@@ -14,14 +14,35 @@ LOG_DIR="${USER_HOME}/Library/Logs/market-dashboard"
 NODE_PATH="$(command -v node)"
 NODE_REAL_PATH="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$NODE_PATH")"
 PATH_VALUE="$(dirname "$NODE_PATH"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+LEGACY_HERMES_MODE="${LEGACY_HERMES_MODE:-read-only}"
 BRIDGE_AWS_PROFILE="${HERMES_BRIDGE_AWS_PROFILE:-market-dashboard-bridge}"
 API_AWS_PROFILE="market-dashboard-local"
 BRIDGE_ENABLED="${HERMES_BRIDGE_ENABLED:-false}"
 OPERATIONS_BRIDGE_ENABLED="${HERMES_OPERATIONS_BRIDGE_ENABLED:-${BRIDGE_ENABLED}}"
 PORTFOLIO_BRIDGE_ENABLED="${HERMES_PORTFOLIO_BRIDGE_ENABLED:-${BRIDGE_ENABLED}}"
-CONTROLLER_MODE="${HERMES_RELIABILITY_CONTROLLER_MODE:-shadow}"
-CONTROLLER_ENABLED_ACTIONS="${HERMES_RELIABILITY_ENABLED_ACTIONS:-}"
+if [[ "${READINESS_CONTROLLER_MODE+x}" == "x" ]]; then
+  CONTROLLER_MODE="${READINESS_CONTROLLER_MODE}"
+else
+  CONTROLLER_MODE="${HERMES_RELIABILITY_CONTROLLER_MODE:-shadow}"
+fi
+if [[ "${READINESS_CONTROLLER_ENABLED_ACTIONS+x}" == "x" ]]; then
+  CONTROLLER_ENABLED_ACTIONS="${READINESS_CONTROLLER_ENABLED_ACTIONS}"
+else
+  CONTROLLER_ENABLED_ACTIONS="${HERMES_RELIABILITY_ENABLED_ACTIONS:-}"
+fi
 LOCAL_NOTIFICATIONS="${MARKET_DASHBOARD_LOCAL_NOTIFICATIONS:-true}"
+case "$(printf '%s' "$LEGACY_HERMES_MODE" | tr '[:upper:]' '[:lower:]')" in
+  shadow)
+    LEGACY_HERMES_MODE="shadow"
+    ;;
+  read-only)
+    LEGACY_HERMES_MODE="read-only"
+    ;;
+  *)
+    echo "LEGACY_HERMES_MODE must be shadow or read-only." >&2
+    exit 1
+    ;;
+esac
 case "$(printf '%s' "$BRIDGE_ENABLED" | tr '[:upper:]' '[:lower:]')" in
   1|true|yes|on|enabled)
     BRIDGE_ENABLED="true"
@@ -56,6 +77,11 @@ OPERATIONS_BRIDGE_ENABLED="$(
 PORTFOLIO_BRIDGE_ENABLED="$(
   normalize_bridge_partition HERMES_PORTFOLIO_BRIDGE_ENABLED "$PORTFOLIO_BRIDGE_ENABLED"
 )"
+if [[ "$LEGACY_HERMES_MODE" == "read-only" ]]; then
+  BRIDGE_ENABLED="false"
+  OPERATIONS_BRIDGE_ENABLED="false"
+  PORTFOLIO_BRIDGE_ENABLED="false"
+fi
 case "$(printf '%s' "$CONTROLLER_MODE" | tr '[:upper:]' '[:lower:]')" in
   active)
     CONTROLLER_MODE="active"
@@ -64,22 +90,22 @@ case "$(printf '%s' "$CONTROLLER_MODE" | tr '[:upper:]' '[:lower:]')" in
     CONTROLLER_MODE="shadow"
     ;;
   *)
-    echo "HERMES_RELIABILITY_CONTROLLER_MODE must be shadow or active." >&2
+    echo "READINESS_CONTROLLER_MODE must be shadow or active." >&2
     exit 1
     ;;
 esac
 if [[ -n "$CONTROLLER_ENABLED_ACTIONS" ]]; then
   if [[ ! "$CONTROLLER_ENABLED_ACTIONS" =~ ^[a-z][a-z0-9-]*(,[a-z][a-z0-9-]*)*$ ]]; then
-    echo "HERMES_RELIABILITY_ENABLED_ACTIONS must be a comma-separated list of exact action IDs." >&2
+    echo "READINESS_CONTROLLER_ENABLED_ACTIONS must be a comma-separated list of exact action IDs." >&2
     exit 1
   fi
   IFS=',' read -r -a controller_action_ids <<< "$CONTROLLER_ENABLED_ACTIONS"
   for controller_action_id in "${controller_action_ids[@]}"; do
     case "$controller_action_id" in
-      start-local-stack|restart-local-stack|rebuild-sidecar-runtime|retry-gmail-poll|rebuild-research-projections|reconcile-prediction-catalog|prune-dashboard-logs)
+      start-local-stack|restart-local-stack|restart-ibkr-sidecar|rebuild-sidecar-runtime|retry-gmail-poll|rebuild-research-projections|reconcile-prediction-catalog|prune-dashboard-logs)
         ;;
       *)
-        echo "Unknown Hermes controller action ID: ${controller_action_id}" >&2
+        echo "Unknown readiness controller action ID: ${controller_action_id}" >&2
         exit 1
         ;;
     esac
@@ -144,6 +170,7 @@ repo_xml="$(xml_escape "$REPO_DIR")"
 node_xml="$(xml_escape "$NODE_PATH")"
 log_xml="$(xml_escape "$LOG_DIR")"
 path_xml="$(xml_escape "$PATH_VALUE")"
+legacy_hermes_mode_xml="$(xml_escape "$LEGACY_HERMES_MODE")"
 bridge_profile_xml="$(xml_escape "$BRIDGE_AWS_PROFILE")"
 bridge_enabled_xml="$(xml_escape "$BRIDGE_ENABLED")"
 operations_bridge_enabled_xml="$(xml_escape "$OPERATIONS_BRIDGE_ENABLED")"
@@ -159,6 +186,7 @@ sed \
   -e "s|__NODE_PATH__|${node_xml}|g" \
   -e "s|__LOG_PATH__|${log_xml}|g" \
   -e "s|__PATH_VALUE__|${path_xml}|g" \
+  -e "s|__LEGACY_HERMES_MODE__|${legacy_hermes_mode_xml}|g" \
   -e "s|__HERMES_BRIDGE_AWS_PROFILE__|${bridge_profile_xml}|g" \
   -e "s|__HERMES_BRIDGE_ENABLED__|${bridge_enabled_xml}|g" \
   -e "s|__HERMES_OPERATIONS_BRIDGE_ENABLED__|${operations_bridge_enabled_xml}|g" \

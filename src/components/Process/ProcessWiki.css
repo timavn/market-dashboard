@@ -1,6 +1,7 @@
 .process-overlay-host {
   position: fixed;
-  inset: 0 var(--dashboard-active-rail-width, 76px) 0 0;
+  /* Center overlays against the full monitor, not the canvas left of the rail. */
+  inset: 0;
   z-index: 1200;
   display: flex;
   align-items: center;
@@ -79,7 +80,8 @@
 
 .process-wiki__site-header {
   min-height: 58px;
-  padding: 8px 14px 8px 18px;
+  /* Keep the Tools/action cluster clear of the dashboard rail overlay. */
+  padding: 8px 74px 8px 18px;
   display: grid;
   grid-template-columns: minmax(210px, 520px) 1fr;
   align-items: center;
@@ -433,6 +435,38 @@
   display: none;
 }
 
+.process-wiki .process-library-article--chapter {
+  margin-top: 42px;
+  padding-top: 2px;
+}
+
+.process-wiki .process-library-article__chapter-header {
+  display: block;
+  margin: 0 0 20px;
+  padding: 0 0 7px;
+  border-bottom: 1px solid var(--process-border);
+  text-align: left;
+}
+
+.process-wiki .wp-paper .process-library-article__chapter-header h2 {
+  margin: 0;
+  padding: 0;
+  border-bottom: 0;
+  font-size: 1.7em;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.process-wiki .process-library-article__chapter-header p {
+  margin: 5px 0 0;
+  color: var(--process-muted);
+  font-size: 0.84em;
+}
+
+.process-wiki .process-library-article__position-sizing-body {
+  min-width: 0;
+}
+
 .process-wiki .wp-paper h2,
 .process-wiki .wp-paper h3,
 .process-wiki .wp-paper h4,
@@ -493,6 +527,89 @@
   text-decoration: underline;
 }
 
+.process-wiki .process-term-definition {
+  position: relative;
+  display: inline-block;
+}
+
+.process-wiki .process-term-definition__link {
+  margin: 0;
+  padding: 0;
+  color: var(--process-link);
+  border: 0;
+  border-bottom: 1px dotted currentColor;
+  background: transparent;
+  font-family: inherit !important;
+  font-size: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.process-wiki .process-term-definition__link:hover,
+.process-wiki .process-term-definition__link:focus-visible {
+  color: var(--process-link-hover);
+  text-decoration: underline;
+  outline: none;
+}
+
+.process-wiki .process-term-definition__popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: min(320px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  padding: 11px 12px;
+  display: block;
+  color: var(--process-ink);
+  border: 1px solid var(--process-border);
+  background: var(--process-bg);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.process-wiki .process-term-definition__header {
+  margin-bottom: 6px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--process-ink);
+}
+
+.process-wiki .process-term-definition__close {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--process-muted);
+  border: 0;
+  background: transparent;
+  font-family: inherit !important;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.process-wiki .process-term-definition__close:hover,
+.process-wiki .process-term-definition__close:focus-visible {
+  color: var(--process-ink);
+  outline: none;
+}
+
+.process-wiki .process-term-definition__body,
+.process-wiki .process-term-definition__example {
+  display: block;
+}
+
+.process-wiki .process-term-definition__example {
+  margin-top: 7px;
+  color: var(--process-muted);
+}
+
 .process-wiki .wp-paper ul,
 .process-wiki .wp-paper ol {
   margin: 4px 0 13px;
@@ -542,6 +659,43 @@
   font-size: 0.95em;
 }
 
+.process-wiki .dashboard-guide__method-statement {
+  margin: 12px 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--process-link);
+  background: var(--process-subtle-bg);
+}
+
+.process-wiki .dashboard-guide__method-statement > strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--process-muted);
+  font-size: 0.75em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.process-wiki .dashboard-guide__method-statement > div > :last-child {
+  margin-bottom: 0;
+}
+
+.process-wiki .dashboard-guide__breakpoint-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.process-wiki .dashboard-guide__breakpoint-grid .wp-table {
+  margin: 0;
+}
+
+.process-wiki .dashboard-guide__provenance-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 18px;
+}
+
 .process-wiki .process-paper.is-editing [data-editable-region],
 .process-wiki [contenteditable="true"][data-editable-region] {
   outline: 1px dashed var(--process-border);
@@ -551,6 +705,17 @@
 .process-wiki .process-paper.is-editing [data-editable-region]:focus,
 .process-wiki [contenteditable="true"][data-editable-region]:focus {
   outline: 2px solid var(--process-link);
+}
+
+@media (max-width: 1140px) {
+  .dashboard-shell .process-overlay-host {
+    justify-content: flex-start;
+    padding-right: calc(var(--dashboard-rail-visible-width) + 20px);
+  }
+
+  .dashboard-shell .process-overlay-dialog {
+    width: 100%;
+  }
 }
 
 @media (max-width: 1060px) {
@@ -575,6 +740,10 @@
 @media (max-width: 760px) {
   .process-overlay-host {
     padding: 8px;
+  }
+
+  .dashboard-shell .process-overlay-host {
+    padding-right: calc(var(--dashboard-rail-visible-width) + 8px);
   }
 
   .process-overlay-dialog {
@@ -651,6 +820,11 @@
   .process-wiki .wp-table {
     display: block;
     overflow-x: auto;
+  }
+
+  .process-wiki .dashboard-guide__breakpoint-grid,
+  .process-wiki .dashboard-guide__provenance-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

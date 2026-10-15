@@ -1,4 +1,5 @@
 import { GROUP_TO_ASSET_CLASS } from './constants';
+import { isExplicitTradeProvenance } from '../../../utils/publishedResearchSignals.cjs';
 import {
   resolveReferencePrice,
   computeRiskRangePercents,
@@ -25,13 +26,15 @@ function riskToUiTrend(raw) {
   const t = normalizeTrendToken(raw);
   if (t === 'BULLISH') return 'bull';
   if (t === 'BEARISH') return 'bear';
+  if (t === 'NEUTRAL') return 'neutral';
   return null;
 }
 
-function trackerToTrade(raw) {
+function publishedTradeDirection(raw) {
   const t = normalizeTrendToken(raw);
   if (t === 'BULLISH') return 'Buy';
   if (t === 'BEARISH') return 'Sell';
+  if (t === 'NEUTRAL') return 'Neutral';
   return null;
 }
 
@@ -49,9 +52,11 @@ export function mapNormalizedRowToMacroSignal(row) {
   const trendForSide = row.riskTrend;
   const side = isLongTrend(trendForSide) ? 'long' : isShortTrend(trendForSide) ? 'short' : null;
 
-  // Trade and Trend are independent published inputs. Missing tracker or
-  // risk-range directions remain missing and are never copied from one another.
-  const trade = trackerToTrade(row.trackerTrend);
+  // The shared canonical projection scans all research products. Tracker Trend
+  // and product membership are not substitutes for explicit published Trade.
+  const tradeEvidence = row.tradeResearch;
+  const trade = tradeEvidence?.status === 'available' && isExplicitTradeProvenance(tradeEvidence.signalProvenance)
+    ? publishedTradeDirection(tradeEvidence.direction) : null;
   const trend = riskToUiTrend(row.riskTrend);
 
   const tailRaw = normalizeTail(row.macroSide || row.callSide);
@@ -92,6 +97,7 @@ export function mapNormalizedRowToMacroSignal(row) {
     assetClass,
     side,
     trade,
+    tradeResearch: trade ? tradeEvidence : null,
     trend,
     tail: tailRaw,
     forecastLow,

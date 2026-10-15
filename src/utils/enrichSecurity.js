@@ -112,6 +112,7 @@ export function enrichSecurity(security, sources = {}) {
     dates: aligned.map(item => (item ? item.date : null)),
     ath: 0,
     current: riskData || null,
+    status: riskData?.status || null,
   };
 
   const volMetrics = getVolatilityMetrics(security.ticker);

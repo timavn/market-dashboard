@@ -420,17 +420,11 @@ def inspect_heartbeats(
                 component=f"heartbeat:{service_id}",
             )
             continue
-        if str(heartbeat.get("status") or "").lower() not in HEALTHY_HEARTBEAT_STATUSES:
-            heartbeat_code = str(
-                heartbeat.get("errorCode") or "SCHEDULED_HEARTBEAT_UNHEALTHY"
-            )
-            add_finding(
-                findings,
-                heartbeat_code,
-                f"The latest {service_id} Scheduler heartbeat is "
-                f"{heartbeat.get('status') or 'unknown'}.",
-                component=f"heartbeat:{service_id}",
-            )
+        # The worker owns readiness/root-cause notifications. Re-emitting its
+        # heartbeat error code from this watchdog created duplicate emails
+        # (for example, two SYSTEM_READINESS_REQUEST_TIMEOUT incidents). The
+        # watchdog remains responsible for missing, stale, and provenance
+        # failures above; the dashboard retains the worker status here.
     return results
 
 
@@ -461,7 +455,16 @@ def inspect_cloudwatch_metrics(
     findings: list[Dict[str, str]],
     *,
     now: datetime,
+    controls: Optional[Mapping[str, str]] = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Optional[float]]:
+    worker_controls = (
+        "QuantAnalystScheduleState",
+        "QuantDeveloperScheduleState",
+        "SecurityScheduleState",
+    )
+    worker_function_retired = bool(controls) and all(
+        controls.get(name) == "DISABLED" for name in worker_controls
+    )
     queries: list[Dict[str, Any]] = []
     for spec in FUNCTION_SPECS:
         key = str(spec["key"])
@@ -543,6 +546,16 @@ def inspect_cloudwatch_metrics(
             "maximumDurationMs": max_duration,
             "timeoutMs": int(spec["timeoutMs"]),
         }
+        if key == "hermes" and worker_function_retired:
+            function.update(
+                {
+                    "status": "retired",
+                    "invocationExpected": False,
+                    "reason": "all-worker-schedules-intentionally-disabled",
+                }
+            )
+            functions[name] = function
+            continue
         functions[name] = function
         near_timeout = (
             max_duration is not None
@@ -993,15 +1006,7 @@ def write_watchdog_alert(
                 transition=event_type,
                 observed_at=now,
             )
-            notification_failure = try_publish_lifecycle_notification(
-                error_code=error_code,
-                event_type=event_type,
-                message=message,
-                source_run_id=source_run_id,
-                observed_at=now,
-            )
-            if notification_failure:
-                notification_failures.append(notification_failure)
+            # Opening is dashboard-only. Email begins only after escalation.
             transitions.append({"eventType": event_type, "errorCode": error_code})
             next_active[error_code] = {
                 "component": component,
@@ -1090,15 +1095,20 @@ def write_watchdog_alert(
             opened_at=str(root_item.get("createdAt") or now),
             observation_count=int(root_details.get("observationCount") or 1),
         )
-        notification_failure = try_publish_lifecycle_notification(
-            error_code=error_code,
-            event_type="incident_recovered",
-            message=message,
-            source_run_id=source_run_id,
-            observed_at=now,
+        was_escalated = bool(
+            root_item.get("escalatedAt")
+            or root_details.get("transition") == "incident_escalated"
         )
-        if notification_failure:
-            notification_failures.append(notification_failure)
+        if was_escalated:
+            notification_failure = try_publish_lifecycle_notification(
+                error_code=error_code,
+                event_type="incident_recovered",
+                message=message,
+                source_run_id=source_run_id,
+                observed_at=now,
+            )
+            if notification_failure:
+                notification_failures.append(notification_failure)
         transitions.append(
             {"eventType": "incident_recovered", "errorCode": error_code}
         )
@@ -1188,7 +1198,11 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
         )
     schedules = inspect_schedules(stack.get("controls") or {}, findings)
     heartbeats = inspect_heartbeats(schedules, findings, now=started)
-    functions, oldest_age = inspect_cloudwatch_metrics(findings, now=started)
+    functions, oldest_age = inspect_cloudwatch_metrics(
+        findings,
+        now=started,
+        controls=stack.get("controls") or {},
+    )
     failure_queue = inspect_failure_queue(
         findings, oldest_age_seconds=oldest_age
     )

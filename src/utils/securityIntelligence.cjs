@@ -9,8 +9,16 @@ const {
   getResearchProduct,
   getSecurityExposureTags,
   isResearchProductDue,
+  isStructuredOnlyTicker,
   latestResearchMarketDate,
 } = require('./researchProductRegistry.cjs');
+const {
+  isCanonicalResearchBias,
+  normalizeResearchBias,
+} = require('./researchBias.cjs');
+
+const { extractPublishedTradeSignals, publishedTradeFromEvent, selectLatestPublishedTrade,
+  isExplicitTradeProvenance, sameSignalInstrument } = require('./publishedResearchSignals.cjs');
 
 const RESPONSE_SCHEMA_VERSION = 1;
 const MAX_SYMBOLS = 200;
@@ -18,12 +26,29 @@ const MAX_HISTORY_DAYS = 5;
 const ENTITY_EVENTS_INDEX = 'marketDate-index';
 const PRODUCT_STAGE_ORDER = ['not_due', 'missing', 'received', 'parsed', 'validated', 'indexed', 'failed'];
 const VALID_PRODUCT_STATES = new Set(PRODUCT_STAGE_ORDER);
-const TRADE_PRODUCT_IDS = new Set(
-  RESEARCH_PRODUCTS
-    .filter((product) => product.authorities.trade === true)
-    .map((product) => product.id),
-);
 const CONTROLLED_EXPOSURE_TYPE_SET = new Set(CONTROLLED_EXPOSURE_TYPES);
+const STRUCTURED_TICKER_EVENT_KINDS = new Set([
+  'primary_risk_range',
+  'historical_risk_range',
+  'risk_range',
+  'supplemental_risk_range',
+  'tracker_trade',
+  'trade_signal',
+  'trend_signal',
+  'signal_strength_added',
+  'signal_strength_removed',
+  'signal_strength_listed',
+  'signal_strength_membership',
+  'portfolio_rank',
+  'portfolio_solutions_rank',
+  'portfolio_solutions_mover',
+  'position_mention',
+  'position_reference',
+  'position_change',
+  'real_time_alert',
+  'etf_pro_change',
+  'investing_idea_position',
+]);
 const BOILERPLATE_PATTERN = /\b(click here|unsubscribe|manage (?:your )?preferences|view (?:this )?email in (?:your )?browser)\b/i;
 
 const ALIAS_TO_CANONICAL = (() => {
@@ -213,11 +238,7 @@ function finiteNumber(value) {
 }
 
 function normalizeBias(value) {
-  const normalized = String(value || '').trim().toUpperCase();
-  if (['BULLISH', 'BULL', 'LONG', 'BUY', 'POSITIVE'].includes(normalized)) return 'BULLISH';
-  if (['BEARISH', 'BEAR', 'SHORT', 'SELL', 'NEGATIVE'].includes(normalized)) return 'BEARISH';
-  if (['NEUTRAL', 'HOLD'].includes(normalized)) return 'NEUTRAL';
-  return null;
+  return normalizeResearchBias(value);
 }
 
 function productIdForSnapshot(snapshot) {
@@ -235,6 +256,39 @@ function manifestProductId(manifest) {
     manifest?.productKey || manifest?.productId || manifest?.snapshotType || manifest?.reportType || '',
   ).trim().toLowerCase();
   return raw ? (getResearchProduct(raw)?.id || raw) : null;
+}
+
+function filterSourceQualityRevisions(records, manifests, { snapshots = false } = {}) {
+  const manifestBySource = new Map(asArray(manifests).map((manifest) => [
+    `${manifest?.marketDate}\u0000${manifestProductId(manifest)}`,
+    manifest,
+  ]));
+  return asArray(records).filter((record) => {
+    const productId = snapshots ? productIdForSnapshot(record) : productIdForEvent(record);
+    const date = snapshots ? record?.date : record?.marketDate;
+    const manifest = manifestBySource.get(`${date}\u0000${productId}`);
+    const artifacts = asArray(manifest?.artifacts);
+    const revision = String(record?.sourceQualityRevision || record?.sourceQuality?.revision || '');
+    const revisedArtifacts = artifacts.filter((artifact) => artifact?.sourceQuality?.revision);
+    // Original immutable events remain in the ledger for audit. A revised
+    // projection becomes current only when the exact source artifact selects
+    // that revision; do not count both attempts as published evidence.
+    if (!revision && !revisedArtifacts.length) return true;
+    const hash = String(record?.contentSha256 || record?.contentHash || record?.sourceEventId || '');
+    const messageId = String(record?.sourceMessageId || record?.gmailMessageId || '');
+    const sourceKey = String(record?.htmlSource || record?.pdfS3Key || record?.sourceArtifact || '');
+    const hashMatches = hash ? artifacts.filter((artifact) => (
+      [artifact?.contentSha256, artifact?.artifactId].includes(hash)
+    )) : [];
+    const keyMatches = sourceKey ? artifacts.filter((artifact) => artifact?.sourceKey === sourceKey) : [];
+    const matched = hashMatches.length ? hashMatches : keyMatches.length ? keyMatches : (
+      record?.contentSha256 ? [] : artifacts.filter((artifact) => (
+        messageId && artifact?.sourceMessageId === messageId
+      ))
+    );
+    if (matched.length !== 1) return false;
+    return revision === String(matched[0]?.sourceQuality?.revision || '');
+  });
 }
 
 function manifestHasFailure(manifest) {
@@ -582,6 +636,14 @@ function matchSymbols(candidate, requestedSymbols) {
     : [];
 }
 
+function structuredTickerEventIsEligible(event, symbol) {
+  const canonical = canonicalizeSymbol(symbol);
+  if (!isStructuredOnlyTicker(canonical)) return true;
+  const matchType = String(event?.matchType || '').trim().toLowerCase();
+  const kind = String(event?.eventType || event?.kind || '').trim().toLowerCase();
+  return matchType === 'structured_membership' && STRUCTURED_TICKER_EVENT_KINDS.has(kind);
+}
+
 function sourceUrlForSnapshot(snapshot) {
   if (snapshot?.article?.feedUrl) return snapshot.article.feedUrl;
   if (snapshot?.sourceUrl) return snapshot.sourceUrl;
@@ -648,6 +710,12 @@ function makeReference(input) {
     sourceEventId: input.sourceEventId || null,
   };
   if (input.value !== undefined) reference.value = input.value;
+  ['signalProvenance', 'sourceTicker', 'fieldPath', 'sourceText'].forEach((field) => {
+    if (input[field] != null) reference[field] = input[field];
+  });
+  // Optional source-match metadata is additive and lets the UI highlight
+  // the exact security mention without changing any decision fields.
+  if (input.matchedText) reference.matchedText = String(input.matchedText);
   if (input.decisionEligible !== undefined) {
     reference.decisionEligible = Boolean(input.decisionEligible);
   }
@@ -700,11 +768,14 @@ function eventEntity(event) {
 
 function referenceFromEvent(event, matchType, exposure, qualityStatus) {
   const productId = productIdForEvent(event);
+  const entity = eventEntity(event);
+  const trade = publishedTradeFromEvent(event);
+  const originalKind = event.eventType || event.kind || 'mention';
   return makeReference({
     marketDate: event.marketDate,
     productId,
     productLabel: event.productLabel,
-    kind: event.eventType || event.kind || 'mention',
+    kind: trade ? 'trade_signal' : ['trade_signal', 'tracker_trade'].includes(originalKind) ? 'mention' : originalKind,
     direction: event.direction || event.action || event.side || null,
     excerpt: event.excerpt || event.summary || event.description || event.headline || null,
     preserveExcerpt: true,
@@ -714,11 +785,18 @@ function referenceFromEvent(event, matchType, exposure, qualityStatus) {
     exposureLabel: exposure?.label || null,
     publishedAt: event.publishedAt || event.eventTime || null,
     sourceUrl: publicEventSourceUrl(event, productId),
+    matchedText: event.matchedText
+      || exposure?.label
+      || (entity.kind === 'ticker' ? entity.value : null),
     // The daily manifest is the authority for pipeline quality. A row-level
     // "validated" marker cannot upgrade a missing or failed manifest.
     qualityStatus: qualityStatus || event.qualityStatus || 'received',
     sourceEventId: event.sourceEventId || event.eventId || event.eventKey || null,
-    value: event.value ?? event.signalValue ?? event.payload?.value,
+    value: trade?.value ?? event.value ?? event.signalValue ?? event.payload?.value,
+    signalProvenance: trade?.signalProvenance,
+    sourceTicker: trade?.sourceTicker || event.sourceTicker || (entity.kind === 'ticker' ? entity.value : null),
+    fieldPath: trade?.fieldPath || event.fieldPath,
+    sourceText: trade?.sourceText || event.sourceText,
     decisionEligible: event.decisionEligible,
   });
 }
@@ -731,11 +809,14 @@ function structuredEntryReference({
   excerpt,
   ticker,
   requestedSymbols,
+  matchRequestedSymbols,
   qualityStatus,
   decisionEligible,
   value,
 }) {
-  return matchSymbols(ticker, requestedSymbols).map((symbol) => ({
+  const sourceTicker = extractTicker(ticker);
+  const matches = matchRequestedSymbols ? matchRequestedSymbols(sourceTicker) : matchSymbols(ticker, requestedSymbols);
+  return matches.map((symbol) => ({
     symbol,
     reference: makeReference({
       marketDate: snapshot.date,
@@ -743,11 +824,12 @@ function structuredEntryReference({
       kind,
       direction,
       excerpt,
-      matchType: normalizeSymbol(extractTicker(ticker)) === normalizeSymbol(symbol)
+      matchType: normalizeSymbol(sourceTicker) === normalizeSymbol(symbol)
         ? 'direct'
         : 'direct_alias',
       publishedAt: snapshot.publishedAt || snapshot.scrapedAt || null,
       sourceUrl: sourceUrlForSnapshot(snapshot),
+      matchedText: sourceTicker || null,
       qualityStatus,
       decisionEligible,
       value,
@@ -773,21 +855,6 @@ function trackerContainers(data) {
     .filter((container) => container && typeof container === 'object' && !Array.isArray(container));
 }
 
-function findTrackerSlot(data, symbol) {
-  for (const container of trackerContainers(data)) {
-    for (const [key, value] of Object.entries(container)) {
-      if (
-        value &&
-        typeof value === 'object' &&
-        symbolMatches(extractTicker(value) || key, symbol)
-      ) {
-        return value;
-      }
-    }
-  }
-  return null;
-}
-
 function collectNarrativeTexts(value, key = '', depth = 0) {
   if (depth > 5 || value == null) return [];
   if (typeof value === 'string') {
@@ -811,18 +878,73 @@ function tokenPattern(token) {
   return escaped ? new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`, 'i') : null;
 }
 
-function narrativeReferences(snapshot, requestedSymbols, qualityStatus) {
+function prepareNarrativeReferenceMatchers(requestedSymbols) {
+  const symbols = Object.freeze([...requestedSymbols]);
+  const matchers = symbols.map((symbol) => {
+    const structuredOnly = isStructuredOnlyTicker(canonicalizeSymbol(symbol));
+    const candidates = structuredOnly ? [] : [...candidatesForSymbol(symbol)].map((token) => (
+      Object.freeze({ token, pattern: tokenPattern(token) })
+    ));
+    return Object.freeze({ structuredOnly, candidates: Object.freeze(candidates) });
+  });
+  // Retain formatting machinery for this exact request, never publications,
+  // holdings, or matches from another capture.
+  return Object.freeze({ symbols, matchers: Object.freeze(matchers) });
+}
+
+function prepareStructuredReferenceMatchers(requestedSymbols) {
+  const symbols = Object.freeze([...requestedSymbols]);
+  const canonicalSymbols = new Map();
+  const tradeSymbols = new Map();
+  const empty = Object.freeze([]);
+  symbols.forEach((symbol) => {
+    const canonical = canonicalizeSymbol(symbol);
+    if (!canonical) return;
+    if (!canonicalSymbols.has(canonical)) canonicalSymbols.set(canonical, []);
+    canonicalSymbols.get(canonical).push(symbol);
+  });
+  canonicalSymbols.forEach(Object.freeze);
+  return Object.freeze({
+    symbols,
+    matchStructuredTicker(ticker) {
+      return canonicalSymbols.get(canonicalizeSymbol(ticker)) || empty;
+    },
+    matchTradeTicker(ticker) {
+      const key = String(ticker || '').trim().toUpperCase();
+      if (!tradeSymbols.has(key)) {
+        // Published Trade aliases identify an exact instrument. Keep their
+        // matcher separate from the broader research exposure aliases above.
+        tradeSymbols.set(key, Object.freeze(symbols.filter(symbol => sameSignalInstrument(key, symbol))));
+      }
+      return tradeSymbols.get(key);
+    },
+  });
+}
+
+function narrativeReferences(snapshot, requestedSymbols, qualityStatus, {
+  skipExposureMentions = false,
+  preparedNarrativeMatchers = null,
+} = {}) {
   const productId = productIdForSnapshot(snapshot);
   const texts = [
     ...collectNarrativeTexts(snapshot.article, 'article'),
     ...collectNarrativeTexts(snapshot.data, 'data'),
   ].map(cleanExcerpt).filter(Boolean);
   const result = [];
+  const prepared = preparedNarrativeMatchers?.symbols?.length === requestedSymbols.length
+    && preparedNarrativeMatchers.symbols.every((symbol, index) => symbol === requestedSymbols[index])
+    ? preparedNarrativeMatchers.matchers : null;
 
   texts.forEach((excerpt) => {
-    requestedSymbols.forEach((symbol) => {
-      const candidates = [...candidatesForSymbol(symbol)];
-      const matched = candidates.find((candidate) => tokenPattern(candidate)?.test(excerpt));
+    requestedSymbols.forEach((symbol, index) => {
+      // AM and PM are valid securities, but unstructured newsletter text
+      // cannot distinguish them from meridiem tokens. Their evidence must
+      // originate from a typed ticker-bearing field.
+      const matcher = prepared?.[index];
+      if (matcher ? matcher.structuredOnly : isStructuredOnlyTicker(canonicalizeSymbol(symbol))) return;
+      const matched = matcher
+        ? matcher.candidates.find((candidate) => candidate.pattern?.test(excerpt))?.token
+        : [...candidatesForSymbol(symbol)].find((candidate) => tokenPattern(candidate)?.test(excerpt));
       if (matched) {
         result.push({
           symbol,
@@ -831,6 +953,7 @@ function narrativeReferences(snapshot, requestedSymbols, qualityStatus) {
             productId,
             kind: 'summary_mention',
             excerpt,
+            matchedText: matched,
             matchType: normalizeSymbol(matched) === normalizeSymbol(symbol) ? 'direct' : 'direct_alias',
             publishedAt: snapshot.publishedAt || snapshot.scrapedAt || null,
             sourceUrl: sourceUrlForSnapshot(snapshot),
@@ -839,6 +962,7 @@ function narrativeReferences(snapshot, requestedSymbols, qualityStatus) {
         });
       }
 
+      if (skipExposureMentions === true) return;
       const exposures = securityExposuresForSymbol(symbol);
       exposures.forEach((exposure) => {
         const aliases = exposure.aliases || [exposure.id];
@@ -848,9 +972,10 @@ function narrativeReferences(snapshot, requestedSymbols, qualityStatus) {
             reference: makeReference({
               marketDate: snapshot.date,
               productId,
-              kind: `${exposure.type}_mention`,
-              excerpt,
-              matchType: 'inferred_exposure',
+            kind: `${exposure.type}_mention`,
+            excerpt,
+            matchedText: aliases.find((alias) => tokenPattern(alias)?.test(excerpt)) || exposure.label,
+            matchType: 'inferred_exposure',
               exposureId: exposure.id,
               exposureType: exposure.type,
               exposureLabel: exposure.label,
@@ -869,15 +994,25 @@ function narrativeReferences(snapshot, requestedSymbols, qualityStatus) {
 
 function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
   includeUnverifiedRiskRanges = false,
+  skipExposureMentions = false,
+  skipNarrativeMentions = false,
+  preparedNarrativeMatchers = null,
+  preparedStructuredMatchers = null,
 } = {}) {
   const productId = productIdForSnapshot(snapshot);
   const data = snapshot?.data || {};
   const result = [];
   const push = (entries) => result.push(...entries);
+  const prepared = preparedStructuredMatchers?.symbols?.length === requestedSymbols.length
+    && preparedStructuredMatchers.symbols.every((symbol, index) => symbol === requestedSymbols[index])
+    ? preparedStructuredMatchers : null;
+  const structuredEntry = input => structuredEntryReference({
+    ...input, matchRequestedSymbols: prepared?.matchStructuredTicker,
+  });
 
   if (productId === 'early-look' || (productId === 'risk-ranges' && includeUnverifiedRiskRanges)) {
     riskRangeEntries(data).forEach((range) => {
-      push(structuredEntryReference({
+      push(structuredEntry({
         snapshot,
         productId,
         kind: productId === 'early-look' ? 'supplemental_risk_range' : 'historical_risk_range',
@@ -892,33 +1027,77 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
     });
   }
 
-  if (TRADE_PRODUCT_IDS.has(productId)) {
-    requestedSymbols.forEach((symbol) => {
-      const slot = findTrackerSlot(data, symbol);
-      const trade = normalizeBias(slot?.trade || slot?.tradeBias || slot?.signal || slot?.trend);
-      if (!slot || !trade) return;
-      const buyTrade = finiteNumber(slot.buyTrade);
-      const sellTrade = finiteNumber(slot.sellTrade);
-      result.push({
-        symbol,
-        reference: makeReference({
-          marketDate: snapshot.date,
-          productId,
-          kind: 'tracker_trade',
-          direction: trade,
-          excerpt: [
-            `Trade ${trade}`,
-            buyTrade !== null ? `Buy Trade ${buyTrade}` : null,
-            sellTrade !== null ? `Sell Trade ${sellTrade}` : null,
-          ].filter(Boolean).join('; '),
-          matchType: 'direct',
-          publishedAt: snapshot.publishedAt || snapshot.scrapedAt || null,
-          sourceUrl: sourceUrlForSnapshot(snapshot),
-          qualityStatus,
-          value: trade,
-        }),
-      });
+  if (productId === 'investing-ideas') {
+    const positions = asArray(data.positions).length
+      ? asArray(data.positions)
+      : [
+        ...asArray(data.longs).map((ticker) => ({ ticker, side: 'Long' })),
+        ...asArray(data.shorts).map((ticker) => ({ ticker, side: 'Short' })),
+      ];
+    positions.forEach((position) => {
+      const ticker = extractTicker(position);
+      if (!ticker) return;
+      const rawSide = String(position?.side || position?.position || '').toUpperCase();
+      const side = rawSide === 'SHORT' ? 'SHORT' : rawSide === 'LONG' ? 'LONG' : null;
+      if (!side) return;
+      const bias = side === 'LONG' ? 'BULLISH' : 'BEARISH';
+      const lrr = finiteNumber(position?.lrr);
+      const hrr = finiteNumber(position?.hrr);
+      const prevClose = finiteNumber(position?.prevClose);
+      push(structuredEntry({
+        snapshot,
+        productId,
+        kind: 'investing_idea_position',
+        direction: bias,
+        excerpt: [
+          `${ticker} ${side}`,
+          prevClose !== null ? `Prev Close ${prevClose}` : null,
+          lrr !== null && hrr !== null ? `LRR ${lrr} – HRR ${hrr}` : null,
+        ].filter(Boolean).join('; '),
+        ticker,
+        requestedSymbols,
+        qualityStatus,
+        decisionEligible: false,
+        value: {
+          side,
+          bias,
+          prevClose,
+          lrr,
+          hrr,
+        },
+      }));
     });
+  }
+
+  extractPublishedTradeSignals(snapshot, {
+    sourceVerified: ['indexed', 'validated'].includes(qualityStatus),
+  }).forEach((trade) => {
+    const matchedSymbols = prepared
+      ? prepared.matchTradeTicker(trade.sourceTicker)
+      : requestedSymbols.filter((symbol) => sameSignalInstrument(trade.sourceTicker, symbol));
+    matchedSymbols.forEach((symbol) => {
+      result.push({ symbol, reference: makeReference({
+        marketDate: snapshot.date, productId, kind: 'trade_signal', direction: trade.value,
+        excerpt: trade.sourceText, preserveExcerpt: true,
+        matchType: trade.sourceTicker === symbol ? 'direct' : 'direct_alias',
+        matchedText: trade.sourceTicker, sourceTicker: trade.sourceTicker,
+        publishedAt: trade.publishedAt, sourceUrl: trade.sourceUrl || sourceUrlForSnapshot(snapshot),
+        qualityStatus, value: trade.value, signalProvenance: trade.signalProvenance,
+        sourceText: trade.sourceText, fieldPath: trade.fieldPath,
+      }) });
+    });
+  });
+
+  if (['momo-tracker', 'bitcoin-trend-tracker'].includes(productId)) {
+    trackerContainers(data).forEach((container) => Object.entries(container).forEach(([key, slot]) => {
+      const trend = normalizeBias(slot?.trend);
+      const ticker = extractTicker(slot) || key;
+      if (!trend) return;
+      push(structuredEntry({ snapshot, productId, kind: 'trend_signal', direction: trend,
+        excerpt: `${ticker}: Trend ${trend}`, ticker, requestedSymbols, qualityStatus,
+        decisionEligible: false, value: { trend, lrr: finiteNumber(slot.lrr ?? slot.buyTrade), hrr: finiteNumber(slot.hrr ?? slot.sellTrade) },
+      }));
+    }));
   }
 
   if (productId === 'signal-strength') {
@@ -929,7 +1108,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
       asArray(data[field]).forEach((entry) => {
         const ticker = extractTicker(entry);
         if (!ticker) return;
-        push(structuredEntryReference({
+        push(structuredEntry({
           snapshot,
           productId,
           kind,
@@ -949,7 +1128,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
       const ticker = extractTicker(entry);
       if (!ticker) return;
       const rank = finiteNumber(entry.rank);
-      push(structuredEntryReference({
+      push(structuredEntry({
         snapshot,
         productId,
         kind: 'portfolio_solutions_rank',
@@ -968,7 +1147,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
       asArray(entries).forEach((entry) => {
         const ticker = extractTicker(entry);
         if (!ticker) return;
-        push(structuredEntryReference({
+        push(structuredEntry({
           snapshot,
           productId,
           kind: 'portfolio_solutions_mover',
@@ -992,7 +1171,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
       asArray(data[field]).forEach((entry) => {
         const ticker = extractTicker(entry);
         if (!ticker) return;
-        push(structuredEntryReference({
+        push(structuredEntry({
           snapshot,
           productId,
           kind: 'position_mention',
@@ -1012,7 +1191,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
     alerts.forEach((alert) => {
       const ticker = extractTicker(alert);
       if (!ticker) return;
-      push(structuredEntryReference({
+      push(structuredEntry({
         snapshot,
         productId,
         kind: 'real_time_alert',
@@ -1036,7 +1215,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
     changes.forEach((change) => {
       const ticker = extractTicker(change);
       if (!ticker) return;
-      push(structuredEntryReference({
+      push(structuredEntry({
         snapshot,
         productId,
         kind: 'etf_pro_change',
@@ -1054,7 +1233,11 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
     });
   }
 
-  push(narrativeReferences(snapshot, requestedSymbols, qualityStatus));
+  if (skipNarrativeMentions !== true) {
+    push(narrativeReferences(snapshot, requestedSymbols, qualityStatus, {
+      skipExposureMentions, preparedNarrativeMatchers,
+    }));
+  }
   return result.filter((item) => item.reference);
 }
 
@@ -1096,7 +1279,7 @@ function decisionInputs({
   const decision = {
     trade: unavailableDecision(loadErrors.snapshots || loadErrors.productManifests
       ? 'research-source-unavailable'
-      : 'no-verified-published-tracker-signal'),
+      : 'no-verified-published-trade-signal'),
     trend: unavailableDecision(loadErrors.riskRangeEnvelope
       ? 'risk-range-source-unavailable'
       : 'no-manifest-verified-primary-risk-range'),
@@ -1158,7 +1341,8 @@ function decisionInputs({
   if (researchProjectionVerified) {
     references
       .filter((reference) => (
-        TRADE_PRODUCT_IDS.has(reference.productId) &&
+        isExplicitTradeProvenance(reference.signalProvenance) &&
+        sameSignalInstrument(reference.sourceTicker, symbol) &&
         reference.marketDate === marketDate &&
         productsById[reference.productId] === 'indexed' &&
         ['trade_signal', 'tracker_trade'].includes(reference.kind) &&
@@ -1175,6 +1359,9 @@ function decisionInputs({
           sourceLabel: reference.productLabel,
           sourceDate: reference.marketDate,
           publishedAt: reference.publishedAt,
+          sourceUrl: reference.sourceUrl, sourceTicker: reference.sourceTicker, ticker: reference.sourceTicker,
+          fieldPath: reference.fieldPath, sourceText: reference.sourceText, signalProvenance: reference.signalProvenance,
+          qualityStatus: reference.qualityStatus, matchType: reference.matchType,
         });
       });
   }
@@ -1209,7 +1396,7 @@ function decisionInputs({
   const uniqueTrackerValues = [...new Set(latestTrackerCandidates.map((candidate) => candidate.value))];
   if (trackerPublicationConflict || uniqueTrackerValues.length > 1) {
     decision.trade = {
-      ...unavailableDecision('conflicting-published-tracker-signals'),
+      ...unavailableDecision('conflicting-published-trade-signals'),
       status: 'conflict',
     };
   } else if (latestTrackerCandidates.length > 0) {
@@ -1282,6 +1469,9 @@ function historicalDecision(reference, value, extra = {}) {
     sourceDate: reference.marketDate,
     publishedAt: reference.publishedAt || null,
     qualityStatus: reference.qualityStatus,
+    sourceUrl: reference.sourceUrl, sourceTicker: reference.sourceTicker, ticker: reference.sourceTicker,
+    fieldPath: reference.fieldPath, sourceText: reference.sourceText, signalProvenance: reference.signalProvenance,
+    matchType: reference.matchType,
     referenceOnly: true,
     executable: false,
     currentDecisionEligible: false,
@@ -1299,6 +1489,7 @@ function latestReference(references) {
 }
 
 function buildLastVerifiedDecision({
+  symbol,
   bucketsForSymbol,
   dates,
   latestVerifiedByProduct,
@@ -1310,45 +1501,18 @@ function buildLastVerifiedDecision({
     ...asArray(bucketsForSymbol?.[date]?.inferred),
   ];
 
-  const tradeCandidates = [];
-  let tradeConflict = false;
-  TRADE_PRODUCT_IDS.forEach((productId) => {
-    const publication = latestVerifiedByProduct[productId];
-    if (!publication) return;
-    const references = referencesForDate(publication.marketDate)
-      .filter((reference) => (
-        reference.productId === productId
-        && verifiedQuality.has(reference.qualityStatus)
-        && ['trade_signal', 'tracker_trade'].includes(reference.kind)
-        && ['direct', 'direct_alias'].includes(reference.matchType)
-      ));
-    if (references.length === 0) return;
-    const newestTimestamp = latestReference(references)?.publishedAt || null;
-    const latest = newestTimestamp
-      ? references.filter((reference) => reference.publishedAt === newestTimestamp)
-      : references;
-    const values = [...new Set(latest.map((reference) => normalizeBias(reference.value)).filter(Boolean))];
-    if (values.length > 1) {
-      tradeConflict = true;
-      return;
-    }
-    if (values.length === 1) {
-      const selected = latestReference(latest);
-      tradeCandidates.push(historicalDecision(selected, values[0]));
-    }
-  });
-  const tradeValues = [...new Set(tradeCandidates.map((candidate) => candidate.value))];
-  if (tradeConflict || tradeValues.length > 1) {
-    result.trade = {
-      ...unavailableDecision('conflicting-last-verified-tracker-signals'),
-      status: 'conflict',
-      referenceOnly: true,
-      executable: false,
-      currentDecisionEligible: false,
-    };
-  } else if (tradeCandidates.length > 0) {
-    result.trade = latestReference(tradeCandidates);
-  }
+  const tradeReferences = dates.flatMap(referencesForDate).filter((reference) => (
+    verifiedQuality.has(reference.qualityStatus) && isExplicitTradeProvenance(reference.signalProvenance)
+    && sameSignalInstrument(reference.sourceTicker, symbol)
+    && ['direct', 'direct_alias'].includes(reference.matchType)
+  ));
+  const retained = selectLatestPublishedTrade(tradeReferences.map((reference) => ({
+    ...reference, date: reference.marketDate, ticker: reference.sourceTicker,
+  })), { ticker: symbol });
+  if (retained?.status === 'conflict') {
+    result.trade = { ...unavailableDecision('conflicting-published-trade-signals'), status: 'conflict',
+      referenceOnly: true, executable: false, currentDecisionEligible: false };
+  } else if (retained) result.trade = historicalDecision(retained, retained.value);
 
   const riskPublication = latestVerifiedByProduct['risk-ranges'];
   if (riskPublication) {
@@ -1367,7 +1531,10 @@ function buildLastVerifiedDecision({
     if (rangeReference) {
       const lrr = finiteNumber(rangeReference.value.lrr);
       const hrr = finiteNumber(rangeReference.value.hrr);
-      const trend = normalizeBias(rangeReference.value.trend || rangeReference.direction);
+      const trend = normalizeBias(rangeReference.value.trend)
+        || (isCanonicalResearchBias(rangeReference.direction)
+          ? normalizeBias(rangeReference.direction)
+          : null);
       result.riskRange = historicalDecision(
         rangeReference,
         { lrr, hrr },
@@ -1488,15 +1655,23 @@ function buildSecurityIntelligence({
   entityEvents = [],
   productManifests = [],
   riskRangeEnvelope = null,
+  publishedTradeReadings = [],
   loadErrors = {},
 } = {}) {
   const requestedSymbols = normalizeRequestedSymbols(symbols);
   const normalizedHistoryDays = Math.max(0, Math.min(MAX_HISTORY_DAYS, Number(historyDays) || 0));
   const dates = marketDateSequence(marketDate, normalizedHistoryDays);
   const dateSet = new Set(dates);
-  const filteredSnapshots = asArray(snapshots).filter((item) => dateSet.has(item?.date));
-  const filteredEvents = asArray(entityEvents).filter((item) => dateSet.has(item?.marketDate));
   const filteredManifests = asArray(productManifests).filter((item) => dateSet.has(item?.marketDate));
+  const filteredSnapshots = filterSourceQualityRevisions(
+    asArray(snapshots).filter((item) => dateSet.has(item?.date)),
+    filteredManifests,
+    { snapshots: true },
+  );
+  const filteredEvents = filterSourceQualityRevisions(
+    asArray(entityEvents).filter((item) => dateSet.has(item?.marketDate)),
+    filteredManifests,
+  );
   const products = productCoverage({
     marketDate,
     now,
@@ -1586,6 +1761,7 @@ function buildSecurityIntelligence({
     const productId = productIdForEvent(event);
     const qualityStatus = evidenceQualityStatus(event.marketDate, productId);
     if (entity.kind === 'ticker') {
+      if (!structuredTickerEventIsEligible(event, entity.value)) return;
       requestedSymbols
         .filter((symbol) => symbolMatches(entity.value, symbol))
         .forEach((symbol) => {
@@ -1648,6 +1824,7 @@ function buildSecurityIntelligence({
         direction: normalizeBias(value.trend),
         excerpt: `LRR ${value.lrr} – HRR ${value.hrr}${value.trend ? `; Trend ${normalizeBias(value.trend) || value.trend}` : ''}`,
         matchType: normalizeSymbol(selected.key) === normalizeSymbol(symbol) ? 'direct' : 'direct_alias',
+        matchedText: selected.key || symbol,
         publishedAt: value.timestamp || riskRangeEnvelope.manifest.latestUpdatedAt || null,
         sourceUrl: `/api/hedgeye/screenshot/${encodeURIComponent(marketDate)}/content?type=risk-ranges`,
         qualityStatus: 'indexed',
@@ -1682,6 +1859,7 @@ function buildSecurityIntelligence({
         loadErrors,
       }),
       lastVerifiedDecision: buildLastVerifiedDecision({
+        symbol,
         bucketsForSymbol: buckets[symbol],
         dates,
         latestVerifiedByProduct,
@@ -1698,6 +1876,36 @@ function buildSecurityIntelligence({
       history,
       coverage: { state: 'no_references', reasons: [] },
     };
+    const allTrade = [
+      ...asArray(publishedTradeReadings),
+      ...dates.flatMap((date) => buckets[symbol][date].direct)
+        .filter((reference) => ['indexed', 'validated'].includes(reference.qualityStatus))
+        .map((reference) => ({ ...reference, date: reference.marketDate,
+          sourceProduct: reference.productId, sourceLabel: reference.productLabel })),
+    ].filter((reading) => ['indexed', 'validated'].includes(reading.qualityStatus)
+      && isExplicitTradeProvenance(reading.signalProvenance));
+    const retained = selectLatestPublishedTrade(allTrade, { ticker: symbol, asOf: marketDate });
+    if (retained) {
+      const value = retained.status === 'conflict' ? {
+        ...unavailableDecision('conflicting-published-trade-signals'), status: 'conflict',
+      } : {
+        status: 'historical', value: retained.value, sourceId: retained.sourceProduct || retained.productId,
+        sourceLabel: retained.sourceLabel || retained.productLabel || getResearchProduct(retained.sourceProduct)?.label,
+        sourceDate: retained.date, publishedAt: retained.publishedAt, sourceUrl: retained.sourceUrl,
+        sourceTicker: retained.sourceTicker, ticker: retained.sourceTicker,
+        fieldPath: retained.fieldPath, sourceText: retained.sourceText,
+        signalProvenance: retained.signalProvenance, qualityStatus: retained.qualityStatus,
+        matchType: retained.sourceTicker === symbol ? 'direct' : 'direct_alias', reason: null,
+      };
+      bySymbol[symbol].lastVerifiedDecision.trade = { ...value, referenceOnly: true,
+        executable: false, currentDecisionEligible: false };
+      if (retained.date === marketDate && retained.status === 'conflict') {
+        bySymbol[symbol].decision.trade = { ...value };
+      } else if (retained.date === marketDate && retained.qualityStatus === 'indexed'
+        && !loadErrors.entityEvents && !loadErrors.productManifests) {
+        bySymbol[symbol].decision.trade = { ...value, status: 'available' };
+      }
+    }
   });
 
   const state = coverageState({ products, loadErrors, totalCurrentReferences });
@@ -1742,6 +1950,7 @@ function buildSecurityIntelligence({
 }
 
 module.exports = {
+  normalizeResearchBias,
   MAX_HISTORY_DAYS,
   MAX_SYMBOLS,
   RESPONSE_SCHEMA_VERSION,
@@ -1750,6 +1959,7 @@ module.exports = {
   canonicalizeSymbol,
   defaultResearchMarketDate,
   extractSnapshotReferences,
+  filterSourceQualityRevisions,
   isValidMarketDate,
   loadEntityEvents,
   loadProductManifests,
@@ -1757,5 +1967,7 @@ module.exports = {
   manifestChecksumForArtifacts,
   marketDateSequence,
   normalizeRequestedSymbols,
+  prepareNarrativeReferenceMatchers,
+  prepareStructuredReferenceMatchers,
   previousMarketDates,
 };

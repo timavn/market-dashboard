@@ -1,4 +1,5 @@
 import { SECURITIES_LIST } from '../constants/securitiesList';
+import { canonicalTradeResearch } from './canonicalTradeResearch.cjs';
 
 export const PREDICTION_SIGNAL_UNIVERSE = [
   { symbol: 'BTC', label: 'Bitcoin', group: 'Crypto', categories: ['Crypto'] },
@@ -85,10 +86,13 @@ export function canonicalizeRiskRangeSymbol(symbol) {
  * @param {Record<string, object>} [riskRanges]
  * @returns {string[]}
  */
-export function collectMacroSignalSymbols(riskRanges = {}) {
+export function collectMacroSignalSymbols(riskRanges = {}, canonicalResearch = null) {
   const symbols = new Set(getPredictionSignalTickers());
   Object.keys(riskRanges || {}).forEach(key => {
     symbols.add(canonicalizeRiskRangeSymbol(key));
+  });
+  Object.keys(canonicalResearch?.bySymbol || {}).forEach(key => {
+    if (canonicalTradeResearch(canonicalResearch, key).status === 'available') symbols.add(key);
   });
   return Array.from(symbols).sort((a, b) => a.localeCompare(b));
 }
@@ -121,8 +125,8 @@ export function resolveMacroSignalQuoteSymbol(displaySymbol, riskRangeSourceKey)
  * @param {Record<string, object>} [riskRanges]
  * @returns {Array<{ display: string, quote: string }>}
  */
-export function getMacroSignalQuotePlan(riskRanges = {}) {
-  const symbols = collectMacroSignalSymbols(riskRanges);
+export function getMacroSignalQuotePlan(riskRanges = {}, canonicalResearch = null) {
+  const symbols = collectMacroSignalSymbols(riskRanges, canonicalResearch);
   return symbols.map(display => {
     const { sourceKey } = pickRiskRange(riskRanges, display);
     return {
@@ -195,6 +199,7 @@ export function inferPredictionSignalCategory(filter, selectedEvent) {
 
 export function normalizePredictionMarketSignals({
   riskRanges = {},
+  canonicalResearch = null,
   bitcoinSnapshot = null,
   momoSnapshot = null,
   macroSnapshot = null,
@@ -204,7 +209,7 @@ export function normalizePredictionMarketSignals({
   selectedEvent = null,
 } = {}) {
   const inferredCategory = inferPredictionSignalCategory(activeCategory, selectedEvent);
-  const symbols = collectMacroSignalSymbols(riskRanges);
+  const symbols = collectMacroSignalSymbols(riskRanges, canonicalResearch);
   const rows = symbols
     .map(sym => inferSignalGroupFromTicker(sym))
     .filter(item => item && isRelevantForCategory(item, inferredCategory))
@@ -214,6 +219,7 @@ export function normalizePredictionMarketSignals({
       item,
       riskRange,
       riskRangeSourceKey,
+      canonicalResearch,
       bitcoinSnapshot,
       momoSnapshot,
       macroSnapshot,
@@ -225,7 +231,7 @@ export function normalizePredictionMarketSignals({
     .filter(row => {
       const inUniverse = Boolean(UNIVERSE_BY_SYMBOL[row.symbol]);
       const hasRange = row.lrr != null || row.hrr != null;
-      return inUniverse || hasRange;
+      return inUniverse || hasRange || row.tradeResearch?.status === 'available';
     })
     .sort(sortSignalRows);
 
@@ -248,6 +254,7 @@ function buildSignalRow({
   item,
   riskRange,
   riskRangeSourceKey = null,
+  canonicalResearch = null,
   bitcoinSnapshot,
   momoSnapshot,
   macroSnapshot,
@@ -259,6 +266,7 @@ function buildSignalRow({
   const macroSide = pickMacroSide(macroSnapshot?.data, item.symbol);
   const callSide = pickMacroSide(callSnapshot?.data, item.symbol);
   const trackerTrend = normalizeTrend(trackerSlot?.trend);
+  const tradeResearch = canonicalTradeResearch(canonicalResearch, item.symbol);
   const riskTrend = normalizeTrend(riskRange?.trend);
   const primaryTrend = trackerTrend || riskTrend || macroSide || callSide || null;
   const sourceLabels = [];
@@ -281,6 +289,7 @@ function buildSignalRow({
     group: item.group,
     trend: primaryTrend,
     trackerTrend,
+    tradeResearch,
     riskTrend,
     macroSide,
     callSide,

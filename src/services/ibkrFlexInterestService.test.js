@@ -191,11 +191,22 @@ describe('IBKR Flex interest service', () => {
       expectedAccountFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       reportHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       revisionHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      tierDetailSectionPresent: true,
+      accrualSectionPresent: true,
+      cashTransactionSectionPresent: true,
+      cashReportSectionPresent: true,
       tierDetails: [expect.objectContaining({ totalInterest: -12.5 })],
       derived: {
         dailyDebitActuals: [expect.objectContaining({ debitAmount: 12.5 })],
         monthlyPaid: [expect.objectContaining({ paid: 125 })],
       },
+    });
+    expect(service.status().latest.sectionPresence).toEqual({
+      tierInterestDetails: true,
+      interestAccruals: true,
+      cashTransactions: true,
+      cashReport: true,
+      stockBorrowFeeDetails: false,
     });
     expect(JSON.stringify(snapshot)).not.toContain(ACCOUNT_ID);
     expect(JSON.stringify(snapshot)).not.toContain(TOKEN);
@@ -315,6 +326,33 @@ describe('IBKR Flex interest service', () => {
     expect(() => service.history()).toThrow(expect.objectContaining({
       code: 'flex_interest_integrity_error',
     }));
+  });
+
+  test('limited history keeps exact fetched-date ordering and still rejects tampering outside its newest rows', async () => {
+    let report = statementXml();
+    let observed = '2026-07-26T12:00:00.000Z';
+    const service = createIbkrFlexInterestService({
+      env: makeEnv(dataDir), dataDir,
+      fetchImpl: async url => url.includes('/SendRequest') ? sendResponse() : response(report),
+      now: () => new Date(observed), sleep: async () => {},
+    });
+    const sync = () => service.sync({ fromDate: '2026-07-01', toDate: '2026-07-31' });
+    const oldest = await sync();
+    report = statementXml({ dailyInterest: '-13.75' });
+    observed = '2026-07-27T12:00:00.000Z';
+    const newer = await sync();
+    report = statementXml({ dailyInterest: '-15.25' });
+    const sameTime = await sync();
+    const expected = [newer, sameTime].sort((a, b) => b.revisionId.localeCompare(a.revisionId));
+    expect(service.history({ limit: 1 })).toEqual(expected.slice(0, 1));
+    expect(service.history({ limit: 2 })).toEqual(expected);
+    expect(service.history({ limit: 50 })).toEqual([...expected, oldest]);
+    const file = path.join(dataDir, 'revisions', `${oldest.revisionId}.json`);
+    fs.chmodSync(file, 0o600);
+    const corrupted = JSON.parse(fs.readFileSync(file, 'utf8'));
+    corrupted.tierDetails[0].totalInterest = -999;
+    fs.writeFileSync(file, JSON.stringify(corrupted));
+    expect(() => service.history({ limit: 1 })).toThrow(expect.objectContaining({ code: 'flex_interest_integrity_error' }));
   });
 
   test('fails closed on account/range mismatches and redacts request secrets from errors', async () => {

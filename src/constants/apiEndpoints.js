@@ -10,14 +10,18 @@ export const ENDPOINTS = {
 
   // Portfolio data
   PORTFOLIO: '/api/portfolio',
+  PORTFOLIO_BALANCE: '/api/portfolio/balance',
+  PORTFOLIO_BALANCE_PREVIEW: '/api/portfolio/balance/preview',
   PORTFOLIO_ACCOUNTS: '/api/portfolio/accounts',
   PORTFOLIO_PREDICTION_MARKET_POSITIONS: '/api/portfolio/prediction-market-positions',
   PORTFOLIO_EXPOSURE_RECONCILIATION: '/api/portfolio/exposure/reconciliation',
   PROVIDERS_STATUS: '/api/providers/status',
+  SP500_CONTRIBUTORS: '/api/market/sp500-contributors',
   IBKR_FLEX_STATUS: '/api/ibkr/flex/status',
   IBKR_FLEX_SYNC: '/api/ibkr/flex/sync',
   IBKR_INTEREST_VALIDATION_STATUS: '/api/ibkr/interest-validation/status',
   IBKR_INTEREST_VALIDATION_HISTORY: '/api/ibkr/interest-validation/history',
+  IBKR_INTEREST_VALIDATION_LEDGER: '/api/ibkr/interest-validation/ledger',
   IBKR_INTEREST_VALIDATION_RUN: '/api/ibkr/interest-validation/run',
   POSITIONS: '/api/positions',
   PERFORMANCE: '/api/performance',
@@ -38,8 +42,12 @@ export const ENDPOINTS = {
 
   // Risk ranges
   RISK_RANGES: '/api/risk-ranges',
+  EXPOSURE_LAB_UNIVERSE: '/api/risk/exposure-lab/universe',
+  EXPOSURE_LAB_SNAPSHOT: '/api/risk/exposure-lab/snapshot',
+  EXPOSURE_LAB_SECURITY_MASTER: '/api/risk/exposure-lab/security-master',
 
   // Workflow status
+  LOGIN_STATUS: '/api/login-status',
   SYSTEM_STATUS: '/api/system-status',
   SYSTEM_READINESS: '/api/system-readiness',
   WORKFLOW_STATUS: '/api/workflow-status',
@@ -50,6 +58,9 @@ export const ENDPOINTS = {
   PREDICTION_MARKETS_AGGREGATED: '/api/prediction-markets/aggregated-events',
   PREDICTION_MARKETS_REFRESH_IBKR: '/api/prediction-markets/refresh/ibkr',
   PREDICTION_MARKETS_PROVIDERS_STATUS: '/api/prediction-markets/providers/status',
+  PREDICTION_MARKET_PERFORMANCE: '/api/prediction-markets/performance',
+  PREDICTION_MARKET_PERFORMANCE_HISTORY: '/api/prediction-markets/performance/history',
+  PREDICTION_MARKET_PERFORMANCE_CURRENT: '/api/prediction-markets/performance/current',
 
   // WebSocket endpoints
   WS_MARKET_DATA: '/ws/market',

@@ -1,10 +1,16 @@
-const { setProviderStatus } = require('../cache');
+const {
+  getProviderStatus,
+  loadOperationalCatalogByRelease,
+  setProviderStatus,
+} = require('../cache');
+const { getCurrentCpiRelease } = require('../cpiRelease');
 const { sidecarRequest, SIDECAR_BASE } = require('./ibkrHttp');
 
 const CPI_REFRESH_TIMEOUT_MS = Number(process.env.IBKR_CPI_REFRESH_TIMEOUT_MS || 30000);
 const REFRESH_TIMEOUT_MS = Number(process.env.IBKR_REFRESH_TIMEOUT_MS || 5000);
 const CPI_DISCOVER_TIMEOUT_MS = Number(process.env.IBKR_CPI_DISCOVER_TIMEOUT_MS || 20000);
 const DISCOVER_TIMEOUT_MS = Number(process.env.IBKR_DISCOVER_TIMEOUT_MS || 60000);
+const IBKR_CATALOG_VENUES = Object.freeze(['IBKR', 'ForecastEx', 'CME']);
 
 function ibkrEnabled() {
   return process.env.IBKR_INGEST_ENABLED !== 'false';
@@ -23,7 +29,7 @@ function setIbkrFamilyStatus(status, message, lastSuccessAt = null, extra = {}) 
     status,
     message,
     errorCode: extra?.errorCode || null,
-    ...(lastSuccessAt ? { last_success_at: lastSuccessAt } : {}),
+    last_success_at: lastSuccessAt || null,
     ...(extra || {}),
   };
   setProviderStatus('ibkr', payload);
@@ -83,6 +89,8 @@ async function fetchIBKREvents(options = {}) {
           catalogContracts: Array.isArray(options.catalogContracts)
             ? options.catalogContracts
             : [],
+          ...(options.forceRefresh ? { forceRefresh: true } : {}),
+          ...(options.retryMissing ? { retryMissing: true } : {}),
         }
       : undefined;
     const result = await sidecarRequest('/refresh', {
@@ -95,11 +103,12 @@ async function fetchIBKREvents(options = {}) {
     const events = Array.isArray(result.events) ? result.events : [];
     const cpiDiscovery = result.cpi_discovery || null;
     const timing = result.timing || null;
+    const refreshEvidence = result.refreshEvidence || provider.refreshEvidence || null;
 
     setIbkrFamilyStatus(
       status,
       provider.message || null,
-      provider.last_success_at || result.fetched_at,
+      status === 'connected' ? (provider.last_success_at || result.fetched_at) : null,
       {
         ...(cpiDiscovery ? { cpi_discovery: cpiDiscovery } : {}),
         ...(timing ? { cpi_timing: timing } : {}),
@@ -107,6 +116,7 @@ async function fetchIBKREvents(options = {}) {
         contracts_added: result.contracts_added ?? 0,
         contracts_total: result.contracts_total ?? events.length,
         portfolio_seed_count: result.portfolio_seed_count ?? 0,
+        ...(refreshEvidence ? { refreshEvidence } : {}),
         ...(result.errorCode ? { errorCode: result.errorCode } : {}),
       },
     );
@@ -123,8 +133,108 @@ async function fetchIBKREvents(options = {}) {
         ? `IBKR sidecar not reachable at ${SIDECAR_BASE}`
         : err.message;
     console.error('[IBKR] sidecar refresh error:', message);
-    setIbkrFamilyStatus(reason, message, null, { gateway: { ok: false } });
+    setIbkrFamilyStatus(reason, message, null, {
+      gateway: { ok: false },
+      errorCode: err.sidecarCode || err.code || null,
+    });
     return [];
+  }
+}
+
+/**
+ * Read the current, server-owned prediction-market catalog generation and ask
+ * the sidecar only for quotes belonging to that exact generation. This is a
+ * read path: catalog discovery and promotion remain separate operator actions.
+ */
+async function fetchCurrentIbkrPredictionSnapshot(options = {}) {
+  const healthCheck = options.checkGatewayHealth || checkGatewayHealth;
+  const releaseLoader = options.getCurrentCpiRelease || getCurrentCpiRelease;
+  const catalogLoader = options.loadOperationalCatalogByRelease || loadOperationalCatalogByRelease;
+  const eventsLoader = options.fetchIBKREvents || fetchIBKREvents;
+  const providerStatusLoader = options.getProviderStatus || getProviderStatus;
+  const health = await healthCheck();
+
+  if (!health.ok) {
+    const refreshEvidence = options.forceRefresh ? {
+      mode: 'on_demand_prediction_fanout',
+      requestedContractCount: 0,
+      brokerSnapshotRequestedCount: 0,
+      brokerSnapshotRetryCount: 0,
+      verifiedContractCount: 0,
+      missingContractCount: null,
+      missingContractCountKnown: false,
+      coverageComplete: false,
+      fromCache: false,
+      blockedBy: health.reason || 'IBKR_GATEWAY_UNAVAILABLE',
+      completedAt: new Date().toISOString(),
+    } : null;
+    return {
+      health,
+      release: null,
+      events: [],
+      provider: {
+        status: health.reason || 'offline',
+        errorCode: health.errorCode || null,
+        message: health.message || 'IB Gateway/TWS is unavailable',
+        ...(refreshEvidence ? { refreshEvidence } : {}),
+      },
+    };
+  }
+
+  let release = null;
+  try {
+    release = await releaseLoader();
+    const catalogContracts = await catalogLoader(release.releaseKey, {
+      venues: IBKR_CATALOG_VENUES,
+      requireCurrent: true,
+    });
+    const events = await eventsLoader({
+      cpi: release.cpi,
+      catalogContracts,
+      ...(options.forceRefresh ? { forceRefresh: true } : {}),
+      ...(options.retryMissing ? { retryMissing: true } : {}),
+    });
+    const provider = providerStatusLoader().ibkr || {};
+    return {
+      health,
+      release,
+      events: Array.isArray(events) ? events : [],
+      provider,
+    };
+  } catch (err) {
+    const errorCode = err.code || err.sidecarCode || 'CATALOG_UNAVAILABLE';
+    const message = err.message || 'The current prediction-market catalog is unavailable.';
+    const refreshEvidence = options.forceRefresh ? {
+      mode: 'on_demand_prediction_fanout',
+      requestedContractCount: 0,
+      brokerSnapshotRequestedCount: 0,
+      brokerSnapshotRetryCount: 0,
+      verifiedContractCount: 0,
+      missingContractCount: null,
+      missingContractCountKnown: false,
+      coverageComplete: false,
+      fromCache: false,
+      blockedBy: errorCode,
+      completedAt: new Date().toISOString(),
+    } : null;
+    setIbkrFamilyStatus('catalog_unavailable', message, null, {
+      errorCode,
+      gateway: { ok: true },
+      releaseKey: release?.releaseKey || null,
+      ...(refreshEvidence ? { refreshEvidence } : {}),
+    });
+    return {
+      health,
+      release,
+      events: [],
+      provider: {
+        status: 'catalog_unavailable',
+        errorCode,
+        message,
+        releaseKey: release?.releaseKey || null,
+        ...(refreshEvidence ? { refreshEvidence } : {}),
+      },
+    };
   }
 }
 
@@ -181,7 +291,9 @@ async function discoverCmeEventContracts() {
 }
 
 module.exports = {
+  IBKR_CATALOG_VENUES,
   fetchIBKREvents,
+  fetchCurrentIbkrPredictionSnapshot,
   checkGatewayHealth,
   discoverIbkrEventContracts,
   fetchCategoryTree,

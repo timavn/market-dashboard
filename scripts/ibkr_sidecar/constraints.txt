@@ -1,0 +1,24 @@
+# Resolved on Python 3.11; shared by local and CI Python 3.11/3.12 environments.
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.12.1
+click==8.3.3
+eventkit==1.0.3
+fastapi==0.136.3
+h11==0.16.0
+httptools==0.8.0
+ib-insync==0.9.86
+idna==3.18
+nest-asyncio==1.6.0
+numpy==2.0.2
+pydantic==2.13.4
+pydantic_core==2.46.4
+python-dotenv==1.2.2
+PyYAML==6.0.3
+starlette==1.6.0
+typing-inspection==0.4.2
+typing_extensions==4.16.0
+uvicorn==0.39.0
+uvloop==0.22.1
+watchfiles==1.1.1
+websockets==15.0.1

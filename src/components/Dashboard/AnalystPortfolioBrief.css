@@ -1,0 +1,145 @@
+.portfolio-brief { color: var(--analyst-ink, #172033); overflow-wrap: anywhere; }
+.analyst-panel-v2 .portfolio-brief { line-height: 1.4; }
+.portfolio-brief :is(strong, b) { font-weight: 400; }
+.dark .analyst-panel-v2.has-portfolio-brief { --analyst-ink: #e4edf5; --analyst-muted: #98a8ba; --analyst-border: #334155; --analyst-accent: #8bcdd0; --analyst-accent-soft: #183237; }
+.portfolio-brief h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 6px; font-size: 14px; font-weight: 400; line-height: 1.35; text-transform: uppercase; letter-spacing: 0.025em; }
+.portfolio-brief h3 { margin: 0 0 4px; font-size: inherit; font-weight: 400; line-height: 1.4; text-transform: uppercase; letter-spacing: 0.025em; }
+.portfolio-brief p { margin: 3px 0; }
+.portfolio-brief .portfolio-review-greeting { margin: 0 0 14px; }
+.portfolio-brief > section { margin: 0 0 14px; }
+.portfolio-brief button { color: var(--analyst-accent, #087b80); font: inherit; text-align: left; cursor: pointer; }
+.portfolio-brief button:hover { text-decoration: underline; }
+.portfolio-brief button:focus-visible { outline: 2px solid var(--analyst-accent, #087b80); outline-offset: 4px; border-radius: 2px; }
+.portfolio-brief-count { display: inline-flex; min-width: 23px; height: 23px; justify-content: center; align-items: center; border-radius: 12px; background: var(--dashboard-attention-soft, #fff7ed); color: var(--dashboard-attention, #f97316); font-size: 10px; font-weight: 400; }
+.portfolio-brief-conflict { padding: 2px 0 2px 10px; border-left: 3px solid var(--dashboard-attention, #f97316); margin: 0 0 12px; }
+.portfolio-brief-conflict h3 { color: var(--dashboard-attention, #f97316); }
+.portfolio-brief-conflict.is-exit { border-left-color: var(--dashboard-negative, #dc2626); }
+.portfolio-brief-conflict.is-exit h3 { color: var(--dashboard-negative, #dc2626); }
+.portfolio-brief .signal-bullish, .portfolio-brief .is-long .portfolio-exposure-value, .portfolio-brief .is-net-positive .portfolio-exposure-value { color: var(--dashboard-positive, #059669); }
+.portfolio-brief .signal-bearish, .portfolio-brief .is-short .portfolio-exposure-value, .portfolio-brief .is-net-negative .portfolio-exposure-value { color: var(--dashboard-negative, #dc2626); }
+.portfolio-brief .signal-neutral, .portfolio-brief .signal-unavailable { color: var(--dashboard-muted-text, #667085); }
+.portfolio-brief-source { display: block; margin-top: 4px; color: var(--analyst-muted, #667085); font-size: 10px; }
+.portfolio-brief-caption, .portfolio-brief-muted { color: var(--analyst-muted, #667085); font-size: 10px; }
+.portfolio-brief-caption { margin-top: 8px !important; }
+.portfolio-brief-more { margin: 0 0 6px; font-weight: 400; }
+.portfolio-brief .portfolio-brief-exposure { width: auto; max-width: 100%; }
+.portfolio-brief-exposure th, .portfolio-brief-exposure td { white-space: nowrap; }
+.portfolio-brief :is(.portfolio-brief-exposure, .portfolio-brief-comparison) .portfolio-exposure-value { padding-inline-start: 12px; }
+.portfolio-brief :is(.portfolio-brief-exposure, .portfolio-brief-comparison) .portfolio-exposure-percent { text-align: right; }
+.portfolio-brief-exposure td.portfolio-exposure-percent { color: var(--analyst-muted, #667085); font-size: 10px; }
+.portfolio-exposure-amount { position: relative; white-space: nowrap; }
+.portfolio-exposure-sign { position: absolute; inset-inline-end: 100%; }
+.portfolio-brief-takeaways { padding: 0; margin: 4px 0 0; list-style: none; }
+.portfolio-brief-takeaways li { margin-bottom: 4px; }
+.portfolio-brief-takeaways button { margin-left: 7px; font-size: 10px; }
+.portfolio-brief-coverage { border-top: 1px solid var(--analyst-border, #dbe1e8); padding-top: 10px; font-size: 10px; }
+.portfolio-brief-coverage-counts { font-weight: 400; }
+.portfolio-positions { width: 100%; min-width: 700px; table-layout: fixed; border-collapse: collapse; margin-top: 8px; font-size: inherit; line-height: inherit; font-variant-numeric: tabular-nums; }
+.portfolio-positions caption { text-align: left; padding-bottom: 10px; color: var(--analyst-muted, #667085); font-size: 9px; }
+.portfolio-position-holding-col { width: 56px; }
+.portfolio-position-name-col { width: 72px; }
+.portfolio-position-signals-col { width: 90px; }
+.portfolio-position-limits-col { width: 64px; }
+.portfolio-position-review-col { width: 174px; }
+.portfolio-position-products-col { width: auto; }
+.portfolio-positions th, .portfolio-positions td { padding: 4px 6px; text-align: left; vertical-align: top; border: 1px solid var(--analyst-border, #dbe1e8); }
+.portfolio-positions thead th { font-size: inherit; font-weight: 400; color: var(--analyst-ink, #172033); background: #f3f4f6; }
+.portfolio-position-row > th { font-weight: 400; }
+.portfolio-positions thead th { white-space: nowrap; }
+.portfolio-position-weight { display: block; }
+.portfolio-position-weight { font-weight: 400; }
+.portfolio-position-section { outline: 1px solid var(--portfolio-position-section-color); outline-offset: -1px; }
+.portfolio-position-section.is-long {
+  --portfolio-position-section-color: var(--dashboard-positive, #059669);
+}
+.portfolio-position-section.is-short {
+  --portfolio-position-section-color: var(--dashboard-negative, #dc2626);
+}
+.portfolio-position-section > tr > :first-child { border-left-color: var(--portfolio-position-section-color); }
+.portfolio-position-section > tr > :last-child { border-right-color: var(--portfolio-position-section-color); }
+.portfolio-position-section > tr:first-child > :is(th, td) { border-top-color: var(--portfolio-position-section-color); }
+.portfolio-position-section > tr:last-child > :is(th, td) { border-bottom-color: var(--portfolio-position-section-color); }
+.portfolio-position-aligned { color: var(--dashboard-positive, #059669); }
+.portfolio-position-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portfolio-position-field { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.portfolio-position-field > small { min-width: 27px; color: var(--analyst-muted, #667085); font-size: 8px; }
+.portfolio-position-limits .portfolio-position-field { gap: 3px; }
+.portfolio-position-limits .portfolio-position-field > small { min-width: 17px; }
+.portfolio-positions td.portfolio-position-limits { padding-inline: 4px; }
+.portfolio-position-field button { padding: 0; font-weight: 400; }
+.portfolio-position-review > * { display: block; }
+.portfolio-position-review small { color: var(--analyst-muted, #667085); font-size: 9px; }
+.portfolio-brief .portfolio-position-product { display: block; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
+.portfolio-position-product + .portfolio-position-product { margin-top: 2px; }
+.portfolio-position-action { color: var(--dashboard-negative, #dc2626); font-weight: 400; }
+.portfolio-review-refresh { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.portfolio-review-refresh button { color: var(--analyst-accent); font-size: 10px; cursor: pointer; }
+.portfolio-review-refresh button:disabled { cursor: default; opacity: 0.65; }
+.portfolio-research-updates { border-bottom: 1px solid var(--analyst-border, #dbe1e8); padding-bottom: 12px; margin-bottom: 14px; }
+.portfolio-brief-research { border-left: 3px solid var(--dashboard-attention, #f97316); padding-left: 10px; margin-bottom: 10px; }
+.portfolio-brief-centered { width: 100%; max-width: 760px; margin-inline: auto; text-align: left; }
+.portfolio-brief-centered h2 { justify-content: flex-start; }
+.portfolio-brief-centered > section { margin-bottom: 14px; }
+.portfolio-brief-centered button { text-align: left; }
+.portfolio-brief-centered .portfolio-brief-exposure { margin-inline: 0; }
+.portfolio-brief-table-scroll { max-width: 100%; overflow-x: auto; }
+.portfolio-brief-table { width: 100%; border-collapse: collapse; margin: 8px 0 0; font: inherit; font-variant-numeric: tabular-nums; }
+.portfolio-brief-table th, .portfolio-brief-table td { padding: 4px 6px; text-align: left; vertical-align: top; border: 1px solid var(--analyst-border, #dbe1e8); font-weight: 400; }
+.portfolio-brief-table thead th, .portfolio-brief-centered .portfolio-positions thead th { background: #f3f4f6; color: var(--analyst-ink, #172033); font-weight: 400; }
+.portfolio-brief-table caption { margin-bottom: 5px; color: var(--analyst-muted, #667085); font-size: 10px; text-align: left; }
+.portfolio-brief-comparison { width: auto; min-width: min(100%, 350px); }
+.portfolio-brief-centered .portfolio-positions th, .portfolio-brief-centered .portfolio-positions td { text-align: left; }
+.portfolio-brief-centered .portfolio-position-field { justify-content: flex-start; }
+.portfolio-brief-exceptions .portfolio-brief-more { margin-top: 8px; }
+.portfolio-brief .portfolio-review-section {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  box-sizing: border-box;
+}
+.portfolio-review-section-body {
+  min-height: 0;
+  overflow: visible;
+  overflow-anchor: none;
+}
+.portfolio-brief .portfolio-review-section-state {
+  margin: 5px 0 0;
+  color: var(--analyst-muted, #667085);
+  font-size: 10px;
+}
+.portfolio-brief :is(.portfolio-brief-exposure, .portfolio-brief-comparison) {
+  width: 300px;
+  min-width: 0;
+  max-width: 100%;
+  table-layout: fixed;
+}
+.portfolio-brief :is(.portfolio-brief-exposure, .portfolio-brief-comparison) col:nth-child(1) { width: 24%; }
+.portfolio-brief :is(.portfolio-brief-exposure, .portfolio-brief-comparison) col:nth-child(2) { width: 50%; }
+.portfolio-brief :is(.portfolio-brief-exposure, .portfolio-brief-comparison) col:nth-child(3) { width: 26%; }
+.portfolio-brief-comparison th, .portfolio-brief-comparison td { white-space: nowrap; }
+.portfolio-position-placeholder td {
+  color: var(--analyst-muted, #667085);
+}
+.portfolio-brief-centered .portfolio-brief-table-scroll { overflow: visible; }
+.portfolio-brief-centered .portfolio-positions { min-width: 0; }
+.portfolio-brief-centered .portfolio-positions thead th { white-space: normal; }
+.portfolio-brief-centered .portfolio-position-field { flex-wrap: wrap; }
+.portfolio-brief-centered .portfolio-brief-exposure th,
+.portfolio-brief-centered .portfolio-brief-exposure td,
+.portfolio-brief-centered .portfolio-brief-comparison th,
+.portfolio-brief-centered .portfolio-brief-comparison td { white-space: normal; overflow-wrap: anywhere; }
+.portfolio-brief h2, .portfolio-brief h3, .portfolio-brief-takeaways > li > strong { color: var(--portfolio-review-blue, #2563eb); }
+.portfolio-position-name { max-width: 21ch; }
+@media (max-width: 760px) {
+  .portfolio-position-holding-col { width: 8%; }
+  .portfolio-position-name-col { width: 10%; }
+  .portfolio-position-signals-col { width: 13%; }
+  .portfolio-position-limits-col { width: 9%; }
+  .portfolio-position-review-col { width: 24%; }
+  .portfolio-position-products-col { width: 36%; }
+}
+@container balance-panel (max-width: 640px) {
+  .has-portfolio-brief .analyst-transcript-v2 { padding: 18px 14px; }
+  .has-portfolio-brief .analyst-conversation-rail.is-open { position: absolute; top: 0; bottom: 0; left: 0; width: min(240px, calc(100% - 44px)); z-index: 4; box-shadow: 5px 0 16px #0001; }
+  .has-portfolio-brief .analyst-conversation-rail.is-open + .analyst-chat-v2 { margin-left: 44px; }
+}

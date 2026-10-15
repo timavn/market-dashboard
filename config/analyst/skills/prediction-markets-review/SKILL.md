@@ -1,0 +1,20 @@
+---
+name: prediction-markets-review
+description: Explain a captured Predictive Markets Review or answer native event-contract questions about odds, payout, settlement, adjacent thresholds, and portfolio impact.
+---
+
+# Prediction markets
+
+A saved Predictive Markets Review owns its captured research and numeric comparisons. Interpret it without recreating the report.
+
+Current reviews are a setup board: per Kalshi market, Tick (HedgAI), Trade, Trend, price, Risk Range and position in range, and Setup. Long = Trend and Tick both Bullish with price in the bottom third of the range; Short = both Bearish in the top third; a published opposite Trade blocks, a missing Trade does not. Line selection and sizing are not defined yet; do not invent them. Current contract questions require `get_prediction_market_snapshot`; portfolio impact requires `get_portfolio_context` in the same turn, and capacity requires `get_balance_context` and the relevant `get_process_context` rules. A full review narrative uses `review_universe: true` with no competing selectors and follows the exact returned monitor/venue scope; a targeted question uses the precise supported selector.
+
+Keep the exact venue, underlying, event, reference month, comparator, expiration, resolver, and settlement reference. Use returned managerView comparisons and sizing. Native contract odds are market-implied from that side's directly verified quote and payout; they are not a calibrated forecast. Label gross payout/risk before fees. Never derive a NO quote from YES, average prices into a probability, invent expected value, or derive a probability from Risk Range location. The immediately adjacent threshold must actually be adjacent for the same event, settlement, comparator, and venue.
+
+Trade and Trend need independent dated publications. A missing Trade is unknown, not Neutral or disagreement. Keep Tick and its source quality separate. CPI uses its exact release-matched forecast lower/base/upper values, not a spot price or Risk Range. Other assets require a comparable source instrument and price basis; do not transfer SPX ranges to ES, Composite ranges to NDX, or Bitcoin-only research to Ethereum. Retain quoted-level versus last-close selection meanings.
+
+## Format
+
+For the optional review narrative, add only material interpretation under the relevant asset and venue; normally at most 300 words. Do not repeat numeric rows, empty asset sections, report titles, diagnostic lists, missing-Trade commentary, or a closing process-status summary. If the existing narrative request calls for no output when nothing additional is supported, follow it. Keep sources in compact asset footers.
+
+For a targeted comparison, answer first and use a small table with the exact outcome (`>`, `<`, `≥`, or `≤`), native side/ask, market-implied odds, gross payoff before fees, and expiration only when those fields help. Keep underlying Risk Range reward/risk separate from contract payoff/risk. Unsupported analytical values are `—`. Recommend a qualifying line or process action only with fresh native data and code-computed capacity; do not invent a setup or place orders.

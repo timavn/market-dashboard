@@ -456,6 +456,7 @@ class RiskRangeReplayTests(unittest.TestCase):
 
             result = replay.replay(
                 apply=True,
+                admin_profile="market-dashboard-admin",
                 session_factory=lambda **_kwargs: session,
                 config_path=config,
                 contract_loader=lambda: contract,
@@ -511,6 +512,7 @@ class RiskRangeReplayTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "projection failed"):
                 replay.replay(
                     apply=True,
+                    admin_profile="market-dashboard-admin",
                     session_factory=lambda **_kwargs: FakeSession(
                         dynamodb,
                         FakeS3(),

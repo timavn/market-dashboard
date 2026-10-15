@@ -1,6 +1,7 @@
 const {
   buildCurrentCpiRelease,
   deriveTargetStrikes,
+  getCurrentCpiRelease,
   normalizeCpiMonthId,
   releaseKeyForEvent,
 } = require('../cpiRelease');
@@ -22,7 +23,9 @@ const JULY_NOWCAST = {
 
 describe('server-owned current CPI release', () => {
   test('builds one canonical release key and venue request from the live nowcast', () => {
-    const release = buildCurrentCpiRelease(JULY_NOWCAST);
+    const release = buildCurrentCpiRelease(JULY_NOWCAST, {
+      now: new Date('2026-08-01T12:00:00Z'),
+    });
 
     expect(release).toMatchObject({
       releaseKey: 'KXCPIYOY#2026-07',
@@ -68,5 +71,56 @@ describe('server-owned current CPI release', () => {
 
   test('derives targets only from actual scenarios and returns no default ladder', () => {
     expect(deriveTargetStrikes([])).toEqual([]);
+  });
+
+  test('keeps the server target range aligned with the CPI ladder rule', () => {
+    expect(deriveTargetStrikes([
+      { value: 3.37 },
+      { value: 3.48 },
+      { value: 3.59 },
+    ])).toEqual([3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8]);
+    expect(deriveTargetStrikes([
+      { value: 3.3 },
+      { value: 3.5 },
+      { value: 3.7 },
+    ])).toEqual([3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9]);
+  });
+
+  test('selects the next report from a merged snapshot immediately at the release cutoff', async () => {
+    const merged = {
+      date: '2026-08-11',
+      data: {
+        metric: 'Headline CPI YoY',
+        forecasts: [
+          {
+            reportMonth: '2026-07',
+            forecastMonth: 'July 2026',
+            releaseAt: '2026-08-12T12:30:00.000Z',
+            publishedAt: '2026-08-11T15:00:00.000Z',
+            scenarios: { upper: 3.58, base: 3.47, lower: 3.36 },
+          },
+          {
+            reportMonth: '2026-08',
+            forecastMonth: 'August 2026',
+            releaseAt: '2026-09-11T12:30:00.000Z',
+            publishedAt: '2026-08-11T15:00:00.000Z',
+            scenarios: { upper: 3.70, base: 3.57, lower: 3.44 },
+          },
+        ],
+      },
+    };
+    const release = await getCurrentCpiRelease({
+      now: new Date('2026-08-12T12:30:00.000Z'),
+      loadSnapshots: async () => [merged],
+    });
+
+    expect(release).toMatchObject({
+      releaseKey: 'KXCPIYOY#2026-08',
+      reportMonth: '2026-08',
+      releaseAt: '2026-09-11T12:30:00.000Z',
+      scenarios: expect.arrayContaining([
+        expect.objectContaining({ key: 'base', value: 3.57 }),
+      ]),
+    });
   });
 });

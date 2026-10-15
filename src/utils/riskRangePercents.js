@@ -51,6 +51,25 @@ export function computeRiskRangePercents(referencePrice, lrr, hrr) {
   };
 }
 
+/**
+ * Rank a complete, source-reported range from its reference close without
+ * manufacturing a missing endpoint. Upside is the move to HRR, downside is
+ * the move to LRR, and largestMovePct captures the more significant side.
+ * @returns {{ largestMovePct: number, upsidePct: number, downsidePct: number } | null}
+ */
+export function computeRiskRangeActionability(referencePrice, lrr, hrr) {
+  const rangePercents = computeRiskRangePercents(referencePrice, lrr, hrr);
+  if (!rangePercents) return null;
+  return {
+    largestMovePct: Math.max(
+      Math.abs(rangePercents.upsidePct),
+      Math.abs(rangePercents.downsidePct),
+    ),
+    upsidePct: Math.max(0, rangePercents.upsidePct),
+    downsidePct: Math.max(0, -rangePercents.downsidePct),
+  };
+}
+
 export function formatRiskRangePercent(value) {
   if (value == null || !Number.isFinite(value)) return '—';
   return `${value.toFixed(1)}%`;

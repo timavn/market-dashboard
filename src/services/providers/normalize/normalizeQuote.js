@@ -1,3 +1,4 @@
+const { strictQuoteNumber, ibkrObservationFailure } = require('./quoteObservation.cjs');
 const {
   isValidPositiveNumber,
   isStaleTimestamp,
@@ -12,35 +13,58 @@ const {
  */
 function normalizeQuote(raw, source, opts = {}) {
   const symbol = (raw.symbol || opts.symbol || '').toUpperCase();
-  const bid = raw.bid != null ? Number(raw.bid) : null;
-  const ask = raw.ask != null ? Number(raw.ask) : null;
-  const last = raw.last != null ? Number(raw.last) : raw.price != null ? Number(raw.price) : null;
+  const bid = raw.bid != null ? strictQuoteNumber(raw.bid) : null;
+  const ask = raw.ask != null ? strictQuoteNumber(raw.ask) : null;
+  const last = raw.last != null ? strictQuoteNumber(raw.last) : raw.price != null ? strictQuoteNumber(raw.price) : null;
   const close =
     raw.close != null
-      ? Number(raw.close)
+      ? strictQuoteNumber(raw.close)
       : raw.previousClose != null
-        ? Number(raw.previousClose)
+        ? strictQuoteNumber(raw.previousClose)
         : null;
 
   const mid = computeMid(bid, ask);
   const mark = computeMark({ mid, last, close });
-  const timestamp = raw.timestamp || raw.fetched_at || null;
+  // A sidecar fetch time proves only when we asked for a quote, not when IBKR
+  // observed the price. Never promote that receipt time into market evidence.
+  const timestamp = raw.timestamp || (source === 'ibkr' ? null : raw.fetched_at || null);
   const hasValidTimestamp = Boolean(timestamp) && Number.isFinite(new Date(timestamp).getTime());
-  const stale = source === 'ibkr' && isStaleTimestamp(timestamp);
+  const stale = source === 'ibkr' && hasValidTimestamp && isStaleTimestamp(timestamp);
+  const dataType = raw.dataType || (source === 'yahoo' ? 'delayed' : 'unknown');
+  const normalizedDataType = String(dataType).toLowerCase();
+  const closeOnlyReference = source === 'ibkr'
+    && !isValidPositiveNumber(mid)
+    && !isValidPositiveNumber(last)
+    && isValidPositiveNumber(close);
+  const frozen = source === 'ibkr'
+    && (normalizedDataType === 'frozen' || normalizedDataType === 'delayed_frozen');
+  const entitlementStatus = raw.entitlementStatus || null;
+  const entitlementDenied = source === 'ibkr'
+    && /(?:denied|not[_ -]?entitled|unavailable|disabled|offline)/i.test(String(entitlementStatus || ''));
+  const observationFailure = source === 'ibkr' ? ibkrObservationFailure(raw) : null;
   const warnings = [...(opts.warnings || [])];
+  if (observationFailure) warnings.push(observationFailure);
+  if (closeOnlyReference) warnings.push('close_only_reference');
+  if (frozen) warnings.push('frozen_quote');
+  if (entitlementDenied) warnings.push('entitlement_unavailable');
   if (!hasValidTimestamp) warnings.push('missing_timestamp');
   if (stale) warnings.push('stale_quote');
   if (!isValidPositiveNumber(mark) && source === 'ibkr') {
     warnings.push('invalid_mark');
   }
-  if (raw.dataType === 'delayed' || raw.dataType === 'delayed_frozen') {
+  if (normalizedDataType === 'delayed' || normalizedDataType === 'delayed_frozen') {
     warnings.push('delayed_data');
   }
 
   return {
     symbol,
     providerSymbol: raw.providerSymbol || raw.localSymbol || symbol,
+    providerRootSymbol: raw.symbol || symbol,
+    lastTradeDateOrContractMonth: raw.lastTradeDateOrContractMonth || null,
+    tradingClass: raw.tradingClass || null,
+    multiplier: raw.multiplier || null,
     conid: raw.conId ?? raw.conid ?? null,
+    secType: raw.secType || null,
     source,
     timestamp,
     bid: isValidPositiveNumber(bid) ? bid : null,
@@ -49,12 +73,18 @@ function normalizeQuote(raw, source, opts = {}) {
     close: isValidPositiveNumber(close) ? close : null,
     mark,
     mid,
-    currency: raw.currency || 'USD',
+    currency: raw.currency || (source === 'ibkr' ? null : 'USD'),
     exchange: raw.exchange || null,
-    dataType: raw.dataType || (source === 'yahoo' ? 'delayed' : 'unknown'),
-    entitlementStatus: raw.entitlementStatus || null,
+    dataType,
+    entitlementStatus,
     warning: warnings.length ? warnings.join('; ') : null,
-    valid: isValidPositiveNumber(mark) && hasValidTimestamp && !stale,
+    valid: isValidPositiveNumber(mark)
+      && hasValidTimestamp
+      && !stale
+      && !closeOnlyReference
+      && !frozen
+      && !entitlementDenied
+      && !observationFailure,
   };
 }
 
@@ -65,8 +95,8 @@ function normalizeYahooLegacy(yahooResult, symbol) {
   if (!yahooResult || !yahooResult.price) {
     return normalizeQuote({}, 'yahoo', { symbol, warnings: ['missing_yahoo_price'] });
   }
-  const price = parseFloat(yahooResult.price);
-  const previousClose = parseFloat(yahooResult.previousClose || yahooResult.price);
+  const price = strictQuoteNumber(yahooResult.price);
+  const previousClose = strictQuoteNumber(yahooResult.previousClose ?? yahooResult.price);
   return normalizeQuote(
     {
       symbol,
@@ -85,6 +115,7 @@ function normalizeYahooLegacy(yahooResult, symbol) {
 function normalizeIbkrRaw(ibkrTick) {
   return normalizeQuote(
     {
+      ...ibkrTick,
       symbol: ibkrTick.symbol,
       conId: ibkrTick.conId,
       bid: ibkrTick.bid,
@@ -95,6 +126,8 @@ function normalizeIbkrRaw(ibkrTick) {
       exchange: ibkrTick.exchange,
       dataType: ibkrTick.dataType,
       timestamp: ibkrTick.timestamp,
+      entitlementStatus: ibkrTick.entitlementStatus,
+      providerSymbol: ibkrTick.providerSymbol || ibkrTick.localSymbol,
     },
     'ibkr',
   );

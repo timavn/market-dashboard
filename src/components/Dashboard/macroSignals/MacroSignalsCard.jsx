@@ -10,7 +10,6 @@ import SignalSection from './SignalSection';
 import { isInActionZone, isOutOfRange } from './SignalRow';
 import {
   BROAD_MACRO_SIGNAL_SYMBOLS,
-  DEFAULT_MOCK_SIGNALS,
   DEFAULT_ASSET_CLASS,
 } from './constants';
 import {
@@ -42,6 +41,7 @@ function hasForecastRange(signal) {
 }
 
 const BROAD_MACRO_SIGNAL_SYMBOL_SET = new Set(BROAD_MACRO_SIGNAL_SYMBOLS);
+const EMPTY_SIGNALS = [];
 
 function isBroadMacroSignal(signal) {
   const ticker = String(signal?.ticker || '').toUpperCase();
@@ -64,8 +64,7 @@ function MacroSignalsCard({
 }) {
   const [selectedAssetClass, setSelectedAssetClass] = useState(DEFAULT_ASSET_CLASS);
 
-  // Use provided signals or fall back to built-in mocks
-  const effectiveSignals = signals && signals.length > 0 ? signals : DEFAULT_MOCK_SIGNALS;
+  const effectiveSignals = !error && Array.isArray(signals) ? signals : EMPTY_SIGNALS;
 
   // Filter by selected asset-class tab
   const filteredSignals = useMemo(
@@ -153,7 +152,7 @@ function MacroSignalsCard({
         <div className="info-note" role="note">
           <Info className="info-note-icon" aria-hidden />
           <span className="info-note-body">
-            Click a security to populate the signal card with Securities Universe data for bet sizing.
+            Click a security to populate the signal card with configured security data for bet sizing.
           </span>
         </div>
       )}
@@ -206,7 +205,9 @@ function MacroSignalsCard({
             />
           )}
           {longs.length === 0 && shorts.length === 0 && neutrals.length === 0 && (
-            <div className="macro-signals-empty">No signals for this asset class.</div>
+            <div className="macro-signals-empty" role="status">
+              {effectiveSignals.length === 0 ? 'Verified signals unavailable.' : 'No signals for this asset class.'}
+            </div>
           )}
         </>
       )}

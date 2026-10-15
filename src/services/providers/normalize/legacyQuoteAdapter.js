@@ -1,22 +1,38 @@
+const { validateQuoteObservation } = require('./quoteContract.cjs');
+
 /**
  * Map canonical quote to legacy API shape used by dashboard components.
  * @param {import('./normalizeQuote').normalizeQuote extends Function ? ReturnType<import('./normalizeQuote').normalizeQuote> : object} canonical
  */
 function toLegacyQuote(canonical) {
-  if (!canonical || !canonical.valid) {
+  if (!canonical || !canonical.valid || (canonical.observation && !validateQuoteObservation(canonical).valid)) {
     return null;
   }
   const mark = canonical.mark;
-  const close = canonical.close ?? mark;
-  const change = close != null && mark != null ? mark - close : 0;
-  const changePercent = close > 0 ? (change / close) * 100 : 0;
+  const close = canonical.close;
+  const change = close != null && mark != null ? mark - close : null;
+  const changePercent = close > 0 && change != null ? (change / close) * 100 : null;
+  const priceText = (value) => value == null ? null
+    : canonical.secType === 'CRYPTO' ? String(value) : value.toFixed(2);
 
   return {
     symbol: canonical.symbol,
-    price: mark.toFixed(2),
-    change: change.toFixed(2),
-    changePercent: changePercent.toFixed(2),
-    previousClose: close != null ? close.toFixed(2) : mark.toFixed(2),
+    price: priceText(mark),
+    change: priceText(change),
+    changePercent: changePercent == null ? null : changePercent.toFixed(2),
+    previousClose: priceText(close),
+    connectionGeneration: canonical.connectionGeneration,
+    accountId: canonical.accountId,
+    providerSymbol: canonical.providerSymbol,
+    providerRootSymbol: canonical.providerRootSymbol,
+    lastTradeDateOrContractMonth: canonical.lastTradeDateOrContractMonth,
+    tradingClass: canonical.tradingClass,
+    multiplier: canonical.multiplier,
+    secType: canonical.secType,
+    observedAt: canonical.observedAt,
+    receivedAt: canonical.receivedAt,
+    expiresAt: canonical.expiresAt,
+    observation: canonical.observation,
     timestamp: canonical.timestamp,
     source: canonical.source,
     mark: canonical.mark,

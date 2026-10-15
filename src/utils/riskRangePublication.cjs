@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { isMarketDay } = require('./analyticsDailyBrief.cjs');
+const { getResearchProductDeadline } = require('./researchProductRegistry.cjs');
 
 const DEFAULT_MIN_PRIMARY_COUNT = 30;
 
@@ -46,8 +47,8 @@ function newYorkParts(now) {
 }
 
 function expectedRiskRangePublication(now = new Date(), {
-  deadlineHour = 8,
-  deadlineMinute = 15,
+  deadlineHour = getResearchProductDeadline('risk-ranges').hour,
+  deadlineMinute = getResearchProductDeadline('risk-ranges').minute,
 } = {}) {
   const parts = newYorkParts(now);
   const today = dateFromIso(parts.date);
@@ -105,8 +106,11 @@ function strictFiniteNumber(value) {
 
 function normalizeRiskRangeItem(item = {}) {
   const ticker = normalizeTicker(item.ticker);
+  const originalName = [item.originalName, item.name]
+    .find((value) => typeof value === 'string' && value.trim())?.trim() || null;
   const lrr = strictFiniteNumber(item.lrr);
   const hrr = strictFiniteNumber(item.hrr);
+  const previousClose = strictFiniteNumber(item.prevClose ?? item.previousClose);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || '')) ? item.date : null;
   const sourceClass = classifyRiskRangeSource(item);
   const reasons = [];
@@ -114,7 +118,7 @@ function normalizeRiskRangeItem(item = {}) {
   if (!date) reasons.push('invalid-date');
   if (lrr === null) reasons.push('invalid-lrr');
   if (hrr === null) reasons.push('invalid-hrr');
-  if (lrr !== null && hrr !== null && lrr > hrr) reasons.push('inverted-range');
+  if (lrr !== null && hrr !== null && lrr >= hrr) reasons.push('inverted-range');
   if (sourceClass === 'unknown') reasons.push('unknown-source');
   if (reasons.length > 0) {
     return {
@@ -133,7 +137,9 @@ function normalizeRiskRangeItem(item = {}) {
     value: {
       lrr,
       hrr,
+      ...(originalName ? { originalName } : {}),
       trend: item.trend || 'N/A',
+      ...(previousClose !== null ? { previousClose } : {}),
       timestamp: item.updatedAt || item.scrapedAt || null,
       date,
       source: item.source || null,
@@ -176,12 +182,28 @@ function riskRangeManifestChecksum(items, publicationDate, {
 }
 
 function applyPersistedManifestGate(envelope, items, storedManifest, {
+  now = new Date(),
   expectedDate,
   pendingDate,
   afterDeadline,
   manifestError = null,
 } = {}) {
   const expected = expectedDate || envelope?.manifest?.expectedDate || null;
+  const sourceQuality = storedManifest?.sourceQuality;
+  const sourceIssues = sourceQuality?.status === 'discrepancy' && Array.isArray(sourceQuality.issues)
+    ? sourceQuality.issues : [];
+  // The source keeps every published value. Only its disputed range projection
+  // is removed, including an older same-day row left by an earlier import.
+  const disputedTickers = new Set(sourceIssues.filter(issue => issue.field === 'riskRange'
+    || (issue.affectedFields || []).some(field => ['lrr', 'hrr', 'trend'].includes(field)))
+    .map(issue => normalizeTicker(issue.ticker)).filter(Boolean));
+  if (sourceIssues.length) {
+    items = (Array.isArray(items) ? items : []).filter(item => !(item.date === expected
+      && classifyRiskRangeSource(item) === 'primary' && disputedTickers.has(normalizeTicker(item.ticker))));
+    // A verified receipt establishes the valid subset; the ordinary minimum
+    // count still applies to publications without explicit quality evidence.
+    envelope = buildRiskRangeEnvelope(items, { now, minPrimaryCount: 1 });
+  }
   const failStatus = pendingDate && !afterDeadline ? 'pending' : 'failed';
   const reasons = [];
   if (manifestError) reasons.push('manifest-unavailable');
@@ -214,6 +236,7 @@ function applyPersistedManifestGate(envelope, items, storedManifest, {
     status: activeAvailable ? 'current' : failStatus,
     ranges: activeAvailable ? envelope.ranges : {},
     supplementalRanges: activeAvailable ? envelope.supplementalRanges : {},
+    ...(sourceIssues.length ? { sourceQuality } : {}),
     manifest: {
       ...(envelope?.manifest || {}),
       expectedDate: expected,
@@ -236,8 +259,8 @@ function buildRiskRangeEnvelope(items, {
   now = new Date(),
   requestedDate = null,
   minPrimaryCount = DEFAULT_MIN_PRIMARY_COUNT,
-  deadlineHour = 8,
-  deadlineMinute = 15,
+  deadlineHour = getResearchProductDeadline('risk-ranges').hour,
+  deadlineMinute = getResearchProductDeadline('risk-ranges').minute,
 } = {}) {
   const dates = [...new Set((Array.isArray(items) ? items : [])
     .map((item) => item?.date)
@@ -251,7 +274,7 @@ function buildRiskRangeEnvelope(items, {
 
   let status = 'missing';
   if (requestedDate) {
-    status = rows.primary.length > 0 && invalidPrimary.length === 0 ? 'historical' : 'invalid';
+    status = rows.primary.length > 0 ? 'historical' : 'invalid';
   } else if (publicationDate) {
     if (!enoughPrimary || invalidPrimary.length > 0) status = 'invalid';
     else if (expectation.pendingDate && publicationDate === expectation.pendingDate) status = 'current';

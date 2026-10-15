@@ -2,6 +2,7 @@ jest.mock('axios', () => ({ get: jest.fn() }));
 
 const axios = require('axios');
 const yahoo = require('../yahoo/yahooMarketDataProvider');
+const { toLegacyQuote } = require('../normalize/legacyQuoteAdapter');
 
 function yahooResponse(symbol, price = 1.35) {
   return {
@@ -40,6 +41,8 @@ describe('yahooMarketDataProvider explicit descriptors', () => {
 
     expect(axios.get.mock.calls[0][0]).toContain('USDCAD%3DX');
     expect(axios.get.mock.calls[0][0]).not.toContain('WRONG');
+    expect(result.canonical.observation).toMatchObject({ source: 'yahoo', classification: 'delayed_reference', valid: true, scope: { kind: 'market', accountId: null }, connectionGeneration: null });
+    expect(result.canonical.receivedAt).not.toBeNull();
     expect(result.canonical).toMatchObject({
       symbol: 'USDCAD',
       source: 'yahoo',
@@ -60,5 +63,80 @@ describe('yahooMarketDataProvider explicit descriptors', () => {
 
     expect(axios.get.mock.calls[0][0]).toContain('%5EGSPC');
     expect(result.canonical.symbol).toBe('SPX');
+  });
+
+  it('uses the Yahoo identity rather than the IBKR identity on an automatic fallback', async () => {
+    axios.get.mockResolvedValue(yahooResponse('^DJI', 54000));
+
+    const result = await yahoo.getQuote({
+      symbol: 'DJI',
+      ibkrSymbol: 'INDU',
+      yahooSymbol: '^DJI',
+      provider: 'auto',
+      conId: 1935181,
+      secType: 'IND',
+      exchange: 'CME',
+    });
+
+    expect(axios.get.mock.calls[0][0]).toContain('%5EDJI');
+    expect(axios.get.mock.calls[0][0]).not.toContain('INDU');
+    expect(result.canonical).toMatchObject({
+      symbol: 'DJI',
+      source: 'yahoo',
+      dataType: 'delayed',
+      valid: true,
+    });
+  });
+
+  it('rejects a provider response for a different Yahoo instrument', async () => {
+    axios.get.mockResolvedValue(yahooResponse('WRONG=X'));
+    const result = await yahoo.getQuote({ symbol: 'USDCAD', provider: 'yahoo', providerSymbol: 'USDCAD=X' });
+    expect(result.canonical.valid).toBe(false);
+  });
+
+  it.each([['DOGE', 0.08477, 0.08412], ['LINK', 11.604, 11.579]])('preserves %s provider precision through overview API serialization', async (symbol, price, previousClose) => {
+    const response = yahooResponse(`${symbol}-USD`, price);
+    response.data.chart.result[0].meta.previousClose = previousClose;
+    axios.get.mockResolvedValue(response);
+    const result = await yahoo.getQuote({
+      symbol, secType: 'CRYPTO', provider: 'yahoo', yahooSymbol: `${symbol}-USD`,
+    });
+    const legacy = toLegacyQuote(result.canonical);
+
+    expect(axios.get.mock.calls[0][0]).toContain(`/chart/${symbol}-USD`);
+    expect(result.canonical).toMatchObject({ valid: true, last: price, close: previousClose });
+    expect(Number(legacy.price)).toBe(price);
+    expect(Number(legacy.previousClose)).toBe(previousClose);
+    expect(Number(legacy.change)).toBeCloseTo(price - previousClose, 10);
+    expect(Number(legacy.change)).not.toBe(0);
+    expect(legacy.observation).toMatchObject({ classification: 'delayed_reference', valid: true });
+  });
+
+  it.each(['DOGE', 'LINK'])('rejects a bare-symbol stock response for the %s crypto request', async (symbol) => {
+    axios.get.mockResolvedValue(yahooResponse(symbol));
+    const result = await yahoo.getQuote({
+      symbol, secType: 'CRYPTO', provider: 'yahoo', yahooSymbol: `${symbol}-USD`,
+    });
+    expect(result.canonical.valid).toBe(false);
+    expect(toLegacyQuote(result.canonical)).toBeNull();
+  });
+
+  it('does not fabricate an observation time when Yahoo omits market time', async () => {
+    const response = yahooResponse('^RUT', 3000);
+    delete response.data.chart.result[0].meta.regularMarketTime;
+    axios.get.mockResolvedValue(response);
+
+    const result = await yahoo.getQuote({
+      symbol: 'RUT',
+      yahooSymbol: '^RUT',
+      provider: 'auto',
+    });
+
+    expect(result.canonical).toMatchObject({
+      symbol: 'RUT',
+      timestamp: null,
+      valid: false,
+    });
+    expect(result.canonical.warning).toMatch(/missing_timestamp/);
   });
 });

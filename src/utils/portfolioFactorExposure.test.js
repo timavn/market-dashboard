@@ -1,7 +1,9 @@
 import {
   buildPortfolioFactorExposure,
+  buildPortfolioQuadExposure,
   holdingMatchesFactorExposure,
 } from './portfolioFactorExposure';
+import { HEDGEYE_EXPOSURE_LIST } from '../constants/quadExposureCatalog';
 
 describe('buildPortfolioFactorExposure', () => {
   test('splits multi-tagged positions equally within the selected dimension and nets both books', () => {
@@ -64,5 +66,45 @@ describe('buildPortfolioFactorExposure', () => {
       'equityStyleFactors',
       'equity-style-factor-value',
     )).toBe(false);
+  });
+});
+
+describe('buildPortfolioQuadExposure', () => {
+  test('includes every worksheet factor and zeros for unheld factors', () => {
+    const rows = buildPortfolioQuadExposure([
+      { symbol: 'OIH', marketValue: 4500 },
+      { symbol: 'OIH', marketValue: -1500 },
+    ], 100000, true);
+    expect(rows.map(row => row.id)).toEqual(HEDGEYE_EXPOSURE_LIST.map(factor => factor.id));
+    expect(rows.find(row => row.label === 'Energy')).toMatchObject({
+      longPct: 4.5, shortPct: 1.5, netPct: 3, grossPct: 6,
+      quadFits: { q2: { status: 'best', rank: 4 }, q4: { status: 'worst', rank: 1 } },
+    });
+    expect(rows.find(row => row.label === 'Utilities')).toMatchObject({ longPct: 0, shortPct: 0, netPct: 0 });
+    expect(rows.find(row => row.label === 'Equities').longPct).toBe(4.5);
+  });
+
+  test.each([null, 0, NaN])('keeps ranks but withholds exposure without valid NAV (%s)', nav => {
+    const rows = buildPortfolioQuadExposure([{ symbol: 'OIH', marketValue: 4500 }], nav, true);
+    expect(rows.every(row => row.longPct === null && row.shortPct === null && row.netPct === null)).toBe(true);
+    expect(rows.find(row => row.label === 'Energy').quadFits.q3).toEqual({ status: 'best', rank: 2 });
+  });
+
+  test('does not turn unavailable portfolio values into zero exposure', () => {
+    const rows = buildPortfolioQuadExposure([{ symbol: 'OIH', marketValue: 4500 }], 100000, false);
+    expect(rows.every(row => row.longPct === null && row.shortPct === null && row.netPct === null)).toBe(true);
+  });
+
+  test('excludes custom and unclassified categories without reassigning their exposure', () => {
+    const rows = buildPortfolioQuadExposure([
+      { symbol: 'OIH', marketValue: 4500 },
+      { symbol: 'IBIT', marketValue: 10000 },
+      { symbol: 'DBMF', marketValue: 3000 },
+      { symbol: 'UNREVIEWED', marketValue: -2500 },
+    ], 100000, true);
+    expect(rows).toHaveLength(45);
+    expect(rows.map(row => row.label)).not.toEqual(expect.arrayContaining(['Cash', 'Cryptocurrency', 'Managed Futures', 'Unclassified']));
+    expect(rows.find(row => row.label === 'Energy').netPct).toBe(4.5);
+    expect(rows.find(row => row.label === 'Equities').netPct).toBe(4.5);
   });
 });

@@ -43,13 +43,13 @@ export function formatVolatilityMetric(value, isPercentage = false) {
 export function getQuadColor(quadNum) {
   switch (quadNum) {
     case 1:
-      return '#059669';
+      return 'var(--dashboard-quad-1)';
     case 2:
-      return '#059669';
+      return 'var(--dashboard-quad-2)';
     case 3:
-      return '#f59e0b';
+      return 'var(--dashboard-quad-3)';
     case 4:
-      return '#dc2626';
+      return 'var(--dashboard-quad-4)';
     default:
       return '#6b7280';
   }

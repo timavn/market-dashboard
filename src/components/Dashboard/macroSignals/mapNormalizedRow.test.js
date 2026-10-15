@@ -25,7 +25,7 @@ describe('mapNormalizedRowToMacroSignal', () => {
       trackerTrend: 'BULLISH',
       riskTrend: null,
     });
-    expect(trackerOnly.trade).toBe('Buy');
+    expect(trackerOnly.trade).toBeNull();
     expect(trackerOnly.trend).toBeNull();
     expect(trackerOnly.side).toBeNull();
 
@@ -37,6 +37,15 @@ describe('mapNormalizedRowToMacroSignal', () => {
     expect(rangeOnly.trade).toBeNull();
     expect(rangeOnly.trend).toBe('bear');
     expect(rangeOnly.side).toBe('short');
+  });
+
+  test.each([['BULLISH', 'Buy'], ['BEARISH', 'Sell'], ['NEUTRAL', 'Neutral']])('displays explicit %s Trade from any canonical source', (direction, expected) => {
+    const evidence = { status: 'available', direction, source: 'early-look', sourceDate: '2026-09-25',
+      signalProvenance: { field: 'trade', method: 'explicit-statement', sourceField: 'body', sourceText: `SPY Trade is ${direction}` } };
+    const result = mapNormalizedRowToMacroSignal({ symbol: 'SPY', tradeResearch: evidence, trackerTrend: 'BEARISH', riskTrend: 'BULLISH' });
+    expect(result.trade).toBe(expected);
+    expect(result.tradeResearch).toBe(evidence);
+    expect(result.trend).toBe('bull');
   });
 
   test('leaves side null for NEUTRAL riskTrend with range data', () => {
@@ -51,6 +60,7 @@ describe('mapNormalizedRowToMacroSignal', () => {
       score: 40,
     });
     expect(view.side).toBeNull();
+    expect(view.trend).toBe('neutral');
     expect(view.forecastLow).toBe(200);
   });
 

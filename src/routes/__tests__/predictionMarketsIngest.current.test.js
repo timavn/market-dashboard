@@ -19,6 +19,26 @@ jest.mock('../../services/predictionMarketsIngest/cpiRelease', () => ({
   releaseKeyForEvent: jest.fn((event) => event?.releaseKey || null),
 }));
 
+jest.mock('../../services/predictionMarketsIngest/cpiOfficial', () => ({
+  loadOfficialCpiFinals: jest.fn(),
+}));
+
+jest.mock('../../services/predictionMarketsIngest/cpiBenchmarkProvider', () => ({
+  loadCpiBenchmarks: jest.fn(),
+}));
+
+jest.mock('../../services/predictionMarketsIngest/watchlistProvider', () => ({
+  getLastSettledSpxCloseSession: jest.fn(),
+  getLastSettledWtiSession: jest.fn(),
+  getPredictionMarketsOverview: jest.fn(),
+  getPredictionMarketWatchlist: jest.fn(),
+  getRecentSettledSpxCloseSessions: jest.fn(),
+  getRecentSettledWtiSessions: jest.fn(),
+  getSpxCoverSnapshot: jest.fn(),
+  getSpxCloseWorkbench: jest.fn(),
+  getWtiWorkbench: jest.fn(),
+}));
+
 const {
   fetchIBKREvents,
 } = require('../../services/predictionMarketsIngest');
@@ -35,6 +55,12 @@ const {
   getCurrentCpiRelease,
   releaseKeyForEvent,
 } = require('../../services/predictionMarketsIngest/cpiRelease');
+const { loadOfficialCpiFinals } = require('../../services/predictionMarketsIngest/cpiOfficial');
+const { loadCpiBenchmarks } = require('../../services/predictionMarketsIngest/cpiBenchmarkProvider');
+const {
+  getPredictionMarketWatchlist,
+  getSpxCoverSnapshot,
+} = require('../../services/predictionMarketsIngest/watchlistProvider');
 const router = require('../predictionMarketsIngest');
 
 const CURRENT_RELEASE = {
@@ -59,6 +85,26 @@ const CURRENT_RELEASE = {
 
 function currentCpiHandler() {
   const layer = router.stack.find((entry) => entry.route?.path === '/cpi/current');
+  return layer.route.stack[0].handle;
+}
+
+function spxCoverHandler() {
+  const layer = router.stack.find((entry) => entry.route?.path === '/spx-close/cover');
+  return layer.route.stack[0].handle;
+}
+
+function watchlistHandler() {
+  const layer = router.stack.find((entry) => entry.route?.path === '/watchlist');
+  return layer.route.stack[0].handle;
+}
+
+function cpiFinalsHandler() {
+  const layer = router.stack.find((entry) => entry.route?.path === '/cpi/finals');
+  return layer.route.stack[0].handle;
+}
+
+function cpiBenchmarksHandler() {
+  const layer = router.stack.find((entry) => entry.route?.path === '/cpi/benchmarks');
   return layer.route.stack[0].handle;
 }
 
@@ -90,6 +136,35 @@ function liveKalshiEvent(overrides = {}) {
     ...overrides,
   };
 }
+
+describe('GET /prediction-markets/watchlist on-demand refresh', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    getPredictionMarketWatchlist.mockResolvedValue({
+      ok: true,
+      rows: [],
+      refreshEvidence: { mode: 'on_demand_prediction_fanout' },
+    });
+  });
+
+  test('forces direct venue and missing-only IBKR retries only when requested', async () => {
+    const forcedResponse = responseMock();
+    await watchlistHandler()({ query: { forceRefresh: 'true' } }, forcedResponse);
+
+    expect(getPredictionMarketWatchlist).toHaveBeenLastCalledWith({
+      forceRefresh: true,
+      retryMissing: true,
+    });
+    expect(forcedResponse.set).toHaveBeenCalledWith('Cache-Control', 'no-store');
+
+    const regularResponse = responseMock();
+    await watchlistHandler()({ query: {} }, regularResponse);
+    expect(getPredictionMarketWatchlist).toHaveBeenLastCalledWith({
+      forceRefresh: false,
+      retryMissing: false,
+    });
+  });
+});
 
 function providerStatus(overrides = {}) {
   return {
@@ -213,6 +288,128 @@ describe('GET /prediction-markets/cpi/current read-only live-data contract', () 
     expect(setProviderStatus).toHaveBeenCalledWith('ibkr', expect.objectContaining({
       status: 'catalog_unavailable',
       errorCode: 'CATALOG_UNAVAILABLE',
+    }));
+  });
+});
+
+describe('GET /prediction-markets/spx-close/cover', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns the discriminated live cover snapshot unchanged', async () => {
+    const payload = {
+      ok: true,
+      mode: 'live',
+      executable: false,
+      markets: [{ ticker: 'SPX-1', yesBid: 0.5, yesAsk: 0.52, noBid: 0.48, noAsk: 0.5 }],
+    };
+    getSpxCoverSnapshot.mockResolvedValue(payload);
+    const res = responseMock();
+
+    await spxCoverHandler()({}, res);
+
+    expect(res.set).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(payload);
+  });
+
+  test('fails closed with an unavailable cover payload', async () => {
+    getSpxCoverSnapshot.mockRejectedValue(Object.assign(new Error('Kalshi unavailable'), { code: 'KALSHI_OFFLINE' }));
+    const res = responseMock();
+
+    await spxCoverHandler()({}, res);
+
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ mode: 'unavailable', markets: [] }));
+  });
+});
+
+describe('GET /prediction-markets/cpi/finals', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('returns official historical CPI finals without exposing a market-data fallback', async () => {
+    const payload = {
+      ok: true,
+      source: 'bls_flat_file',
+      finals: [{ id: '2026-06', value: 3.5, source: 'bls_flat_file' }],
+    };
+    loadOfficialCpiFinals.mockResolvedValue(payload);
+    const res = responseMock();
+
+    await cpiFinalsHandler()({}, res);
+
+    expect(res.set).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(payload);
+  });
+
+  test('fails closed when the official source is unavailable', async () => {
+    loadOfficialCpiFinals.mockRejectedValue(new Error('BLS unavailable'));
+    const res = responseMock();
+
+    await cpiFinalsHandler()({}, res);
+
+    expect(res.status).toHaveBeenCalledWith(502);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: false, finals: [] }));
+  });
+});
+
+describe('GET /prediction-markets/cpi/benchmarks', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('returns independent benchmark source states without caching in the browser', async () => {
+    const payload = {
+      ok: true,
+      period: '2026-07',
+      metric: 'headline-cpi-yoy',
+      unit: 'percent',
+      sources: [
+        { id: 'wall-street-consensus', status: 'unavailable', point: null },
+        { id: 'cleveland-fed', status: 'available', point: 3.42 },
+      ],
+    };
+    loadCpiBenchmarks.mockResolvedValue(payload);
+    const res = responseMock();
+
+    await cpiBenchmarksHandler()({ query: { month: '2026-07' } }, res);
+
+    expect(res.set).toHaveBeenCalledWith('Cache-Control', 'no-store');
+    expect(loadCpiBenchmarks).toHaveBeenCalledWith({
+      month: '2026-07',
+      includePublicReleaseSetup: true,
+    });
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(payload);
+  });
+
+  test('rejects an invalid month before calling either provider', async () => {
+    const res = responseMock();
+
+    await cpiBenchmarksHandler()({ query: { month: 'July 2026' } }, res);
+
+    expect(loadCpiBenchmarks).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      ok: false,
+      code: 'CPI_BENCHMARK_MONTH_INVALID',
+      sources: [],
+    }));
+  });
+
+  test('fails closed with no source values after an unexpected provider error', async () => {
+    loadCpiBenchmarks.mockRejectedValue(new Error('benchmark provider failed'));
+    const res = responseMock();
+
+    await cpiBenchmarksHandler()({ query: { month: '2026-07' } }, res);
+
+    expect(res.status).toHaveBeenCalledWith(502);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      ok: false,
+      period: '2026-07',
+      sources: [],
     }));
   });
 });

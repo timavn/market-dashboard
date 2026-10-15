@@ -321,6 +321,25 @@ class WatchdogTests(unittest.TestCase):
         self.assertTrue(heartbeat["scheduled"])
         self.assertEqual(metrics.put_calls[0]["Namespace"], "MarketDashboard/Readiness")
 
+    def test_disabled_workers_are_retired_without_invocation_warnings(self):
+        metrics = FakeCloudWatch(
+            {
+                "hermes_invocations": [3],
+                "hermes_errors": [2],
+                "hermes_duration": [60_000],
+            }
+        )
+
+        result, *_ = self.invoke(metrics=metrics)
+
+        self.assertEqual(result["status"], "success")
+        hermes_function = result["checks"]["functions"][
+            "market-dashboard-hermes-worker-v2"
+        ]
+        self.assertEqual(hermes_function["status"], "retired")
+        self.assertFalse(hermes_function["invocationExpected"])
+        self.assertEqual(result["findingCount"], 0)
+
     def test_enabled_schedule_requires_exact_fresh_typed_heartbeat(self):
         gmail = watchdog.SCHEDULE_SPECS[0]
         database = FakeDynamo(
@@ -632,7 +651,6 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(
             [payload["eventType"] for payload in payloads],
             [
-                "incident_opened",
                 "incident_escalated",
                 "incident_recovered",
             ],
@@ -714,7 +732,7 @@ class WatchdogTests(unittest.TestCase):
 
         self.assertEqual(
             [json.loads(call["Message"])["eventType"] for call in notifications.calls],
-            ["incident_recovered"],
+            [],
         )
         root_item = watchdog.from_dynamodb_item(
             database.alert_items[watchdog.watchdog_alert_id(error_code)]
@@ -735,8 +753,8 @@ class WatchdogTests(unittest.TestCase):
             notifications=FakeSns(fail=True),
         )
 
-        self.assertEqual(result["status"], "warning")
-        self.assertIn(
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn(
             "WATCHDOG_SNS_NOTIFICATION_FAILED",
             [finding["errorCode"] for finding in result["findings"]],
         )
@@ -747,11 +765,8 @@ class WatchdogTests(unittest.TestCase):
                 if write["TableName"] == watchdog.HEARTBEAT_TABLE
             )
         )
-        self.assertEqual(heartbeat["status"], "warning")
-        self.assertEqual(
-            heartbeat["errorCode"],
-            "WATCHDOG_SNS_NOTIFICATION_FAILED",
-        )
+        self.assertEqual(heartbeat["status"], "success")
+        self.assertIsNone(heartbeat.get("errorCode"))
         root_item = watchdog.from_dynamodb_item(
             database.alert_items[
                 watchdog.watchdog_alert_id("RUNTIME_FAILURE_QUEUE_BACKLOG")

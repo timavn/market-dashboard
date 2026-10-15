@@ -1,133 +1,70 @@
 .global-session-strip {
-  position: relative;
   width: 100%;
   height: 100%;
-  min-height: 96px;
-  overflow: hidden;
+  min-height: 40px;
   background: #ffffff;
-  color: #142033;
+  color: #475467;
   font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 400;
   font-variant-numeric: tabular-nums lining-nums;
+  container-type: inline-size;
 }
 
 .global-session-strip__regions {
   display: grid;
-  grid-template-columns: 3fr 1fr 2fr;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   height: 100%;
   min-width: 0;
 }
 
 .global-session-region {
-  --session-accent: #22345c;
+  grid-column: span var(--market-count);
   min-width: 0;
-  padding: 12px 12px 9px;
-}
-
-.global-session-region--americas {
-  --session-accent: #059669;
-}
-
-.global-session-region__heading {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 29px;
-  color: var(--session-accent);
-}
-
-.global-session-region__heading::before {
-  position: absolute;
-  right: 0;
-  bottom: 2px;
-  left: 0;
-  height: 1px;
-  background: currentColor;
-  content: '';
-}
-
-.global-session-region__heading::after {
-  position: absolute;
-  bottom: 0.5px;
-  left: 50%;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 3px #ffffff;
-  content: '';
-  transform: translateX(-50%);
-}
-
-.global-session-region__heading span {
-  align-self: flex-start;
-  color: currentColor;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.17em;
-  line-height: 1;
-  text-transform: uppercase;
 }
 
 .global-session-region__cities {
   display: grid;
   grid-template-columns: repeat(var(--market-count), minmax(0, 1fr));
-  height: calc(100% - 29px);
+  height: 100%;
 }
 
 .global-session-city {
   display: flex;
   min-width: 0;
+  min-height: 40px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 2px;
+  padding: 4px 6px;
   text-align: center;
 }
 
-.global-session-city > span {
-  color: #526174;
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.16em;
-  line-height: 1;
+.global-session-city + .global-session-city,
+.global-session-region + .global-session-region {
+  border-left: 1px solid #d0d5dd;
 }
 
-.global-session-city > strong {
-  color: #17243a;
-  font-family: var(--font-ui);
-  font-size: clamp(16px, 1.12vw, 23px);
-  font-weight: 480;
-  letter-spacing: -0.025em;
-  line-height: 1;
+.global-session-city__code,
+.global-session-city__datetime {
+  color: inherit;
+  font: inherit;
+  line-height: 14px;
+  white-space: nowrap;
 }
 
-.global-session-city--holiday > span,
-.global-session-city--closed > span {
-  color: #526174;
-}
-
-.global-session-strip--compact {
-  min-height: 82px;
-}
-
-.global-session-strip--compact .global-session-region {
-  padding-top: 8px;
-  padding-bottom: 6px;
-}
-
-@media (max-width: 1050px) {
+@container (max-width: 660px) {
   .global-session-strip__regions {
-    grid-template-columns: 3fr 1fr 2fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .global-session-region {
-    padding-right: 8px;
-    padding-left: 8px;
+  .global-session-region--europe,
+  .global-session-region--asia {
+    border-top: 1px solid #d0d5dd;
   }
 
-  .global-session-region__heading span,
-  .global-session-city > span {
-    font-size: 8px;
+  .global-session-region--europe {
+    border-left: 0;
   }
 }

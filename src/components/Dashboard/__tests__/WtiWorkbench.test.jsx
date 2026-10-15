@@ -4,6 +4,7 @@ import '@testing-library/jest-dom';
 import predictionMarketsIngestService from '../../../services/api/predictionMarketsIngestService';
 import { MarketDataService } from '../../../services/api/marketDataService';
 import WtiWorkbench from '../WtiWorkbench';
+import { resetSessionResourceStore } from '../../../utils/sessionResourceStore';
 
 jest.mock('../../../services/api/predictionMarketsIngestService', () => ({
   __esModule: true,
@@ -188,6 +189,8 @@ describe('WtiWorkbench', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    resetSessionResourceStore();
+    window.sessionStorage.clear();
     nowSpy = jest.spyOn(Date, 'now').mockReturnValue(NOW);
     arrange();
   });
@@ -207,8 +210,10 @@ describe('WtiWorkbench', () => {
     render(<WtiWorkbench cadence="daily" sharedPositionsState={sharedPositionsState} />);
 
     const ladder = await screen.findByRole('table', { name: 'daily WTI contract ladder' });
-    expect(within(ladder).getByText('WTI > $83.99')).toBeInTheDocument();
-    expect(within(ladder).getByText('WTI > $84.99')).toBeInTheDocument();
+    expect(within(ladder).getByRole('columnheader', { name: 'Above threshold' })).toBeInTheDocument();
+    expect(within(ladder).getByText('Above $83.99')).toBeInTheDocument();
+    expect(within(ladder).getByText('Above $84.99')).toBeInTheDocument();
+    expect(screen.getByText(/KXWTI · daily “Above \$X” contracts/i)).toBeInTheDocument();
     expect(within(ladder).getAllByText('64¢').length).toBeGreaterThan(0);
     expect(within(ladder).getAllByText('35¢').length).toBeGreaterThan(0);
     expect(screen.getByText('$71.25')).toBeInTheDocument();
@@ -231,6 +236,16 @@ describe('WtiWorkbench', () => {
 
     expect(onCadenceChange).toHaveBeenCalledWith('weekly');
     expect(predictionMarketsIngestService.getWtiWorkbench).toHaveBeenCalledWith('daily');
+  });
+
+  test('offers a back button that returns to the prediction-markets overview', async () => {
+    const onBack = jest.fn();
+    render(<WtiWorkbench cadence="daily" onBack={onBack} />);
+    await screen.findByRole('table', { name: 'daily WTI contract ladder' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to prediction markets overview' }));
+
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   test('keeps the header, switch, Contracts card, and Details card usable when all WTI sources fail', async () => {
@@ -281,6 +296,29 @@ describe('WtiWorkbench', () => {
     expect(screen.queryByText(/Showing the most recent fully verified settlement/i)).not.toBeInTheDocument();
   });
 
+  test('rejects refresh-delayed OVX context even when recently verified', async () => {
+    arrange({
+      volatility: {
+        OVX: {
+          ...currentOvx.OVX,
+          availability: 'reference',
+          freshness: 'refresh-delayed',
+          refreshDelayed: true,
+          lastVerifiedAt: '2026-07-21T18:30:00.000Z',
+          retainedUntil: '2026-07-21T19:00:00.000Z',
+        },
+      },
+    });
+    render(<WtiWorkbench cadence="daily" />);
+
+    expect(await screen.findByRole('table', { name: 'daily WTI contract ladder' })).toBeInTheDocument();
+    const ovxContext = screen.getByText('OVX context').closest('.wti-context-card');
+    expect(within(ovxContext).getByText('UNAVAILABLE')).toBeInTheDocument();
+    expect(within(ovxContext).getByText('A fresh current-session OVX reference is unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('64.45')).not.toBeInTheDocument();
+    expect(within(ovxContext).queryByText(/Cboe delayed/)).not.toBeInTheDocument();
+  });
+
   test('marks zero native depth incomplete without hiding direct per-side payout arithmetic', async () => {
     arrange({
       live: {
@@ -294,7 +332,7 @@ describe('WtiWorkbench', () => {
     render(<WtiWorkbench cadence="daily" />);
     const ladder = await screen.findByRole('table', { name: 'daily WTI contract ladder' });
 
-    fireEvent.click(within(ladder).getByRole('button', { name: 'Inspect WTI > $83.99' }));
+    fireEvent.click(within(ladder).getByRole('button', { name: 'Inspect Above $83.99' }));
 
     expect(within(ladder).getAllByText('INCOMPLETE')).toHaveLength(2);
     const payoutTable = screen.getByRole('table', { name: 'Selected WTI contract payout arithmetic' });

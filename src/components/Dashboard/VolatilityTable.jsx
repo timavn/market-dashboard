@@ -9,9 +9,16 @@ import {
   getBucketForSeries,
   VOL_RANGES,
 } from '../../utils/volatilityRegimes';
+import {
+  isDisplayableVolatilityRow,
+  isHistoricalVolatilityRow,
+  isRefreshDelayedVolatilityRow,
+} from '../../utils/volatilitySnapshotRows';
+import DelayedDataMarker from './DelayedDataMarker';
+import { delayedMarkerMarketContext } from '../../utils/delayedMarkerMarketContext';
 import './VolatilityTable.css';
 
-// All 7 series in one table — VVIX under VIX; MOVE from RATES
+// Keep the table aligned with the shared volatility roster.
 const ALL_SERIES = VOLATILITY_SERIES;
 
 const HEAT_CAP_PCT = 15;
@@ -36,10 +43,7 @@ const formatPeriodPct = (value) => {
 };
 
 const isHistoricalMoveRow = (seriesName, row) => (
-  seriesName === 'MOVE'
-  && row?.availability === 'historical'
-  && row?.freshness === 'historical'
-  && row?.quoteMode === 'end-of-day'
+  isHistoricalVolatilityRow(seriesName, row)
   && row?.lastPx != null
   && Number.isFinite(Number(row.lastPx))
 );
@@ -89,13 +93,9 @@ const VolatilityTable = ({
 
   const isSeriesCompletelyMissing = (seriesName, rowData) => {
     if (!rowData) return true;
-    if (isHistoricalMoveRow(seriesName, rowData)) return false;
-    return (
-      rowData.availability !== 'available' ||
-      rowData.freshness !== 'current' ||
-      rowData.lastPx == null ||
-      !Number.isFinite(Number(rowData.lastPx))
-    );
+    return !isDisplayableVolatilityRow(seriesName, rowData)
+      || rowData.lastPx == null
+      || !Number.isFinite(Number(rowData.lastPx));
   };
 
   if (loading) {
@@ -104,7 +104,7 @@ const VolatilityTable = ({
     );
   }
 
-  if (error) {
+  if (error && !snapshot) {
     return (
       <div className="volatility-table-loading volatility-table-error" role="alert">
         <span>Volatility data unavailable: {error}</span>
@@ -123,6 +123,11 @@ const VolatilityTable = ({
       data-testid="volatility-table"
       data-variant={variant}
     >
+      {error ? (
+        <div className="volatility-table-loading volatility-table-error" role="status">
+          Refresh delayed: {error}
+        </div>
+      ) : null}
       <div className="region-mw-body">
         <div className="region-mw-table-wrap">
           <table className="region-mw-quotes-table volatility-mw-table">
@@ -168,6 +173,14 @@ const VolatilityTable = ({
               {ALL_SERIES.map((s) => {
                 const row = data[s.name] || {};
                 const historicalMove = isHistoricalMoveRow(s.name, row);
+                const refreshDelayed = isRefreshDelayedVolatilityRow(row);
+                const displayedStatus = refreshDelayed
+                  ? 'refresh-delayed'
+                  : historicalMove ? 'historical' : 'live';
+                const referenceAsOf = row?.asOf || row?.lastVerifiedAt || row?.timestamp;
+                const markerTitle = refreshDelayed
+                  ? `Refresh delayed · last verified ${referenceAsOf || 'time unavailable'}`
+                  : `Historical reference · as of ${referenceAsOf || 'time unavailable'}`;
                 const seriesMissing = isSeriesCompletelyMissing(s.name, row);
                 const missingLabel =
                   s.name === 'RVX'
@@ -178,6 +191,11 @@ const VolatilityTable = ({
                       title: missingLabel,
                       'aria-label': `${s.name} volatility data unavailable`,
                     }
+                  : refreshDelayed
+                    ? {
+                        title: `Refresh delayed. Showing the last verified ${s.symbol} value as of ${new Date(row.asOf).toLocaleString()}.`,
+                        'aria-label': `${s.name} last verified volatility; refresh delayed`,
+                      }
                   : historicalMove
                     ? {
                         title: `End-of-day MOVE value as of ${new Date(row.asOf).toLocaleString()}`,
@@ -201,7 +219,7 @@ const VolatilityTable = ({
                 const regimeRanges = [...(VOL_RANGES[s.name]?.ranges || [])].reverse();
 
                 return (
-                  <tr key={s.name} className="region-mw-tr">
+                  <tr key={s.name} className={`region-mw-tr${refreshDelayed ? ' vol-mw-row--refresh-delayed' : ''}`}>
                     <td className="region-mw-td region-mw-td-name vol-mw-td-metric">
                       <div className="vol-mw-series-cell-content">
                         <div className="vol-mw-series-identity">
@@ -224,7 +242,7 @@ const VolatilityTable = ({
                           aria-label={
                             seriesMissing
                               ? `${s.name} volatility regime unavailable`
-                              : `${s.name} ${historicalMove ? 'end-of-day' : 'current'} volatility regime: ${bucketSpot}`
+                              : `${s.name} ${historicalMove ? 'end-of-day' : refreshDelayed ? 'last verified, refresh delayed' : 'current'} volatility regime: ${bucketSpot}`
                           }
                         >
                           {regimeRanges.map((range) => {
@@ -251,10 +269,28 @@ const VolatilityTable = ({
                     >
                       {seriesMissing ? 'N/A' : historicalMove ? (
                         <span className="vol-mw-eod-value">
-                          <strong>{formatValue(row.lastPx)}</strong>
+                          <strong>
+                            {formatValue(row.lastPx)}
+                            <DelayedDataMarker
+                              status={displayedStatus}
+                              title={markerTitle}
+                              updatedAt={referenceAsOf}
+                              {...delayedMarkerMarketContext(row)}
+                            />
+                          </strong>
                           <small>EOD · AS OF {formatAsOfDate(row.asOf)}</small>
                         </span>
-                      ) : formatValue(row.lastPx)}
+                      ) : (
+                        <>
+                          {formatValue(row.lastPx)}
+                          <DelayedDataMarker
+                            status={displayedStatus}
+                            title={markerTitle}
+                            updatedAt={referenceAsOf}
+                            {...delayedMarkerMarketContext(row)}
+                          />
+                        </>
+                      )}
                     </td>
                     <td
                       className={`region-mw-td region-mw-td-num ${seriesMissing ? 'region-mw-heat--na' : bucketClass(bucket1d)}`}

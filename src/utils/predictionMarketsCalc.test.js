@@ -416,9 +416,9 @@ describe('getRecommendation', () => {
     const recStandard = getRecommendation({ ...contract, payoutMultiplier: 1 }, defaultSettings);
     const recCME = getRecommendation(contract, defaultSettings);
     // CME max loss per contract is 100x larger, so fewer contracts should be suggested
-    if (recCME.action === 'Trade' && recStandard.action === 'Trade') {
-      expect(recCME.suggestedContracts).toBeLessThanOrEqual(recStandard.suggestedContracts);
-    }
+    expect(recCME.action).toBe('Trade');
+    expect(recStandard.action).toBe('Trade');
+    expect(recCME.suggestedContracts).toBeLessThanOrEqual(recStandard.suggestedContracts);
   });
 });
 

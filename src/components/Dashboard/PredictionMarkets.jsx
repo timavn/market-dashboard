@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Activity, FileText, Info } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Activity, FileText } from 'lucide-react';
 import './PredictionMarkets.css';
 import { MarketDataService } from '../../services/api/marketDataService';
 import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
@@ -7,6 +8,11 @@ import {
   getMacroSignalQuotePlan,
   normalizePredictionMarketSignals,
 } from '../../utils/predictionMarketSignals';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import {
+  buildCanonicalRiskRangeMap,
+  buildCanonicalTrackerSnapshot,
+} from '../../utils/securityIntelligenceV2';
 import { isTreasuryYieldSymbol } from '../../utils/treasuryYieldScale';
 import {
   MacroSignalsCard,
@@ -34,6 +40,11 @@ import {
   normalizeCpiNowcast,
   summarizeCpiPositions,
 } from '../../utils/cpiPredictionMarket';
+import {
+  buildCpiAllocationModel,
+  buildCpiCalibratedProbabilityCurve,
+  calculateKalshiTakerFee,
+} from '../../utils/cpiAllocationModel';
 import authoritativeIbkrCpiContract from '../../utils/authoritativeIbkrCpiContract.cjs';
 import {
   adjustProbability,
@@ -58,6 +69,29 @@ import {
 } from '../../utils/predictionMarketsCalc';
 
 const API_BASE = (process.env.REACT_APP_API_URL || process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001') + '/api/prediction-markets';
+
+async function loadCanonicalSecurityUniverse() {
+  const bySymbol = {};
+  let cursor = null;
+  let firstPage = null;
+  do {
+    const page = await MarketDataService.getSecurityIntelligenceUniverseV2({
+      limit: 200,
+      cursor,
+    });
+    if (page?.schemaVersion !== 2) {
+      throw new Error('Canonical security universe returned an unsupported schema.');
+    }
+    firstPage = firstPage || page;
+    Object.assign(bySymbol, page.bySymbol || {});
+    cursor = page.page?.nextCursor || null;
+  } while (cursor);
+  return {
+    ...(firstPage || { schemaVersion: 2, marketDate: null, bySymbol: {} }),
+    bySymbol,
+    page: null,
+  };
+}
 
 async function pmFetch(path) {
   const res = await fetch(`${API_BASE}${path}`);
@@ -2061,7 +2095,7 @@ function BetBuilderV2({ event, settings }) {
       </button>
       <button className="pmv2-btn-secondary">☆ Add to Watchlist</button>
 
-      {reviewOpen && (
+      {reviewOpen && createPortal(
         <div className="pmv2-modal-overlay" onClick={() => setReviewOpen(false)}>
           <div className="pmv2-modal" onClick={e => e.stopPropagation()}>
             <div className="pmv2-modal-title">Review Bet</div>
@@ -2077,7 +2111,8 @@ function BetBuilderV2({ event, settings }) {
               Close
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -2339,7 +2374,7 @@ function hasNonLiveTradingFlag(event) {
   return (event?.data_quality_flags || []).some((flag) => NON_LIVE_TRADING_FLAGS.has(flag));
 }
 
-function isLiveTradingEvent(event) {
+function isLiveTradingEvent(event, nowMs = Date.now()) {
   if (!event || event.source_api === 'IBKR_PORTFOLIO' || event.heldPosition || hasNonLiveTradingFlag(event)) return false;
   if (!['IBKR_TWS_API', 'IBKR_CPAPI', 'kalshi_trade_api_v2'].includes(event.source_api)) return false;
   const status = String(event.status || 'open').toLowerCase();
@@ -2349,10 +2384,10 @@ function isLiveTradingEvent(event) {
   const expiresAt = compactExpiry
     ? Date.parse(`${compactExpiry[1]}-${compactExpiry[2]}-${compactExpiry[3]}T23:59:59Z`)
     : Date.parse(rawExpiry);
-  if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) return false;
+  if (Number.isFinite(expiresAt) && expiresAt <= nowMs) return false;
   const updatedAt = Date.parse(event.updated_at || '');
   if (!Number.isFinite(updatedAt)) return false;
-  const ageMs = Date.now() - updatedAt;
+  const ageMs = nowMs - updatedAt;
   return ageMs >= -5000 && ageMs <= 120000;
 }
 
@@ -2385,6 +2420,7 @@ function ContractProviderStatusDot({
   ibkrDiscovering,
   onRefreshIbkr,
   onDiscoverIbkr,
+  className = '',
 }) {
   const ibkr = providers?.ibkr || {};
   const kalshi = providers?.kalshi || {};
@@ -2535,6 +2571,7 @@ function ContractProviderStatusDot({
       overallLabel="IBKR contracts"
       sources={sources}
       align="right"
+      className={className}
     />
   );
 }
@@ -3640,13 +3677,14 @@ function fmtCpiLevel(value, digits = 2) {
   return n.toFixed(digits);
 }
 
-function formatCpiLevelPercent(value, digits = 2) {
+function formatCpiLevelPercent(value, digits = 1) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '–';
   return `${n.toFixed(digits)}%`;
 }
 
 function fmtProb(value) {
+  if (value == null || value === '') return '–';
   const n = Number(value);
   if (!Number.isFinite(n)) return '–';
   return `${Math.round(n * 100)}%`;
@@ -3677,6 +3715,84 @@ function getCpiMonthOptions(latest = null) {
 const DEFAULT_CPI_MONTH_OPTIONS = getCpiMonthOptions();
 const CPI_MODEL_NOWCAST_DATE = process.env.REACT_APP_CPI_MODEL_NOWCAST_DATE || null;
 const PM_WORKBENCH_STATE_KEY = 'marketDashboard.predictionMarkets.workbench.v1';
+const DEFAULT_CPI_RISK_PCT = 1;
+
+function parseCpiRiskPct(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const percentage = Number(value);
+  return Number.isFinite(percentage) && percentage > 0 && percentage <= 100
+    ? percentage
+    : null;
+}
+
+function getPersistedCpiRiskPct(state = {}) {
+  return parseCpiRiskPct(state.cpiRiskPct) ?? DEFAULT_CPI_RISK_PCT;
+}
+
+function getCpiAllocationSignature({
+  model,
+  rows = [],
+  history = [],
+  finals = [],
+  positions = [],
+  liveNlv = null,
+  riskPct = null,
+  settings = {},
+  currentOpenRisk = null,
+  providers = null,
+} = {}) {
+  return JSON.stringify({
+    liveNlv,
+    riskPct,
+    model: {
+      forecastMonth: model?.forecastMonth || null,
+      publishedText: model?.publishedText || null,
+      scenarios: (model?.scenarios || []).map((scenario) => ({
+        key: scenario.key,
+        value: scenario.value,
+      })),
+    },
+    rows: rows.map((row) => ({
+      id: row.id,
+      threshold: row.threshold,
+      yesPrice: row.yesPrice,
+      noPrice: row.noPrice,
+      yesBid: row.event?.yes_bid,
+      yesAskSize: row.event?.yes_ask_size,
+      yesBidSize: row.event?.yes_bid_size,
+      noAskSize: row.event?.no_ask_size,
+      retrievedAt: row.event?.quote_retrieved_at || row.event?.updated_at || null,
+      flags: row.event?.data_quality_flags || [],
+    })),
+    history: normalizeCpiNowcastHistory(history).map((entry) => ({
+      id: entry.id,
+      status: entry.status,
+      raw: entry.scenarios?.raw || null,
+    })),
+    finals: normalizeCpiOfficialFinals(finals).map((entry) => ({ id: entry.id, value: entry.value })),
+    positions: positions.map((position) => ({
+      id: position.id,
+      side: position.contractSide,
+      quantity: position.quantity,
+      avgPrice: position.avgPrice,
+      costBasis: position.costBasis,
+      title: position.title,
+    })),
+    limits: {
+      maxRiskPerBet: settings.maxRiskPerBet,
+      maxOpenRisk: settings.maxOpenRisk,
+      maxCorrelatedExposure: settings.maxCorrelatedExposure,
+      maxPmRiskPct: settings.maxPmRiskPct,
+      currentOpenRisk,
+    },
+    providerState: {
+      ibkr: providers?.ibkr?.status || null,
+      ibkrExecutionReady: providers?.ibkr?.execution_ready === true,
+      kalshi: providers?.kalshi?.status || null,
+      kalshiDisplayReady: providers?.kalshi?.display_ready === true,
+    },
+  });
+}
 
 function getCpiMonthFromLabel(value) {
   const match = String(value || '').trim().match(/^([A-Za-z]+)\s+(\d{4})$/);
@@ -3734,19 +3850,243 @@ const CPI_CALENDAR_FINALS = [
   { id: '2026-06', label: 'Jun 26', final: null, settlementLabel: 'Settlement Tuesday, July 14, 2026 · 8:30 AM ET' },
 ];
 
-const CPI_CALENDAR_SCALE = {
-  min: -5,
-  zero: 0,
-  max: 10,
-};
+const CPI_RELEASE_DATES = Object.freeze({
+  '2025-06': '2025-07-15T12:30:00.000Z',
+  '2025-07': '2025-08-12T12:30:00.000Z',
+  '2025-08': '2025-09-11T12:30:00.000Z',
+  '2025-09': '2025-10-24T12:30:00.000Z',
+  '2025-10': '2025-11-13T13:30:00.000Z',
+  '2025-11': '2025-12-18T13:30:00.000Z',
+  '2025-12': '2026-01-13T13:30:00.000Z',
+  '2026-01': '2026-02-13T13:30:00.000Z',
+  '2026-02': '2026-03-11T12:30:00.000Z',
+  '2026-03': '2026-04-10T12:30:00.000Z',
+  '2026-04': '2026-05-12T12:30:00.000Z',
+  '2026-05': '2026-06-10T12:30:00.000Z',
+  '2026-06': '2026-07-14T12:30:00.000Z',
+  '2026-07': '2026-08-12T12:30:00.000Z',
+  '2026-08': '2026-09-11T12:30:00.000Z',
+});
+const CPI_OFFICIAL_RETRY_DELAYS_MS = [2000, 5000, 10000, 60000];
+const CPI_OFFICIAL_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+const CPI_RELEASE_REFRESH_INTERVAL_MS = 30 * 1000;
+const CPI_BENCHMARK_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+const BLS_CPI_SOURCE_URL = 'https://www.bls.gov/news.release/cpi.t01.htm';
+
+function cpiReleaseTimestamp(value) {
+  const text = String(value || '').trim();
+  if (!text) return NaN;
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(text)
+    ? `${text}T12:30:00.000Z`
+    : text;
+  return Date.parse(normalized);
+}
+
+function normalizeCpiOfficialFinals(payload = null) {
+  const finals = Array.isArray(payload) ? payload : payload?.finals;
+  if (!Array.isArray(finals)) return [];
+  return finals.map((entry) => {
+    const id = String(entry?.id || entry?.monthId || '').trim();
+    const rawValue = entry?.value ?? entry?.final;
+    const value = rawValue == null || String(rawValue).trim() === '' ? null : Number(rawValue);
+    return /^20\d{2}-(0[1-9]|1[0-2])$/.test(id) && Number.isFinite(value)
+      ? {
+          id,
+          value,
+          source: entry.source || 'bls_api',
+        }
+      : null;
+  }).filter(Boolean);
+}
+
+function normalizeCpiNowcastHistory(payload = null) {
+  const entries = Array.isArray(payload) ? payload : payload?.entries;
+  if (!Array.isArray(entries)) return [];
+  return entries.map((entry) => {
+    const id = String(entry?.monthId || entry?.id || '').trim();
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(id)) return null;
+    const scenarios = entry?.scenarios;
+    const rounded = {
+      upper: Number(scenarios?.upper?.rounded),
+      base: Number(scenarios?.base?.rounded),
+      lower: Number(scenarios?.lower?.rounded),
+    };
+    const raw = {
+      upper: Number(scenarios?.upper?.raw),
+      base: Number(scenarios?.base?.raw),
+      lower: Number(scenarios?.lower?.raw),
+    };
+    const hasScenarios = [rounded.upper, rounded.base, rounded.lower].every(Number.isFinite)
+      && [raw.upper, raw.base, raw.lower].every(Number.isFinite)
+      && raw.lower < raw.base
+      && raw.base < raw.upper;
+    return {
+      id,
+      releaseAt: entry.releaseAt || null,
+      status: entry.status || 'unavailable',
+      publishedAt: entry.publishedAt || null,
+      source: entry.source || null,
+      scenarios: hasScenarios ? { rounded, raw } : null,
+    };
+  }).filter(Boolean);
+}
+
+function finiteCpiComparisonValue(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function safeCpiSourceUrl(value) {
+  const text = String(value || '').trim();
+  return /^https:\/\//i.test(text) ? text : null;
+}
+
+function normalizeCpiBenchmarkPayload(payload, period) {
+  const exactEnvelope = payload?.period === period
+    && payload?.metric === 'headline-cpi-yoy'
+    && payload?.unit === 'percent';
+  const sources = exactEnvelope && Array.isArray(payload?.sources) ? payload.sources : [];
+  return {
+    period,
+    metric: 'headline-cpi-yoy',
+    unit: 'percent',
+    fetchedAt: exactEnvelope ? payload.fetchedAt || null : null,
+    sources: sources.map((source) => {
+      const status = String(source?.status || '').trim().toLowerCase();
+      const point = finiteCpiComparisonValue(source?.point);
+      const sourceName = String(source?.source || '').trim().toLowerCase();
+      const rejectedSource = /(mock|seed|fallback|stale|offline|cache)/.test(sourceName);
+      const available = status === 'available' && point != null && !rejectedSource;
+      return {
+        id: String(source?.id || '').trim(),
+        kind: String(source?.kind || '').trim(),
+        status: available ? 'available' : 'unavailable',
+        point: available ? point : null,
+        asOf: source?.asOf || null,
+        releaseAt: source?.releaseAt || null,
+        source: source?.source || null,
+        sourceUrl: safeCpiSourceUrl(source?.sourceUrl),
+        reason: available
+          ? null
+          : source?.reason || 'This forecast source is unavailable for the selected month.',
+      };
+    }),
+  };
+}
+
+function buildCpiCalendarEntries({
+  officialFinals = [],
+  nowcastHistory = [],
+  forecastMonth = null,
+  forecastReleaseDate = null,
+  anchorMonth = null,
+  anchorMonths = [],
+} = {}) {
+  const entries = new Map(CPI_CALENDAR_FINALS.map((entry) => [entry.id, {
+    ...entry,
+    releaseDate: entry.releaseDate || CPI_RELEASE_DATES[entry.id] || null,
+  }]));
+  normalizeCpiOfficialFinals(officialFinals).forEach((official) => {
+    const existing = entries.get(official.id) || getCpiMonthFromId(official.id);
+    if (!existing) return;
+    entries.set(official.id, {
+      ...existing,
+      id: official.id,
+      label: existing.label || `${CPI_MONTH_LABELS[existing.month]} ${String(existing.year).slice(-2)}`,
+      final: official.value,
+      finalSource: official.source,
+      releaseDate: existing.releaseDate || CPI_RELEASE_DATES[official.id] || null,
+    });
+  });
+
+  normalizeCpiNowcastHistory(nowcastHistory).forEach((history) => {
+    const existing = entries.get(history.id) || getCpiMonthFromId(history.id);
+    if (!existing) return;
+    const releaseDate = existing.releaseDate || history.releaseAt || CPI_RELEASE_DATES[history.id] || null;
+    entries.set(history.id, {
+      ...existing,
+      id: history.id,
+      label: existing.label || `${CPI_MONTH_LABELS[existing.month]} ${String(existing.year).slice(-2)}`,
+      releaseDate,
+      settlementLabel: existing.settlementLabel || (releaseDate
+        ? `Settlement ${formatDateShort(releaseDate)} · 8:30 AM ET`
+        : 'Settlement date unavailable'),
+      nowcastHistory: history,
+    });
+  });
+
+  if (forecastMonth?.id && !entries.has(forecastMonth.id)) {
+    entries.set(forecastMonth.id, {
+      id: forecastMonth.id,
+      label: forecastMonth.label,
+      final: null,
+      releaseDate: forecastReleaseDate || CPI_RELEASE_DATES[forecastMonth.id] || null,
+      settlementLabel: forecastReleaseDate
+        ? `Settlement ${formatDateShort(forecastReleaseDate)} · 8:30 AM ET`
+        : 'Settlement date unavailable',
+    });
+  } else if (forecastMonth?.id && forecastReleaseDate) {
+    const existing = entries.get(forecastMonth.id);
+    entries.set(forecastMonth.id, {
+      ...existing,
+      releaseDate: existing?.releaseDate || forecastReleaseDate,
+      settlementLabel: existing?.settlementLabel || `Settlement ${formatDateShort(forecastReleaseDate)} · 8:30 AM ET`,
+    });
+  }
+
+  const latestFinalId = [...entries.values()]
+    .filter((entry) => entry.final != null && Number.isFinite(Number(entry.final)))
+    .map((entry) => entry.id)
+    .sort()
+    .at(-1);
+  const latestFinalMonth = getCpiMonthFromId(latestFinalId);
+  const anchor = [anchorMonth, ...anchorMonths, forecastMonth, latestFinalMonth]
+    .filter(Boolean)
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .at(-1) || getCpiMonthFromId(CPI_CALENDAR_FINALS.at(-1)?.id);
+
+  return getCpiMonthOptions(anchor).map((month) => {
+    const existing = entries.get(month.id);
+    return existing || {
+      id: month.id,
+      label: month.label,
+      final: null,
+      releaseDate: CPI_RELEASE_DATES[month.id] || null,
+      settlementLabel: 'Settlement date unavailable',
+    };
+  });
+}
+
+export function isCpiMonthExpired(entry = null, now = new Date()) {
+  if (!entry) return false;
+  if (entry.final != null && Number.isFinite(Number(entry.final))) return true;
+  const releaseDate = entry.releaseDate;
+  if (!releaseDate) return false;
+  const releaseDeadline = cpiReleaseTimestamp(releaseDate);
+  const nowValue = now instanceof Date ? now.getTime() : Number(now);
+  return Number.isFinite(releaseDeadline) && Number.isFinite(nowValue) && releaseDeadline < nowValue;
+}
+
+function hasPendingCpiOfficialFinal(finals = [], now = Date.now()) {
+  const finalIds = new Set(normalizeCpiOfficialFinals(finals).map((entry) => entry.id));
+  return Object.entries(CPI_RELEASE_DATES).some(([id, releaseDate]) => {
+    const releaseDeadline = cpiReleaseTimestamp(releaseDate);
+    return Number.isFinite(releaseDeadline) && releaseDeadline < now && !finalIds.has(id);
+  });
+}
+
 const CPI_MISSING_DATA_TITLE = 'Missing Data';
 const CPI_MISSING_DATA_MESSAGE = 'Live data is unavailable for this section.';
 
-function CpiMissingDataBox() {
+function CpiMissingDataBox({
+  title = CPI_MISSING_DATA_TITLE,
+  message = CPI_MISSING_DATA_MESSAGE,
+} = {}) {
   return (
     <div className="cpi-missing-data-box" role="status" aria-live="polite">
-      <strong>{CPI_MISSING_DATA_TITLE}</strong>
-      <span>{CPI_MISSING_DATA_MESSAGE}</span>
+      <strong>{title}</strong>
+      <span>{message}</span>
     </div>
   );
 }
@@ -3778,6 +4118,151 @@ function hasOrderedCpiScenarioValues(lower, base, upper) {
     low < mid &&
     mid < high
   );
+}
+
+function formatCpiComparisonPoint(value) {
+  const numeric = finiteCpiComparisonValue(value);
+  return numeric == null ? '—' : `${numeric.toFixed(2)}%`;
+}
+
+function formatCpiComparisonRange(lower, upper) {
+  const low = finiteCpiComparisonValue(lower);
+  const high = finiteCpiComparisonValue(upper);
+  return low == null || high == null ? '—' : `${low.toFixed(2)}%–${high.toFixed(2)}%`;
+}
+
+function formatCpiComparisonDelta(value) {
+  const numeric = finiteCpiComparisonValue(value);
+  if (numeric == null) return '—';
+  const sign = numeric > 0 ? '+' : '';
+  return `${sign}${numeric.toFixed(2)} pp`;
+}
+
+function formatCpiComparisonAsOf(value, fallback = '—') {
+  if (!value) return fallback;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+    const releaseDate = new Date(`${value}T12:00:00.000Z`);
+    if (Number.isNaN(releaseDate.getTime())) return fallback;
+    const dateLabel = releaseDate.toLocaleDateString('en-US', {
+      timeZone: 'UTC',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    return `${dateLabel}, 8:30 AM ET`;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
+function buildCpiForecastComparisonRows({
+  entry,
+  benchmarkPayload,
+  benchmarksLoading = false,
+  benchmarksError = null,
+} = {}) {
+  const history = entry?.nowcastHistory || null;
+  const rawScenarios = history?.scenarios?.raw || null;
+  const lower = finiteCpiComparisonValue(rawScenarios?.lower);
+  const base = finiteCpiComparisonValue(rawScenarios?.base);
+  const upper = finiteCpiComparisonValue(rawScenarios?.upper);
+  const hedgeyeAvailable = hasOrderedCpiScenarioValues(lower, base, upper);
+  const sourceById = new Map((benchmarkPayload?.sources || []).map((source) => [source.id, source]));
+  const streetSource = sourceById.get('wall-street-consensus') || null;
+  const clevelandSource = sourceById.get('cleveland-fed') || null;
+  const benchmarkUnavailableReason = benchmarksError || 'Verified benchmark data is unavailable for the selected month.';
+  const benchmarkRow = ({ id, label, detail, source }) => {
+    if (benchmarksLoading) {
+      return {
+        id,
+        label,
+        detail: 'Loading verified source…',
+        status: 'loading',
+        point: null,
+        sourceUrl: null,
+        asOf: null,
+      };
+    }
+    const available = source?.status === 'available' && finiteCpiComparisonValue(source?.point) != null;
+    return {
+      id,
+      label,
+      detail: available ? detail : source?.reason || benchmarkUnavailableReason,
+      status: available ? 'available' : 'unavailable',
+      point: available ? finiteCpiComparisonValue(source.point) : null,
+      sourceUrl: source?.sourceUrl || null,
+      asOf: source?.asOf || null,
+      releaseAt: source?.releaseAt || null,
+    };
+  };
+
+  const street = benchmarkRow({
+    id: 'wall-street-consensus',
+    label: 'Wall Street consensus',
+    detail: 'Trading Economics survey consensus',
+    source: streetSource,
+  });
+  const cleveland = benchmarkRow({
+    id: 'cleveland-fed',
+    label: 'Cleveland Fed',
+    detail: 'Independent model nowcast',
+    source: clevelandSource,
+  });
+  const releaseAt = street.releaseAt || cleveland.releaseAt || entry?.releaseDate || null;
+  const finalValue = finiteCpiComparisonValue(entry?.final);
+  const finalAvailable = finalValue != null;
+  const expired = isCpiMonthExpired(entry, Date.now());
+  const rows = [
+    {
+      id: 'hedgeye',
+      label: 'Hedgeye · our view',
+      detail: hedgeyeAvailable
+        ? history?.status === 'provisional' ? 'Provisional forecast' : 'Final pre-release forecast'
+        : 'No source-matched Hedgeye forecast is available for this month.',
+      status: hedgeyeAvailable ? 'available' : 'unavailable',
+      point: hedgeyeAvailable ? base : null,
+      rangeLow: hedgeyeAvailable ? lower : null,
+      rangeHigh: hedgeyeAvailable ? upper : null,
+      asOf: history?.publishedAt || null,
+      asOfFallback: hedgeyeAvailable && history?.status === 'final-pre-release'
+        ? 'Final pre-release'
+        : '—',
+      sourceUrl: null,
+    },
+    street,
+    cleveland,
+    {
+      id: 'bls-actual',
+      label: 'BLS actual',
+      detail: finalAvailable
+        ? 'Official Headline CPI YoY result'
+        : expired ? 'Official BLS result is unavailable.' : 'Pending official release',
+      status: finalAvailable ? 'available' : expired ? 'unavailable' : 'pending',
+      point: finalAvailable ? finalValue : null,
+      asOf: finalAvailable ? releaseAt : null,
+      sourceUrl: BLS_CPI_SOURCE_URL,
+    },
+  ];
+  const consensusPoint = street.status === 'available' ? street.point : null;
+  return rows.map((row) => ({
+    ...row,
+    delta: row.id !== 'wall-street-consensus'
+      && row.status === 'available'
+      && consensusPoint != null
+      ? Number((row.point - consensusPoint).toFixed(6))
+      : null,
+    deltaLabel: row.id === 'wall-street-consensus' && row.status === 'available'
+      ? 'Benchmark'
+      : null,
+  }));
 }
 
 export function getCpiAccountValue(portfolioData = null, now = new Date()) {
@@ -4020,12 +4505,14 @@ function getCpiLineScenarioOutcomes(threshold, side, scenarios = []) {
 }
 
 function formatCpiCents(value) {
+  if (value == null || value === '') return '–';
   const n = Number(value);
   if (!Number.isFinite(n)) return '–';
   return `${Math.round(n * 100)}c`;
 }
 
 function formatCpiEdgeCents(value) {
+  if (value == null || value === '') return '–';
   const n = Number(value);
   if (!Number.isFinite(n)) return '–';
   const cents = Math.round(n * 100);
@@ -4069,25 +4556,91 @@ function getCpiPositionLine(position, scenarios = []) {
   };
 }
 
-function getCpiExecutableLineCandidates(rows = [], model = null, settings = {}) {
+function getCpiDirectVolume(row = {}) {
+  const raw = row?.event?.volume;
+  if (raw == null || raw === '') return null;
+  const volume = Number(raw);
+  return Number.isFinite(volume) && volume > 0 ? volume : null;
+}
+
+function getCpiDirectDisplayAsk(row = {}, side = 'YES') {
+  const raw = side === 'NO' ? row?.event?.no_ask : row?.event?.yes_ask;
+  if (raw == null || raw === '') return null;
+  const ask = Number(raw);
+  return Number.isFinite(ask) && ask >= 0 && ask <= 1 ? ask : null;
+}
+
+function hasCompleteCpiDisplayBook(row = {}) {
+  const event = row.event || {};
+  const validPair = (bidValue, askValue) => {
+    if (bidValue == null || bidValue === '' || askValue == null || askValue === '') return false;
+    const bid = Number(bidValue);
+    const ask = Number(askValue);
+    return Number.isFinite(bid) && Number.isFinite(ask)
+      && bid >= 0 && ask <= 1 && ask >= bid;
+  };
+  return validPair(event.yes_bid, event.yes_ask) && validPair(event.no_bid, event.no_ask);
+}
+
+function getCpiDisplayProviderPriority(row = {}) {
+  const source = String(row?.event?.source_api || '').toUpperCase();
+  if (source === 'IBKR_TWS_API' || source === 'IBKR_CPAPI') return 2;
+  if (source === 'KALSHI_TRADE_API_V2') return 1;
+  return 0;
+}
+
+function shouldPreferCpiDisplayRow(candidate, current) {
+  if (!current) return true;
+  const completeDelta = Number(hasCompleteCpiDisplayBook(candidate)) - Number(hasCompleteCpiDisplayBook(current));
+  if (completeDelta !== 0) return completeDelta > 0;
+  return getCpiDisplayProviderPriority(candidate) > getCpiDisplayProviderPriority(current);
+}
+
+function selectCpiPositiveVolumeRows(rows = []) {
+  const byStrike = new Map();
+  rows.forEach((row) => {
+    if (row?.missingContract || getCpiDirectVolume(row) == null || !Number.isFinite(Number(row.threshold))) return;
+    const strike = Number(row.threshold).toFixed(1);
+    const current = byStrike.get(strike);
+    if (shouldPreferCpiDisplayRow(row, current)) byStrike.set(strike, row);
+  });
+  return [...byStrike.values()]
+    .sort((a, b) => Number(a.threshold) - Number(b.threshold));
+}
+
+function getCpiLineFee(row, ask) {
+  if (ask == null) return null;
+  const venue = String(row?.event?.venue || row?.venue || '').toLowerCase();
+  if (venue === 'kalshi') return calculateKalshiTakerFee(1, ask);
+  const rawFee = row?.event?.fee_per_contract;
+  if (rawFee == null || rawFee === '') return null;
+  const fee = Number(rawFee);
+  return Number.isFinite(fee) && fee >= 0 ? fee : null;
+}
+
+function getCpiScenarioMatrixRows(rows = [], model = null, probabilityCurve = null) {
   const scenarios = getCpiScenarioSpecs(model);
-  const riskBudget = Number(settings?.maxRiskPerBet || 500);
-  return rows
-    .filter((row) => !row.missingContract)
-    .flatMap((row) => ['YES', 'NO'].map((side) => {
-      const ask = getCpiLineAsk(row, side);
-      if (ask == null) return null;
+  const curveByStrike = new Map((probabilityCurve?.probabilities || []).map((entry) => [
+    Number(entry.threshold).toFixed(4),
+    entry,
+  ]));
+  return selectCpiPositiveVolumeRows(rows)
+    .map((row) => {
+      const side = 'YES';
       const threshold = Number(row.threshold);
-      const wins = getCpiScenarioWinCount(threshold, side, scenarios);
-      const fairValue = scenarios.length ? wins / scenarios.length : null;
-      const edge = fairValue != null ? fairValue - ask : null;
+      const volume = getCpiDirectVolume(row);
+      const ask = getCpiDirectDisplayAsk(row, side);
+      const executableAsk = getCpiLineAsk(row, side);
+      const curveEntry = curveByStrike.get(threshold.toFixed(4));
+      const fairValue = curveEntry?.fairProbability ?? null;
       const payoutMultiplier = Number(row.payoutMultiplier || 1);
-      const contracts = ask > 0 && riskBudget > 0
-        ? Math.floor(riskBudget / (ask * payoutMultiplier))
-        : 0;
+      const fee = getCpiLineFee(row, executableAsk);
+      const edge = fairValue != null && executableAsk != null && fee != null && payoutMultiplier > 0
+        ? fairValue - executableAsk - (fee / payoutMultiplier)
+        : null;
       return {
         id: `${row.id}-${side}`,
-        source: 'live_quote',
+        source: 'live_provider',
         row,
         title: getCpiLineTitle(threshold, side),
         threshold,
@@ -4096,77 +4649,20 @@ function getCpiExecutableLineCandidates(rows = [], model = null, settings = {}) 
         askLabel: 'Ask',
         fairValue,
         edge,
+        volume,
         outcomes: getCpiLineScenarioOutcomes(threshold, side, scenarios),
-        wins,
+        wins: getCpiScenarioWinCount(threshold, side, scenarios),
         scenarioCount: scenarios.length,
-        executable: true,
+        executable: executableAsk != null,
         payoutMultiplier,
-        riskBudget,
-        contracts,
-        evForBudget: edge == null ? null : contracts * edge * payoutMultiplier,
       };
-    }))
-    .filter(Boolean);
-}
-
-function getCpiScenarioMatrixRows(rows = [], model = null, openPositions = []) {
-  const scenarios = getCpiScenarioSpecs(model);
-  const executableLines = getCpiExecutableLineCandidates(rows, model);
-  const byKey = new Map();
-  const addLine = (line) => {
-    if (!line || !Number.isFinite(Number(line.threshold))) return;
-    const key = `${Number(line.threshold).toFixed(1)}-${line.side}-${line.source}`;
-    if (!byKey.has(key)) byKey.set(key, line);
-  };
-
-  if (scenarios.length === 0) {
-    executableLines.slice(0, 8).forEach(addLine);
-    openPositions.map((position) => getCpiPositionLine(position, scenarios)).forEach(addLine);
-    return [...byKey.values()].sort((a, b) => {
-      if (Number(a.threshold) !== Number(b.threshold)) return Number(a.threshold) - Number(b.threshold);
-      if (a.side !== b.side) return a.side === 'YES' ? -1 : 1;
-      return String(a.id).localeCompare(String(b.id));
     });
-  }
-
-  const roundedTargets = [...new Set(scenarios.map((scenario) => Number(scenario.roundedValue).toFixed(1)))];
-  roundedTargets.forEach((target) => {
-    const yesLine = executableLines.find((line) => line.side === 'YES' && Number(line.threshold).toFixed(1) === target);
-    if (yesLine) addLine(yesLine);
-  });
-
-  [...executableLines]
-    .filter((line) => Number.isFinite(Number(line.edge)))
-    .sort((a, b) => b.edge - a.edge)
-    .slice(0, 2)
-    .forEach(addLine);
-
-  openPositions.map((position) => getCpiPositionLine(position, scenarios)).forEach(addLine);
-
-  return [...byKey.values()].sort((a, b) => {
-    if (a.source !== b.source) {
-      if (a.source === 'live_quote' && b.source !== 'live_quote') return -1;
-      if (a.source !== 'live_quote' && b.source === 'live_quote') return 1;
-    }
-    if (Number(a.threshold) !== Number(b.threshold)) return Number(a.threshold) - Number(b.threshold);
-    if (a.side !== b.side) return a.side === 'YES' ? -1 : 1;
-    return String(a.id).localeCompare(String(b.id));
-  });
 }
 
 function getCpiLineBadgeTone(line, index = 0) {
   if (line?.side === 'YES') return 'green';
   if (line?.side === 'NO') return 'blue';
   return Number(line?.edge) > 0 || index === 0 ? 'slate' : 'gray';
-}
-
-function getCpiLineEdgeLabel(line, index = 0) {
-  const edge = Number(line?.edge);
-  if (!Number.isFinite(edge)) return '–';
-  if (line?.source === 'open_position') return 'Hedge / Open';
-  if (edge < 0) return 'Avoid';
-  if (index === 0) return 'Best';
-  return 'Small';
 }
 
 function getCpiPositionScenarioPayoff(position = {}, line = {}, scenario = {}) {
@@ -4502,189 +4998,218 @@ function CpiPayoffMap({ metrics, scenarios, legMarkers, strikeExposureRows }) {
   );
 }
 
+function getCpiCalendarEntryDisplay(entry) {
+  const finalValue = finiteCpiComparisonValue(entry?.final);
+  const rawScenarios = entry?.nowcastHistory?.scenarios?.raw || null;
+  const estimateBase = finiteCpiComparisonValue(rawScenarios?.base);
+  const released = isCpiMonthExpired(entry, Date.now());
+  const hasEstimate = !released && hasOrderedCpiScenarioValues(
+    rawScenarios?.lower,
+    rawScenarios?.base,
+    rawScenarios?.upper,
+  );
+  const hasFinal = finalValue != null;
+  const displayValue = hasFinal ? finalValue : hasEstimate ? estimateBase : null;
+  const valueKind = hasFinal ? 'actual' : hasEstimate ? 'estimate' : 'unavailable';
+  const provenanceTitle = hasFinal
+    ? 'Official BLS Headline CPI YoY actual'
+    : hasEstimate
+      ? `${entry?.nowcastHistory?.status === 'provisional' ? 'Provisional' : 'Final pre-release'} Hedgeye estimate`
+      : 'CPI value unavailable';
+  return { displayValue, valueKind, provenanceTitle };
+}
+
+function formatCpiToplineSettlement(entry) {
+  const rawDate = entry?.releaseDate;
+  if (!rawDate) return 'Settlement unavailable';
+  const date = new Date(
+    /^\d{4}-\d{2}-\d{2}$/.test(String(rawDate))
+      ? `${rawDate}T12:00:00.000Z`
+      : rawDate,
+  );
+  if (Number.isNaN(date.getTime())) return 'Settlement unavailable';
+  const dateLabel = date.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short',
+    day: 'numeric',
+  });
+  return `Settles ${dateLabel} · 8:30 AM ET`;
+}
+
+function formatCpiLiveQuoteTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function CpiCalculatorHeader({
+  activeMonth,
+  calendarEntries = [],
+  liveQuoteObservedAt = null,
+  loading = false,
+  expiredMonth = false,
+}) {
+  const activeEntry = calendarEntries.find((entry) => entry.id === activeMonth?.id) || null;
+  const monthTitle = activeMonth
+    ? `${CPI_MONTH_LABELS[activeMonth.month].toUpperCase()} ${activeMonth.year}`
+    : 'UNAVAILABLE';
+  const quoteTime = formatCpiLiveQuoteTime(liveQuoteObservedAt);
+  const liveLabel = expiredMonth
+    ? 'Historical view'
+    : quoteTime
+      ? `Live ${quoteTime} ET`
+      : loading
+        ? 'Loading live quotes…'
+        : 'Live data unavailable';
+  const liveTone = expiredMonth ? 'historical' : quoteTime ? 'live' : loading ? 'loading' : 'unavailable';
+
+  return (
+    <header className="cpi-ledger-topline cpi-calendar-header">
+      <h1>CPI <span aria-hidden="true">·</span> {monthTitle}</h1>
+      <span className="cpi-ledger-settlement">{formatCpiToplineSettlement(activeEntry)}</span>
+      <span className={`cpi-ledger-live-status ${liveTone}`} role="status">{liveLabel}</span>
+    </header>
+  );
+}
+
+function CpiForecastRail({
   model,
-  sourceModel,
   activeMonth,
   months,
+  calendarEntries = [],
   onMonthSelect,
+  benchmarkPayload = null,
+  benchmarksLoading = false,
+  benchmarksError = null,
 }) {
-  const lower = getScenarioValue(model, 'downside');
-  const base = getScenarioValue(model, 'base');
-  const upper = getScenarioValue(model, 'upside');
-  const baseScenario = model?.scenarios?.find((item) => /base/i.test(String(item?.key || item?.label || item?.name || '')));
-  const baseFallback = baseScenario?.value ?? baseScenario?.percent ?? baseScenario?.raw ?? null;
-  const resolvedBase = Number.isFinite(Number(base)) ? Number(base) : Number(baseFallback);
-  const hasScenarioValues = hasOrderedCpiScenarioValues(lower, resolvedBase, upper);
-  const activeLabel = activeMonth?.fullLabel || 'Current CPI release unavailable';
-  const levelRange = CPI_CALENDAR_SCALE.max - CPI_CALENDAR_SCALE.min;
-  const getCalendarLevelPct = (value) => {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return null;
-    return Math.max(0, Math.min(100, ((n - CPI_CALENDAR_SCALE.min) / levelRange) * 100));
-  };
-  const zeroPct = getCalendarLevelPct(CPI_CALENDAR_SCALE.zero);
-  const getBarGeometry = (value) => {
-    const valuePct = getCalendarLevelPct(value);
-    if (valuePct == null || zeroPct == null) return null;
-    return {
-      valuePct,
-      bottomPct: Math.min(valuePct, zeroPct),
-      heightPct: Math.max(1, Math.abs(valuePct - zeroPct)),
-      polarity: Number(value) < CPI_CALENDAR_SCALE.zero ? 'negative' : 'positive',
-    };
-  };
   const monthLookup = useMemo(
     () => new Map((months || []).map((month) => [month.id, month])),
     [months],
   );
-  const forecastMonth = getCpiMonthFromLabel(sourceModel?.forecastMonth);
-  const calendarEntries = useMemo(() => {
-    if (!forecastMonth || CPI_CALENDAR_FINALS.some((entry) => entry.id === forecastMonth.id)) {
-      return CPI_CALENDAR_FINALS;
-    }
-    return [
-      ...CPI_CALENDAR_FINALS,
-      {
-        id: forecastMonth.id,
-        label: forecastMonth.label,
-        final: null,
-        settlementLabel: sourceModel?.releaseDate
-          ? `Settlement ${formatDateShort(sourceModel.releaseDate)} · 8:30 AM ET`
-          : 'Settlement date unavailable',
-      },
-    ].slice(-13);
-  }, [forecastMonth, sourceModel?.releaseDate]);
-  const activeCalendarEntry = calendarEntries.find((entry) => entry.id === activeMonth?.id);
-  const settlementLabel = activeCalendarEntry?.settlementLabel || 'Settlement date unavailable';
+  const activeEntry = calendarEntries.find((entry) => entry.id === activeMonth?.id) || null;
+  const comparisonRows = buildCpiForecastComparisonRows({
+    entry: activeEntry,
+    benchmarkPayload,
+    benchmarksLoading,
+    benchmarksError,
+  });
+  const comparisonById = new Map(comparisonRows.map((row) => [row.id, row]));
+  const hedgeye = comparisonById.get('hedgeye') || {};
+  const street = comparisonById.get('wall-street-consensus') || {};
+  const cleveland = comparisonById.get('cleveland-fed') || {};
+  const rawScenarios = activeEntry?.nowcastHistory?.scenarios?.raw || null;
+  const historicalScenarios = hasOrderedCpiScenarioValues(
+    rawScenarios?.lower,
+    rawScenarios?.base,
+    rawScenarios?.upper,
+  ) ? [
+      { key: 'downside', label: 'Downside', tone: 'negative', value: rawScenarios.lower },
+      { key: 'base', label: 'Base', tone: 'neutral', value: rawScenarios.base },
+      { key: 'upside', label: 'Upside', tone: 'positive', value: rawScenarios.upper },
+    ].map((scenario) => ({
+      ...scenario,
+      roundedValue: roundCpiSettlementLevel(scenario.value),
+    })) : [];
+  const scenarios = historicalScenarios.length
+    ? historicalScenarios
+    : model
+      ? getCpiScenarioSpecs(model)
+      : [];
+  const forecastAsOf = hedgeye.status === 'available'
+    ? formatCpiComparisonAsOf(hedgeye.asOf, hedgeye.asOfFallback)
+    : 'Forecast timestamp unavailable';
+  const renderSourceLabel = (row, fallbackLabel) => row?.sourceUrl ? (
+    <a href={row.sourceUrl} target="_blank" rel="noreferrer">{fallbackLabel}</a>
+  ) : fallbackLabel;
+  const renderSourceValue = (row) => row?.status === 'loading'
+    ? 'Loading…'
+    : formatCpiComparisonPoint(row?.point);
 
   return (
-    <header className="cpi-calculator-header cpi-calendar-header">
-      <div className="cpi-calendar-title-row">
-        <div className="cpi-calendar-title-block">
-          <span className="cpi-calendar-title-accent" aria-hidden="true" />
-          <div>
-            <h1>CPI Model</h1>
-          </div>
-        </div>
-        <div className="cpi-calendar-meta">
-          <strong>Active: {activeLabel}</strong>
-          <span className="cpi-calendar-settlement">{settlementLabel}</span>
-        </div>
-      </div>
+    <aside className="cpi-ledger-panel cpi-forecast-rail" aria-labelledby="cpi-forecast-rail-title">
+      <div className="cpi-ledger-panel-scroll">
+        <section className="cpi-forecast-summary">
+          <h2 id="cpi-forecast-rail-title">Forecast</h2>
+          <dl>
+            <div title={hedgeye.detail}>
+              <dt>Hedgeye</dt>
+              <dd>{renderSourceValue(hedgeye)}</dd>
+            </div>
+            <div title={hedgeye.detail}>
+              <dt>Range</dt>
+              <dd>{formatCpiComparisonRange(hedgeye.rangeLow, hedgeye.rangeHigh)}</dd>
+            </div>
+            <div title={cleveland.detail}>
+              <dt>{renderSourceLabel(cleveland, 'Cleveland Fed')}</dt>
+              <dd>{renderSourceValue(cleveland)}</dd>
+            </div>
+            <div title={street.detail}>
+              <dt>{renderSourceLabel(street, 'Street')}</dt>
+              <dd>{renderSourceValue(street)}</dd>
+            </div>
+          </dl>
+        </section>
 
-      <div className="cpi-calendar-grid" aria-label="CPI YoY calendar with prior-year bookend">
-        {calendarEntries.map((entry, index) => {
-          const isActive = entry.id === activeMonth?.id;
-          const previousFinal = index > 0 ? calendarEntries[index - 1]?.final : null;
-          const hasFinal = entry.final != null && Number.isFinite(Number(entry.final));
-          const finalValue = hasFinal ? Number(entry.final) : null;
-          const displayFinal = hasFinal ? finalValue : Number.isFinite(Number(entry.displayFinal)) ? Number(entry.displayFinal) : null;
-          const direction = !hasFinal || previousFinal == null
-            ? 'neutral'
-            : finalValue >= previousFinal
-              ? 'up'
-              : 'down';
-          const finalBar = hasFinal ? getBarGeometry(finalValue) : null;
-          const lowerBar = getBarGeometry(lower);
-          const baseBar = getBarGeometry(resolvedBase);
-          const upperBar = getBarGeometry(upper);
-          const isNowcastEntry = entry.id === forecastMonth?.id;
-          const showScenarioValues = isNowcastEntry && hasScenarioValues;
-          const nowcastHeadline = isNowcastEntry && Number.isFinite(resolvedBase)
-            ? formatCpiLevelPercent(resolvedBase)
-            : null;
-          const hasScenarioChart = !hasFinal && showScenarioValues && [lowerBar, baseBar, upperBar].every(Boolean);
-          const cardClasses = [
-            'cpi-calendar-card',
-            isActive ? 'active' : '',
-            direction,
-            entry.context ? 'context' : '',
-            isNowcastEntry ? 'nowcast' : '',
-          ].filter(Boolean).join(' ');
-          const month = monthLookup.get(entry.id);
-          return (
-            <button
-              key={entry.id}
-              type="button"
-              className={cardClasses}
-              aria-pressed={isActive}
-              onClick={() => month && onMonthSelect(month)}
-            >
-              <span className="cpi-calendar-month">{entry.label}</span>
-              <span className="cpi-calendar-divider" />
-              <strong className="cpi-calendar-final">
-                {nowcastHeadline != null
-                  ? nowcastHeadline
-                  : isNowcastEntry
-                    ? '–'
-                    : displayFinal != null
-                      ? formatCpiLevelPercent(displayFinal)
-                      : '–'}
-              </strong>
-              <span className="cpi-calendar-mini-chart" aria-hidden="true">
-                <span className="cpi-calendar-axis-label top">+10%</span>
-                <span className="cpi-calendar-axis-label zero">0%</span>
-                <span className="cpi-calendar-axis-label bottom">-5%</span>
-                <i className="cpi-calendar-zero-line" />
-                {hasFinal ? (
-                  finalBar && (
-                    <>
-                      <i
-                        className={`cpi-calendar-bar ${finalBar.polarity}`}
-                        style={{
-                          bottom: `${finalBar.bottomPct}%`,
-                          height: `${finalBar.heightPct}%`,
-                        }}
-                      />
-                      <i className="cpi-calendar-bar-line" style={{ bottom: `${finalBar.valuePct}%` }} />
-                    </>
-                  )
-                ) : hasScenarioChart ? (
-                  <>
-                    <i
-                      className="cpi-calendar-scenario-lower-line"
-                      style={{ bottom: `${lowerBar.valuePct}%` }}
-                    />
-                    <i
-                      className="cpi-calendar-scenario-base-line"
-                      style={{ bottom: `${baseBar.valuePct}%` }}
-                    />
-                    <i
-                      className="cpi-calendar-scenario-upper-line"
-                      style={{ bottom: `${upperBar.valuePct}%` }}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <i className="cpi-calendar-estimate-track" />
-                    <i className="cpi-calendar-estimate-dot lower" />
-                    <i className="cpi-calendar-estimate-dot base" />
-                    <i className="cpi-calendar-estimate-dot upper" />
-                  </>
-                )}
-              </span>
-              <span className="cpi-estimate-labels">
-                <span className="upper">
-                  <span className="cpi-estimate-value">{showScenarioValues ? fmtCpiLevel(upper) : 'X.XX'}</span>{' '}
-                  <span className="cpi-estimate-name">upper</span>
-                </span>
-                {!isNowcastEntry && (
-                  <span className="base">
-                    <span className="cpi-estimate-value">{showScenarioValues ? fmtCpiLevel(resolvedBase) : 'X.XX'}</span>{' '}
-                    <span className="cpi-estimate-name">base</span>
-                  </span>
-                )}
-                <span className="lower">
-                  <span className="cpi-estimate-value">{showScenarioValues ? fmtCpiLevel(lower) : 'X.XX'}</span>{' '}
-                  <span className="cpi-estimate-name">lower</span>
-                </span>
-              </span>
-            </button>
-          );
-        })}
+        <section className="cpi-forecast-scenarios" aria-labelledby="cpi-scenario-levels-title">
+          <h3 id="cpi-scenario-levels-title">Scenario levels</h3>
+          {scenarios.length ? (
+            <dl>
+              {scenarios.map((scenario) => (
+                <div className={scenario.tone} key={scenario.key}>
+                  <dt>{scenario.label}</dt>
+                  <dd>{fmtCpiLevel(scenario.value, 2)} → {fmtCpiLevel(scenario.roundedValue, 1)}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <CpiMissingDataBox
+              title="Scenario levels unavailable"
+              message="A source-matched Hedgeye CPI forecast is required."
+            />
+          )}
+        </section>
+
+        <section className="cpi-month-history" aria-labelledby="cpi-month-history-title">
+          <div className="cpi-month-history-heading">
+            <h3 id="cpi-month-history-title">Month history</h3>
+            <span>YoY</span>
+          </div>
+          <div className="cpi-month-history-list">
+            {calendarEntries.map((entry) => {
+              const month = monthLookup.get(entry.id);
+              const isActive = entry.id === activeMonth?.id;
+              const { displayValue, valueKind, provenanceTitle } = getCpiCalendarEntryDisplay(entry);
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className={isActive ? 'active' : ''}
+                  aria-pressed={isActive}
+                  aria-label={`${entry.label}; ${displayValue == null ? 'value unavailable' : `${formatCpiLevelPercent(displayValue, 1)} ${valueKind}`}; ${provenanceTitle}`}
+                  title={provenanceTitle}
+                  onClick={() => month && onMonthSelect(month)}
+                  disabled={!month}
+                >
+                  <span>{entry.label}</span>
+                  <strong>{displayValue == null ? '—' : formatCpiLevelPercent(displayValue, 1)}</strong>
+                  <small>{valueKind === 'estimate' ? 'est' : valueKind === 'actual' ? 'actual' : ''}</small>
+                </button>
+              );
+            })}
+          </div>
+        </section>
       </div>
-    </header>
+      <footer className="cpi-forecast-footnote">
+        <span>All values are % change YoY</span>
+        <span>Forecast as of {forecastAsOf}</span>
+      </footer>
+    </aside>
   );
 }
 
@@ -4696,6 +5221,8 @@ function CpiNoLiveContractState({
   ibkrDiscovering,
   onRefreshIbkr,
   onDiscoverIbkr,
+  title = CPI_MISSING_DATA_TITLE,
+  message = CPI_MISSING_DATA_MESSAGE,
 }) {
   const showLoading = loading && providers == null && rows.length === 0;
 
@@ -4711,7 +5238,7 @@ function CpiNoLiveContractState({
 
   return (
     <div className="cpi-state cpi-state-compact cpi-missing-data-panel">
-      <CpiMissingDataBox />
+      <CpiMissingDataBox title={title} message={message} />
       <div className="cpi-state-actions">
         <RefreshButton
           label="Discover IBKR Contracts"
@@ -4726,6 +5253,15 @@ function CpiNoLiveContractState({
           disabled={ibkrLoading || ibkrDiscovering}
         />
       </div>
+    </div>
+  );
+}
+
+function CpiExpiredTableState({ section, monthLabel }) {
+  return (
+    <div className="cpi-expired-table-state" role="status">
+      <strong>{monthLabel || 'This CPI month'} has passed</strong>
+      <span>No live {section.toLowerCase()} data is shown after the CPI release.</span>
     </div>
   );
 }
@@ -4746,6 +5282,7 @@ function CpiLineBadgeLegend() {
 
 function CpiScenarioMatrixCard({
   rows,
+  displayRows = [],
   matrixRows,
   loading,
   model,
@@ -4754,8 +5291,10 @@ function CpiScenarioMatrixCard({
   ibkrDiscovering,
   onRefreshIbkr,
   onDiscoverIbkr,
+  expiredMonth = false,
+  monthLabel = null,
 }) {
-  const scenarios = getCpiScenarioSpecs(model);
+  const scenarios = model ? getCpiScenarioSpecs(model) : [];
   const contractWarnings = useMemo(() => (
     rows.flatMap((row) => (
       (row.warnings || []).map((warning) => `${row.title}: ${warning}`)
@@ -4768,7 +5307,7 @@ function CpiScenarioMatrixCard({
 
   return (
     <Pmv2CardChrome
-      className="cpi-matrix-card"
+      className={`cpi-matrix-card${expiredMonth ? ' cpi-expired-month' : ''}`}
       icon={(
         <img
           className="cpi-contracts-card-icon"
@@ -4782,7 +5321,7 @@ function CpiScenarioMatrixCard({
         </span>
       )}
       titleId="cpi-scenario-matrix-title"
-      actions={(
+      actions={!expiredMonth && (
         <div className="cpi-header-actions">
           <ContractProviderStatusDot
             providers={providers}
@@ -4797,7 +5336,9 @@ function CpiScenarioMatrixCard({
         </div>
       )}
     >
-      {rows.length === 0 ? (
+      {expiredMonth ? (
+        <CpiExpiredTableState section="contracts" monthLabel={monthLabel} />
+      ) : matrixRows.length === 0 ? (
         <CpiNoLiveContractState
           rows={rows}
           loading={loading}
@@ -4806,10 +5347,14 @@ function CpiScenarioMatrixCard({
           ibkrDiscovering={ibkrDiscovering}
           onRefreshIbkr={onRefreshIbkr}
           onDiscoverIbkr={onDiscoverIbkr}
+          title={displayRows.length === 0 ? CPI_MISSING_DATA_TITLE : 'No live-volume contracts'}
+          message={displayRows.length === 0
+            ? CPI_MISSING_DATA_MESSAGE
+            : 'No verified current-release contracts have positive venue volume.'}
         />
       ) : (
         <div className="cpi-matrix-table-wrap">
-          <table className="cpi-matrix-table">
+          <table className="cpi-matrix-table" aria-label="CPI contracts">
             <thead>
               <tr>
                 <th>Contract</th>
@@ -4822,6 +5367,7 @@ function CpiScenarioMatrixCard({
                 <th>Fair<br />(c)</th>
                 <th>Ask<br />(c)</th>
                 <th>Edge<br />(c)</th>
+                <th className="cpi-matrix-volume">Volume</th>
               </tr>
             </thead>
             <tbody>
@@ -4850,8 +5396,8 @@ function CpiScenarioMatrixCard({
                     </td>
                     <td className={edgeTone}>
                       <strong>{formatCpiEdgeCents(line.edge)}</strong>
-                      <small>{getCpiLineEdgeLabel(line, index)}</small>
                     </td>
+                    <td className="cpi-matrix-volume">{fmtVolume(line.volume)}</td>
                   </tr>
                 );
               })}
@@ -4862,9 +5408,537 @@ function CpiScenarioMatrixCard({
     </Pmv2CardChrome>
   );
 }
+
+function CpiContractLadderPanel({
+  rows,
+  displayRows = [],
+  matrixRows,
+  loading,
+  providers,
+  ibkrLoading,
+  ibkrDiscovering,
+  onRefreshIbkr,
+  onDiscoverIbkr,
+  expiredMonth = false,
+  monthLabel = null,
+}) {
+  return (
+    <section
+      className={`cpi-ledger-panel cpi-contract-ladder${expiredMonth ? ' cpi-expired-month' : ''}`}
+      aria-label="Contract ladder"
+    >
+      <div className="cpi-ledger-panel-body">
+        {expiredMonth ? (
+          <CpiExpiredTableState section="contracts" monthLabel={monthLabel} />
+        ) : matrixRows.length === 0 ? (
+          <CpiNoLiveContractState
+            rows={rows}
+            loading={loading}
+            providers={providers}
+            ibkrLoading={ibkrLoading}
+            ibkrDiscovering={ibkrDiscovering}
+            onRefreshIbkr={onRefreshIbkr}
+            onDiscoverIbkr={onDiscoverIbkr}
+            title={displayRows.length === 0 ? CPI_MISSING_DATA_TITLE : 'No live-volume contracts'}
+            message={displayRows.length === 0
+              ? CPI_MISSING_DATA_MESSAGE
+              : 'No verified current-release contracts have positive venue volume.'}
+          />
+        ) : (
+          <div className="cpi-contract-table-wrap">
+            <table className="cpi-contract-table" aria-label="CPI contracts">
+              <thead>
+                <tr>
+                  <th>Contract</th>
+                  <th>Fair <small>(c)</small></th>
+                  <th>Ask <small>(c)</small></th>
+                  <th>Edge <small>(c)</small></th>
+                  <th>Volume</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matrixRows.map((line) => {
+                  const edgeTone = Number(line.edge) > 0
+                    ? 'edge-positive'
+                    : Number(line.edge) < 0 ? 'edge-negative' : 'edge-neutral';
+                  return (
+                    <tr
+                      key={line.id}
+                      className={Number(line.edge) > 0 ? 'edge-positive-row' : ''}
+                    >
+                      <td className="cpi-contract-name"><strong>{line.title}</strong></td>
+                      <td>{formatCpiCents(line.fairValue)}</td>
+                      <td>{formatCpiCents(line.ask)}</td>
+                      <td className={edgeTone}>
+                        <strong>{formatCpiEdgeCents(line.edge)}</strong>
+                      </td>
+                      <td>{fmtVolume(line.volume)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {matrixRows.length > 0 && !expiredMonth && (
+          <footer className="cpi-contract-footnote">
+            <span>c = cents (e.g., 67c = $0.67)</span>
+            <span>Volume = contracts traded</span>
+          </footer>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function getCpiAllocatorStatusMessage(reason) {
+  const messages = {
+    live_nlv_unavailable: 'Verified live IBKR net liquidation value is required.',
+    invalid_risk_percentage: 'Enter a percentage greater than 0 and no more than 100.',
+    current_scenarios_unavailable: 'A current ordered Hedgeye CPI nowcast is required.',
+    insufficient_calibration_history: 'Resolved pre-release Hedgeye/BLS calibration history is incomplete.',
+    insufficient_live_market_curve: 'At least three direct live two-sided CPI books are required.',
+    no_live_executable_depth: 'Fresh native asks, depth, and a known venue fee schedule are required.',
+    live_provider_unavailable: 'A verified live CPI market-data provider is required.',
+  };
+  return messages[reason] || 'The allocation model is not ready from verified live inputs.';
+}
+
+function CpiRiskBudgetPanel({
+  liveNlv,
+  riskPctInput,
+  onRiskPctChange,
+  onApply,
+  preview,
+  allocationPlan,
+  allocationInvalidated,
+}) {
+  const ready = preview?.status === 'ready';
+  const requestedBudget = Number.isFinite(Number(preview?.requestedBudget))
+    ? preview.requestedBudget
+    : null;
+  const allowedBudget = Number.isFinite(Number(preview?.effectiveBudget))
+    ? preview.effectiveBudget
+    : null;
+  return (
+    <section className="cpi-risk-budget-panel" aria-labelledby="cpi-risk-budget-title">
+      <header>
+        <div>
+          <h3 id="cpi-risk-budget-title">Risk Budget</h3>
+          <span>Additional CPI risk · sizing only · no order submission</span>
+        </div>
+        <button
+          type="button"
+          className="cpi-allocation-apply"
+          onClick={onApply}
+          disabled={!ready}
+        >
+          {allocationPlan ? 'Recalculate' : 'Apply / recalculate'}
+        </button>
+      </header>
+      <div className="cpi-risk-budget-grid">
+        <label className="cpi-risk-input-field">
+          <span>% of NLV</span>
+          <span className="cpi-risk-input-control">
+            <input
+              type="number"
+              min="0.01"
+              max="100"
+              step="0.01"
+              inputMode="decimal"
+              value={riskPctInput}
+              onChange={(event) => onRiskPctChange(event.target.value)}
+              aria-label="CPI risk percentage of net liquidation value"
+            />
+            <b>%</b>
+          </span>
+        </label>
+        <div>
+          <span>Verified live NLV</span>
+          <strong>{liveNlv != null ? formatCpiMoney(liveNlv, { decimals: 0 }) : '–'}</strong>
+        </div>
+        <div>
+          <span>Requested budget</span>
+          <strong>{requestedBudget != null ? formatCpiMoney(requestedBudget, { decimals: 2 }) : '–'}</strong>
+        </div>
+        <div>
+          <span>Allowed after guardrails</span>
+          <strong>{allowedBudget != null ? formatCpiMoney(allowedBudget, { decimals: 2 }) : '–'}</strong>
+        </div>
+        <div>
+          <span>Post-trade CPI risk</span>
+          <strong>
+            {allocationPlan?.metrics
+              ? `${formatCpiMoney(allocationPlan.metrics.postTradeWorstLoss, { decimals: 2 })} · ${(allocationPlan.metrics.postTradeRiskPct * 100).toFixed(2)}% NLV`
+              : '–'}
+          </strong>
+        </div>
+      </div>
+      <div className={`cpi-allocation-readiness${ready ? ' ready' : ' unavailable'}`} role="status">
+        {allocationInvalidated
+          ? 'Live inputs changed. The prior allocation was invalidated; recalculate before using it.'
+          : !ready
+            ? getCpiAllocatorStatusMessage(preview?.reason)
+            : allocationPlan
+              ? 'Allocation is calculated from the currently displayed live snapshot.'
+              : 'Verified inputs are ready. Apply to calculate an allocation.'}
+      </div>
+    </section>
+  );
+}
+
+function CpiAllocationTable({ plan }) {
+  if (!plan) return null;
+  return (
+    <section className="cpi-allocation-section" aria-labelledby="cpi-allocation-title">
+      <header className="cpi-payday-section-heading">
+        <div>
+          <h3 id="cpi-allocation-title">Proposed Allocation</h3>
+          <span>One side per strike · native top-of-book depth · fees included</span>
+        </div>
+      </header>
+      <div className="cpi-allocation-table-wrap">
+        <table className="cpi-allocation-table">
+          <thead>
+            <tr>
+              <th>Contract</th>
+              <th>Side</th>
+              <th>Model fair</th>
+              <th>Ask / VWAP</th>
+              <th>Net edge</th>
+              <th>Allocated</th>
+              <th>Qty</th>
+              <th>Fees</th>
+              <th>Max loss</th>
+            </tr>
+          </thead>
+          <tbody>
+            {plan.allocations.map((allocation) => (
+              <tr key={allocation.id} data-testid="cpi-allocation-row">
+                <td><strong>Above {fmtCpiLevel(allocation.threshold, 1)}</strong></td>
+                <td>{allocation.side || '–'}</td>
+                <td>{allocation.fairProbability != null ? fmtProb(allocation.fairProbability) : '–'}</td>
+                <td>
+                  {allocation.ask != null ? formatCpiCents(allocation.ask) : '–'}
+                  {allocation.depthCap > 0 && (
+                    <small>Depth {formatCpiContracts(allocation.depthCap)}</small>
+                  )}
+                </td>
+                <td className={Number(allocation.netEdge) >= 0 ? 'edge-positive' : 'edge-negative'}>
+                  {allocation.netEdge != null ? formatCpiEdgeCents(allocation.netEdge) : '–'}
+                </td>
+                <td>{formatCpiMoney(allocation.allocation, { decimals: 2 })}</td>
+                <td>{formatCpiContracts(allocation.contracts)}</td>
+                <td>{formatCpiMoney(allocation.fees, { decimals: 2 })}</td>
+                <td>{formatCpiMoney(allocation.maxLoss, { decimals: 2 })}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function CpiAllocationDiagnostics({ plan }) {
+  if (!plan?.metrics) return null;
+  const metrics = plan.metrics;
+  const items = [
+    ['Calibration observations', formatCpiContracts(metrics.calibrationObservations)],
+    ['Deployed', formatCpiMoney(plan.deployedBudget, { decimals: 2 })],
+    ['Residual cash', formatCpiMoney(plan.residualBudget, { decimals: 2 })],
+    ['Expected P&L', formatCpiMoney(metrics.expectedPnl, { decimals: 2, signed: true })],
+    ['Worst-case P&L', formatCpiMoney(metrics.combinedWorstPnl, { decimals: 2, signed: true })],
+    ['CVaR 95%', formatCpiMoney(metrics.cvar95, { decimals: 2, signed: true })],
+    ['Total fees', formatCpiMoney(metrics.totalFees, { decimals: 2 })],
+  ];
+  return (
+    <section className="cpi-allocation-diagnostics" aria-labelledby="cpi-diagnostics-title">
+      <header className="cpi-payday-section-heading">
+        <div>
+          <h3 id="cpi-diagnostics-title">Model Diagnostics</h3>
+          <span>Expected values use the calibrated settlement-state distribution</span>
+        </div>
+      </header>
+      <div className="cpi-diagnostic-grid">
+        {items.map(([label, value]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+      {plan.warnings?.length > 0 && (
+        <div className={`cpi-allocation-warnings${metrics.forcedDeployment ? ' mandate-override' : ''}`}>
+          {plan.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CpiSettlementOutcomeTable({ plan }) {
+  if (!plan?.settlementStates?.length) return null;
+  return (
+    <section className="cpi-settlement-section" aria-labelledby="cpi-settlement-title">
+      <header className="cpi-payday-section-heading">
+        <div>
+          <h3 id="cpi-settlement-title">Settlement Outcomes</h3>
+          <span>Current book, additional allocation, and combined expiration P&amp;L</span>
+        </div>
+      </header>
+      <div className="cpi-settlement-table-wrap">
+        <table className="cpi-settlement-table">
+          <thead>
+            <tr>
+              <th>Reported CPI</th>
+              <th>Probability</th>
+              <th>Current book</th>
+              <th>Proposed</th>
+              <th>Combined</th>
+            </tr>
+          </thead>
+          <tbody>
+            {plan.settlementStates.map((state) => (
+              <tr key={state.key}>
+                <td>{state.label}</td>
+                <td>{fmtProb(state.probability)}</td>
+                {[state.currentPnl, state.proposedPnl, state.combinedPnl].map((value, index) => (
+                  <td key={`${state.key}-${index}`} className={value >= 0 ? 'edge-positive' : 'edge-negative'}>
+                    {formatCpiMoney(value, { decimals: 2, signed: true })}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function CpiCompactRiskBudgetPanel({
+  liveNlv,
+  riskPctInput,
+  onRiskPctChange,
+  onApply,
+  preview,
+  allocationPlan,
+  allocationInvalidated,
+}) {
+  const ready = preview?.status === 'ready';
+  const allowedBudget = Number.isFinite(Number(preview?.effectiveBudget))
+    ? preview.effectiveBudget
+    : null;
+
+  return (
+    <section className="cpi-ledger-risk" aria-labelledby="cpi-ledger-risk-title">
+      <header>
+        <h3 id="cpi-ledger-risk-title">Risk budget</h3>
+        <span>Worst-case loss across all scenarios</span>
+      </header>
+      <div className="cpi-ledger-risk-grid">
+        <label>
+          <span>NLV %</span>
+          <span className="cpi-ledger-risk-input">
+            <input
+              type="number"
+              min="0.01"
+              max="100"
+              step="0.01"
+              inputMode="decimal"
+              value={riskPctInput}
+              onChange={(event) => onRiskPctChange(event.target.value)}
+              aria-label="CPI risk percentage of net liquidation value"
+            />
+            <b>%</b>
+          </span>
+        </label>
+        <div>
+          <span>NLV</span>
+          <strong>{liveNlv != null ? formatCpiMoney(liveNlv, { decimals: 0 }) : '–'}</strong>
+        </div>
+        <div>
+          <span>Allowed</span>
+          <strong>{allowedBudget != null ? formatCpiMoney(allowedBudget, { decimals: 2 }) : '–'}</strong>
+        </div>
+        <button
+          type="button"
+          className="cpi-ledger-calculate"
+          onClick={onApply}
+          disabled={!ready}
+        >
+          Calculate
+        </button>
+      </div>
+      <div className={`cpi-allocation-readiness${ready ? ' ready' : ' unavailable'}`} role="status">
+        {allocationInvalidated
+          ? 'Live inputs changed. The prior allocation was invalidated; calculate again before using it.'
+          : !ready
+            ? getCpiAllocatorStatusMessage(preview?.reason)
+            : allocationPlan
+              ? 'Allocation calculated from the currently displayed live snapshot.'
+              : 'Verified inputs are ready. Calculate to build an allocation.'}
+      </div>
+    </section>
+  );
+}
+
+function CpiCurrentBookTable({ openPositions, positionLines, totalRisk }) {
+  if (!openPositions.length) {
+    return (
+      <div className="cpi-current-book-empty">
+        <CpiMissingDataBox
+          title="No live positions"
+          message="No verified live CPI positions are available."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="cpi-current-book-table-wrap">
+      <table className="cpi-current-book-table" aria-label="Current CPI positions">
+        <thead>
+          <tr>
+            <th>Position</th>
+            <th>Qty</th>
+            <th>Avg</th>
+            <th>Risk</th>
+          </tr>
+        </thead>
+        <tbody>
+          {openPositions.map((position, index) => {
+            const line = positionLines[index] || getCpiPositionLine(position, []);
+            return (
+              <tr key={position.id || `${line.title}-${index}`}>
+                <td><strong>{line.title}</strong></td>
+                <td>{formatCpiContracts(Math.abs(position.quantity || 0))}</td>
+                <td>{formatCpiCents(line.ask)}</td>
+                <td>{formatCpiMoney(position.maxLoss, { decimals: 0 })}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>Total risk</td>
+            <td colSpan="3">{formatCpiMoney(totalRisk, { decimals: 0 })}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
+function CpiScenarioNetPayoff({ scenarioColumns, hasLivePositions }) {
+  return (
+    <section className="cpi-net-payoff" aria-labelledby="cpi-net-payoff-title">
+      <h3 id="cpi-net-payoff-title">Scenario net payoff</h3>
+      <div className="cpi-net-payoff-grid">
+        {scenarioColumns.map((scenario) => (
+          <div className={scenario.tone} key={scenario.key}>
+            <span>{scenario.label}</span>
+            <small>{fmtCpiLevel(scenario.value, 2)} → {fmtCpiLevel(scenario.roundedValue, 1)}</small>
+            <strong className={hasLivePositions
+              ? scenario.netPayoff >= 0 ? 'positive' : 'negative'
+              : 'unavailable'}>
+              {hasLivePositions
+                ? formatCpiMoney(scenario.netPayoff, { decimals: 0, signed: true })
+                : '–'}
+            </strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CpiCurrentBookPanel({
+  model,
+  openPositions,
+  liveNlv,
+  riskPctInput,
+  onRiskPctChange,
+  onApply,
+  preview,
+  allocationPlan,
+  allocationInvalidated = false,
+  expiredMonth = false,
+  monthLabel = null,
+}) {
+  const scenarios = model ? getCpiScenarioSpecs(model) : [];
+  const positionLines = openPositions.map((position) => getCpiPositionLine(position, scenarios));
+  const totalRisk = openPositions.reduce((sum, position) => sum + Number(position.maxLoss || 0), 0);
+  const scenarioColumns = getCpiScenarioExposureColumns(openPositions, positionLines, scenarios);
+
+  return (
+    <aside
+      className={`cpi-ledger-panel cpi-current-book${expiredMonth ? ' cpi-expired-month' : ''}`}
+      aria-labelledby="cpi-current-book-title"
+    >
+      <header className="cpi-ledger-section-header">
+        <h2 id="cpi-current-book-title">Current book</h2>
+      </header>
+      <div className="cpi-current-book-scroll">
+        {expiredMonth ? (
+          <CpiExpiredTableState section="book" monthLabel={monthLabel} />
+        ) : (
+          <>
+            <CpiCurrentBookTable
+              openPositions={openPositions}
+              positionLines={positionLines}
+              totalRisk={totalRisk}
+            />
+            {scenarioColumns.length > 0 && (
+              <CpiScenarioNetPayoff
+                scenarioColumns={scenarioColumns}
+                hasLivePositions={openPositions.length > 0}
+              />
+            )}
+            <CpiCompactRiskBudgetPanel
+              liveNlv={liveNlv}
+              riskPctInput={riskPctInput}
+              onRiskPctChange={onRiskPctChange}
+              onApply={onApply}
+              preview={preview}
+              allocationPlan={allocationPlan}
+              allocationInvalidated={allocationInvalidated}
+            />
+            {allocationPlan && (
+              <details className="cpi-allocation-details">
+                <summary>
+                  <span>Allocation details</span>
+                  <small>
+                    {allocationPlan.allocations?.length || 0} lines · {formatCpiMoney(allocationPlan.deployedBudget, { decimals: 2 })} deployed
+                  </small>
+                </summary>
+                <div className="cpi-allocation-details-body">
+                  <CpiAllocationTable plan={allocationPlan} />
+                  <CpiAllocationDiagnostics plan={allocationPlan} />
+                  <CpiSettlementOutcomeTable plan={allocationPlan} />
+                </div>
+              </details>
+            )}
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 function CpiPayoffConfirmationCard({
   model,
   openPositions,
+  liveNlv,
+  riskPctInput,
+  onRiskPctChange,
+  onApply,
+  preview,
+  allocationPlan,
+  allocationInvalidated = false,
+  expiredMonth = false,
+  monthLabel = null,
 }) {
   const scenarios = getCpiScenarioSpecs(model);
   const openPositionLines = openPositions.map((position) => getCpiPositionLine(position, scenarios));
@@ -4882,7 +5956,7 @@ function CpiPayoffConfirmationCard({
 
   return (
     <Pmv2CardChrome
-      className="cpi-payoff-card cpi-payday-exposure-card"
+      className={`cpi-payoff-card cpi-payday-exposure-card${expiredMonth ? ' cpi-expired-month' : ''}`}
       icon={(
         <img
           className="cpi-payoff-card-icon"
@@ -4898,22 +5972,48 @@ function CpiPayoffConfirmationCard({
       titleId="cpi-payoff-title"
       actions={<CpiLineBadgeLegend />}
     >
-      <CpiScenarioExposureBody
-        openPositions={openPositions}
-        model={model}
-        scenarios={scenarios}
-        totalContracts={totalContracts}
-        totalRisk={totalRisk}
-        totalMaxProfit={totalMaxProfit}
-        totalUnrealizedPnl={totalUnrealizedPnl}
-        scenarioColumns={scenarioColumns}
-        largestLine={largestLine}
-        netBias={netBias}
-        marketCount={marketCount}
-        showHeader={false}
-        showRail={false}
-        compact
-      />
+      {expiredMonth ? (
+        <CpiExpiredTableState section="payday" monthLabel={monthLabel} />
+      ) : (
+        <div className="cpi-payday-planner">
+          <CpiRiskBudgetPanel
+            liveNlv={liveNlv}
+            riskPctInput={riskPctInput}
+            onRiskPctChange={onRiskPctChange}
+            onApply={onApply}
+            preview={preview}
+            allocationPlan={allocationPlan}
+            allocationInvalidated={allocationInvalidated}
+          />
+          <CpiAllocationTable plan={allocationPlan} />
+          <CpiAllocationDiagnostics plan={allocationPlan} />
+          <CpiSettlementOutcomeTable plan={allocationPlan} />
+          <section className="cpi-current-positions-section" aria-labelledby="cpi-current-positions-title">
+            <header className="cpi-payday-section-heading">
+              <div>
+                <h3 id="cpi-current-positions-title">Current Positions</h3>
+                <span>Existing live portfolio exposure</span>
+              </div>
+            </header>
+            <CpiScenarioExposureBody
+              openPositions={openPositions}
+              model={model}
+              scenarios={scenarios}
+              totalContracts={totalContracts}
+              totalRisk={totalRisk}
+              totalMaxProfit={totalMaxProfit}
+              totalUnrealizedPnl={totalUnrealizedPnl}
+              scenarioColumns={scenarioColumns}
+              largestLine={largestLine}
+              netBias={netBias}
+              marketCount={marketCount}
+              showHeader={false}
+              showRail={false}
+              compact
+            />
+          </section>
+        </div>
+      )}
     </Pmv2CardChrome>
   );
 }
@@ -5140,6 +6240,7 @@ export default function PredictionMarkets({
   const [apiStatus, setApiStatus] = useState('loading');
   const [loadError, setLoadError] = useState(null);
   const [marketEvents, setMarketEvents] = useState([]);
+  const [cpiProviderEvents, setCpiProviderEvents] = useState([]);
   const [providers, setProviders] = useState(null);
   const [ingestError, setIngestError] = useState(null);
   const [signalsLoading, setSignalsLoading] = useState(true);
@@ -5147,6 +6248,7 @@ export default function PredictionMarkets({
   const [selectedSignalSymbol, setSelectedSignalSymbol] = useState(() => persistedWorkbenchState.selectedSignalSymbol || null);
   const [signalData, setSignalData] = useState({
     riskRanges: {},
+    canonicalResearch: null,
     bitcoinSnapshot: null,
     momoSnapshot: null,
     macroSnapshot: null,
@@ -5162,9 +6264,26 @@ export default function PredictionMarkets({
   const [portfolioPredictionPositionsLive, setPortfolioPredictionPositionsLive] = useState(false);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [activeCpiMonth, setActiveCpiMonth] = useState(() => getPersistedCpiMonth(persistedWorkbenchState));
+  const [cpiRiskPctInput, setCpiRiskPctInput] = useState(() => (
+    getPersistedCpiRiskPct(persistedWorkbenchState).toFixed(2)
+  ));
+  const [cpiAllocationRequest, setCpiAllocationRequest] = useState(null);
+  const [cpiAllocationInvalidated, setCpiAllocationInvalidated] = useState(false);
+  const [cpiAllocationClock, setCpiAllocationClock] = useState(() => Date.now());
+  const [cpiOfficialFinals, setCpiOfficialFinals] = useState([]);
+  const [cpiNowcastHistory, setCpiNowcastHistory] = useState({ entries: [] });
+  const [cpiBenchmarkState, setCpiBenchmarkState] = useState({
+    period: null,
+    payload: null,
+    loading: false,
+    error: null,
+  });
   const [currentCpiRelease, setCurrentCpiRelease] = useState(null);
   const [currentCpiReleaseError, setCurrentCpiReleaseError] = useState(null);
   const ibkrBusyRef = useRef(false);
+  const cpiOfficialRetryTimerRef = useRef(null);
+  const currentCpiReleaseRef = useRef(null);
+  const lastCpiReleaseKeyRef = useRef(null);
   const userSelectedCpiMonthRef = useRef(Boolean(persistedWorkbenchState.activeCpiMonthId));
 
   const normalizedCpiNowcast = useMemo(
@@ -5181,12 +6300,131 @@ export default function PredictionMarkets({
     () => getCpiMonthFromId(currentCpiRelease?.reportMonth),
     [currentCpiRelease?.reportMonth],
   );
+  const currentCpiNowcast = useMemo(() => {
+    if (!currentCpiRelease?.scenarios?.length || !currentCpiRelease?.forecastMonth) return null;
+    return normalizeCpiNowcast({
+      publishedAt: currentCpiRelease.source?.asOf || null,
+      data: {
+        metric: currentCpiRelease.metric || 'Headline CPI YoY',
+        forecastMonth: currentCpiRelease.forecastMonth,
+        releaseDate: currentCpiRelease.releaseAt || currentCpiRelease.releaseDate || null,
+        scenarios: currentCpiRelease.scenarios,
+      },
+    });
+  }, [currentCpiRelease]);
+  const cpiCalendarNowcastHistory = useMemo(() => {
+    const entries = Array.isArray(cpiNowcastHistory?.entries)
+      ? [...cpiNowcastHistory.entries]
+      : [];
+    if (currentCpiNowcast?.ok && operationalCpiMonth?.id) {
+      const model = currentCpiNowcast.model;
+      const scenarios = model.scenarios || [];
+      const raw = {
+        upper: Number(scenarios.find((scenario) => scenario.key === 'upside')?.value),
+        base: Number(scenarios.find((scenario) => scenario.key === 'base')?.value),
+        lower: Number(scenarios.find((scenario) => scenario.key === 'downside')?.value),
+      };
+      if ([raw.upper, raw.base, raw.lower].every(Number.isFinite)) {
+        const replacement = {
+          id: operationalCpiMonth.id,
+          monthId: operationalCpiMonth.id,
+          releaseAt: currentCpiRelease?.releaseAt || model.releaseDate || null,
+          status: 'provisional',
+          publishedAt: currentCpiRelease?.source?.asOf || model.publishedText || null,
+          source: currentCpiRelease?.source || null,
+          scenarios: {
+            raw,
+            rounded: {
+              upper: roundCpiSettlementLevel(raw.upper),
+              base: roundCpiSettlementLevel(raw.base),
+              lower: roundCpiSettlementLevel(raw.lower),
+            },
+          },
+        };
+        const index = entries.findIndex((entry) => (entry?.id || entry?.monthId) === operationalCpiMonth.id);
+        if (index >= 0) entries[index] = { ...entries[index], ...replacement };
+        else entries.push(replacement);
+      }
+    }
+    return { ...cpiNowcastHistory, entries };
+  }, [cpiNowcastHistory, currentCpiNowcast, currentCpiRelease?.releaseAt, currentCpiRelease?.source?.asOf, operationalCpiMonth]);
   const cpiMonths = useMemo(() => {
-    const anchor = operationalCpiMonth || sourceCpiMonth || activeCpiMonth;
+    const anchor = [operationalCpiMonth, activeCpiMonth, sourceCpiMonth]
+      .filter(Boolean)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .at(-1);
     return anchor
       ? getCpiMonthOptions({ year: anchor.year, month: anchor.month })
       : DEFAULT_CPI_MONTH_OPTIONS;
   }, [activeCpiMonth, operationalCpiMonth, sourceCpiMonth]);
+
+  const cpiCalendarEntries = useMemo(
+    () => buildCpiCalendarEntries({
+      officialFinals: cpiOfficialFinals,
+      nowcastHistory: cpiCalendarNowcastHistory,
+      forecastMonth: operationalCpiMonth || sourceCpiMonth,
+      forecastReleaseDate: currentCpiRelease?.releaseAt || normalizedCpiNowcast.model?.releaseDate,
+      anchorMonths: [operationalCpiMonth, activeCpiMonth],
+    }),
+    [activeCpiMonth, cpiCalendarNowcastHistory, cpiOfficialFinals, currentCpiRelease?.releaseAt, normalizedCpiNowcast.model?.releaseDate, operationalCpiMonth, sourceCpiMonth],
+  );
+
+  const activeCpiCalendarEntry = useMemo(
+    () => cpiCalendarEntries.find((entry) => entry.id === activeCpiMonth?.id) || null,
+    [activeCpiMonth?.id, cpiCalendarEntries],
+  );
+  const activeCpiMonthExpired = isCpiMonthExpired(activeCpiCalendarEntry, Date.now());
+
+  useEffect(() => {
+    const period = activeCpiMonth?.id || null;
+    if (!period) {
+      setCpiBenchmarkState({ period: null, payload: null, loading: false, error: null });
+      return undefined;
+    }
+    let disposed = false;
+    const load = async () => {
+      setCpiBenchmarkState({ period, payload: null, loading: true, error: null });
+      try {
+        if (typeof predictionMarketsIngestService.getCpiBenchmarks !== 'function') {
+          throw new Error('CPI benchmark service is unavailable.');
+        }
+        const response = await predictionMarketsIngestService.getCpiBenchmarks(period);
+        if (
+          response?.period !== period
+          || response?.metric !== 'headline-cpi-yoy'
+          || response?.unit !== 'percent'
+        ) {
+          throw new Error('CPI benchmark response did not match the selected month and metric.');
+        }
+        if (!disposed) {
+          setCpiBenchmarkState({
+            period,
+            payload: normalizeCpiBenchmarkPayload(response, period),
+            loading: false,
+            error: null,
+          });
+        }
+      } catch (error) {
+        if (!disposed) {
+          setCpiBenchmarkState({
+            period,
+            payload: null,
+            loading: false,
+            error: error?.message || 'Verified CPI benchmark data is unavailable.',
+          });
+        }
+      }
+    };
+
+    load();
+    const intervalId = !activeCpiMonthExpired
+      ? window.setInterval(load, CPI_BENCHMARK_REFRESH_INTERVAL_MS)
+      : null;
+    return () => {
+      disposed = true;
+      if (intervalId != null) window.clearInterval(intervalId);
+    };
+  }, [activeCpiMonth?.id, activeCpiMonthExpired]);
 
   useEffect(() => {
     const preferredMonth = operationalCpiMonth || sourceCpiMonth;
@@ -5199,6 +6437,20 @@ export default function PredictionMarkets({
     }
   }, [activeCpiMonth?.id, operationalCpiMonth, sourceCpiMonth]);
 
+  useEffect(() => {
+    const releaseKey = currentCpiRelease?.releaseKey || null;
+    if (!releaseKey) return;
+    const previousReleaseKey = lastCpiReleaseKeyRef.current;
+    if (previousReleaseKey && previousReleaseKey !== releaseKey && operationalCpiMonth) {
+      // A canonical release-key change is the only event that may override a
+      // persisted historical selection. This prevents July rows from
+      // surviving the official 8:30 AM ET rollover into August.
+      userSelectedCpiMonthRef.current = false;
+      setActiveCpiMonth(operationalCpiMonth);
+    }
+    lastCpiReleaseKeyRef.current = releaseKey;
+  }, [currentCpiRelease?.releaseKey, operationalCpiMonth]);
+
   const selectCpiMonth = useCallback((month) => {
     userSelectedCpiMonthRef.current = true;
     setActiveCpiMonth(month);
@@ -5209,12 +6461,18 @@ export default function PredictionMarkets({
   }, [ibkrLoading, ibkrDiscovering]);
 
   useEffect(() => {
+    const intervalId = window.setInterval(() => setCpiAllocationClock(Date.now()), 15000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
     writePredictionMarketsWorkbenchState({
       selectedId,
       selectedSignalSymbol,
       activeCpiMonthId: activeCpiMonth?.id || null,
+      cpiRiskPct: parseCpiRiskPct(cpiRiskPctInput),
     });
-  }, [activeCpiMonth, selectedId, selectedSignalSymbol]);
+  }, [activeCpiMonth, cpiRiskPctInput, selectedId, selectedSignalSymbol]);
 
   const loadPortfolioPredictionPositions = useCallback(async () => {
     if (sharedPositionsState) {
@@ -5248,44 +6506,62 @@ export default function PredictionMarkets({
   }, [portfolioData?.accountId, sharedPositionsState]);
 
   const loadIbkr = useCallback(async (requestBody = {}) => {
+    if (ibkrBusyRef.current) return null;
+    ibkrBusyRef.current = true;
     setIbkrLoading(true);
     setIngestError(null);
     try {
       const data = await predictionMarketsIngestService.refreshIbkr(requestBody);
       const liveProvider = isLiveCpiContractProvider(data.providers);
       const newEvents = liveProvider
-        ? filterIbkrWorkbenchEvents(data.events || data.dashboardEvents || []).filter(isLiveTradingEvent)
+        ? filterIbkrWorkbenchEvents(data.events || data.dashboardEvents || [])
+            .filter((event) => isLiveTradingEvent(event))
+        : [];
+      const providerEvents = liveProvider
+        ? filterIbkrWorkbenchEvents(data.providerEvents || data.events || data.dashboardEvents || [])
+            .filter((event) => isLiveTradingEvent(event))
         : [];
       setMarketEvents(newEvents);
+      setCpiProviderEvents(providerEvents);
       if (data.providers) setProviders(data.providers);
       await loadPortfolioPredictionPositions();
     } catch (err) {
       console.warn('[PM] IBKR refresh error:', err.message);
       setIngestError(err.message);
-      setMarketEvents([]);
-      setPortfolioPredictionPositions([]);
-      setPortfolioPredictionPositionsLive(false);
+      // A transport failure is not evidence that the previously verified
+      // contracts vanished. Keep them mounted; their own provider timestamps
+      // and the next confirmed provider response govern availability.
     } finally {
+      ibkrBusyRef.current = false;
       setIbkrLoading(false);
     }
   }, [loadPortfolioPredictionPositions]);
 
   const discoverIbkr = useCallback(async (requestBody = {}) => {
+    if (ibkrBusyRef.current) return null;
+    ibkrBusyRef.current = true;
     setIbkrDiscovering(true);
     setIngestError(null);
     try {
       const data = await predictionMarketsIngestService.discoverIbkr(requestBody);
       const liveProvider = isLiveCpiContractProvider(data.providers);
       const newEvents = liveProvider
-        ? filterIbkrWorkbenchEvents(data.events || data.dashboardEvents || []).filter(isLiveTradingEvent)
+        ? filterIbkrWorkbenchEvents(data.events || data.dashboardEvents || [])
+            .filter((event) => isLiveTradingEvent(event))
+        : [];
+      const providerEvents = liveProvider
+        ? filterIbkrWorkbenchEvents(data.providerEvents || data.events || data.dashboardEvents || [])
+            .filter((event) => isLiveTradingEvent(event))
         : [];
       setMarketEvents(newEvents);
+      setCpiProviderEvents(providerEvents);
       if (data.providers) setProviders(data.providers);
       await loadPortfolioPredictionPositions();
     } catch (err) {
       console.warn('[PM] IBKR discovery error:', err.message);
       setIngestError(err.message);
     } finally {
+      ibkrBusyRef.current = false;
       setIbkrDiscovering(false);
     }
   }, [loadPortfolioPredictionPositions]);
@@ -5320,23 +6596,44 @@ export default function PredictionMarkets({
   const loadSignalData = useCallback(async () => {
     setSignalsLoading(true);
     setSignalsError(null);
+    if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+      setSignalData((current) => ({
+        riskRanges: {},
+        canonicalResearch: null,
+        bitcoinSnapshot: null,
+        momoSnapshot: null,
+        macroSnapshot: null,
+        callSnapshot: null,
+        inflationNowcastSnapshot: current.inflationNowcastSnapshot,
+        spotPrices: {},
+      }));
+    }
     try {
-      const riskRanges = await MarketDataService.getRiskRanges().catch(err => {
-        console.warn('[PM] risk range signal load error:', err);
-        return {};
-      });
-      const quotePlan = getMacroSignalQuotePlan(riskRanges || {});
+      // Published Trade comes from all indexed products in the canonical
+      // projection, independently of the legacy Risk Range display flag.
+      const canonicalPayload = await loadCanonicalSecurityUniverse().catch(() => null);
+      const riskRanges = SECURITY_INTELLIGENCE_V2_ENABLED
+        ? buildCanonicalRiskRangeMap(canonicalPayload, { primaryOnly: true })
+        : await MarketDataService.getRiskRanges().catch(err => {
+          console.warn('[PM] risk range signal load error:', err);
+          return {};
+        });
+      const quotePlan = getMacroSignalQuotePlan(riskRanges || {}, canonicalPayload);
       const quoteTickers = [...new Set(quotePlan.map(entry => entry.quote))];
 
       const [bitcoinSnapshot, momoSnapshot, macroSnapshot, callSnapshot, freshness] = await Promise.all([
-        MarketDataService.getHedgeyeSnapshot('bitcoin-trend-tracker').catch(err => {
-          console.warn('[PM] bitcoin tracker signal load error:', err);
-          return null;
-        }),
-        MarketDataService.getHedgeyeSnapshot('momo-tracker').catch(err => {
-          console.warn('[PM] momo tracker signal load error:', err);
-          return null;
-        }),
+        SECURITY_INTELLIGENCE_V2_ENABLED
+          ? Promise.resolve(buildCanonicalTrackerSnapshot(canonicalPayload, 'bitcoin-trend-tracker'))
+          : MarketDataService.getHedgeyeSnapshot('bitcoin-trend-tracker').catch(err => {
+            console.warn('[PM] bitcoin tracker signal load error:', err);
+            return null;
+          }),
+        SECURITY_INTELLIGENCE_V2_ENABLED
+          ? Promise.resolve(buildCanonicalTrackerSnapshot(canonicalPayload, 'momo-tracker'))
+          : MarketDataService.getHedgeyeSnapshot('momo-tracker').catch(err => {
+            console.warn('[PM] momo tracker signal load error:', err);
+            return null;
+          }),
         MarketDataService.getHedgeyeSnapshot('the-macro-show').catch(err => {
           console.warn('[PM] macro show signal load error:', err);
           return null;
@@ -5354,6 +6651,7 @@ export default function PredictionMarkets({
       setSignalData((current) => ({
         ...current,
         riskRanges: riskRanges || {},
+        canonicalResearch: canonicalPayload,
         bitcoinSnapshot,
         momoSnapshot,
         macroSnapshot,
@@ -5386,18 +6684,44 @@ export default function PredictionMarkets({
   }, []);
 
   const loadCpiNowcastData = useCallback(async () => {
+    const historyRequest = typeof MarketDataService.getHedgeyeInflationNowcastHistory === 'function'
+      ? MarketDataService.getHedgeyeInflationNowcastHistory({ from: '2025-07' })
+      : Promise.resolve({ entries: [] });
+    const [snapshotResult, historyResult] = await Promise.allSettled([
+      MarketDataService.getHedgeyeSnapshot('inflation-nowcast', CPI_MODEL_NOWCAST_DATE),
+      historyRequest,
+    ]);
+    if (snapshotResult.status === 'fulfilled') {
+      setSignalData((current) => ({
+        ...current,
+        inflationNowcastSnapshot: snapshotResult.value,
+      }));
+    } else {
+      console.warn('[PM] inflation nowcast signal load error:', snapshotResult.reason);
+    }
+    if (historyResult.status === 'fulfilled') {
+      setCpiNowcastHistory(historyResult.value || { entries: [] });
+    } else {
+      console.warn('[PM] inflation nowcast history load error:', historyResult.reason);
+      setCpiNowcastHistory({ entries: [] });
+    }
+  }, []);
+
+  const loadCpiOfficialFinals = useCallback(async () => {
+    if (typeof predictionMarketsIngestService.getCpiOfficialFinals !== 'function') return null;
     try {
-      const inflationNowcastSnapshot = await MarketDataService.getHedgeyeSnapshot('inflation-nowcast', CPI_MODEL_NOWCAST_DATE);
-      setSignalData((current) => ({
-        ...current,
-        inflationNowcastSnapshot,
-      }));
+      const response = await predictionMarketsIngestService.getCpiOfficialFinals();
+      const finals = normalizeCpiOfficialFinals(response);
+      setCpiOfficialFinals(finals);
+      return { ...response, finals };
     } catch (err) {
-      console.warn('[PM] inflation nowcast signal load error:', err);
-      setSignalData((current) => ({
-        ...current,
-        inflationNowcastSnapshot: null,
-      }));
+      console.warn('[PM] official CPI finals load error:', err.message);
+      return {
+        ok: false,
+        finals: [],
+        refreshing: false,
+        remoteStatus: 'unavailable',
+      };
     }
   }, []);
 
@@ -5408,18 +6732,35 @@ export default function PredictionMarkets({
       if (!current?.ok || !current?.releaseKey || !current?.request?.cpi) {
         throw new Error(current?.error || 'Current CPI release is unavailable.');
       }
+      currentCpiReleaseRef.current = current;
       setCurrentCpiRelease(current);
       setCurrentCpiReleaseError(null);
       if (current.providers) setProviders(current.providers);
       const rows = isLiveCpiContractProvider(current.providers)
-        ? filterIbkrWorkbenchEvents(current.events || current.dashboardEvents || []).filter(isLiveTradingEvent)
+        ? filterIbkrWorkbenchEvents(current.events || current.dashboardEvents || [])
+            .filter((event) => isLiveTradingEvent(event))
+        : [];
+      const providerRows = isLiveCpiContractProvider(current.providers)
+        ? filterIbkrWorkbenchEvents(current.providerEvents || current.events || current.dashboardEvents || [])
+            .filter((event) => isLiveTradingEvent(event))
         : [];
       setMarketEvents(rows);
+      setCpiProviderEvents(providerRows);
     } catch (err) {
       console.warn('[PM] current CPI release load error:', err.message);
-      setCurrentCpiRelease(null);
       setCurrentCpiReleaseError(err.message || 'Current CPI release is unavailable.');
-      setMarketEvents([]);
+      const previous = currentCpiReleaseRef.current;
+      const previousReleaseAt = cpiReleaseTimestamp(previous?.releaseAt || previous?.releaseDate || '');
+      if (Number.isFinite(previousReleaseAt) && previousReleaseAt <= Date.now()) {
+        // Once the official release timestamp has passed, an unavailable
+        // next-month forecast must clear the outgoing ladder rather than
+        // leave stale July contracts mounted.
+        currentCpiReleaseRef.current = null;
+        setCurrentCpiRelease(null);
+        setMarketEvents([]);
+        setCpiProviderEvents([]);
+        setProviders(null);
+      }
     } finally {
       setIngestLoading(false);
     }
@@ -5427,7 +6768,62 @@ export default function PredictionMarkets({
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadCpiNowcastData(); }, [loadCpiNowcastData]);
-  useEffect(() => { loadCurrentCpiRelease(); }, [loadCurrentCpiRelease]);
+  useEffect(() => {
+    let disposed = false;
+    let retryAttempt = 0;
+
+    const schedule = (delay) => {
+      if (disposed) return;
+      cpiOfficialRetryTimerRef.current = window.setTimeout(run, delay);
+    };
+
+    const run = async () => {
+      const response = await loadCpiOfficialFinals();
+      if (disposed) return;
+      const finals = response?.finals || [];
+      const refreshing = response?.refreshing === true || response?.remoteStatus === 'refreshing';
+      const pendingReleasedFinal = hasPendingCpiOfficialFinal(finals);
+      const remoteUnavailable = response?.remoteStatus === 'unavailable' || response?.ok === false;
+      if (refreshing || pendingReleasedFinal || remoteUnavailable) {
+        const delay = CPI_OFFICIAL_RETRY_DELAYS_MS[Math.min(retryAttempt, CPI_OFFICIAL_RETRY_DELAYS_MS.length - 1)];
+        retryAttempt += 1;
+        schedule(delay);
+        return;
+      }
+      retryAttempt = 0;
+      schedule(CPI_OFFICIAL_REFRESH_INTERVAL_MS);
+    };
+
+    run();
+    return () => {
+      disposed = true;
+      if (cpiOfficialRetryTimerRef.current != null) {
+        window.clearTimeout(cpiOfficialRetryTimerRef.current);
+        cpiOfficialRetryTimerRef.current = null;
+      }
+    };
+  }, [loadCpiOfficialFinals]);
+  useEffect(() => {
+    let disposed = false;
+    const refresh = () => {
+      if (!disposed) loadCurrentCpiRelease();
+    };
+    refresh();
+    const intervalId = window.setInterval(refresh, CPI_RELEASE_REFRESH_INTERVAL_MS);
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [loadCurrentCpiRelease]);
+  useEffect(() => {
+    const releaseAt = cpiReleaseTimestamp(currentCpiRelease?.releaseAt || currentCpiRelease?.releaseDate || '');
+    if (!Number.isFinite(releaseAt)) return undefined;
+    const delay = releaseAt <= Date.now()
+      ? 0
+      : Math.min(releaseAt - Date.now() + 50, CPI_RELEASE_REFRESH_INTERVAL_MS);
+    const timerId = window.setTimeout(() => loadCurrentCpiRelease(), delay);
+    return () => window.clearTimeout(timerId);
+  }, [currentCpiRelease?.releaseAt, currentCpiRelease?.releaseDate, loadCurrentCpiRelease]);
   useEffect(() => { loadSignalData(); }, [loadSignalData]);
   useEffect(() => { loadPortfolioPredictionPositions(); }, [loadPortfolioPredictionPositions]);
   useEffect(() => {
@@ -5464,6 +6860,7 @@ export default function PredictionMarkets({
 
   const signalContext = useMemo(() => normalizePredictionMarketSignals({
     riskRanges: signalData.riskRanges,
+    canonicalResearch: signalData.canonicalResearch,
     bitcoinSnapshot: signalData.bitcoinSnapshot,
     momoSnapshot: signalData.momoSnapshot,
     macroSnapshot: signalData.macroSnapshot,
@@ -5510,6 +6907,36 @@ export default function PredictionMarkets({
   );
 
   const cpiNowcastResult = useMemo(() => {
+    if (
+      currentCpiNowcast?.ok
+      && signalData.inflationNowcastSnapshot
+      && operationalCpiMonth?.id === activeCpiMonth?.id
+    ) {
+      return {
+        ...currentCpiNowcast,
+        sourceModel: currentCpiNowcast.model,
+      };
+    }
+    const historyEntry = normalizeCpiNowcastHistory(cpiNowcastHistory)
+      .find((entry) => entry.id === activeCpiMonth?.id && entry.scenarios);
+    if (signalData.inflationNowcastSnapshot && historyEntry?.scenarios) {
+      const historyNowcast = normalizeCpiNowcast({
+        publishedAt: historyEntry.publishedAt,
+        data: {
+          metric: 'Headline CPI YoY',
+          forecastMonth: activeCpiMonth?.fullLabel,
+          releaseDate: historyEntry.releaseAt,
+          scenarios: [
+            { key: 'upside', label: 'Upside', value: historyEntry.scenarios.raw.upper },
+            { key: 'base', label: 'Base Case', value: historyEntry.scenarios.raw.base },
+            { key: 'downside', label: 'Downside', value: historyEntry.scenarios.raw.lower },
+          ],
+        },
+      });
+      if (historyNowcast.ok) {
+        return { ...historyNowcast, sourceModel: historyNowcast.model };
+      }
+    }
     if (!normalizedCpiNowcast.ok) return normalizedCpiNowcast;
     if (!sourceCpiMonth || sourceCpiMonth.id !== activeCpiMonth?.id) {
       return {
@@ -5524,11 +6951,17 @@ export default function PredictionMarkets({
       ...normalizedCpiNowcast,
       sourceModel: normalizedCpiNowcast.model,
     };
-  }, [activeCpiMonth?.fullLabel, activeCpiMonth?.id, normalizedCpiNowcast, sourceCpiMonth]);
+  }, [activeCpiMonth?.fullLabel, activeCpiMonth?.id, cpiNowcastHistory, currentCpiNowcast, normalizedCpiNowcast, operationalCpiMonth, signalData.inflationNowcastSnapshot, sourceCpiMonth]);
 
   const cpiAutoRefreshRequest = useMemo(
-    () => currentCpiRelease?.request?.cpi?.targetStrikes?.length ? {} : null,
-    [currentCpiRelease],
+    () => (
+      cpiNowcastResult.ok
+      && !activeCpiMonthExpired
+      && currentCpiRelease?.request?.cpi?.targetStrikes?.length
+        ? {}
+        : null
+    ),
+    [activeCpiMonthExpired, cpiNowcastResult.ok, currentCpiRelease],
   );
 
   useEffect(() => {
@@ -5563,7 +6996,7 @@ export default function PredictionMarkets({
 
   const cpiContractEvents = useMemo(() => {
     const merged = events
-      .filter(isLiveTradingEvent)
+      .filter((event) => isLiveTradingEvent(event, cpiAllocationClock))
       .filter((event) => isCpiContractForMonth(event, activeCpiMonth));
     const seen = new Set();
     return merged.filter((event) => {
@@ -5573,26 +7006,180 @@ export default function PredictionMarkets({
       seen.add(key);
       return true;
     });
-  }, [activeCpiMonth, events]);
+  }, [activeCpiMonth, cpiAllocationClock, events]);
+
+  const cpiDisplayContractEvents = useMemo(() => {
+    const liveRows = cpiProviderEvents
+      .filter((event) => isLiveTradingEvent(event, cpiAllocationClock))
+      .filter((event) => isCpiContractForMonth(event, activeCpiMonth));
+    const seen = new Set();
+    return liveRows.filter((event) => {
+      const key = event?.id || event?.conid || event?.question || event?.contract_title;
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [activeCpiMonth, cpiAllocationClock, cpiProviderEvents]);
+
+  const cpiLiveQuoteObservedAt = useMemo(() => {
+    if (activeCpiMonthExpired || !isLiveCpiContractProvider(providers)) return null;
+    return cpiDisplayContractEvents.reduce((latest, event) => {
+      const observedAt = Date.parse(event?.updated_at || '');
+      if (!Number.isFinite(observedAt)) return latest;
+      return latest == null || observedAt > latest ? observedAt : latest;
+    }, null);
+  }, [activeCpiMonthExpired, cpiDisplayContractEvents, providers]);
+
+  const cpiLiveNlv = useMemo(
+    () => getCpiAccountValue(portfolioData, new Date(cpiAllocationClock)),
+    [cpiAllocationClock, portfolioData],
+  );
 
   const cpiSizingSettings = useMemo(() => ({
     ...settings,
     // Stored/manual equity is never valid for an active CPI trade size. Fail
     // closed unless the portfolio provider identifies a live IBKR snapshot.
-    portfolioEquity: getCpiAccountValue(portfolioData),
-  }), [portfolioData, settings]);
+    portfolioEquity: cpiLiveNlv,
+  }), [cpiLiveNlv, settings]);
 
   const cpiContractRows = useMemo(
-    () => cpiNowcastResult.ok && isLiveCpiContractProvider(providers) && cpiContractEvents.length > 0
+    () => !activeCpiMonthExpired && cpiNowcastResult.ok && isLiveCpiContractProvider(providers) && cpiContractEvents.length > 0
       ? buildCpiContractLadder(cpiContractEvents, cpiNowcastResult.model, cpiSizingSettings, activeCpiMonth)
       : [],
-    [activeCpiMonth, cpiNowcastResult, providers, cpiContractEvents, cpiSizingSettings],
+    [activeCpiMonth, activeCpiMonthExpired, cpiNowcastResult, providers, cpiContractEvents, cpiSizingSettings],
+  );
+
+  const cpiDisplayContractRows = useMemo(
+    () => !activeCpiMonthExpired && cpiNowcastResult.ok && isLiveCpiContractProvider(providers) && cpiDisplayContractEvents.length > 0
+      ? buildCpiContractLadder(
+          cpiDisplayContractEvents,
+          cpiNowcastResult.model,
+          { ...cpiSizingSettings, portfolioEquity: null },
+          activeCpiMonth,
+          { scope: 'all-live' },
+        )
+      : [],
+    [
+      activeCpiMonth,
+      activeCpiMonthExpired,
+      cpiDisplayContractEvents,
+      cpiNowcastResult,
+      cpiSizingSettings,
+      providers,
+    ],
+  );
+
+  const cpiPositiveVolumeRows = useMemo(
+    () => selectCpiPositiveVolumeRows(cpiDisplayContractRows),
+    [cpiDisplayContractRows],
+  );
+
+  const cpiDisplayProbabilityCurve = useMemo(
+    () => buildCpiCalibratedProbabilityCurve({
+      model: cpiNowcastResult.model,
+      history: cpiNowcastHistory,
+      finals: cpiOfficialFinals,
+      rows: cpiPositiveVolumeRows,
+    }),
+    [cpiNowcastHistory, cpiNowcastResult.model, cpiOfficialFinals, cpiPositiveVolumeRows],
   );
 
   const cpiScenarioMatrixRows = useMemo(
-    () => getCpiScenarioMatrixRows(cpiContractRows, cpiNowcastResult.model, cpiPositions),
-    [cpiContractRows, cpiNowcastResult.model, cpiPositions],
+    () => getCpiScenarioMatrixRows(cpiPositiveVolumeRows, cpiNowcastResult.model, cpiDisplayProbabilityCurve),
+    [cpiDisplayProbabilityCurve, cpiNowcastResult.model, cpiPositiveVolumeRows],
   );
+
+  const cpiRiskPct = parseCpiRiskPct(cpiRiskPctInput);
+  const cpiCurrentOpenRisk = Number.isFinite(Number(risk?.totalMaxLoss ?? analytics?.totalOpenRisk))
+    ? Number(risk?.totalMaxLoss ?? analytics?.totalOpenRisk)
+    : null;
+  const cpiAllocationSignature = useMemo(
+    () => getCpiAllocationSignature({
+      model: cpiNowcastResult.model,
+      rows: cpiContractRows,
+      history: cpiNowcastHistory,
+      finals: cpiOfficialFinals,
+      positions: cpiPositions,
+      liveNlv: cpiLiveNlv,
+      riskPct: cpiRiskPct,
+      settings: cpiSizingSettings,
+      currentOpenRisk: cpiCurrentOpenRisk,
+      providers,
+    }),
+    [
+      cpiContractRows,
+      cpiCurrentOpenRisk,
+      cpiLiveNlv,
+      cpiNowcastHistory,
+      cpiNowcastResult.model,
+      cpiOfficialFinals,
+      cpiPositions,
+      cpiRiskPct,
+      cpiSizingSettings,
+      providers,
+    ],
+  );
+  const cpiAllocationPreview = useMemo(
+    () => buildCpiAllocationModel({
+      model: cpiNowcastResult.model,
+      history: cpiNowcastHistory,
+      finals: cpiOfficialFinals,
+      rows: cpiContractRows,
+      openPositions: cpiPositions,
+      portfolioEquity: cpiLiveNlv,
+      riskPct: cpiRiskPct,
+      settings: cpiSizingSettings,
+      currentOpenRisk: cpiCurrentOpenRisk,
+      providerReady: isLiveCpiContractProvider(providers),
+      now: cpiAllocationClock,
+    }),
+    [
+      cpiAllocationClock,
+      cpiContractRows,
+      cpiCurrentOpenRisk,
+      cpiLiveNlv,
+      cpiNowcastHistory,
+      cpiNowcastResult.model,
+      cpiOfficialFinals,
+      cpiPositions,
+      cpiRiskPct,
+      cpiSizingSettings,
+      providers,
+    ],
+  );
+  const cpiAllocationPlan = cpiAllocationRequest?.signature === cpiAllocationSignature
+    && cpiAllocationPreview.status === 'ready'
+    ? cpiAllocationPreview
+    : null;
+
+  useEffect(() => {
+    if (
+      cpiAllocationRequest &&
+      (
+        cpiAllocationRequest.signature !== cpiAllocationSignature ||
+        cpiAllocationPreview.status !== 'ready'
+      )
+    ) {
+      setCpiAllocationRequest(null);
+      setCpiAllocationInvalidated(true);
+    }
+  }, [cpiAllocationPreview.status, cpiAllocationRequest, cpiAllocationSignature]);
+
+  const updateCpiRiskPctInput = useCallback((value) => {
+    setCpiRiskPctInput(value);
+    if (cpiAllocationRequest) setCpiAllocationInvalidated(true);
+    setCpiAllocationRequest(null);
+  }, [cpiAllocationRequest]);
+
+  const applyCpiAllocation = useCallback(() => {
+    if (cpiAllocationPreview.status !== 'ready') return;
+    setCpiAllocationRequest({
+      signature: cpiAllocationSignature,
+      riskPct: cpiRiskPct,
+    });
+    setCpiAllocationInvalidated(false);
+  }, [cpiAllocationPreview.status, cpiAllocationSignature, cpiRiskPct]);
 
   const contractMapEvents = useMemo(
     () => mergeHeldPredictionEvents(
@@ -5625,14 +7212,13 @@ export default function PredictionMarkets({
       )}
       <div className="cpi-workbench-shell">
         <CpiCalculatorHeader
-          model={cpiNowcastResult.model}
-          sourceModel={cpiNowcastResult.sourceModel || cpiNowcastResult.model}
           activeMonth={activeCpiMonth}
-          months={cpiMonths}
-          onMonthSelect={selectCpiMonth}
-          modelReady={cpiNowcastResult.ok}
+          calendarEntries={cpiCalendarEntries}
+          liveQuoteObservedAt={cpiLiveQuoteObservedAt}
+          loading={loading || ingestLoading || ibkrLoading || ibkrDiscovering}
+          expiredMonth={activeCpiMonthExpired}
         />
-        {!cpiNowcastResult.ok && cpiNowcastResult.message && (
+        {!activeCpiMonthExpired && !cpiNowcastResult.ok && cpiNowcastResult.message && (
           <div className="pmv2-error-banner cpi-inline-error" role="status">
             {cpiNowcastResult.message}
           </div>
@@ -5640,26 +7226,53 @@ export default function PredictionMarkets({
         {signalsError && (
           <div className="pmv2-error-banner cpi-inline-error">{signalsError}</div>
         )}
-        {currentCpiReleaseError && (
+        {currentCpiReleaseError && !activeCpiMonthExpired && (
           <div className="pmv2-error-banner cpi-inline-error" role="status">
             Current CPI release unavailable: {currentCpiReleaseError}
           </div>
         )}
         <main className="cpi-workbench-grid">
-          <CpiScenarioMatrixCard
+          <CpiForecastRail
+            model={cpiNowcastResult.ok ? cpiNowcastResult.model : null}
+            activeMonth={activeCpiMonth}
+            months={cpiMonths}
+            calendarEntries={cpiCalendarEntries}
+            onMonthSelect={selectCpiMonth}
+            benchmarkPayload={cpiBenchmarkState.period === activeCpiMonth?.id
+              ? cpiBenchmarkState.payload
+              : null}
+            benchmarksLoading={cpiBenchmarkState.period === activeCpiMonth?.id
+              ? cpiBenchmarkState.loading
+              : true}
+            benchmarksError={cpiBenchmarkState.period === activeCpiMonth?.id
+              ? cpiBenchmarkState.error
+              : null}
+          />
+          <CpiContractLadderPanel
             rows={cpiContractRows}
+            displayRows={cpiDisplayContractRows}
             matrixRows={cpiScenarioMatrixRows}
             loading={loading || ingestLoading || ibkrLoading || ibkrDiscovering}
-            model={cpiNowcastResult.model}
             providers={providers}
             ibkrLoading={ibkrLoading}
             ibkrDiscovering={ibkrDiscovering}
             onRefreshIbkr={refreshCpiContracts}
             onDiscoverIbkr={discoverCpiContracts}
+            expiredMonth={activeCpiMonthExpired}
+            monthLabel={activeCpiCalendarEntry?.label || activeCpiMonth?.fullLabel}
           />
-          <CpiPayoffConfirmationCard
+          <CpiCurrentBookPanel
             model={cpiNowcastResult.model}
             openPositions={cpiPositions}
+            liveNlv={cpiLiveNlv}
+            riskPctInput={cpiRiskPctInput}
+            onRiskPctChange={updateCpiRiskPctInput}
+            onApply={applyCpiAllocation}
+            preview={cpiAllocationPreview}
+            allocationPlan={cpiAllocationPlan}
+            allocationInvalidated={cpiAllocationInvalidated}
+            expiredMonth={activeCpiMonthExpired}
+            monthLabel={activeCpiCalendarEntry?.label || activeCpiMonth?.fullLabel}
           />
         </main>
       </div>

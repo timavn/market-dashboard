@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { Card, Text } from '@tremor/react';
 import { useTheme } from '../../context/ThemeContext';
 import SecurityDetailModal from './SecurityDetailModal';
@@ -9,16 +9,44 @@ import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesLi
 import { filterSecurities, getGicsSector, mapAssetClassToFactor } from '../../utils/securitiesUniverseUtils';
 import { computeKPIs } from '../../utils/realizedGainLossUtils';
 import './PerformanceTracking.css';
+import { useSurfaceActivity } from '../common/PersistentSurface';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
+
+const EMPTY_REALIZED_LOTS = Object.freeze([]);
 
 const PerformanceTracking = () => {
+  const active = useSurfaceActivity();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [selectedSecurity, setSelectedSecurity] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [realizedLots, setRealizedLots] = useState([]);
-  const [realizedLoading, setRealizedLoading] = useState(true);
-  const [realizedError, setRealizedError] = useState(null);
+  const loadRealizedLots = useCallback(
+    () => PerformanceService.getRealizedGainLoss({ period: 'ytd' }),
+    [],
+  );
+  const realizedResource = useDashboardResource('performance-history', { period: 'ytd' }, {
+    fetcher: loadRealizedLots,
+    validate: (value) => (
+      value
+      && typeof value === 'object'
+      && Array.isArray(value.lots)
+      && value.mock !== true
+      && value.seeded !== true
+        ? value
+        : null
+    ),
+    getObservedAt: (value) => value.generatedAt || value.asOf || value.endDate || null,
+    active,
+    refreshOnActivate: false,
+  });
+  const realizedLots = Array.isArray(realizedResource.data?.lots)
+    ? realizedResource.data.lots
+    : EMPTY_REALIZED_LOTS;
+  const realizedLoading = realizedResource.initialLoading && !realizedResource.data;
+  const realizedError = realizedResource.error?.response?.data?.error
+    || realizedResource.error?.message
+    || null;
 
   const rows = useMemo(
     () => [...SECURITIES_LIST].sort((a, b) => a.ticker.localeCompare(b.ticker, undefined, { sensitivity: 'base' })),
@@ -30,34 +58,11 @@ const PerformanceTracking = () => {
     [rows, searchQuery]
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    setRealizedLoading(true);
-    setRealizedError(null);
-    PerformanceService.getRealizedGainLoss({ period: 'ytd' })
-      .then((data) => {
-        if (!cancelled) {
-          setRealizedLots(Array.isArray(data?.lots) ? data.lots : []);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setRealizedError(err?.response?.data?.error || err?.message || 'Failed to load realized gain/loss');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setRealizedLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const clearAllFilters = () => {
     setSearchQuery('');
   };
 
-  const realizedKPIs = useMemo(() => computeKPIs(realizedLots), [realizedLots]);
+  const realizedKPIs = useMemo(() => realizedResource.data && !realizedError ? computeKPIs(realizedLots) : null, [realizedLots, realizedResource.data, realizedError]);
 
   return (
     <div
@@ -65,7 +70,7 @@ const PerformanceTracking = () => {
       style={{ backgroundColor: isDark ? '#111827' : '#f9fafb' }}
     >
       <div className="px-1">
-        <PortfolioPerformanceDashboard isDark={isDark} realizedKPIs={realizedKPIs} />
+        <PortfolioPerformanceDashboard isDark={isDark} realizedKPIs={realizedKPIs} observedAt={realizedResource.observedAt} loading={realizedLoading} error={realizedError} />
         
         <RealizedGainLossBubbleChart
           lots={realizedLots}

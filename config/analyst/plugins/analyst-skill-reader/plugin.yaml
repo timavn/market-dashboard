@@ -1,0 +1,4 @@
+name: analyst-skill-reader
+version: 1.0.0
+description: Read installed Analyst workflows without skill editing or additional market tools.
+author: Tim Smith

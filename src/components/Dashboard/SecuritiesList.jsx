@@ -2,16 +2,21 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Text } from '@tremor/react';
 import { SECURITIES_LIST } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import { canonicalProductState } from '../../utils/securityIntelligenceV2';
 import { isFreshForToday } from '../../utils/dateFreshness';
 import EtfProCard from './EtfProCard';
 import './SecuritiesList.css';
 import LoadingIndicator from '../common/LoadingIndicator';
+import useHedgaiTickResearch from '../../hooks/useHedgaiTickResearch';
+import DashboardResearchLabel from './DashboardResearchLabel';
 
 const VIEW_KEY = 'leftSidebarView_v1';
 const SS_ROWS_PER_PAGE_FALLBACK = 10;
 const SS_ROW_APPROX_PX = 31;
 
 const SecuritiesList = ({ isPortfolioOpen = false }) => {
+  const { readings: tickReadings } = useHedgaiTickResearch();
   const securities = SECURITIES_LIST;
   const [showLegend, setShowLegend] = useState(false);
   const [showDotLegend, setShowDotLegend] = useState(false);
@@ -23,6 +28,7 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
   });
   const [prices, setPrices] = useState({}); // { ticker: { price, timestamp } }
   const [riskRanges, setRiskRanges] = useState({}); // { ticker: { lrr, hrr, timestamp } }
+  const [securityIntelligence, setSecurityIntelligence] = useState({});
   const [loading, setLoading] = useState(true);
   const [updateTrigger, setUpdateTrigger] = useState(0); // Trigger for real-time color updates
   const [updatedRows, setUpdatedRows] = useState(new Set()); // Track rows that were just updated for blink animation
@@ -208,9 +214,8 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
         console.log(`[SecuritiesList] [${pollId}] Starting fetchPricesData (poll #${pollCount})`);
       }
 
+      const tickers = securities.map(s => s.ticker);
       try {
-        const tickers = securities.map(s => s.ticker);
-
         if (isDev && isFirstPoll) {
           console.log(`[SecuritiesList] [${pollId}] Fetching prices for ${tickers.length} securities`);
         }
@@ -226,8 +231,12 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
 
         // Handle empty response
         if (!quotes || Object.keys(quotes).length === 0) {
-          console.warn(`[SecuritiesList] [${pollId}] Empty quotes response! Keeping existing data.`);
-          // Keep existing data, just update loading state
+          console.warn(`[SecuritiesList] [${pollId}] Empty quotes response; live prices are unavailable.`);
+          const unavailablePrices = Object.fromEntries(
+            tickers.map((ticker) => [ticker, { price: '--', timestamp: null }]),
+          );
+          setPrices(unavailablePrices);
+          pricesRef.current = unavailablePrices;
           setLoading(false);
           return;
         }
@@ -247,15 +256,9 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
             };
             successCount++;
           } else {
-            // For failed quotes, keep existing data if available, or set to null
-            // Use ref to avoid stale closure issues
-            const existingData = pricesRef.current[ticker];
-            if (existingData && existingData.price && existingData.price !== '--') {
-              // Keep existing data but mark as potentially stale
-              priceMap[ticker] = existingData;
-            } else {
-              priceMap[ticker] = { price: '--', timestamp: null };
-            }
+            // A failed live quote is unavailable, never a reason to repaint
+            // the last observed value as if it were current.
+            priceMap[ticker] = { price: '--', timestamp: null };
             failCount++;
           }
         });
@@ -298,14 +301,13 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
           }
         });
 
-        // On error, keep existing data if available
-        if (Object.keys(pricesRef.current).length > 0) {
-          if (isDev) {
-            console.log(`[SecuritiesList] [${pollId}] Error occurred, keeping existing ${Object.keys(pricesRef.current).length} price entries`);
-          }
-        } else {
-          console.warn(`[SecuritiesList] [${pollId}] Error occurred and no existing data available`);
-        }
+        // Clear the entire quote set on transport failure so no stale live
+        // mark remains visible after a failed refresh.
+        const unavailablePrices = Object.fromEntries(
+          tickers.map((ticker) => [ticker, { price: '--', timestamp: null }]),
+        );
+        setPrices(unavailablePrices);
+        pricesRef.current = unavailablePrices;
 
         setLoading(false);
       }
@@ -335,6 +337,45 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
     const fetchRiskRanges = async () => {
       try {
         const tickers = securities.map(s => s.ticker);
+        if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+          // A v2 refresh is a new verification attempt. Do not render the
+          // prior current-day values while the canonical request is pending.
+          setRiskRanges({});
+          riskRangesRef.current = {};
+          setSecurityIntelligence({});
+          const payload = await MarketDataService.getSecurityIntelligenceV2({
+            symbols: tickers,
+            historyDays: 0,
+          });
+          if (payload?.schemaVersion !== 2) {
+            throw new Error('Canonical security intelligence returned an unsupported schema.');
+          }
+          const intelligenceMap = {};
+          const riskRangeMap = {};
+          tickers.forEach((ticker) => {
+            const symbol = ticker.toUpperCase();
+            const security = payload.bySymbol?.[symbol] || null;
+            const product = security?.products?.['risk-ranges'] || null;
+            const range = product?.fields?.riskRange?.value || null;
+            const status = canonicalProductState(product);
+            intelligenceMap[symbol] = {
+              health: security?.health?.status || 'unavailable',
+              status,
+              product,
+            };
+            riskRangeMap[symbol] = {
+              lrr: range?.lrr ?? null,
+              hrr: range?.hrr ?? null,
+              trend: product?.fields?.trend?.value || null,
+              timestamp: product?.publishedAt || null,
+              status,
+            };
+          });
+          setRiskRanges(riskRangeMap);
+          riskRangesRef.current = riskRangeMap;
+          setSecurityIntelligence(intelligenceMap);
+          return;
+        }
         const riskRangeData = await MarketDataService.getRiskRanges(tickers);
 
         // Transform data to match our format
@@ -346,16 +387,38 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
               lrr: data.lrr,
               hrr: data.hrr,
               trend: data.trend,
-              timestamp: data.timestamp
+              timestamp: data.timestamp,
+              status: 'available',
             };
           }
         });
 
         setRiskRanges(riskRangeMap);
         riskRangesRef.current = riskRangeMap;
+        setSecurityIntelligence({});
       } catch (error) {
         console.error('[SecuritiesList] Error fetching risk ranges:', error);
-        // Keep existing data on error
+        if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+          const unavailableRanges = Object.fromEntries(
+            securities.map((security) => [security.ticker.toUpperCase(), {
+              lrr: null,
+              hrr: null,
+              trend: null,
+              timestamp: null,
+              status: 'unavailable',
+            }]),
+          );
+          const unavailableIntelligence = Object.fromEntries(
+            securities.map((security) => [security.ticker.toUpperCase(), {
+              health: 'unavailable',
+              status: 'unavailable',
+              product: null,
+            }]),
+          );
+          setRiskRanges(unavailableRanges);
+          riskRangesRef.current = unavailableRanges;
+          setSecurityIntelligence(unavailableIntelligence);
+        }
       }
     };
 
@@ -838,7 +901,7 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
           <div className="header-number">#</div>
           <div className="header-ticker">Ticker</div>
           <div className="header-price">Spot Price</div>
-          <div className="header-bias">Bias</div>
+          <div className="header-bias" title="Tick / Trend">Ti / Te</div>
           <div className="header-lrr">LRR</div>
         </div>
 
@@ -858,7 +921,7 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
             return (
             <div
               key={security.ticker}
-              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${isLastOnPage ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''}`}
+              className={`securities-data-row ${getAssetClassBgColor(security.assetClass)} ${isLastOnPage ? 'last-row' : ''} ${updatedRows.has(security.ticker) ? 'row-updated' : ''} ${SECURITY_INTELLIGENCE_V2_ENABLED && securityIntelligence[security.ticker.toUpperCase()]?.health !== 'ready' && Object.keys(securityIntelligence).length > 0 ? 'research-attention' : ''}`}
               style={{
                 gridTemplateColumns: '20px 30px 60px 70px 60px 60px'
               }}
@@ -920,6 +983,7 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
                 </span>
               </div>
               <div className="data-bias-cell">
+                <DashboardResearchLabel label={security.ticker} reading={tickReadings[security.ticker]} showName={false} />
                 {(() => {
                   const riskRangeData = riskRanges[security.ticker.toUpperCase()] || riskRangesRef.current[security.ticker.toUpperCase()];
                   const trend = riskRangeData?.trend;
@@ -927,18 +991,26 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
                   let displayTrend = '--';
                   let colorClass = 'text-gray-400';
 
+                  if (SECURITY_INTELLIGENCE_V2_ENABLED && riskRangeData?.status !== 'available') {
+                    displayTrend = riskRangeData?.status === 'conflict' ? 'CONFLICT' : riskRangeData?.status === 'unavailable' ? 'UNAVAILABLE' : 'N/A';
+                  }
+
                   if (trend === 'BULLISH') {
                     displayTrend = 'Bullish';
-                    colorClass = '!text-emerald-600 dark:!text-emerald-400 font-bold';
+                    colorClass = '!text-emerald-600 dark:!text-emerald-400';
                   } else if (trend === 'BEARISH') {
                     displayTrend = 'Bearish';
-                    colorClass = '!text-red-600 dark:!text-red-400 font-bold';
+                    colorClass = '!text-red-600 dark:!text-red-400';
                   } else if (trend === 'NEUTRAL') {
                     displayTrend = 'Neutral';
                     colorClass = 'text-gray-500 dark:text-gray-400';
                   }
 
-                  return <span className={`data-signal text-[10px] ${colorClass}`}>{displayTrend}</span>;
+                  const arrow = { Bullish: '↑', Bearish: '↓', Neutral: '→' }[displayTrend];
+                  return <span className={`data-signal text-[10px] ${colorClass}`} style={{ fontWeight: 400 }} title={`${security.ticker} Trend: ${displayTrend}`}
+                    role={arrow ? 'img' : undefined} aria-label={arrow ? `${security.ticker} trend: ${displayTrend}` : undefined}>
+                    {arrow ? `Te ${arrow}` : displayTrend}
+                  </span>;
                 })()}
               </div>
               <div className="data-lrr-cell">
@@ -950,6 +1022,13 @@ const SecuritiesList = ({ isPortfolioOpen = false }) => {
                     if (lrr !== undefined && lrr !== null) {
                       const isPercentage = security.ticker.startsWith('UST');
                       return formatRiskLevel(lrr, isPercentage);
+                    }
+                    if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+                      return riskRangeData?.status === 'conflict'
+                        ? 'CONFLICT'
+                        : riskRangeData?.status === 'unavailable'
+                          ? 'UNAVAILABLE'
+                          : 'N/A';
                     }
                     return '--';
                   })()}

@@ -79,7 +79,7 @@ See [docs/IBKR_READ_ONLY_BOUNDARIES.md](../../docs/IBKR_READ_ONLY_BOUNDARIES.md)
 - `POST /historical`: body `{ "instrument", "range", "interval" }` — historical bars
 - `GET /portfolio/positions?account=`: open positions (cache-first when streaming)
 - `GET /portfolio/account-summary?account=`: net liquidation, cash, margins (cache-first)
-- `GET /portfolio/open-orders?account=`: read-only open orders (dev only; not exposed in dashboard UI)
+- `GET /portfolio/open-orders?account=`: fresh read-only snapshot of all broker-visible open orders across API clients, including stop triggers, remaining quantities and account/contract identity for the Analyst's dated stop-coverage check; returns no orders on an unavailable or incomplete refresh
 - `GET /portfolio/pnl?account=`: freshly subscribed native account PnL after a
   current socket round trip; it never derives a percentage from cached NLV
 

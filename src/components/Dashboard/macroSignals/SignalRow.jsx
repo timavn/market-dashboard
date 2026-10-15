@@ -1,6 +1,7 @@
 import RangeWidget from './RangeWidget';
 import SignalArrow from './TrendIcon';
 import { formatRiskRangePercent } from '../../../utils/riskRangePercents';
+import { formatResearchSourceDate, formatResearchTime } from '../../../utils/researchDateFormat';
 
 /** Returns true if spot price is in the outer thirds of the forecast range (action zones). */
 function isInActionZone(signal) {
@@ -22,6 +23,11 @@ function isOutOfRange(signal) {
 function SignalRow({ signal, active, onSelectSignal }) {
   const tone = signal.side === 'short' ? 'red' : signal.side === 'long' ? 'green' : 'neutral';
   const sideClass = signal.side === 'short' ? 'short' : signal.side === 'long' ? 'long' : 'neutral';
+  const trade = signal.tradeResearch;
+  const tradeTime = formatResearchTime(trade?.sourcePublishedAt);
+  const tradeDetail = trade ? [trade.sourceLabel || trade.source,
+    `${formatResearchSourceDate(trade.sourceDate)}${tradeTime !== '—' ? ` ${tradeTime} ET` : ''}`,
+    trade.signalProvenance?.sourceText, trade.sourceUrl].filter(Boolean).join(' · ') : undefined;
 
   const breakout = isOutOfRange(signal);
   const actionZone = !breakout && isInActionZone(signal);
@@ -56,8 +62,11 @@ function SignalRow({ signal, active, onSelectSignal }) {
           canonical={signal.canonical}
         />
       </div>
-      <div className="signal-cell-center">
-        <SignalArrow value={signal.trade} />
+      <div className="signal-cell-center" title={tradeDetail}>
+        {trade?.sourceUrl ? <a href={trade.sourceUrl} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
+          aria-label={`${signal.ticker} published Trade · ${tradeDetail}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+          <SignalArrow value={signal.trade} />
+        </a> : <SignalArrow value={signal.trade} />}
       </div>
       <div className="signal-cell-center">
         <SignalArrow value={signal.trend} />

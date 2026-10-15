@@ -1,14 +1,26 @@
 import sys
 import os
-import boto3
+from pathlib import Path
 
 # Add lambda directory to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../aws/lambda')))
 
-import csv_processor
 from decimal import Decimal
 
-def run_ingestion():
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / 'infra' / 'scripts'))
+from aws_profile_contract import (  # noqa: E402
+    ADMIN_PROFILE,
+    AwsProfileContractError,
+    pin_environment,
+    verified_session,
+)
+
+def run_ingestion(session):
+    import csv_processor
+
+    csv_processor.s3_client = session.client('s3')
+    csv_processor.dynamodb = session.resource('dynamodb')
     print("Starting manual ingestion...")
     
     # 1. Ingest Positions (12-30-2025 Statement)
@@ -70,6 +82,16 @@ def run_ingestion():
         print("History Reconstruction Failed.")
 
 if __name__ == '__main__':
-    # Ensure region is set
-    os.environ['AWS_REGION'] = 'us-west-1'
-    run_ingestion()
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Manually ingest legacy portfolio files with the verified admin profile.')
+    parser.add_argument('--admin-profile', required=True)
+    args = parser.parse_args()
+    if args.admin_profile != ADMIN_PROFILE:
+        parser.error(f'--admin-profile must be {ADMIN_PROFILE}')
+    try:
+        aws_session = verified_session(args.admin_profile, purpose='admin', region='us-west-1')
+    except AwsProfileContractError as error:
+        parser.error(f'{error.error_code}: {error.detail}')
+    pin_environment(args.admin_profile)
+    run_ingestion(aws_session)

@@ -1,0 +1,29 @@
+.pcv2-sizing-vol-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pcv2-vol-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.pcv2-vol-badge.is-limited {
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+}
+
+.pcv2-vol-badge.is-spike {
+  color: #991b1b;
+  background: #fee2e2;
+  border: 1px solid #ef4444;
+}

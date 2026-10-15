@@ -9,9 +9,18 @@ const REGION_GROUPS = [
   { id: 'asia', label: 'Asia', codes: ['HK', 'TYO'] },
 ];
 
+const HOME_TIMEZONE_CODE = 'LA';
+
 const isActiveStatus = (status) => ['open', 'pre-market', 'post-market'].includes(status);
 
 const formatLocalTime = (now, timezone) => format(utcToZonedTime(now, timezone), 'HH:mm');
+
+const formatLocalDate = (now, timezone) => format(utcToZonedTime(now, timezone), 'MMM d');
+
+const formatLocalTimezone = (now, timezone) => new Intl.DateTimeFormat('en-US', {
+  timeZone: timezone,
+  timeZoneName: 'short',
+}).formatToParts(now).find((part) => part.type === 'timeZoneName').value;
 
 const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
   const [now, setNow] = useState(() => new Date());
@@ -32,6 +41,9 @@ const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
           ...market,
           status,
           time: formatLocalTime(now, market.timezone),
+          date: formatLocalDate(now, market.timezone),
+          timezoneLabel: formatLocalTimezone(now, market.timezone),
+          isHome: market.code === HOME_TIMEZONE_CODE,
         };
       });
     return {
@@ -52,23 +64,20 @@ const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
             key={group.id}
             className={`global-session-region global-session-region--${group.id}${group.active ? ' is-active' : ''}`}
             aria-label={`${group.label} market clocks`}
+            style={{ '--market-count': group.markets.length }}
           >
-            <div className="global-session-region__heading">
-              <span>{group.label}</span>
-            </div>
-            <div
-              className="global-session-region__cities"
-              style={{ '--market-count': group.markets.length }}
-            >
+            <div className="global-session-region__cities">
               {group.markets.map((market) => (
                 <div
                   key={market.id}
-                  className={`global-session-city global-session-city--${market.status}`}
-                  aria-label={`${market.code} ${market.time}, ${market.status}`}
-                  title={`${market.name} · ${market.status.replace('-', ' ')}`}
+                  className={`global-session-city global-session-city--${market.status}${market.isHome ? ' global-session-city--home' : ''}`}
+                  aria-label={`${market.code} ${market.date} ${market.time} ${market.timezoneLabel}, ${market.status}${market.isHome ? ', home timezone' : ''}`}
+                  title={`${market.name} · ${market.date} ${market.time} ${market.timezoneLabel} · ${market.status.replace('-', ' ')}${market.isHome ? ' · home timezone' : ''}`}
                 >
-                  <span>{market.code}</span>
-                  <strong>{market.time}</strong>
+                  <span className="global-session-city__code">{market.code}</span>
+                  <time className="global-session-city__datetime" dateTime={now.toISOString()}>
+                    {market.date} {market.time} {market.timezoneLabel}
+                  </time>
                 </div>
               ))}
             </div>
@@ -79,5 +88,5 @@ const GlobalMarketDayCycleHeader = ({ compact = false, className = '' }) => {
   );
 };
 
-export { REGION_GROUPS, formatLocalTime, isActiveStatus };
+export { REGION_GROUPS, HOME_TIMEZONE_CODE, formatLocalTime, formatLocalDate, formatLocalTimezone, isActiveStatus };
 export default GlobalMarketDayCycleHeader;

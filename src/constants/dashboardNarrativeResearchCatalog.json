@@ -1,0 +1,20 @@
+[
+  {
+    "symbol": "CRB",
+    "sourceTicker": "CRB",
+    "sourceInstrument": "CRB Commodities Index",
+    "subjectPattern": "CRB (?:Commodities )?Index",
+    "currentStatementPattern": "(?:is (?:back to )?(?:signaling )?|remains |(?:is )?back to signaling )",
+    "performancePrefixPattern": "(?:(?:corrected|reflated|inflated|was (?:up|down)) (?:another )?[+−-]?\\d+(?:\\.\\d+)?% (?:last|this) (?:week|month) and )?"
+  },
+  {
+    "symbol": "ZC",
+    "sourceTicker": "CORN",
+    "sourceInstrument": "Corn (underlying commodity)",
+    "subjectPattern": "Corn",
+    "currentStatementPattern": "(?:is (?:back to )?(?:signaling )?|remains |(?:is )?back to signaling )",
+    "performancePrefixPattern": "(?:(?:corrected|reflated|inflated|was (?:up|down)) (?:another )?[+−-]?\\d+(?:\\.\\d+)?% (?:last|this) (?:week|month) and )?",
+    "basisLabel": "underlying",
+    "basisRelationship": "Published Corn commodity Trend; dashboard price is Corn futures."
+  }
+]

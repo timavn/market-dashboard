@@ -1,0 +1,33 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { createQuoteRequestScheduler } = require('./quoteRequestScheduler.cjs');
+const flush = () => new Promise(resolve => setImmediate(resolve));
+test('coalesces overlapping identities and bounds concurrent misses without cache sleeps', async () => {
+  const schedule = createQuoteRequestScheduler({ concurrency: 2 });
+  const release = [];
+  let calls = 0;
+  const task = () => { calls += 1; return new Promise(resolve => release.push(resolve)); };
+  const first = schedule('SPY:SMART', task);
+  const same = schedule('SPY:SMART', task);
+  const differentIdentity = schedule('SPY:ARCA', task);
+  const queued = schedule('QQQ:SMART', task);
+  assert.equal(first, same);
+  await flush();
+  assert.equal(calls, 2);
+  release[0](1);
+  await flush();
+  assert.equal(calls, 3);
+  release[1](2); release[2](3);
+  assert.deepEqual(await Promise.all([first, same, differentIdentity, queued]), [1, 1, 2, 3]);
+});
+test('a failed observation leaves its identity retryable and queue size bounded', async () => {
+  const schedule = createQuoteRequestScheduler({ concurrency: 1, maxPending: 1 });
+  let reject;
+  const first = schedule('SPY', () => new Promise((_, no) => { reject = no; }));
+  await assert.rejects(schedule('QQQ', async () => 2), /capacity/);
+  await flush();
+  reject(new Error('offline'));
+  await assert.rejects(first, /offline/);
+  await flush();
+  assert.equal(await schedule('SPY', async () => 3), 3);
+});

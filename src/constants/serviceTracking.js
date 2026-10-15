@@ -187,30 +187,6 @@ export const SERVICE_CONFIG = {
       costPerCall: 0,
       dataSource: 'DynamoDB queries',
       status: 'active'
-    },
-    hermesDirectorStatus: {
-      name: 'Hermes Director Status API',
-      endpoint: '/api/hermes/director/status',
-      description: 'Managing Director orchestration snapshot, worker health, and alerts',
-      updateFrequency: 'On load / On-demand',
-      updateFrequencyMs: null,
-      estimatedCallsPerDay: 48,
-      estimatedCallsPerMonth: 1440,
-      costPerCall: 0,
-      dataSource: 'DynamoDB (HermesAgentRuns/HermesAlerts) + workflow synthesis',
-      status: 'active'
-    },
-    hermesDirectorCommand: {
-      name: 'Hermes Director Command API',
-      endpoint: '/api/hermes/director/command',
-      description: 'Manual Managing Director commands and worker dispatch',
-      updateFrequency: 'User-driven',
-      updateFrequencyMs: null,
-      estimatedCallsPerDay: 6,
-      estimatedCallsPerMonth: 180,
-      costPerCall: 0,
-      dataSource: 'Express orchestration → Lambda/EventBridge/DynamoDB',
-      status: 'active'
     }
   },
 
@@ -327,61 +303,19 @@ export const SERVICE_CONFIG = {
       status: 'active',
       method: 'AWS Lambda + Gmail OAuth'
     },
-    hermesManagingDirector: {
-      name: 'The Managing Director',
-      type: 'orchestrator',
-      description: 'Human-facing control plane for worker status, summaries, and manual delegation',
-      schedule: 'On-demand via chat/dashboard',
+    analyst: {
+      name: 'The Analyst',
+      type: 'agent',
+      description: 'Cited research, portfolio reviews, and dashboard attention',
+      schedule: 'On demand and scheduled research checks',
       updateFrequency: 'User-driven',
-      estimatedRunsPerDay: 6,
-      estimatedRunsPerMonth: 180,
+      estimatedRunsPerDay: 0,
+      estimatedRunsPerMonth: 0,
       costPerRun: 0,
       costPerMonth: 0,
-      dataSource: 'Dashboard/API → DynamoDB',
+      dataSource: 'Verified research and account evidence',
       status: 'active',
-      method: 'Express orchestration layer'
-    },
-    hermesQuantAnalyst: {
-      name: 'Hermes Quant Analyst',
-      type: 'lambda',
-      description: 'Threshold, outlier, Hedgeye freshness, and anomaly scans',
-      schedule: 'Disabled until a secure dashboard target exists',
-      updateFrequency: 'Disabled',
-      estimatedRunsPerDay: 0,
-      estimatedRunsPerMonth: 0,
-      costPerRun: 0.0002,
-      costPerMonth: 0,
-      dataSource: 'Portfolio/Hedgeye data → DynamoDB alerts',
-      status: 'disabled',
-      method: 'AWS Lambda + EventBridge'
-    },
-    hermesQuantDeveloper: {
-      name: 'Hermes Quant Developer',
-      type: 'lambda',
-      description: 'Dashboard/API/workflow regression monitor',
-      schedule: 'Disabled until a secure dashboard target exists',
-      updateFrequency: 'Disabled',
-      estimatedRunsPerDay: 0,
-      estimatedRunsPerMonth: 0,
-      costPerRun: 0.0002,
-      costPerMonth: 0,
-      dataSource: 'HTTP health checks → DynamoDB alerts',
-      status: 'disabled',
-      method: 'AWS Lambda + EventBridge'
-    },
-    hermesSecurity: {
-      name: 'Hermes Security',
-      type: 'lambda',
-      description: 'Auth/config drift and suspicious failure monitor',
-      schedule: 'Disabled until a secure dashboard target exists',
-      updateFrequency: 'Disabled',
-      estimatedRunsPerDay: 0,
-      estimatedRunsPerMonth: 0,
-      costPerRun: 0.0002,
-      costPerMonth: 0,
-      dataSource: 'Infrastructure checks → DynamoDB alerts',
-      status: 'disabled',
-      method: 'AWS Lambda + EventBridge'
+      method: 'Hermes gateway and Analyst sidecar'
     },
     marketDataCollector: {
       name: 'Market Data Collector',

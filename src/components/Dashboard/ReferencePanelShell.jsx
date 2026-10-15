@@ -6,6 +6,7 @@ const ReferencePanelShell = ({
   title,
   subtitle,
   status,
+  statusIndicator = null,
   statusTone = 'neutral',
   onRefresh,
   refreshing = false,
@@ -17,6 +18,7 @@ const ReferencePanelShell = ({
       <div className="reference-panel__heading">
         <div className="reference-panel__title-row">
           <h1>{title}</h1>
+          {statusIndicator}
           {status && (
             <span className={`reference-panel__status reference-panel__status--${statusTone}`}>
               {status}

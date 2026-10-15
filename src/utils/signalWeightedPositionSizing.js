@@ -5,6 +5,7 @@
  * means 50 basis points. The module only returns read-only recommendations;
  * it has no order-routing side effects.
  */
+import { portfolioSizingPolicies } from '../constants/portfolioSizingPolicies.cjs';
 
 export const SIZING_CONSTANTS = Object.freeze({
   MIN_BETA: 0.5,
@@ -130,6 +131,37 @@ export function calculateBetaBand(
   };
 }
 
+/** A portfolio process policy does not change the instrument's security type. */
+export function resolveSizingPolicy(symbol) {
+  const key = String(symbol || '').trim().toUpperCase();
+  const policyId = portfolioSizingPolicies.symbols[key];
+  const policy = portfolioSizingPolicies.policies[policyId];
+  return policy ? { ...policy, asOf: portfolioSizingPolicies.asOf, authority: portfolioSizingPolicies.authority } : null;
+}
+
+/** Resolve the policy band before the separate ATR maximum-position cap. */
+export function calculateSizingBand({ symbol, beta } = {}) {
+  const policy = resolveSizingPolicy(symbol);
+  if (!policy) {
+    const band = calculateBetaBand(beta);
+    return { ...band, maxWeight: band.betaMaxWeight, requiresBeta: true, policy: null };
+  }
+  return {
+    available: true,
+    reason: null,
+    rawBeta: null,
+    effectiveBeta: null,
+    rawMinWeight: policy.minWeight,
+    rawMaxWeight: policy.maxWeight,
+    minWeight: policy.minWeight,
+    maxWeight: policy.maxWeight,
+    betaMaxWeight: null,
+    requiresBeta: policy.requiresBeta,
+    policy,
+    unit: 'percentage-points',
+  };
+}
+
 function hasSource(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -158,11 +190,12 @@ function validateDatedMetric(metric, {
 /** Required research inputs must be attributable before an executable output is allowed. */
 export function validateResearchProvenance(input = {}) {
   const provenance = input.provenance || {};
+  const band = calculateSizingBand({ symbol: input.symbol || input.instrument?.symbol, beta: input.beta });
   const blockers = [
-    ...validateDatedMetric(input.beta, {
+    ...(band.requiresBeta ? validateDatedMetric(input.beta, {
       prefix: 'BETA',
       minimumObservations: SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS,
-    }),
+    }) : []),
     ...validateDatedMetric(input.atr14, {
       prefix: 'ATR',
       minimumObservations: SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS,
@@ -541,7 +574,7 @@ function unique(values) {
  * The function never transmits orders and never substitutes non-live quote data.
  */
 export function calculateSizingDecision(input = {}) {
-  const betaBand = calculateBetaBand(input.beta);
+  const sizingBand = calculateSizingBand({ symbol: input.symbol || input.instrument?.symbol, beta: input.beta });
   const atrRiskCap = calculateAtrRiskCap({
     atr14: input.atr14,
     spot: input.spot,
@@ -563,13 +596,13 @@ export function calculateSizingDecision(input = {}) {
   const streaks = calculateDirectionalStreaks(input.riskRangeHistory);
   const record = calculateRecordSignal({ hrr: input.hrr, lrr: input.lrr, priorAth, priorAtl });
   const conviction = calculateConviction({ bias, range, streaks, record });
-  const minWeight = betaBand.minWeight;
-  const betaMaxWeight = betaBand.betaMaxWeight;
-  const maxWeight = betaBand.available
-    ? Math.min(betaMaxWeight, atrRiskCap.available ? atrRiskCap.capWeight : betaMaxWeight)
+  const minWeight = sizingBand.minWeight;
+  const betaMaxWeight = sizingBand.betaMaxWeight;
+  const maxWeight = sizingBand.available
+    ? Math.min(sizingBand.maxWeight, atrRiskCap.available ? atrRiskCap.capWeight : sizingBand.maxWeight)
     : null;
   const operationalMaxWeight = maxWeight == null ? null : roundWeightDown(maxWeight);
-  const riskBlocked = betaBand.available && atrRiskCap.available && atrRiskCap.capWeight < minWeight;
+  const riskBlocked = sizingBand.available && atrRiskCap.available && atrRiskCap.capWeight < minWeight;
   const targetWeight = riskBlocked ? null : calculateTargetWeight({
     minWeight,
     maxWeight,
@@ -592,7 +625,7 @@ export function calculateSizingDecision(input = {}) {
   let researchAction = 'WATCH';
   let recommendedWeight = null;
 
-  if (!betaBand.available) researchReasons.push(betaBand.reason);
+  if (!sizingBand.available) researchReasons.push(sizingBand.reason);
   if (!bias) researchReasons.push('BIAS_UNAVAILABLE');
   if (!signalDataComplete) researchReasons.push('SIGNAL_DATA_INCOMPLETE');
   if (!range.available) researchReasons.push(range.reason);
@@ -609,11 +642,11 @@ export function calculateSizingDecision(input = {}) {
     recommendedWeight = positionExists ? 0 : null;
   } else if (positionExists && tradeAligned && trendBroken) {
     lifecycleState = 'BENCH';
-    recommendedWeight = betaBand.available ? Math.min(positionWeight, minWeight) : null;
-    researchAction = betaBand.available && positionWeight > minWeight ? 'REDUCE_TO_BENCH' : 'HOLD';
+    recommendedWeight = sizingBand.available ? Math.min(positionWeight, minWeight) : null;
+    researchAction = sizingBand.available && positionWeight > minWeight ? 'REDUCE_TO_BENCH' : 'HOLD';
     researchReasons.push('TREND_BREAK_TRADE_ALIGNED');
-    if (betaBand.available && positionWeight < minWeight) researchReasons.push('BELOW_MIN_NO_RISK_INCREASE');
-  } else if (positionExists && betaBand.available && tradeAligned && trendAligned && range.available) {
+    if (sizingBand.available && positionWeight < minWeight) researchReasons.push('BELOW_MIN_NO_RISK_INCREASE');
+  } else if (positionExists && sizingBand.available && tradeAligned && trendAligned && range.available) {
     lifecycleState = 'ACTIVE';
     recommendedWeight = positionWeight;
     researchAction = 'HOLD';
@@ -637,7 +670,7 @@ export function calculateSizingDecision(input = {}) {
         researchReasons.push(range.inRange ? 'WRONG_RANGE_HALF' : 'OUT_OF_RANGE');
       }
     }
-  } else if (!positionExists && betaBand.available && tradeAligned && trendAligned && range.favorableHalf) {
+  } else if (!positionExists && sizingBand.available && tradeAligned && trendAligned && range.favorableHalf) {
     lifecycleState = 'ACTIVE';
     researchAction = 'OPEN';
     recommendedWeight = minWeight;
@@ -653,7 +686,7 @@ export function calculateSizingDecision(input = {}) {
 
   const researchReady = !['WATCH'].includes(lifecycleState) && recommendedWeight != null;
   const research = {
-    available: betaBand.available && signalsAvailable,
+    available: sizingBand.available && signalsAvailable,
     lifecycleState,
     action: researchAction,
     targetWeight,
@@ -734,10 +767,11 @@ export function calculateSizingDecision(input = {}) {
   };
 
   return {
-    rawBeta: betaBand.rawBeta,
-    effectiveBeta: betaBand.effectiveBeta,
-    rawMinWeight: betaBand.rawMinWeight,
-    rawMaxWeight: betaBand.rawMaxWeight,
+    rawBeta: sizingBand.rawBeta,
+    effectiveBeta: sizingBand.effectiveBeta,
+    rawMinWeight: sizingBand.rawMinWeight,
+    rawMaxWeight: sizingBand.rawMaxWeight,
+    sizingBand,
     minWeight,
     betaMaxWeight,
     atrRiskCap,

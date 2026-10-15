@@ -1,4 +1,6 @@
 import {
+  EXPOSURE_DIMENSIONS,
+  HEDGEYE_EXPOSURE_LIST,
   getExposureDefinition,
   resolveSecurityExposureProfile,
 } from '../constants/quadExposureCatalog';
@@ -86,4 +88,39 @@ export const buildPortfolioFactorExposure = (holdings, totalValue, dimension) =>
     rows,
     coverage: { classifiedPct, unclassifiedPct },
   };
+};
+
+// Show only Hedgeye worksheet factors, including factors with no position.
+// Categories retain the existing attribution rule; rows across categories overlap.
+export const buildPortfolioQuadExposure = (holdings, nav, available, unavailableHoldings = []) => {
+  const canCalculate = available && Array.isArray(holdings) && finiteNumber(nav) > 0;
+  const totals = new Map();
+  if (canCalculate) {
+    Object.keys(EXPOSURE_DIMENSIONS).forEach(dimension => {
+      buildPortfolioFactorExposure(holdings, nav, dimension).rows.forEach(row => {
+        totals.set(row.id, row);
+      });
+    });
+  }
+  const valuesFor = row => ({
+    longPct: canCalculate ? row?.longPct || 0 : null,
+    shortPct: canCalculate ? row?.shortPct || 0 : null,
+    netPct: canCalculate ? row?.netPct || 0 : null,
+    grossPct: canCalculate ? row?.grossPct || 0 : null,
+  });
+  const rows = HEDGEYE_EXPOSURE_LIST.map(exposure => ({
+    ...exposure,
+    ...valuesFor(totals.get(exposure.id)),
+  }));
+  const incompleteFactors = new Map();
+  unavailableHoldings.forEach(holding => {
+    const profile = resolveSecurityExposureProfile(holding);
+    const ids = profile.classificationStatus === 'reviewed'
+      ? [profile.primaryExposureId, ...(profile.secondaryExposureIds || [])] : [];
+    ids.forEach(id => incompleteFactors.set(id, [...(incompleteFactors.get(id) || []), holding.symbol]));
+  });
+  return rows.map(row => incompleteFactors.has(row.id) ? {
+    ...row, longPct: null, shortPct: null, netPct: null, grossPct: null,
+    unavailableReason: `Missing verified valuation for ${[...new Set(incompleteFactors.get(row.id))].join(', ')}`,
+  } : row);
 };

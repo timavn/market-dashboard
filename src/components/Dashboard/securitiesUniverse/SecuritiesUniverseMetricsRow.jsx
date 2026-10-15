@@ -1,5 +1,6 @@
 import React from 'react';
 import RiskRangeCell from './RiskRangeCell';
+import DashboardResearchLabel from '../DashboardResearchLabel';
 import { buildTradingDays } from '../../../utils/enrichSecurity';
 import {
   formatSecurityPrice,
@@ -25,21 +26,27 @@ function SecuritiesUniverseMetricsRow({ security, rowIndex = 0, tradingDays }) {
 
   return (
     <tr
-      className="su-metrics-row"
+      className={`su-metrics-row ${security.researchHealth && security.researchHealth !== 'ready' ? 'su-research-attention' : ''}`}
+      title={security.researchHealth && security.researchHealth !== 'ready'
+        ? `${security.ticker} current research is incomplete or unavailable.`
+        : undefined}
       style={{
         borderBottom: '1px solid #e8e2d5',
-        backgroundColor: rowIndex % 2 === 0 ? 'transparent' : '#f9fafb',
+        backgroundColor: security.researchHealth && security.researchHealth !== 'ready'
+          ? '#fef2f2'
+          : rowIndex % 2 === 0 ? 'transparent' : '#f9fafb',
       }}
     >
       <td style={{ padding: '2px 3px', fontWeight: '600', borderRight: '1px solid #e5e7eb', textAlign: 'center' }} className="dark:text-white">
                         {security.ticker}
                       </td>
-                      <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 600, borderRight: '1px solid #e5e7eb' }} className="dark:text-gray-300">
-                        <span style={{
+                      <td style={{ padding: '2px 3px', textAlign: 'center', fontWeight: 400, borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }} className="dark:text-gray-300">
+                        <DashboardResearchLabel label={security.ticker} reading={security.tickResearch} showName={false} />
+                        <span style={{ marginLeft: security.tickResearch ? 3 : 0,
                           color: security.bias === 'BULLISH' ? '#059669' :
                             security.bias === 'BEARISH' ? '#dc2626' : '#6b7280'
                         }}>
-                          {security.bias}
+                          {({ BULLISH: 'Te ↑', BEARISH: 'Te ↓', NEUTRAL: 'Te →' })[security.bias] || security.bias || '—'}
                         </span>
                       </td>
                       <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }} className="dark:text-gray-300">
@@ -112,7 +119,6 @@ function SecuritiesUniverseMetricsRow({ security, rowIndex = 0, tradingDays }) {
                       <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }} className="dark:text-gray-300">
                         {security.beta}
                       </td>
-
                       <td style={{ padding: '2px 3px', textAlign: 'center', borderRight: '1px solid #e5e7eb' }}>
                         {security.quadRanking && security.quadRanking !== '--' ? (
                           <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'center' }}>

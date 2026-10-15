@@ -2,8 +2,10 @@ import expectedValuesData from './expectedValuesData';
 import { SECURITIES_LIST } from './securitiesList';
 import {
   CONID_SECURITY_PROFILE_OVERRIDES,
+  EXPOSURE_CLASSIFICATION_VERSION,
   EXPOSURE_DEFINITIONS,
   EXPOSURE_LIST,
+  HEDGEYE_EXPOSURE_LIST,
   LIVE_BOOK_SECURITY_PROFILES,
   QUAD_PLAYBOOK,
   SECURITY_EXPOSURE_PROFILES,
@@ -21,6 +23,15 @@ const CURRENT_LIVE_BOOK_SYMBOLS = [
   'IAK', 'EPHE', 'XLRE', 'IDX', 'PSKY', 'CRWD', 'KTB', 'EQRR', 'IPAY',
 ];
 
+const SEPTEMBER_BOOK_SYMBOLS = [
+  'CLOZ', 'YCL', 'SNOW', 'FRPT', 'DBMF', 'QAT', 'XLU', 'RXL', 'UNG', 'AMZN',
+  'JOET', 'SAIA', 'COLO', 'PTF', 'LLYX', 'FXH', 'JPM', 'SUJA', 'EWP', 'TXG',
+  'PRN', 'GDX', 'MSFT', 'R', 'IGV', 'EZA', 'TLT', 'ZROZ', 'UGL', 'PFSI',
+  'RDNT', 'TTD', 'ENZL', 'WEAT', 'BRZU', 'IBIT', 'CSX', 'WMT', 'MSOS', 'UNHG',
+  'XBI', 'AMDY', 'JETS', 'PCAR', 'HYG', 'JOJO', 'SRUUF', 'EXPGY', 'PBD', 'MICC',
+  'DKS', 'CRWD', 'LVHI', 'FAS', 'OIH', 'IPAY', 'EMIF', 'SJM',
+];
+
 const EXPECTED_VALUE_FIELDS = {
   assetClasses: ['bestAssetClasses', 'worstAssetClasses'],
   equitySectors: ['bestEquitySectors', 'worstEquitySectors'],
@@ -29,6 +40,14 @@ const EXPECTED_VALUE_FIELDS = {
 };
 
 describe('QUAD_PLAYBOOK', () => {
+  test('limits the Hedgeye table catalog to exactly the worksheet labels', () => {
+    const worksheetLabels = new Set(expectedValuesData.quadData.flatMap(quad => (
+      Object.values(EXPECTED_VALUE_FIELDS).flatMap(fields => fields.flatMap(field => quad[field].split(', ')))
+    )));
+    expect(HEDGEYE_EXPOSURE_LIST).toHaveLength(45);
+    expect(new Set(HEDGEYE_EXPOSURE_LIST.map(exposure => exposure.label))).toEqual(worksheetLabels);
+  });
+
   test('preserves every ordered best/worst list from expectedValuesData', () => {
     expectedValuesData.quadData.forEach((expectedQuad, index) => {
       const quad = QUAD_PLAYBOOK[`q${index + 1}`];
@@ -53,7 +72,8 @@ describe('QUAD_PLAYBOOK', () => {
       ['q1', 'q2', 'q3', 'q4'].forEach((quadKey) => {
         const fit = definition.quadFits[quadKey];
         expect(['best', 'worst', 'not-listed']).toContain(fit.status);
-        expect(fit.rank).toEqual(fit.status === 'not-listed' ? null : expect.any(Number));
+        const rankedValue = expect.any(Number);
+        expect(fit.rank).toEqual(fit.status === 'not-listed' ? null : rankedValue);
         expect(fit.rank === null || fit.rank > 0).toBe(true);
       });
     });
@@ -88,7 +108,7 @@ describe('reviewed security exposure profiles', () => {
       symbol,
       classificationStatus: 'reviewed',
       classificationSource: 'curated',
-      classificationVersion: '2026-07-26',
+      classificationVersion: EXPOSURE_CLASSIFICATION_VERSION,
     }));
     expect(EXPOSURE_DEFINITIONS[profile.primaryExposureId]).toBeDefined();
     expect(new Set(profile.secondaryExposureIds).size).toBe(profile.secondaryExposureIds.length);
@@ -97,6 +117,15 @@ describe('reviewed security exposure profiles', () => {
       expect(EXPOSURE_DEFINITIONS[id]).toBeDefined();
     });
   };
+
+  test('covers every September portfolio security with a reviewed primary exposure', () => {
+    expect(SEPTEMBER_BOOK_SYMBOLS).toHaveLength(58);
+    SEPTEMBER_BOOK_SYMBOLS.forEach(symbol => {
+      const profile = resolveSecurityExposureProfile(symbol);
+      expectValidReviewedProfile(profile, symbol);
+      expect(getExposureDefinition(profile.primaryExposureId)).not.toBeNull();
+    });
+  });
 
   test('covers all 119 securities in the dashboard universe', () => {
     expect(SECURITIES_LIST).toHaveLength(119);
@@ -187,7 +216,7 @@ describe('reviewed security exposure profiles', () => {
       secondaryExposureIds: [],
       classificationStatus: 'unclassified',
       classificationSource: 'unmapped',
-      classificationVersion: '2026-07-26',
+      classificationVersion: EXPOSURE_CLASSIFICATION_VERSION,
     });
   });
 });

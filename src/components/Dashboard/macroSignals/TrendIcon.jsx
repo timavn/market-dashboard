@@ -7,11 +7,13 @@ function normalizeSignalArrowValue(value) {
   if (value === 'bearish' || value === 'bear' || value === 'Sell' || value === 'Short') {
     return 'bearish';
   }
-  return 'neutral';
+  return value === 'neutral' || value === 'Neutral' || value === 'NEUTRAL' ? 'neutral' : null;
 }
 
 function SignalArrow({ value }) {
   const normalized = normalizeSignalArrowValue(value);
+
+  if (!normalized) return <span className="signal-arrow-unavailable" aria-label="Unavailable">—</span>;
 
   if (normalized === 'bullish') {
     return <ArrowUp className="signal-arrow signal-arrow-bullish" />;

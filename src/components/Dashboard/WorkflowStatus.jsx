@@ -3,12 +3,15 @@ import axios from 'axios';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
 import { getIbkrPortfolioStatusDot } from '../../utils/ibkrConnectionStatus';
-import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
+import PersistentSurface, { useSurfaceActivity } from '../common/PersistentSurface';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
 import LoadingIndicator from '../common/LoadingIndicator';
+import ResourceDataStatusChip from './ResourceDataStatusChip';
 import './AnalyticsDailyBrief.css';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const ANALYST_SHADOW_MODE = process.env.REACT_APP_ANALYST_SHADOW_MODE === 'true';
 
 const EVENT_PRIORITY = {
   action_signal: 0,
@@ -363,22 +366,18 @@ function OperationsView({ onBack }) {
   );
 }
 
-const WorkflowStatus = ({ portfolioData = null, connection = null, forceRefresh = false }) => {
+const WorkflowStatus = ({ portfolioData = null, connection = null, refreshToken = 0 }) => {
+  const active = useSurfaceActivity();
   const { theme } = useTheme();
-  const [brief, setBrief] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [lastUpdated, setLastUpdated] = useState(null);
   const [selection, setSelection] = useState(null);
   const [showOperations, setShowOperations] = useState(false);
-  const forceRefreshRef = useRef(forceRefresh);
+  const forceRefreshRef = useRef(false);
+  const previousRefreshTokenRef = useRef(refreshToken);
+  const pendingRefreshTokenRef = useRef(false);
 
   const fetchBrief = useCallback(async () => {
-    setLoading(true);
-    setError('');
     try {
       const refresh = forceRefreshRef.current;
-      forceRefreshRef.current = false;
       const response = await axios.get(
         `${BACKEND_URL}/api/analytics/daily-brief${refresh ? '?refresh=1' : ''}`,
       );
@@ -386,28 +385,54 @@ const WorkflowStatus = ({ portfolioData = null, connection = null, forceRefresh 
       if (cacheState === 'stale' && Array.isArray(response.data?.events) && response.data.events.length > 0) {
         throw new Error('Stale analytics response contained actionable events.');
       }
-      setBrief(response.data);
-      setLastUpdated(new Date());
-    } catch (requestError) {
-      setBrief(null);
-      setError(requestError?.response?.data?.error || requestError.message || 'Unable to load verified analytics.');
+      return {
+        ...response.data,
+        resourceObservedAt: response.data?.generatedAt
+          || response.data?.asOf
+          || response.data?.date
+          || new Date().toISOString(),
+      };
     } finally {
-      setLoading(false);
+      forceRefreshRef.current = false;
     }
   }, []);
 
-  useEffect(() => startVisibilityAwarePolling({
-    poll: fetchBrief,
-    intervalMs: REFRESH_INTERVAL_MS,
-    pollOnStart: true,
-  }), [fetchBrief]);
+  const briefResource = useDashboardResource('workflow', {}, {
+    fetcher: fetchBrief,
+    validate: (value) => (
+      value && typeof value === 'object' && Array.isArray(value.events) ? value : null
+    ),
+    getObservedAt: (value) => value.resourceObservedAt,
+    pollIntervalMs: REFRESH_INTERVAL_MS,
+    active,
+    refreshOnActivate: false,
+  });
+  const brief = briefResource.data;
+  const loading = briefResource.initialLoading && !brief;
+  const error = briefResource.error?.response?.data?.error
+    || briefResource.error?.message
+    || '';
+  const lastUpdated = briefResource.observedAt;
+
+  useEffect(() => {
+    if (refreshToken !== previousRefreshTokenRef.current) {
+      previousRefreshTokenRef.current = refreshToken;
+      pendingRefreshTokenRef.current = true;
+    }
+    if (!active || !pendingRefreshTokenRef.current || briefResource.refreshing) return;
+    pendingRefreshTokenRef.current = false;
+    forceRefreshRef.current = true;
+    briefResource.refresh();
+  }, [active, briefResource, refreshToken]);
 
   const portfolioStatus = useMemo(() => getIbkrPortfolioStatusDot({
     connection,
     portfolioData,
     loading: false,
   }), [connection, portfolioData]);
-  const portfolioMatchingAvailable = portfolioStatus.status === 'active';
+  const portfolioMatchingAvailable = portfolioStatus.status === 'active'
+    && briefResource.availability === 'reference'
+    && !error;
 
   const liveHoldings = useMemo(() => {
     if (!portfolioMatchingAvailable) return new Map();
@@ -434,10 +459,10 @@ const WorkflowStatus = ({ portfolioData = null, connection = null, forceRefresh 
     }).sort((a, b) => a.priority - b.priority || a.ticker.localeCompare(b.ticker));
   }, [brief?.events, liveHoldings]);
 
-  if (showOperations) return <OperationsView onBack={() => setShowOperations(false)} />;
-
   return (
-    <div className={`adb-shell ${theme === 'dark' ? 'adb-shell--dark' : ''}`}>
+    <>
+      <PersistentSurface active={!showOperations} eager>
+        <div className={`adb-shell ${theme === 'dark' ? 'adb-shell--dark' : ''}`}>
       <div className="adb-brief-header">
         <div>
           <span className="adb-eyebrow">Daily decision brief</span>
@@ -449,17 +474,23 @@ const WorkflowStatus = ({ portfolioData = null, connection = null, forceRefresh 
             {TRUST_LABELS[brief.trust.status] || brief.trust.status}
           </span>
         )}
+        <ResourceDataStatusChip resource={briefResource} context="Analytics daily brief" />
       </div>
 
       {loading && !brief ? (
         <LoadingIndicator label="Loading verified changes…" size="sm" centered />
-      ) : error ? (
+      ) : !brief ? (
         <div className="adb-state adb-state--error">
           <strong>Verified analytics unavailable</strong>
           <span>{error}</span>
         </div>
       ) : brief ? (
         <>
+          {error && (
+            <div className="adb-state adb-state--muted" role="status">
+              Refresh delayed. Showing the last dated research brief; live portfolio matching is disabled.
+            </div>
+          )}
           <div className="adb-trust-strip">
             <div>
               <span>Research</span>
@@ -573,13 +604,20 @@ const WorkflowStatus = ({ portfolioData = null, connection = null, forceRefresh 
 
           <div className="adb-footer">
             <span>Research snapshots are dated references; no prices or executions are inferred here.</span>
-            <button type="button" className="adb-text-button" onClick={() => setShowOperations(true)}>Open operations</button>
+            {ANALYST_SHADOW_MODE && (
+              <button type="button" className="adb-text-button" onClick={() => setShowOperations(true)}>Open operations</button>
+            )}
           </div>
         </>
       ) : null}
 
-      {selection && <SourceInspector selection={selection} onClose={() => setSelection(null)} />}
-    </div>
+          {selection && <SourceInspector selection={selection} onClose={() => setSelection(null)} />}
+        </div>
+      </PersistentSurface>
+      <PersistentSurface active={showOperations}>
+        <OperationsView onBack={() => setShowOperations(false)} />
+      </PersistentSurface>
+    </>
   );
 };
 

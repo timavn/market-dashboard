@@ -1,0 +1,71 @@
+.pcv2-intel-span-3 {
+  grid-column: span 3;
+}
+
+.pcv2-intel-header-button {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.pcv2-intel-header-button:hover {
+  color: var(--pcv2-blue);
+}
+
+.pcv2-intel-header-button:focus-visible {
+  outline: 1px solid var(--pcv2-blue);
+  outline-offset: 1px;
+}
+
+.pcv2-intel-quad-order {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.pcv2-intel-quad {
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 500;
+  border-radius: 3px;
+}
+
+.pcv2-intel-quad.is-q1 {
+  background: var(--dashboard-quad-1);
+}
+
+.pcv2-intel-quad.is-q2 {
+  background: var(--dashboard-quad-2);
+}
+
+.pcv2-intel-quad.is-q3 {
+  color: #2b2b2b;
+  background: var(--dashboard-quad-3);
+}
+
+.pcv2-intel-quad.is-q4 {
+  background: var(--dashboard-quad-4);
+}
+
+.pcv2-intel-quad-arrow {
+  color: #7c899e;
+  font-size: 9px;
+  font-weight: 500;
+}

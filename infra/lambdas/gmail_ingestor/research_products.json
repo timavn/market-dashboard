@@ -1,6 +1,11 @@
 {
   "schemaVersion": 1,
   "marketTimeZone": "America/New_York",
+  "defaultDashboardConsumer": {
+    "kind": "snapshot",
+    "pathTemplate": "/api/hedgeye/snapshot/{product}",
+    "label": "Research view"
+  },
     "stages": [
         "received",
         "parsed",
@@ -11,7 +16,7 @@
         "non_empty": "The recognized publication must retain non-empty searchable content.",
         "primary_risk_ranges": "At least one row must contain a ticker, TREND, LRR, and HRR.",
         "supplemental_risk_ranges": "At least one row must contain a ticker, supplemental TREND, LRR, and HRR.",
-        "published_trade_signals": "At least one structured security row must contain the tracker's published Trade signal.",
+        "published_tracker_rows": "At least one structured security row must contain the tracker's published Trend column; Trade requires independent explicit evidence.",
         "entity_rows": "At least one valid ticker/entity row or structured addition/removal must be retained.",
         "portfolio_rankings": "At least one Portfolio Solutions row must contain a valid ticker and rank.",
         "signal_strength_membership": "At least one valid security must be present in the full Signal Strength membership.",
@@ -20,9 +25,24 @@
     },
   "products": [
     {
+      "id": "hedgai-signals",
+      "label": "HedgAI Signals",
+      "dashboardConsumer": { "kind": "published-book", "path": "/api/research/hedgai", "label": "Tick research" },
+      "cadence": "event_driven",
+      "matchTerms": ["hedgai signals |"],
+      "parserModes": ["html"],
+      "parsers": {"html": "hedgeye_html_dispatch"},
+      "validationRule": "hedgai_publication",
+      "authorities": {"trade": false, "trend": false, "riskRange": false, "supplementalRiskRange": false}
+    },
+    {
       "id": "risk-ranges",
+      "dashboardConsumer": { "kind": "risk-range", "path": "/api/risk-ranges?envelope=1", "label": "Risk Range views" },
       "label": "Risk Ranges",
       "cadence": "market_day_0800",
+      "deadlineHourET": 8,
+      "deadlineMinuteET": 0,
+      "graceMinutes": 15,
       "matchTerms": [
         "risk range",
         "risk-range",
@@ -108,10 +128,10 @@
                 "html": "hedgeye_html_dispatch",
                 "pdf": "_extract_bitcoin_tracker_with_pdf_pages"
             },
-            "validationRule": "published_trade_signals",
+            "validationRule": "published_tracker_rows",
       "authorities": {
-        "trade": true,
-        "trend": false,
+        "trade": false,
+        "trend": true,
         "riskRange": false,
         "supplementalRiskRange": false
       }
@@ -156,10 +176,10 @@
                 "html": "hedgeye_html_dispatch",
                 "pdf": "extract_momo_tracker"
             },
-            "validationRule": "published_trade_signals",
+            "validationRule": "published_tracker_rows",
       "authorities": {
-        "trade": true,
-        "trend": false,
+        "trade": false,
+        "trend": true,
         "riskRange": false,
         "supplementalRiskRange": false
       }
@@ -190,6 +210,7 @@
     },
     {
       "id": "real-time-alert",
+      "dashboardConsumer": { "kind": "readiness", "checkId": "research.rta", "label": "Real-Time Alerts positions" },
       "label": "Real-Time Alerts",
       "cadence": "event_driven",
       "matchTerms": [
@@ -199,10 +220,32 @@
             "parserModes": [
                 "html"
             ],
-            "parsers": {
-                "html": "hedgeye_html_dispatch"
-            },
-            "validationRule": "entity_rows",
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "entity_rows",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "top-3-things",
+      "label": "Top 3 Things",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "top 3 things",
+        "top three things"
+      ],
+      "parserModes": [
+        "html"
+      ],
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "non_empty",
       "authorities": {
         "trade": false,
         "trend": false,
@@ -304,9 +347,36 @@
       }
     },
     {
+      "id": "inflation-nowcast",
+      "label": "Monthly Inflation Nowcast",
+      "dashboardConsumer": {
+        "kind": "published-book",
+        "path": "/api/hedgeye/inflation-nowcast/history",
+        "label": "Inflation nowcast"
+      },
+      "cadence": "event_driven",
+      "matchTerms": [
+        "monthly inflation nowcast"
+      ],
+      "parserModes": [
+        "html"
+      ],
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "non_empty",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
       "id": "cftc-positioning",
       "label": "CFTC Positioning",
       "cadence": "weekly",
+      "publicationDateBasis": "reporting-week",
       "matchTerms": [
         "cftc",
         "positioning"
@@ -329,6 +399,7 @@
     },
     {
       "id": "etf-pro",
+      "dashboardConsumer": { "kind": "readiness", "checkId": "research.etf-pro", "label": "ETF Pro positions" },
       "label": "ETF Pro",
       "cadence": "event_driven",
       "matchTerms": [
@@ -365,6 +436,12 @@
                 "html": "hedgeye_html_dispatch"
             },
             "validationRule": "entity_rows",
+      "normalizedFields": [
+        "side",
+        "bias",
+        "previousClose",
+        "riskRange"
+      ],
       "authorities": {
         "trade": false,
         "trend": false,

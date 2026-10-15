@@ -91,7 +91,6 @@ describe('WorkflowStatus Analytics Cards', () => {
 
         test('always-show cards should render even with empty data', () => {
             ALWAYS_SHOW_CARDS.forEach(key => {
-                const diff = mockChangelogData[key];
                 const alwaysShow = ALWAYS_SHOW_CARDS.includes(key);
                 expect(alwaysShow).toBe(true);
                 // Card should render because alwaysShow is true
@@ -108,12 +107,7 @@ describe('WorkflowStatus Analytics Cards', () => {
                     (diff.trendChanges && diff.trendChanges.length > 0)
                 );
 
-                if (key === 'risk-ranges') {
-                    expect(hasData).toBe(true); // Has trendChanges and added
-                }
-                if (key === 'early-look') {
-                    expect(hasData).toBe(true); // Has removed
-                }
+                expect(hasData).toBe(true);
             });
         });
     });
@@ -156,6 +150,3 @@ describe('WorkflowStatus Analytics Cards', () => {
         });
     });
 });
-
-// Export for use in test runner
-module.exports = { describe, test, expect };

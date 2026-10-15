@@ -20,32 +20,29 @@ if (process.env.MARKET_DASHBOARD_AWS_PROFILE_LOCKED === 'true') {
 }
 const express = require('express');
 const cors = require('cors');
+const { createApiCorsOptions } = require('./src/services/api/corsConfig.cjs');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
-const AWS = require('aws-sdk/global');
-const S3 = require('aws-sdk/clients/s3');
-const DynamoDB = require('aws-sdk/clients/dynamodb');
-const Lambda = require('aws-sdk/clients/lambda');
-const SES = require('aws-sdk/clients/ses');
-const CloudWatch = require('aws-sdk/clients/cloudwatch');
+const { AWS, S3, DynamoDB, Lambda, SES, CloudWatch } = require('./src/services/aws/clients.cjs');
+const { readAllDynamoItems } = require('./src/services/data/dynamoPagination.cjs');
+const { createQuoteRequestScheduler } = require('./src/services/providers/quoteRequestScheduler.cjs');
+const scheduleQuoteFetch = createQuoteRequestScheduler();
+const { createLocalTrustMiddleware, validateLocalRequest, rejectWebSocketUpgrade, createMessageBudget } = require('./src/services/security/localTrust.cjs');
+const analystRuntimeGate = require('./src/services/analyst/analystRuntimeGate.cjs').getAnalystRuntimeGate();
 const axios = require('axios');
 const SERVICE_MANIFEST = require('./ops/services.json');
 const AWS_RESOURCE_DEFAULTS = SERVICE_MANIFEST.aws?.resources || {};
 const GMAIL_SERVICE_DEFINITION = (SERVICE_MANIFEST.services || [])
   .find((service) => service.id === 'gmail.ingestion');
-const {
-  DEFAULT_CACHE_PATH,
-  DEFAULT_CALIBRATION_REPORT_PATH,
-  DEFAULT_MARKET_STRUCTURE_TABLE,
-  MARKET_STRUCTURE_SERIES_ID,
-  buildMarketShareVolumeResponse,
-  normalizeMarketStructureRecord,
-  sortRecordsDescending
-} = require('./src/utils/marketStructureVolume.cjs');
-const {
-  buildHedgeyeVolumeSnapshotResponse
-} = require('./src/utils/hedgeyeVolumeSnapshot.cjs');
+const { createExchangeVolumeService } = require('./src/services/exchangeVolumeService.cjs');
+const { createExUsVolumeService } = require('./src/services/exUsVolumeService.cjs');
+const { createRegionalVolumeService } = require('./src/services/regionalVolumeService.cjs');
+const exchangeVolumeService = createRegionalVolumeService({
+  usService: createExchangeVolumeService(),
+  exUsService: createExUsVolumeService(),
+});
+const { buildMomoTrackerCsvRows } = require('./src/utils/momoTrackerCsv.cjs');
 const { determineEtfProSnapshotDate } = require('./src/utils/etfProSnapshotDate.cjs');
 const {
   parseEtfProActionEmail,
@@ -68,6 +65,13 @@ const {
   executeDirectorCommand,
   updateAlertRecord,
 } = require('./src/utils/hermesManagingDirector.cjs');
+const {
+  legacyHermesIsReadOnly,
+  normalizeLegacyHermesMode,
+  rejectLegacyHermesMutation,
+  stripLegacyHermesWorkflowFields,
+} = require('./src/utils/legacyHermesMode.cjs');
+const legacyHermesMode = normalizeLegacyHermesMode();
 const {
   summarizeRealTimeAlertPositions,
 } = require('./src/utils/rtaPositionReconstruction.cjs');
@@ -103,28 +107,43 @@ const {
   buildRiskRangeEnvelope,
   expectedRiskRangePublication,
 } = require('./src/utils/riskRangePublication.cjs');
-const {
-  buildCorrelationCacheKey,
-  computePortfolioCorrelationConcentration,
-  DEFAULT_WINDOWS: PORTFOLIO_CORRELATION_WINDOWS,
-  DEFAULT_PRIMARY_WINDOW: PORTFOLIO_CORRELATION_PRIMARY_WINDOW,
-  getCorrelationScorableSymbols,
-} = require('./src/utils/portfolioCorrelationConcentration');
 const { sidecarRequest } = require('./src/services/providers/ibkrSidecarClient');
 const {
+  buildAnalystRuntimeCheck,
   createSystemReadinessService,
   getLambdaActivity,
   getServiceHeartbeat,
+  getSupervisorProvenance,
 } = require('./src/services/systemReadinessService.cjs');
 const {
-  collectAutomationHeartbeatEvidence,
+  collectScheduledHeartbeatEvidence,
   createSystemStatusService,
   createUnavailableSystemStatus,
 } = require('./src/services/systemStatusService.cjs');
 const {
+  createAwsProfileProbe,
+  createLoginActionService,
+  createLoginStatusService,
+} = require('./src/services/loginStatusService.cjs');
+const {
   resolveGmailPollHealth,
 } = require('./src/utils/gmailPollHealth.cjs');
+const {
+  buildHistoricalBackfillStatus,
+} = require('./src/utils/hermesHistoricalBackfill.cjs');
+const {
+  buildCpiNowcastHistory,
+} = require('./src/utils/cpiNowcastHistory.cjs');
 const { createSystemReadinessRepairService } = require('./src/services/systemReadinessRepairService.cjs');
+const { createSystemReadinessRoutes } = require('./src/routes/systemReadiness.cjs');
+const { createSp500ContributorsHandler } = require('./src/routes/sp500Contributors.cjs');
+const { createMarketDailyHandler } = require('./src/routes/marketDaily.cjs');
+const { createMarketRotationHandler } = require('./src/routes/marketRotation.cjs');
+const {
+  createLeveragedProductOverlapHandler,
+  createExchangeVolumeHandler,
+  createMarketEventsHandler,
+} = require('./src/routes/referenceHandlers.cjs');
 const {
   isPredictionMarketContract,
   normalizeIbkrPosition,
@@ -141,22 +160,42 @@ const {
 const {
   createUsdCorrelationService,
 } = require('./src/services/usdCorrelationService.cjs');
+const { fetchTreasuryParYieldSeries } = require('./src/services/treasuryParYields.cjs');
+const {
+  createGoldCorrelationService,
+} = require('./src/services/goldCorrelationService.cjs');
+const {
+  createUsdCorrelationHandler,
+  createGoldCorrelationHandler,
+} = require('./src/routes/correlationHandlers.cjs');
 const {
   createFxvlSnapshotService,
 } = require('./src/services/fxvlSnapshotService.cjs');
 const {
+  createLeveragedProductOverlapService,
+} = require('./src/services/leveragedProductOverlapService.cjs');
+const {
   fetchFlexStatement,
+  getConfig: getFlexConfig,
   getReconciliation: getFlexReconciliation,
   publicConfigStatus: getFlexPublicConfigStatus,
+  readFlexActivityTrades,
+  startFlexActivitySync,
+  stopFlexActivitySync,
 } = require('./src/services/ibkrFlexService.cjs');
+const { expectedIbkrAccountIds } = require('./src/utils/ibkrAccountCoverage.cjs');
 const {
-  getIbkrInterestValidationHistory,
-  getIbkrInterestValidationStatus,
+  getIbkrInterestValidationHistoryAsync,
+  getIbkrInterestValidationStatusAsync,
+  readPrivateInterestLedgerAsync,
+  closeIbkrInterestEvidenceWorker,
+  recordIbkrInterestBalanceObservation,
   runIbkrInterestValidation,
   startIbkrInterestValidation,
   stopIbkrInterestValidation,
 } = require('./src/services/ibkrInterestValidationService.cjs');
 const { getFreshCachedQuote } = require('./src/services/providers/quoteCachePolicy.cjs');
+const { validateQuoteObservation } = require('./src/services/providers/normalize/quoteContract.cjs');
 const {
   instrumentCacheKey,
   canUseSymbolStream,
@@ -168,12 +207,40 @@ const {
   toQuoteInstrument,
   buildQuoteMetadata,
   buildPeriodReturnsMetadata,
+  isDisplayableQuoteRow,
 } = require('./src/services/providers/multiRegionQuoteIntegrity.cjs');
+const { percentageChange, latestObservationChange } = require('./src/services/providers/observationChange.cjs');
+const { fetchOfficialSovereignSeries } = require('./src/services/officialSovereignYields.cjs');
+const MARKET_BACKDROP_CATALOG = require('./src/constants/marketBackdropCatalog.json');
+const MARKET_PULSE_SUPPLEMENTAL_CATALOG = require('./src/constants/marketPulseSupplementalCatalog.json');
+const {
+  createMarketQuoteReferenceStore,
+  markRetainedReference,
+} = require('./src/services/marketQuoteReferenceStore.cjs');
+const {
+  summarizeMarketDataStatusEvidence,
+} = require('./src/services/marketDataStatusEvidence.cjs');
 const {
   createVolatilitySnapshotService,
+  isUsMarketOpen,
+  mostRecentCompletedTradingDateKey,
 } = require('./src/services/volatilitySnapshotService.cjs');
+const {
+  createVixHandler,
+  createVolatilityHandler,
+  createVolatilitySnapshotHandler,
+} = require('./src/routes/volatilityHandlers.cjs');
+const {
+  createMarketEventsService,
+} = require('./src/services/marketEventsService.cjs');
 const { scanAllPages } = require('./src/utils/dynamoScanAllPages.cjs');
 const { createAsyncTtlCache } = require('./src/utils/serverResponseCache.cjs');
+const {
+  buildPublicMarketStructureSnapshot,
+  isIsoDate: isMarketStructureIsoDate,
+  resolveMarketStructureChartAsset,
+  safeInlineFilename: safeMarketStructureFilename,
+} = require('./src/utils/marketStructureReport.cjs');
 const {
   createCheckpointFirstResearchResponse,
   failClosedResearchRefresh,
@@ -188,29 +255,80 @@ const {
   REASONS: SECURITY_RISK_METRICS_REASONS,
   buildSecurityRiskMetrics,
   createUnavailableSecurityRiskMetrics,
-  parseYahooChartBars,
+  normalizeAdjustedPriceBars,
 } = require('./src/utils/securityRiskMetrics.cjs');
+const { fetchYahooAdjustedHistoryData } = require('./src/services/providers/yahooAdjustedHistory.cjs');
+const { createCompletedSessionVolatilityHandler } = require('./src/services/completedSessionVolatility.cjs');
+const { closeWorkbookReaders } = require('./src/services/workbookReaderWorkerService.cjs');
+const {
+  buildHedgeyeSecurityUniverse,
+  parseSeedSecurities,
+} = require('./src/utils/hedgeyeUniverseDiscovery.cjs');
+const {
+  FACTOR_DEFINITIONS: EXPOSURE_LAB_FACTOR_DEFINITIONS,
+  MODEL_VERSION: EXPOSURE_LAB_MODEL_VERSION,
+  buildFactorNeutralizationScenarios,
+  buildPortfolioFactorRiskSnapshot,
+  getFactorProxySymbols,
+} = require('./src/utils/exposureLabFactorRisk.cjs');
+const {
+  buildEmptyCorrelation,
+  buildEmptyGeography,
+  buildExposureLabDiagnostics,
+  classifyExposureLabPortfolioInput,
+} = require('./src/utils/exposureLabDiagnostics.cjs');
+const {
+  getExposureLabGeographyHistorySymbols,
+} = require('./src/constants/exposureLabGeography.cjs');
+const {
+  createExposureLabSecurityMaster,
+  mergeSecurityMasterReviews,
+} = require('./src/services/exposureLabSecurityMaster.cjs');
+const {
+  createExposureLabSecurityIdentityResolver,
+  resolveExposureLabYahooSymbol,
+} = require('./src/services/exposureLabSecurityIdentity.cjs');
+const { createSecurityIdentitiesHandler } = require('./src/routes/securityIdentities.cjs');
 const {
   ANALYTICS_SOURCE_IDS,
   buildAnalyticsDailyBrief,
+  isMarketDay,
 } = require('./src/utils/analyticsDailyBrief.cjs');
+const {
+  DEFAULT_RETENTION_DAYS: TLDR_ARCHIVE_RETENTION_DAYS,
+  DEFAULT_VISIBLE_DAYS: TLDR_ARCHIVE_VISIBLE_DAYS,
+  assertArchiveDate,
+  buildMorningTldrArchive,
+  buildMorningTldrDay,
+  buildMorningTldrStatus,
+} = require('./src/utils/morningTldrArchive.cjs');
 const {
   MAX_HISTORY_DAYS: SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS,
   MAX_SYMBOLS: SECURITY_INTELLIGENCE_MAX_SYMBOLS,
-  buildSecurityIntelligence,
   defaultResearchMarketDate,
   isValidMarketDate,
   loadSecurityIntelligenceInputs,
   normalizeRequestedSymbols,
 } = require('./src/utils/securityIntelligence.cjs');
+const { createSecurityIntelligenceWorkerService } = require('./src/services/securityIntelligenceWorkerService.cjs');
 const {
   PRESIGNED_POST_TTL_SECONDS,
   buildPortfolioPresignedPostParams,
   createPortfolioUploadKey,
   validatePortfolioUploadRequest,
 } = require('./src/utils/portfolioUploadPolicy.cjs');
+const { createAnalystRoutes } = require('./src/routes/analyst.cjs');
+const { createPortfolioRefreshResearchWorkerService } = require('./src/services/analyst/portfolioRefreshResearchWorkerService.cjs');
+const { createCurrencyPairsHandler } = require('./src/routes/currencyPairsHandler.cjs');
+const { attachAnalystGatewayProxy } = require('./src/services/analyst/analystGatewayProxy.cjs');
 
 const volatilitySnapshotService = createVolatilitySnapshotService({ httpClient: axios });
+const marketEventsService = createMarketEventsService({ httpClient: axios });
+const leveragedProductOverlapService = createLeveragedProductOverlapService();
+const marketQuoteReferenceStore = createMarketQuoteReferenceStore({
+  dataDir: process.env.MARKET_QUOTE_REFERENCE_DATA_DIR
+    || path.join(process.cwd(), 'data', 'market-quotes-reference'),
+});
 
 function scaleRateProxyValue(raw, isRateProxy) {
   if (raw == null || raw === undefined || !isRateProxy) return raw;
@@ -228,6 +346,7 @@ AWS.config.update({
   region: process.env.AWS_REGION || 'us-west-1',
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  sessionToken: process.env.AWS_SESSION_TOKEN,
   // Falls back to ~/.aws/credentials if env vars not set
 });
 
@@ -236,6 +355,13 @@ const dynamodb = new DynamoDB.DocumentClient();
 const lambda = new Lambda();
 const ses = new SES({ apiVersion: '2010-12-01' });
 const cloudwatch = new CloudWatch();
+const exposureLabSecurityMaster = createExposureLabSecurityMaster({
+  documentClient: dynamodb,
+  tableName: process.env.EXPOSURE_LAB_SECURITY_MASTER_TABLE
+    || 'ExposureLabSecurityMasterV1',
+  indexName: process.env.EXPOSURE_LAB_SECURITY_MASTER_INDEX
+    || 'recordType-sortKey-index',
+});
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -253,6 +379,7 @@ const RESEARCH_AUTHORITATIVE_REFRESH_TIMEOUT_MS = Number.isFinite(
 // IBKR, portfolio, and quote routes retain their existing freshness policies.
 const researchResponseCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 100 });
 const hermesLedgerCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
+const hermesRuntimeStateCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
 const researchEventLedgerCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 10 });
 const etfProSnapshotHistoryCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
 const s3ArtifactCache = createAsyncTtlCache({ ttlMs: ONE_DAY_MS, maxEntries: 1_000 });
@@ -308,23 +435,39 @@ async function validateAWSCredentials() {
 
 // Middleware
 // CORS: Allow React dev server (port 3000) in development, or same origin in production
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? false // Same origin in production (Express serves static files)
-    : ['http://localhost:3000', 'http://127.0.0.1:3000'], // React dev server in development
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Readiness-Repair'],
-  exposedHeaders: [
-    'X-Data-Cache',
-    'X-Data-Age',
-    'X-Risk-Range-Status',
-    'X-Risk-Range-Publication-Date',
-    'Age',
-    'Warning',
-  ],
-}));
+app.use(createLocalTrustMiddleware());
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH'].includes(req.method) && !req.is('application/json')) {
+    return res.status(415).json({ error: 'JSON request content type is required' });
+  }
+  next();
+});
+app.use(cors(createApiCorsOptions()));
 app.use(express.json({ limit: '5mb' }));
+
+let analystGatewayProxy = null;
+const portfolioResearchCapture = createPortfolioRefreshResearchWorkerService();
+const analystRoutes = createAnalystRoutes({
+  capturePortfolioResearch: params => portfolioResearchCapture.capture(params),
+  getContractStatus: () => analystRuntimeGate.status(),
+  s3,
+  dynamodb,
+  lambda,
+  httpClient: axios,
+  getRiskRangeStatus: ({ now } = {}) => buildCurrentRiskRangeWorkflowStatus({ now }),
+  gatewayStatus: () => analystGatewayProxy?.status?.() || {
+    connected: false,
+    status: 'starting',
+  },
+});
+app.use('/internal/analyst', analystRoutes.internalRouter);
+app.use('/api/analyst', analystRoutes.router);
+const analystStagingCleanupTimer = setInterval(() => {
+  analystRoutes.cleanupStaging().catch((error) => {
+    console.warn('[Analyst] Staging cleanup failed:', error.message);
+  });
+}, 60 * 60 * 1000);
+analystStagingCleanupTimer.unref();
 
 /**
  * Resolve ETF Pro content date + counts from latest.json (handles legacy files without meta.snapshotDate).
@@ -570,25 +713,63 @@ async function getCachedHermesLedgerItems() {
   });
 }
 
-async function getResearchEventLedgerItems(productKey) {
+async function getHermesRuntimeState() {
+  const cacheResult = await hermesRuntimeStateCache.get('gmail-runtime-state', async () => {
+    const result = await dynamodb.get({
+      TableName: HERMES_EMAIL_LEDGER_TABLE,
+      Key: {
+        messageId: `runtime#gmail#${HERMES_GMAIL_ACCOUNT}`,
+        attachmentId: 'history-cursor',
+      },
+      ConsistentRead: true,
+    }).promise();
+    return result.Item || null;
+  });
+  return requireAuthoritativeCacheValue(cacheResult, {
+    errorCode: 'HERMES_RUNTIME_STATE_CACHE_STALE',
+    source: `${HERMES_EMAIL_LEDGER_TABLE} runtime state`,
+  });
+}
+
+async function getResearchEventLedgerItems(
+  productKey,
+  { sinceEventTime = null, limit = 20_000, forceRefresh = false, refreshAfter = null } = {},
+) {
   try {
-    const cacheResult = await researchEventLedgerCache.get(productKey, async () => {
+    const cacheKey = `${productKey}:${sinceEventTime || 'all'}:${limit}`;
+    const cached = researchEventLedgerCache.peek(cacheKey);
+    if (forceRefresh && cached && (!refreshAfter || cached.storedAt < Number(refreshAfter))) {
+      researchEventLedgerCache.delete(cacheKey);
+    }
+    const cacheResult = await researchEventLedgerCache.get(cacheKey, async () => {
       const items = [];
       let exclusiveStartKey;
       do {
+        const expressionAttributeNames = { '#productKey': 'productKey' };
+        const expressionAttributeValues = { ':productKey': productKey };
+        let keyConditionExpression = '#productKey = :productKey';
+        if (sinceEventTime) {
+          // eventKey is prefixed by the ISO event time, so this is an exact
+          // canonical checkpoint floor rather than a best-effort filter.
+          expressionAttributeNames['#eventKey'] = 'eventKey';
+          expressionAttributeValues[':startEventKey'] = String(sinceEventTime);
+          keyConditionExpression += ' AND #eventKey >= :startEventKey';
+        }
         const result = await dynamodb.query({
           TableName: RESEARCH_EVENT_LEDGER_TABLE,
-          KeyConditionExpression: '#productKey = :productKey',
-          ExpressionAttributeNames: { '#productKey': 'productKey' },
-          ExpressionAttributeValues: { ':productKey': productKey },
+          KeyConditionExpression: keyConditionExpression,
+          ExpressionAttributeNames: expressionAttributeNames,
+          ExpressionAttributeValues: expressionAttributeValues,
           ScanIndexForward: true,
-          ConsistentRead: true,
+          ConsistentRead: false,
+          Limit: Math.max(1, Math.min(1_000, Number(limit) || 20_000)),
           ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
         }).promise();
         items.push(...(result.Items || []));
+        if (items.length >= limit) break;
         exclusiveStartKey = result.LastEvaluatedKey;
       } while (exclusiveStartKey);
-      return items;
+      return items.slice(0, limit);
     });
     if (cacheResult.status === 'stale') {
       return {
@@ -757,27 +938,37 @@ async function getGmailPollHealth() {
 }
 
 async function getResolvedEtfProPayload() {
-  const [emailSnapshots, ingestionHealth, eventLedgerResult, legacyPayloads] = await Promise.all([
-    getEtfProEmailSnapshots(),
-    getGmailPollHealth(),
-    getResearchEventLedgerItems('etf-pro'),
-    getHermesEtfProEmailPayloads(),
-  ]);
-  const materializedPayloads = emailSnapshots
-    .map(etfProEmailSnapshotToPayload)
-    .filter((payload) => Array.isArray(payload?.rows) && payload.rows.length > 0);
-  const emailPayload = pickNewestPayload(materializedPayloads);
-  const v2Payloads = buildEtfProPayloadsFromResearchEvents(eventLedgerResult.items);
   const manualCheckpointRecord = loadLocalEtfProCheckpoint();
   const manualCheckpoint = manualCheckpointRecord?.checkpoint || null;
   const manualCheckpointValidation = manualCheckpointRecord?.checkpointValidation || null;
   const manualCheckpointTrust = manualCheckpoint
     ? { ...manualCheckpoint, checkpointValidation: manualCheckpointValidation }
     : null;
+  const authoritativeCheckpointTime = manualCheckpointValidation?.valid
+    ? manualCheckpoint?.asOf || null
+    : null;
+  const [emailSnapshots, ingestionHealth, eventLedgerResult, legacyPayloads] = await Promise.all([
+    ALLOW_LEGACY_RESEARCH_REBUILD
+      ? getEtfProEmailSnapshots()
+      : Promise.resolve([]),
+    getGmailPollHealth(),
+    authoritativeCheckpointTime
+      ? getResearchEventLedgerItems('etf-pro', {
+        sinceEventTime: authoritativeCheckpointTime,
+      })
+      : Promise.resolve({ items: [], error: 'ETF_PRO_CHECKPOINT_REQUIRED' }),
+    ALLOW_LEGACY_RESEARCH_REBUILD
+      ? getHermesEtfProEmailPayloads()
+      : Promise.resolve({ fullBooks: [], actions: [], rejected: [] }),
+  ]);
+  const materializedPayloads = emailSnapshots
+    .map(etfProEmailSnapshotToPayload)
+    .filter((payload) => Array.isArray(payload?.rows) && payload.rows.length > 0);
+  const emailPayload = pickNewestPayload(materializedPayloads);
+  const v2Payloads = buildEtfProPayloadsFromResearchEvents(eventLedgerResult.items);
   const manualFullBook = manualCheckpointValidation?.valid
     ? checkpointToEtfProFullBookPayload(manualCheckpoint)
     : null;
-  const authoritativeCheckpointTime = manualFullBook?.meta?.asOf || null;
   const canonicalFullBooks = [
     ...v2Payloads.fullBooks,
     ...(manualFullBook ? [manualFullBook] : []),
@@ -876,14 +1067,17 @@ async function fetchHermesRtaSnapshots(windowDays, { authoritativeCheckpointTime
     windowDays,
     checkpointTime: authoritativeCheckpointTime,
   }));
-  const [items, eventLedgerResult] = await Promise.all([
-    getCachedHermesLedgerItems(),
-    getResearchEventLedgerItems('real-time-alert'),
-  ]);
-  const legacy = await materializeRtaLedgerItems(items, {
-    cutoff,
-    getArtifactText: getCachedHermesArtifactText,
-  });
+  const eventLedgerResult = authoritativeCheckpointTime
+    ? await getResearchEventLedgerItems('real-time-alert', {
+      sinceEventTime: authoritativeCheckpointTime,
+    })
+    : { items: [], error: 'RTA_CHECKPOINT_REQUIRED' };
+  const legacy = ALLOW_LEGACY_RESEARCH_REBUILD
+    ? await materializeRtaLedgerItems(await getCachedHermesLedgerItems(), {
+      cutoff,
+      getArtifactText: getCachedHermesArtifactText,
+    })
+    : { snapshots: [], rejected: [], selectedMessageCount: 0, materializedEventCount: 0 };
   const v2 = materializeRtaResearchEvents(eventLedgerResult.items.filter((item) => {
     const eventTime = new Date(item?.eventTime || '').getTime();
     return !Number.isFinite(eventTime) || eventTime >= cutoff.getTime();
@@ -893,6 +1087,8 @@ async function fetchHermesRtaSnapshots(windowDays, { authoritativeCheckpointTime
     eventLedgerError: eventLedgerResult.error,
   };
 }
+
+const { loadRtaResolutions } = require('./src/utils/rtaResolutions.cjs');
 
 function loadLocalRtaBenchmark() {
   const benchmarkPath = path.join(__dirname, 'data', 'hedgeye', 'rta', 'latest-benchmark.json');
@@ -938,13 +1134,8 @@ function loadLocalEtfProCheckpoint() {
 }
 
 async function getEtfProEmailSnapshots() {
-  const cacheResult = await etfProSnapshotHistoryCache.get('all', () => scanAllPages(dynamodb, {
-      TableName: 'HedgeyeDailySnapshot',
-      FilterExpression: 'snapshotType = :type',
-      ExpressionAttributeValues: {
-        ':type': 'etf-pro',
-      },
-    }));
+  const cacheResult = await etfProSnapshotHistoryCache.get('bounded-etf-pro', () =>
+    queryLatestSnapshotsByType('etf-pro', { limit: 120 }));
   const snapshots = requireAuthoritativeCacheValue(cacheResult, {
     errorCode: 'ETF_PRO_SNAPSHOT_HISTORY_CACHE_STALE',
     source: 'HedgeyeDailySnapshot ETF Pro history',
@@ -969,48 +1160,45 @@ async function getHermesInboxStatus() {
     latestStatus: null,
     errorCode: null,
     lastSuccessAt: null,
+    historicalBackfill: null,
     nextRun: 'Every 15 minutes',
     source: HERMES_EMAIL_LEDGER_TABLE,
     gmailAccount: HERMES_GMAIL_ACCOUNT,
     gmailQuery: HERMES_GMAIL_QUERY,
   };
 
-  const items = await getCachedHermesLedgerItems();
+  const runtimeState = await getHermesRuntimeState();
+  if (!runtimeState) return defaultStatus;
 
-  if (items.length === 0) {
-    return defaultStatus;
-  }
-
-  const getItemTime = (item) => {
-    const raw = item.updatedAt || item.receivedAt || item.createdAt;
-    const d = raw ? new Date(raw) : null;
-    return d && !Number.isNaN(d.getTime()) ? d.getTime() : 0;
-  };
-
-  const runtimeState = items
-    .filter((item) => item?.attachmentId === 'history-cursor' && String(item?.messageId || '').startsWith('runtime#gmail#'))
-    .sort((a, b) => getItemTime(b) - getItemTime(a))[0] || null;
-  const artifactItems = items.filter((item) => !String(item?.messageId || '').startsWith('runtime#gmail#'));
-  const latest = (artifactItems.length > 0 ? artifactItems : items)
-    .reduce((best, item) => (getItemTime(item) > getItemTime(best) ? item : best));
-  const latestTime = latest.updatedAt || latest.receivedAt || latest.createdAt || null;
-  const storedCount = items.filter((item) => item.status === 'STORED').length;
-  const errorCount = items.filter((item) => item.status === 'ERROR').length;
-  const pendingCount = items.filter((item) => item.status === 'IN_PROGRESS').length;
+  const counts = runtimeState.counts || {};
+  const latestTime = runtimeState.lastSuccessAt || runtimeState.updatedAt || null;
+  const storedCount = Number(counts.stored || 0);
+  const errorCount = Number(counts.errors || 0);
+  const pendingCount = Number(counts.remaining || 0);
+  const historicalBackfill = runtimeState.archivedBackfillReasonCode
+    ? {
+      status: 'archived',
+      archivedAt: runtimeState.archivedBackfillAt || null,
+      reasonCode: runtimeState.archivedBackfillReasonCode,
+      pendingCount: 0,
+      retryableCount: 0,
+      quarantinedCount: Number(runtimeState.quarantinedCount || 0),
+      completedCount: Number(counts.stored || 0),
+      totalCount: Number(counts.messages || 0),
+    }
+    : null;
 
   let status = 'success';
   // Historical failures remain useful evidence, but they must not permanently
   // poison the current status after a later poll succeeds. Scheduler/auth
   // heartbeat health is evaluated independently by /api/system-readiness.
-  if (runtimeState?.status === 'AUTH_REQUIRED') {
+  if (runtimeState.status === 'AUTH_REQUIRED') {
     status = 'error';
-  } else if (runtimeState?.status === 'ERROR') {
+  } else if (runtimeState.status === 'ERROR') {
     status = 'error';
-  } else if (latest.status === 'ERROR') {
-    status = 'error';
-  } else if (latest.status === 'IN_PROGRESS') {
+  } else if (runtimeState.status === 'IN_PROGRESS') {
     status = 'warning';
-  } else if (storedCount === 0) {
+  } else if (runtimeState.status !== 'READY' && storedCount === 0) {
     status = 'missing';
   } else if (latestTime) {
     const ageMs = Date.now() - new Date(latestTime).getTime();
@@ -1027,14 +1215,15 @@ async function getHermesInboxStatus() {
     storedCount,
     errorCount,
     pendingCount,
-    attachmentCount: items.length,
-    latestFilename: latest.filename || null,
-    latestS3Key: latest.s3Key || null,
-    latestStatus: latest.status || null,
+    attachmentCount: Number(counts.messages || 0),
+    latestFilename: null,
+    latestS3Key: null,
+    latestStatus: runtimeState.status || null,
     errorCode: runtimeState?.errorCode || null,
     lastSuccessAt: runtimeState?.lastSuccessAt || null,
-    gmailAccount: latest.accountEmail || latest.gmailAccount || defaultStatus.gmailAccount,
-    gmailQuery: latest.query || defaultStatus.gmailQuery,
+    historicalBackfill,
+    gmailAccount: runtimeState.accountEmail || defaultStatus.gmailAccount,
+    gmailQuery: runtimeState.query || defaultStatus.gmailQuery,
   };
 }
 
@@ -1050,6 +1239,385 @@ const {
 } = require('./src/services/predictionMarketsIngest/reconciliationService');
 app.use('/api/prediction-markets', predictionMarketsIngestRoutes);
 
+// Resolver monitor: fresh live dated-futures marks come from the existing IBKR
+// sidecar; official venue/BLS publications remain the only settlement sources.
+const { createPredictionMarketTestRouter } = require('./src/routes/predictionMarketTest.cjs');
+const { MARKET_CONFIGS: PREDICTION_MONITOR_MARKETS } = require('./src/services/predictionMarketTest/marketMonitorService.cjs');
+const { createForecastExMonitorProvider } = require('./src/services/predictionMarketTest/forecastExMonitorProvider.cjs');
+const {
+  GOLD_SPOT_PROXY_INSTRUMENT,
+  createMarketReferenceProvider,
+} = require('./src/services/predictionMarketTest/marketReferenceProvider.cjs');
+const forecastExMonitorProvider = createForecastExMonitorProvider();
+const loadMonitorCryptoTracker = ({ limit = 2, dates = [] } = {}) => {
+  const exactDates = [...new Set(dates.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date))))];
+  if (!exactDates.length) return queryLatestSnapshotsByType('bitcoin-trend-tracker', { limit });
+  if (exactDates.length > 200) throw new RangeError('Crypto tracker requests are limited to 200 exact publication dates.');
+  const chunks = [exactDates.slice(0, 100), exactDates.slice(100)].filter((chunk) => chunk.length);
+  return Promise.all(chunks.map((chunk) => dynamodb.batchGet({
+    RequestItems: { HedgeyeDailySnapshot: {
+      Keys: chunk.map((date) => ({ date, snapshotType: 'bitcoin-trend-tracker' })),
+      ConsistentRead: true,
+    } },
+  }).promise().then((result) => {
+    if (result.UnprocessedKeys?.HedgeyeDailySnapshot?.Keys?.length) {
+      throw new Error('Crypto tracker publication read was incomplete.');
+    }
+    return result.Responses?.HedgeyeDailySnapshot || [];
+  }))).then((rows) => rows.flat());
+};
+const marketReferenceProvider = createMarketReferenceProvider({ loadCryptoTracker: loadMonitorCryptoTracker });
+const { loadReviewedBaseline } = require('./src/services/hedgaiResearch.cjs');
+const { createHedgaiResearchHandlers } = require('./src/routes/hedgaiResearch.cjs');
+const { createHedgaiResearchWorkerService } = require('./src/services/hedgaiResearchWorkerService.cjs');
+const hedgaiResearchWorker = createHedgaiResearchWorkerService({
+  region: process.env.AWS_REGION || 'us-west-1',
+  tableName: process.env.RESEARCH_EVENT_LEDGER_TABLE
+    || AWS_RESOURCE_DEFAULTS.researchEventLedgerTable || 'ResearchEventLedgerV2',
+});
+const loadHedgaiResearch = options => hedgaiResearchWorker.loadResearch(options);
+const predictionMarketTest = createPredictionMarketTestRouter({
+  loadHedgaiResearch: ({ now, ...options }) => loadHedgaiResearch({ ...options, asOf: now.toISOString() }),
+  loadRiskRanges: ({ now }) => loadRiskRangePublicationEnvelope({ now }),
+  loadInflationNowcasts: ({ limit }) => queryLatestSnapshotsByType('inflation-nowcast', { limit }),
+  loadCryptoTracker: loadMonitorCryptoTracker,
+  loadTradeSnapshots: ({ now }) => loadCanonicalSecurityIntelligence({
+    symbols: [...new Set(Object.values(PREDICTION_MONITOR_MARKETS).map((market) => market.trade?.ticker).filter(Boolean))],
+    now, historyDays: SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS,
+  }),
+  loadCftcSnapshots: ({ limit }) => queryLatestSnapshotsByType('cftc-positioning', { limit }),
+  loadMarketStructureSnapshots: ({ limit }) => queryLatestSnapshotsByType('market-structure', { limit }),
+  loadUsdSnapshot: () => usdCorrelationService.getSnapshot(),
+  loadVolatilitySnapshot: () => volatilitySnapshotService.fetchSnapshot(),
+  loadForecastExLive: (context) => forecastExMonitorProvider.getSnapshot(context),
+  loadMarketReference: (context) => marketReferenceProvider.getSnapshot(context),
+  loadMarketReferenceHealth: () => marketReferenceProvider.getHealth(),
+});
+app.use('/api/prediction-market-test', predictionMarketTest.router);
+
+// Predictive Markets Review setup board: Hedgeye Tick/Trade/Trend, price and
+// Risk Range position for every tracked Kalshi market.
+const { createSetupBoardLoader, extraCboeSeries } = require('./src/services/predictionSetupBoard.cjs');
+const PREDICTION_EXTRA_CBOE_SERIES = extraCboeSeries();
+const loadPredictionSetupBoard = createSetupBoardLoader({
+  loadRiskRanges: ({ now }) => loadRiskRangePublicationEnvelope({ now }),
+  loadCryptoQuant: () => queryLatestSnapshotsByType('bitcoin-trend-tracker', { limit: 1 }).then((rows) => rows[0] || null),
+  loadHedgai: ({ now }) => loadHedgaiResearch({ asOf: now.toISOString() }),
+  loadSecurityIntelligence: ({ symbols, now }) => loadCanonicalSecurityIntelligence({
+    symbols, now, historyDays: SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS }),
+  loadNowcast: () => queryLatestSnapshotsByType('inflation-nowcast', { limit: 1 }).then((rows) => rows[0] || null),
+  loadQuotes: async (symbols) => Object.fromEntries((await Promise.all(symbols.map(async (symbol) => {
+    const quote = await getQuote(symbol).catch(() => null);
+    return quote?.price && isQuoteUsableNow(quote, symbol) ? [symbol, quote] : null;
+  }))).filter(Boolean)),
+  loadVolatility: async () => ({ ...await volatilitySnapshotService.fetchSnapshot(),
+    ...await volatilitySnapshotService.fetchCboeRows(PREDICTION_EXTRA_CBOE_SERIES).catch(() => ({})) }),
+  loadUsdCorrelations: () => usdCorrelationService.getSnapshot(),
+  loadPeriodReturns: (symbol) => getPeriodReturnsCached(symbol),
+  loadKalshiEvents: (series) => require('./src/services/predictionMarketsIngest/providers/kalshiClient')
+    .kalshiFetch('/events', { series_ticker: series, status: 'open', limit: 200 }).then((body) => body?.events || []),
+  marketDateFor: (now) => defaultResearchMarketDate(now),
+});
+app.get('/api/prediction-markets/setup-board', async (_req, res) => {
+  try {
+    res.json(await loadPredictionSetupBoard({ now: new Date() }));
+  } catch (error) {
+    console.error('[prediction-setup-board]', error.message);
+    res.status(503).json({ error: 'Setup board unavailable' });
+  }
+});
+
+// Prediction-market performance ledger. The reconciler is server-owned so
+// historical capture continues when the Balance panel is closed. It accepts
+// only fresh sidecar evidence and keeps unavailable broker reads fail-closed.
+const {
+  buildSettlementProviders,
+  createPredictionMarketPerformanceRoutes,
+} = require('./src/routes/predictionMarketPerformance');
+const { createContractPnlHistoryStore, ledgerSourceScope } = require('./src/services/contractPnlHistoryStore.cjs');
+const { getRecentSettledWtiSessions, getRecentSettledSpxCloseSessions } = require('./src/services/predictionMarketsIngest/watchlistProvider');
+const { kalshiFetch } = require('./src/services/predictionMarketsIngest/providers/kalshiClient');
+const { loadOfficialCpiFinals } = require('./src/services/predictionMarketsIngest/cpiOfficial');
+const { loadOfficialForecastExPrices } = require('./src/services/forecastExOfficialPrices.cjs');
+const { loadOfficialForecastExContractSchedule } = require('./src/services/forecastExContractSchedule.cjs');
+const { createCmeDailyBulletinLoader } = require('./src/services/cmeDailyBulletinSettlements.cjs');
+const { buildPredictionMarketScheduleProvider } = require('./src/services/predictionMarketContractSchedules.cjs');
+const { forecastExThresholdIdentity } = require('./src/services/predictionMarketPerformanceLedger.cjs');
+const { buildPredictionMarketMarkProviders } = require('./src/services/predictionMarketPerformanceMarks.cjs');
+const { applyHistoricalImportBundle } = require('./src/services/predictionMarketHistoricalImport.cjs');
+const predictionPerformanceIbkrProvider = require('./src/services/providers/ibkr/ibkrMarketDataProvider');
+const { buildExactEsFutureInstrument } = require('./src/services/forecastExFesIdentity.cjs');
+const bundledCpiHistory = require('./data/prediction-market-performance/historical-cpi-2026.json');
+const loadCmeDailyBulletinSettlement = createCmeDailyBulletinLoader();
+const loadPredictionMarketContractSchedule = buildPredictionMarketScheduleProvider({
+  loadOfficialForecastExContractSchedule,
+  kalshiFetch,
+});
+
+function exactEsResolverInstrument(settlementSymbol) {
+  const match = String(settlementSymbol || '').trim().toUpperCase().match(/^ES([HMUZ])(\d{2})$/);
+  const monthByCode = { H: '03', M: '06', U: '09', Z: '12' };
+  if (!match) return null;
+  return buildExactEsFutureInstrument({
+    resolverSymbol: `ES${match[1]}${match[2]}`,
+    underlyingContractMonth: `20${match[2]}${monthByCode[match[1]]}`,
+  });
+}
+
+const fesPreliminaryCutoffCache = new Map();
+const fesPreliminaryCutoffInFlight = new Map();
+
+async function loadVerifiedFesCutoffBar(request) {
+  if (fesPreliminaryCutoffCache.has(request.key)) return fesPreliminaryCutoffCache.get(request.key);
+  if (fesPreliminaryCutoffInFlight.has(request.key)) return fesPreliminaryCutoffInFlight.get(request.key);
+  const pending = (async () => {
+    const result = await predictionPerformanceIbkrProvider.getHistoricalBars(request.instrument, '5d', '1m');
+    if (result?.source !== 'ibkr' || !Array.isArray(result.bars) || !Number.isFinite(Date.parse(result.asOf || ''))) return null;
+    const targetBarStart = request.cutoffAt - 60_000;
+    const matches = result.bars.filter((bar) => {
+      const parsed = Date.parse(String(bar?.date || '').replace(' ', 'T'));
+      return Number.isFinite(parsed) && parsed === targetBarStart;
+    });
+    if (matches.length !== 1) return null;
+    const values = [matches[0].open, matches[0].high, matches[0].low, matches[0].close].map(Number);
+    if (!values.every(Number.isFinite)
+      || values[1] < values[2]
+      || values[0] < values[2]
+      || values[0] > values[1]
+      || values[3] < values[2]
+      || values[3] > values[1]) return null;
+    return {
+      value: values[3],
+      windowOpen: values[0],
+      windowHigh: values[1],
+      windowLow: values[2],
+      windowClose: values[3],
+      barStartAt: new Date(targetBarStart).toISOString(),
+      cutoffAt: new Date(request.cutoffAt).toISOString(),
+      asOf: new Date(Date.parse(result.asOf)).toISOString(),
+    };
+  })();
+  fesPreliminaryCutoffInFlight.set(request.key, pending);
+  try {
+    const reference = await pending;
+    // A completed historical bar is immutable. Reuse only the exact verified
+    // IBKR observation and retain its original provenance/as-of timestamp.
+    if (reference) fesPreliminaryCutoffCache.set(request.key, reference);
+    return reference;
+  } finally {
+    if (fesPreliminaryCutoffInFlight.get(request.key) === pending) {
+      fesPreliminaryCutoffInFlight.delete(request.key);
+    }
+  }
+}
+
+async function loadFesPreliminaryCutoffReferences(records = []) {
+  const references = [];
+  const requests = new Map();
+  for (const record of records) {
+    const identity = forecastExThresholdIdentity(record);
+    const settlementSymbol = String(record?.settlementSymbol || '').trim().toUpperCase();
+    const cutoffAt = Date.parse(record?.lastTradeAt || '');
+    const status = String(record?.status || '').trim().toLowerCase();
+    const unresolved = status === 'open'
+      || status === 'awaiting_resolution'
+      || (status === 'review' && Number(record?.netQuantity || record?.remainingQuantity || 0) > 0);
+    if (identity?.productCode !== 'FES'
+      || !unresolved
+      || !settlementSymbol
+      || !Number.isFinite(cutoffAt)
+      || Date.now() < cutoffAt) continue;
+    const instrument = exactEsResolverInstrument(settlementSymbol);
+    if (!instrument) continue;
+    const key = `${identity.eventDate}:${settlementSymbol}:${record.lastTradeAt}`;
+    if (!requests.has(key)) requests.set(key, {
+      key,
+      settlementSymbol,
+      cutoffAt,
+      instrument,
+      contracts: new Map(),
+    });
+    requests.get(key).contracts.set(identity.eventContract, identity);
+  }
+  const results = await Promise.allSettled([...requests.values()].map(async (request) => {
+    const cutoffBar = await loadVerifiedFesCutoffBar(request);
+    if (!cutoffBar) return [];
+    return [...request.contracts.values()].map((contract) => ({
+      role: 'resolver_reference',
+      availability: 'preliminary_reference',
+      final: false,
+      complete: true,
+      source: 'ibkr_exact_cutoff_bar',
+      provider: 'ibkr',
+      provenance: 'verified_ibkr_historical_trade_bar',
+      productCode: 'FES',
+      market: 'sp500',
+      eventContract: contract.eventContract,
+      tradingDate: contract.eventDate,
+      symbol: request.settlementSymbol,
+      ...cutoffBar,
+    }));
+  }));
+  for (const result of results) {
+    if (result.status === 'fulfilled' && Array.isArray(result.value)) references.push(...result.value);
+  }
+  return references;
+}
+
+const getPredictionMarketResolverSettlements = async ({ records = [], maxWaitMs = null } = {}) => {
+  const observations = [...predictionMarketTest.service.getResolverSettlements()];
+  const requests = new Map();
+  for (const record of records) {
+    const identity = forecastExThresholdIdentity(record);
+    const settlementSymbol = String(record?.settlementSymbol || '').trim().toUpperCase();
+    if (!identity || !['METLG', 'FES'].includes(identity.productCode) || !settlementSymbol) continue;
+    const eventDate = identity.eventDate || identity.resolutionDate;
+    const key = `${identity.productCode}:${eventDate}:${settlementSymbol}`;
+    const alreadyFinal = observations.some((observation) => (
+      observation?.availability === 'official_final'
+      && observation?.final === true
+      && (identity.productCode !== 'FES' || observation?.source === 'cme_daily_bulletin_final')
+      && String(observation?.productCode || '').toUpperCase() === identity.productCode
+      && String(observation?.tradingDate || observation?.eventDate || '').slice(0, 10) === eventDate
+      && String(observation?.symbol || '').trim().toUpperCase() === settlementSymbol
+    ));
+    if (!alreadyFinal) requests.set(key, { settlementSymbol, tradingDate: eventDate });
+  }
+  const completedOfficial = [];
+  const completedPreliminary = [];
+  const officialTasks = [...requests.values()].map(async (request) => {
+    try {
+      completedOfficial.push(await loadCmeDailyBulletinSettlement(request));
+    } catch (_error) {
+      // CME commonly publishes the FINAL bulletin on the following business
+      // day. Wrong-date, preliminary, missing, and ambiguous documents remain
+      // unavailable instead of becoming a proxy settlement.
+    }
+  });
+  const preliminaryTask = (async () => {
+    try {
+      completedPreliminary.push(...await loadFesPreliminaryCutoffReferences(records));
+    } catch (_error) {
+      // A preliminary reference is optional. Exact official settlement remains
+      // pending when the broker bar cannot be verified.
+    }
+  })();
+  const allTasks = Promise.allSettled([...officialTasks, preliminaryTask]);
+  const boundedWaitMs = Number(maxWaitMs);
+  if (Number.isFinite(boundedWaitMs) && boundedWaitMs > 0) {
+    let timer;
+    await Promise.race([
+      preliminaryTask,
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, boundedWaitMs);
+        timer.unref?.();
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+  } else {
+    await allTasks;
+  }
+  const available = [...observations, ...completedOfficial];
+  for (const reference of completedPreliminary) {
+    const officialExists = available.some((observation) => (
+      observation?.availability === 'official_final'
+      && observation?.final === true
+      && String(observation?.productCode || '').toUpperCase() === 'FES'
+      && String(observation?.tradingDate || '').slice(0, 10) === reference.tradingDate
+      && String(observation?.symbol || '').trim().toUpperCase() === reference.symbol
+    ));
+    if (!officialExists) available.push(reference);
+  }
+  return available;
+};
+const predictionMarketPerformance = createPredictionMarketPerformanceRoutes({
+  dynamodb,
+  historyStore: createContractPnlHistoryStore({
+    sourceScope: ledgerSourceScope({ tableName: process.env.PREDICTION_MARKET_PERFORMANCE_LEDGER_TABLE || 'PredictionMarketPerformanceLedger' }),
+  }),
+  sidecarRequest,
+  tableName: process.env.PREDICTION_MARKET_PERFORMANCE_LEDGER_TABLE || 'PredictionMarketPerformanceLedger',
+  settlementProviders: buildSettlementProviders({
+    getRecentSettledWtiSessions,
+    getRecentSettledSpxCloseSessions,
+    loadOfficialCpiFinals,
+    loadOfficialForecastExPrices,
+    getResolverSettlements: getPredictionMarketResolverSettlements,
+    kalshiFetch,
+  }),
+  loadContractSchedule: loadPredictionMarketContractSchedule,
+  markProviders: buildPredictionMarketMarkProviders({
+    kalshiFetch,
+    loadOfficialForecastExPrices,
+  }),
+  getResolverSettlements: getPredictionMarketResolverSettlements,
+  marketMonitorCoordinator: predictionMarketTest.marketMonitorCoordinator,
+  loadOfficialForecastExPrices,
+  getManagedAccounts: managedPredictionMarketAccounts,
+  getKnownAccounts: knownPredictionMarketAccounts,
+  getExpectedAccounts: expectedPredictionMarketAccounts,
+  readHistoricalExecutions: (accountId) => readFlexActivityTrades({ accountId }),
+  logger: console,
+});
+app.use('/api/prediction-markets/performance', predictionMarketPerformance.router);
+
+async function importBundledPredictionMarketHistory() {
+  const result = await applyHistoricalImportBundle({
+    store: predictionMarketPerformance.store,
+    bundle: bundledCpiHistory,
+  });
+  for (const account of bundledCpiHistory.accounts || []) {
+    const records = await predictionMarketPerformance.store.queryAccountPrefix(account.accountId, 'lifecycle#');
+    await predictionMarketPerformance.resolveSettlements({
+      accountId: account.accountId,
+      records,
+    });
+  }
+  return result;
+}
+
+async function managedPredictionMarketAccounts() {
+  const response = await sidecarRequest('/accounts', { timeoutMs: 3000 });
+  if (response?.ok !== true || !Array.isArray(response.accounts)) {
+    const error = new Error(response?.message || 'Managed IBKR accounts are unavailable.');
+    error.code = response?.status || 'IBKR_ACCOUNTS_UNAVAILABLE';
+    throw error;
+  }
+  return response.accounts;
+}
+
+function expectedPredictionMarketAccounts() {
+  return expectedIbkrAccountIds();
+}
+
+async function knownPredictionMarketAccounts() {
+  const bundledAccounts = (bundledCpiHistory.accounts || []).map((account) => account.accountId);
+  const flex = readFlexActivityTrades();
+  const flexAccounts = [
+    ...(flex.trades || []).map((trade) => trade.accountId),
+    ...(flex.controls?.accounts || []).map((account) => account.accountId),
+  ];
+  return [...new Set([
+    ...expectedPredictionMarketAccounts(),
+    ...bundledAccounts,
+    ...flexAccounts,
+  ].filter(Boolean))];
+}
+
+async function trackedPredictionMarketAccounts() {
+  const expectedAccounts = expectedPredictionMarketAccounts();
+  if (expectedAccounts.length) return expectedAccounts;
+  const knownAccounts = await knownPredictionMarketAccounts();
+  try {
+    return [...new Set([
+      ...knownAccounts,
+      ...await managedPredictionMarketAccounts(),
+    ].filter(Boolean))];
+  } catch (_error) {
+    return knownAccounts;
+  }
+}
+
 // Market / portfolio data providers (IBKR-first, Yahoo fallback)
 const compositeMarketDataProvider = require('./src/services/providers/compositeMarketDataProvider');
 const yahooMarketDataProvider = require('./src/services/providers/yahoo/yahooMarketDataProvider');
@@ -1060,6 +1628,16 @@ const { createCompositePortfolioDataProvider } = require('./src/services/provide
 const uploadedStatementPortfolioProvider = createUploadedStatementPortfolioProvider(dynamodb);
 const portfolioDataProvider = createCompositePortfolioDataProvider(uploadedStatementPortfolioProvider);
 app.locals.portfolioDataProvider = portfolioDataProvider;
+
+const { createPcaDataSource } = require('./src/services/pca/pcaData.cjs');
+const { createPcaService } = require('./src/services/pca/pcaService.cjs');
+const { createPcaRiskRouter } = require('./src/routes/pcaRisk.cjs');
+const pcaRiskService = createPcaService({
+  dataSource: createPcaDataSource({
+    getPortfolioSnapshot: account => portfolioDataProvider.getPortfolioSnapshot(account),
+  }),
+});
+app.use('/api/risk/pca', createPcaRiskRouter({ service: pcaRiskService }));
 
 const providersRoutes = require('./src/routes/providers');
 app.use('/api/providers', providersRoutes);
@@ -1104,12 +1682,35 @@ const SECURITY_RISK_METRICS_CACHE_TTL = Number.isFinite(parsedSecurityRiskMetric
   ? Math.max(60_000, parsedSecurityRiskMetricsCacheTtl)
   : 60 * 60 * 1000;
 const parsedSecurityRiskMetricsCacheMaxEntries = parseInt(
-  process.env.SECURITY_RISK_METRICS_CACHE_MAX_ENTRIES || '100',
+  process.env.SECURITY_RISK_METRICS_CACHE_MAX_ENTRIES || '160',
   10,
 );
 const SECURITY_RISK_METRICS_CACHE_MAX_ENTRIES = Number.isFinite(parsedSecurityRiskMetricsCacheMaxEntries)
   ? Math.max(10, parsedSecurityRiskMetricsCacheMaxEntries)
-  : 100;
+  : 160;
+const parsedExposureLabHistoryCalendarDays = parseInt(
+  process.env.EXPOSURE_LAB_HISTORY_CALENDAR_DAYS || '550',
+  10,
+);
+const EXPOSURE_LAB_HISTORY_CALENDAR_DAYS = Number.isFinite(parsedExposureLabHistoryCalendarDays)
+  ? Math.max(400, parsedExposureLabHistoryCalendarDays)
+  : 550;
+
+// The universe is rebuilt from the complete persisted Hedgeye archive. Keep a
+// short successful-response cache, but never substitute an expired result when
+// DynamoDB is unavailable: archive coverage must be explicit and auditable.
+const exposureLabUniverseCache = {
+  value: null,
+  timestamp: 0,
+  inFlight: null,
+};
+const parsedExposureLabUniverseCacheTtl = parseInt(
+  process.env.EXPOSURE_LAB_UNIVERSE_CACHE_TTL_MS || '900000',
+  10,
+);
+const EXPOSURE_LAB_UNIVERSE_CACHE_TTL = Number.isFinite(parsedExposureLabUniverseCacheTtl)
+  ? Math.max(60_000, parsedExposureLabUniverseCacheTtl)
+  : 15 * 60 * 1000;
 
 // Cache for risk ranges (1 hour TTL - changes daily)
 const riskRangesCache = new Map();
@@ -1137,6 +1738,97 @@ const HERMES_EMAIL_LEDGER_TABLE = process.env.HERMES_LEDGER_TABLE
   || 'HermesEmailIngestLedger';
 const HERMES_GMAIL_QUERY = process.env.HERMES_GMAIL_QUERY || 'label:Hedgeye newer_than:30d';
 const HERMES_GMAIL_ACCOUNT = process.env.HERMES_GMAIL_ACCOUNT || process.env.HERMES_ACCOUNT_EMAIL || 'timsmithaviation@gmail.com';
+const HEDGEYE_SNAPSHOT_INDEX = process.env.HEDGEYE_SNAPSHOT_INDEX
+  || 'snapshotType-date-meta-index';
+const ALLOW_LEGACY_RESEARCH_REBUILD = String(
+  process.env.HERMES_ALLOW_LEGACY_REBUILD || '',
+).toLowerCase() === 'true';
+
+async function queryLatestSnapshotsByType(
+  snapshotType,
+  { limit = 2, projectionExpression = null, expressionAttributeNames = {} } = {},
+) {
+  const type = String(snapshotType || '').trim();
+  if (!type) return [];
+  try {
+    const params = {
+      TableName: 'HedgeyeDailySnapshot',
+      IndexName: HEDGEYE_SNAPSHOT_INDEX,
+      KeyConditionExpression: '#snapshotType = :snapshotType',
+      ExpressionAttributeNames: {
+        '#snapshotType': 'snapshotType',
+        ...expressionAttributeNames,
+      },
+      ExpressionAttributeValues: { ':snapshotType': type },
+      ScanIndexForward: false,
+      Limit: Math.max(1, Math.min(200, Number(limit) || 2)),
+    };
+    if (projectionExpression) params.ProjectionExpression = projectionExpression;
+    const result = await dynamodb.query(params).promise();
+    const rows = result.Items || [];
+    if (projectionExpression || rows.length === 0) return rows;
+    // The bounded index intentionally projects only freshness metadata. Full
+    // payload consumers fetch the exact latest keys instead of reading the
+    // whole table or storing large research documents in the GSI.
+    const keys = rows.map((row) => ({
+      date: row.date,
+      snapshotType: row.snapshotType,
+    }));
+    const fullRows = [];
+    // BatchGetItem accepts at most 100 keys per request. The bounded ETF Pro
+    // history path can request more than one batch, so chunk and retry only
+    // DynamoDB's explicitly returned UnprocessedKeys.
+    for (let offset = 0; offset < keys.length; offset += 100) {
+      let pending = keys.slice(offset, offset + 100);
+      for (let attempt = 0; pending.length > 0 && attempt < 4; attempt += 1) {
+        const full = await dynamodb.batchGet({
+          RequestItems: {
+            HedgeyeDailySnapshot: {
+              Keys: pending,
+              ConsistentRead: false,
+            },
+          },
+        }).promise();
+        fullRows.push(...(full.Responses?.HedgeyeDailySnapshot || []));
+        pending = full.UnprocessedKeys?.HedgeyeDailySnapshot?.Keys || [];
+      }
+      if (pending.length > 0) {
+        const error = new Error('DynamoDB did not process all Hedgeye snapshot keys');
+        error.code = 'HEDGEYE_SNAPSHOT_BATCH_UNPROCESSED';
+        throw error;
+      }
+    }
+    return fullRows.length > 0 ? fullRows : rows;
+  } catch (error) {
+    // During the one-time GSI build (or a local environment without the
+    // migration), keep the active path bounded by exact-key reads. Never
+    // silently fall back to a table scan.
+    if (!['ResourceNotFoundException', 'ValidationException'].includes(error.code)) {
+      throw error;
+    }
+    const rows = [];
+    const seenDates = new Set();
+    const maxDays = Math.max(14, Number(limit) * 7);
+    for (let offset = 0; offset < maxDays && rows.length < limit; offset += 1) {
+      const date = new Date();
+      date.setDate(date.getDate() - offset);
+      const dateString = date.toLocaleDateString('en-CA', {
+        timeZone: 'America/New_York',
+      });
+      if (seenDates.has(dateString)) continue;
+      seenDates.add(dateString);
+      const result = await dynamodb.get({
+        TableName: 'HedgeyeDailySnapshot',
+        Key: { date: dateString, snapshotType: type },
+        ...(projectionExpression
+          ? { ProjectionExpression: projectionExpression, ExpressionAttributeNames: expressionAttributeNames }
+          : {}),
+      }).promise();
+      if (result.Item) rows.push(result.Item);
+    }
+    return rows;
+  }
+}
 
 async function queryRiskRangePublicationRows(publicationDate) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(publicationDate || ''))) return [];
@@ -1157,10 +1849,7 @@ async function queryRiskRangePublicationRows(publicationDate) {
 }
 
 async function loadRiskRangePublicationEnvelope({ requestedDate = null, now = new Date() } = {}) {
-  const options = {
-    deadlineHour: Number(process.env.RISK_RANGE_DEADLINE_HOUR_ET || 8),
-    deadlineMinute: Number(process.env.RISK_RANGE_DEADLINE_MINUTE_ET || 15),
-  };
+  const options = {};
   const expectation = expectedRiskRangePublication(now, options);
   const publicationDate = requestedDate || expectation.expectedDate;
   const items = await queryRiskRangePublicationRows(publicationDate);
@@ -1184,9 +1873,46 @@ async function loadRiskRangePublicationEnvelope({ requestedDate = null, now = ne
     manifestError = error.code || error.message;
   }
   return applyPersistedManifestGate(envelope, items, persistedManifest, {
+    now,
     ...expectation,
     manifestError,
   });
+}
+
+async function buildCurrentRiskRangeWorkflowStatus({ now = new Date() } = {}) {
+  const envelope = await loadRiskRangePublicationEnvelope({ now });
+  const manifestAccessDenied = /access.?denied|not authorized/i.test(
+    String(envelope.diagnostics?.manifestError || ''),
+  );
+  return {
+    status: envelope.status === 'current'
+      ? 'success'
+      : envelope.status === 'pending'
+        ? 'pending'
+        : envelope.status === 'stale'
+          ? 'error'
+          : envelope.status,
+    lastRun: envelope.manifest.publicationDate,
+    scrapedAt: envelope.manifest.latestUpdatedAt,
+    count: envelope.manifest.decisionRangeCount,
+    primaryCount: envelope.manifest.primaryCount,
+    supplementalCount: envelope.manifest.supplementalCount,
+    expectedDate: envelope.manifest.expectedDate,
+    pendingDate: envelope.manifest.pendingDate,
+    available: envelope.available,
+    errorCode: envelope.diagnostics?.manifestReasons?.includes('manifest-unavailable')
+      ? (manifestAccessDenied
+        ? 'RISK_RANGE_MANIFEST_ACCESS_DENIED'
+        : 'RISK_RANGE_MANIFEST_UNAVAILABLE')
+      : envelope.diagnostics?.manifestReasons?.includes('manifest-missing')
+        ? 'RISK_RANGE_MANIFEST_MISSING'
+        : envelope.diagnostics?.manifestReasons?.length
+          ? 'RISK_RANGE_MANIFEST_INVALID'
+          : null,
+    diagnostics: envelope.diagnostics,
+    error: envelope.diagnostics?.manifestError || null,
+    nextRun: '8:15 AM ET (market days)',
+  };
 }
 
 async function buildWorkflowStatusSnapshot() {
@@ -1212,6 +1938,7 @@ async function buildWorkflowStatusSnapshot() {
       errorCount: 0,
       pendingCount: 0,
       attachmentCount: 0,
+      historicalBackfill: null,
       latestFilename: null,
       latestS3Key: null,
       nextRun: 'Every 15 minutes'
@@ -1219,39 +1946,7 @@ async function buildWorkflowStatusSnapshot() {
   };
 
   try {
-    const envelope = await loadRiskRangePublicationEnvelope({ now: new Date() });
-    const manifestAccessDenied = /access.?denied|not authorized/i.test(
-      String(envelope.diagnostics?.manifestError || ''),
-    );
-    workflowStatus.hedgeye = {
-      status: envelope.status === 'current'
-        ? 'success'
-        : envelope.status === 'pending'
-          ? 'pending'
-          : envelope.status === 'stale'
-            ? 'error'
-            : envelope.status,
-      lastRun: envelope.manifest.publicationDate,
-      scrapedAt: envelope.manifest.latestUpdatedAt,
-      count: envelope.manifest.decisionRangeCount,
-      primaryCount: envelope.manifest.primaryCount,
-      supplementalCount: envelope.manifest.supplementalCount,
-      expectedDate: envelope.manifest.expectedDate,
-      pendingDate: envelope.manifest.pendingDate,
-      available: envelope.available,
-      errorCode: envelope.diagnostics?.manifestReasons?.includes('manifest-unavailable')
-        ? (manifestAccessDenied
-          ? 'RISK_RANGE_MANIFEST_ACCESS_DENIED'
-          : 'RISK_RANGE_MANIFEST_UNAVAILABLE')
-        : envelope.diagnostics?.manifestReasons?.includes('manifest-missing')
-          ? 'RISK_RANGE_MANIFEST_MISSING'
-          : envelope.diagnostics?.manifestReasons?.length
-            ? 'RISK_RANGE_MANIFEST_INVALID'
-            : null,
-      diagnostics: envelope.diagnostics,
-      error: envelope.diagnostics?.manifestError || null,
-      nextRun: '8:15 AM ET (market days)',
-    };
+    workflowStatus.hedgeye = await buildCurrentRiskRangeWorkflowStatus({ now: new Date() });
   } catch (hedgeyeError) {
     console.error('[API] Error fetching Hedgeye status:', hedgeyeError);
     workflowStatus.hedgeye.status = 'error';
@@ -1260,10 +1955,7 @@ async function buildWorkflowStatusSnapshot() {
   }
 
   try {
-    const portfolioResult = await dynamodb.scan({
-      TableName: 'PortfolioSnapshots',
-      Limit: 10
-    }).promise();
+    const portfolioResult = await readAllDynamoItems(dynamodb, 'scan', { TableName: 'PortfolioSnapshots' });
 
     if (portfolioResult.Items && portfolioResult.Items.length > 0) {
       const latest = portfolioResult.Items.sort((a, b) => {
@@ -1306,11 +1998,10 @@ async function buildWorkflowStatusSnapshot() {
 const intradayCache = new Map();
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-// FRED Series IDs for Treasury Yields and Rates
-// Note: UST2Y, UST10Y, and UST30Y are now sourced from Yahoo
-// Finance Treasury yield indices to support intraday/1D/5D
-// charts, so they are intentionally NOT included here.
+// FRED Series IDs for Treasury Yields and Rates. Treasury observations are
+// dated daily references; they do not advertise intraday chart ranges.
 const FRED_SERIES = {
+  'UST2Y': 'DGS2',
   'UST5Y': 'DGS5',
   'UST13W': 'DGS3MO',
   'SOFR': 'SOFR',
@@ -1321,11 +2012,10 @@ const FRED_SERIES = {
   'HY_OAS': 'BAMLH0A0HYM2',   // US HY Corporate OAS
 };
 
-// International sovereign 10Y yields. Stooq used to provide free daily CSVs
-// but now gates the `/q/d/l/` endpoint behind an API key; until a replacement
-// intraday source is wired, we read these monthly from FRED's OECD-sourced
-// IRLTLT01 series (suffix `156N` = harmonized 10-year long-term rate, percent
-// per annum). Data is ~1 month delayed but is the best free source we have.
+// Monthly reference fallback for international sovereign 10Y yields when no
+// verified daily source is available. FRED's OECD-sourced IRLTLT01 series are
+// harmonized monthly long-term rates, percent per annum. They may publish with
+// substantial lag and never supply day or 15-day changes.
 const INTL_BOND_FRED_FALLBACK = {
   'BUND10Y': 'IRLTLT01DEM156N',   // Germany
   'GILT10Y': 'IRLTLT01GBM156N',   // UK
@@ -1334,13 +2024,106 @@ const INTL_BOND_FRED_FALLBACK = {
   'JGB10Y': 'IRLTLT01JPM156N',    // Japan
   'ACGB10Y': 'IRLTLT01AUM156N',   // Australia
   'KTB10Y': 'IRLTLT01KRM156N',    // South Korea
-  // CGB (China) has no FRED monthly series — renders as '—' until a paid
-  // feed or alternate free source is wired in.
+  'CAN10Y': 'IRLTLT01CAM156N',     // Canada
 };
 
 // Kept for forward compatibility if a keyless Stooq replacement becomes
 // available. Empty for now; fetchIntlBondQuote skips Stooq when this is empty.
 const STOOQ_BOND_SYMBOLS = {};
+
+const TRADING_ECONOMICS_BOND_COUNTRIES = {
+  BUND10Y: ['germany'],
+  GILT10Y: ['united kingdom', 'uk'],
+  OAT10Y: ['france'],
+  BTP10Y: ['italy'],
+  JGB10Y: ['japan'],
+  ACGB10Y: ['australia'],
+  KTB10Y: ['south korea', 'korea'],
+  CAN10Y: ['canada'],
+};
+const TRADING_ECONOMICS_BOND_TTL_MS = 60 * 1000;
+let tradingEconomicsBondCache = { expiresAt: 0, promise: null };
+
+const firstFiniteNumber = (...values) => {
+  for (const value of values) {
+    if (value === '' || value == null) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const firstValidTimestamp = (...values) => {
+  for (const value of values) {
+    const parsed = Date.parse(String(value || ''));
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return null;
+};
+
+async function fetchTradingEconomicsBondSnapshot() {
+  const apiKey = String(process.env.TRADING_ECONOMICS_API_KEY || '').trim();
+  if (!apiKey) return new Map();
+  const now = Date.now();
+  if (tradingEconomicsBondCache.promise && tradingEconomicsBondCache.expiresAt > now) {
+    return tradingEconomicsBondCache.promise;
+  }
+
+  const promise = axios.get('https://api.tradingeconomics.com/markets/bond', {
+    params: { c: apiKey, type: '10Y' },
+    timeout: 12_000,
+    headers: { 'User-Agent': 'market-dashboard/1.0' },
+  }).then((response) => {
+    const receivedAt = new Date().toISOString();
+    const rows = Array.isArray(response.data) ? response.data : [];
+    const bySymbol = new Map();
+    Object.entries(TRADING_ECONOMICS_BOND_COUNTRIES).forEach(([symbol, aliases]) => {
+      const match = rows.find((row) => {
+        const identity = [row?.Country, row?.country, row?.Name, row?.name, row?.Symbol, row?.symbol]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return aliases.some((alias) => identity.includes(alias));
+      });
+      const price = firstFiniteNumber(match?.Last, match?.last, match?.Close, match?.close);
+      const timestamp = firstValidTimestamp(
+        match?.Date,
+        match?.date,
+        match?.LastUpdate,
+        match?.lastUpdate,
+      );
+      if (price == null || !timestamp) return;
+      const change = firstFiniteNumber(match?.DailyChange, match?.dailyChange, match?.Change, match?.change);
+      const changePercent = firstFiniteNumber(
+        match?.DailyPercentualChange,
+        match?.dailyPercentualChange,
+        match?.PercentChange,
+        match?.percentChange,
+      );
+      bySymbol.set(symbol, {
+        receivedAt,
+        price: price.toFixed(3),
+        change: change == null ? null : change.toFixed(3),
+        changePercent: changePercent == null ? null : changePercent.toFixed(3),
+        timestamp,
+        source: 'trading_economics',
+        dataType: 'delayed',
+        observationFrequency: 'daily',
+        warning: 'delayed_data',
+      });
+    });
+    return bySymbol;
+  }).catch((error) => {
+    console.warn('[TradingEconomics] Global bond refresh unavailable:', error.message);
+    return new Map();
+  });
+
+  tradingEconomicsBondCache = {
+    expiresAt: now + TRADING_ECONOMICS_BOND_TTL_MS,
+    promise,
+  };
+  return promise;
+}
 
 // Yahoo Finance ticker mappings (consolidated from securitiesConfig.js)
 // This should match src/constants/securitiesConfig.js YAHOO_TICKER_MAP
@@ -1354,25 +2137,38 @@ const YAHOO_TICKER_MAP = {
   'IXIC': '^IXIC',
   'RUT': '^RUT',
   'NDX': '^NDX',
+  'MID': '^MID',
   'VIX': '^VIX',
   'RVX': '^RVX',
   'VXN': '^VXN',
   'GVZ': '^GVZ',
   'OVX': '^OVX',
   'CRB': '^TRCCRB',
+  'SMH': 'SMH',
 
   // Indices - European
+  'STOXX600': '^STOXX',
+  'SX5E': '^STOXX50E',
   'DAX': '^GDAXI',
   'FTSE': '^FTSE',
   'CAC': '^FCHI',
   'N100': '^N100',
+  'FTSEMIB': 'FTSEMIB.MI',
+  'IBEX': '^IBEX',
+  'SMI': '^SSMI',
 
   // Indices - Asian
   'NIKK': '^N225',
   'N225': '^N225',
   'HSI': '^HSI',
+  'CSI300': '000300.SS',
   'SSEC': '000001.SS',
+  'KOSPI': '^KS11',
+  'TAIEX': '^TWII',
+  'NIFTY50': '^NSEI',
   'AXJO': '^AXJO',
+  'JKSE': '^JKSE',
+  'KLSE': '^KLSE',
 
   // Indices - Other
   'MOVE': '^MOVE',
@@ -1380,9 +2176,6 @@ const YAHOO_TICKER_MAP = {
   // Treasury yield indices used as rate proxies
   'UST10Y': '^TNX',
   'UST30Y': '^TYX',
-  // For 2-year, we currently proxy with the 5-year index; adjust
-  // if a dedicated 2Y yield index symbol is added.
-  'UST2Y': '^FVX',
 
   // Currency pairs
   'EUR/USD': 'EURUSD=X',
@@ -1427,6 +2220,16 @@ const YAHOO_TICKER_MAP = {
   'HG': 'HG=F',
   'PLATINUM': 'PL=F',
   'PL': 'PL=F',
+  'CORN': 'ZC=F',
+  'ZC': 'ZC=F',
+  'PALLADIUM': 'PA=F',
+  'PA': 'PA=F',
+  'WHEAT': 'ZW=F',
+  'ZW': 'ZW=F',
+  'SOYBEANS': 'ZS=F',
+  'ZS': 'ZS=F',
+  'RBOB': 'RB=F',
+  'RB': 'RB=F',
 
   // ETFs for market breadth
   'QQQ': 'QQQ',
@@ -1444,20 +2247,70 @@ const YAHOO_TICKER_MAP = {
   'SOLANA': 'SOL-USD',
   'AVAX': 'AVAX-USD',
   'XRP': 'XRP-USD',
+  'DOGE': 'DOGE-USD',
+  'LINK': 'LINK-USD',
 };
 
-// Multi-region market configuration
+const getBackdropCatalogGroup = (groupId) => (
+  MARKET_BACKDROP_CATALOG.find((group) => group.id === groupId)
+);
+
+const toBackdropIndex = (row) => ({
+  symbol: row.symbol,
+  name: row.label,
+  unit: row.unit || undefined,
+  changeUnit: row.changeUnit || undefined,
+  country: row.country || undefined,
+  ...(row.provider || {}),
+});
+
+const getBackdropRegionIndices = (groupId) => (
+  (getBackdropCatalogGroup(groupId)?.rows || [])
+    .filter((row) => !row.derived)
+    .map(toBackdropIndex)
+);
+
+const RATE_TAB_LABELS = {
+  us_treasuries: 'Treasuries',
+  credit: 'Credit',
+  eu_sovereigns: 'Europe',
+  asia_sovereigns: 'Asia Pacific',
+  americas_sovereigns: 'Americas',
+};
+
+const buildBackdropRateTabs = () => {
+  const rows = getBackdropCatalogGroup('rates')?.rows || [];
+  return Object.fromEntries(Object.entries(RATE_TAB_LABELS).map(([tabKey, label]) => [
+    tabKey,
+    {
+      label,
+      indices: rows
+        .filter((row) => row.tab === tabKey && !row.derived)
+        .map(toBackdropIndex),
+      derived: rows
+        .filter((row) => row.tab === tabKey && row.derived)
+        .map((row) => ({
+          symbol: row.symbol,
+          name: row.label,
+          unit: row.unit || 'bps',
+          changeUnit: row.changeUnit || 'bps',
+          formula: row.derived.formula,
+        })),
+    },
+  ]));
+};
+
+// Multi-region market configuration. The active backdrop regions consume the
+// same ordered catalog as the UI so provider coverage cannot drift from the
+// summary/detail roster.
 const MARKET_REGIONS = {
+  pulse: {
+    label: 'Macro pulse',
+    indices: MARKET_PULSE_SUPPLEMENTAL_CATALOG.map(toBackdropIndex)
+  },
   us: {
     label: 'US',
-    indices: [
-      { symbol: 'SPX', name: 'S&P 500', yahooSymbol: '^GSPC', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'DJI', name: 'Dow 30', yahooSymbol: '^DJI', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'IXIC', name: 'Nasdaq', yahooSymbol: '^IXIC', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'RUT', name: 'Russell 2000', yahooSymbol: '^RUT', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'QQQ', name: 'QQQ (Tech)', yahooSymbol: 'QQQ' },
-      { symbol: 'RSP', name: 'EW S&P (Breadth)', yahooSymbol: 'RSP' }
-    ]
+    indices: getBackdropRegionIndices('us')
   },
   sectors: {
     label: 'Sectors',
@@ -1478,36 +2331,15 @@ const MARKET_REGIONS = {
   },
   europe: {
     label: 'Europe',
-    indices: [
-      { symbol: 'FTSE', name: 'FTSE 100', yahooSymbol: '^FTSE', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'CAC', name: 'CAC 40', yahooSymbol: '^FCHI', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'DAX', name: 'DAX', yahooSymbol: '^GDAXI', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'N100', name: 'Euronext 100', yahooSymbol: '^N100', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'EURUSD', name: 'EUR/USD', yahooSymbol: 'EURUSD=X', provider: 'yahoo', secType: 'CASH' },
-      { symbol: 'GBPUSD', name: 'USD/GBP', yahooSymbol: 'GBPUSD=X', provider: 'yahoo', secType: 'CASH' }
-    ]
+    indices: getBackdropRegionIndices('europe')
   },
   asia: {
     label: 'Asia',
-    indices: [
-      { symbol: 'N225', name: 'Nikkei 225', yahooSymbol: '^N225', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'HSI', name: 'Hang Seng', yahooSymbol: '^HSI', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'SSEC', name: 'Shanghai', yahooSymbol: '000001.SS', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'AXJO', name: 'ASX 200', yahooSymbol: '^AXJO', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'USDJPY', name: 'USD/JPY', yahooSymbol: 'JPY=X', provider: 'yahoo', secType: 'CASH' },
-      { symbol: 'USDCNY', name: 'USD/CNY', yahooSymbol: 'CNY=X', provider: 'yahoo', secType: 'CASH' }
-    ]
+    indices: getBackdropRegionIndices('asia')
   },
   crypto: {
     label: 'Cryptocurrencies',
-    indices: [
-      { symbol: 'BTC', name: 'Bitcoin', yahooSymbol: 'BTC-USD', provider: 'yahoo', secType: 'CRYPTO' },
-      { symbol: 'ETH', name: 'Ethereum', yahooSymbol: 'ETH-USD', provider: 'yahoo', secType: 'CRYPTO' },
-      { symbol: 'BNB', name: 'Binance Coin', yahooSymbol: 'BNB-USD', provider: 'yahoo', secType: 'CRYPTO' },
-      { symbol: 'ADA', name: 'Cardano', yahooSymbol: 'ADA-USD', provider: 'yahoo', secType: 'CRYPTO' },
-      { symbol: 'SOL', name: 'Solana', yahooSymbol: 'SOL-USD', provider: 'yahoo', secType: 'CRYPTO' },
-      { symbol: 'XRP', name: 'XRP', yahooSymbol: 'XRP-USD', provider: 'yahoo', secType: 'CRYPTO' }
-    ]
+    indices: getBackdropRegionIndices('crypto')
   },
   rates: {
     label: 'Rates',
@@ -1515,79 +2347,12 @@ const MARKET_REGIONS = {
     // still expect a flat list (and for generic region iteration). The
     // tabbed structure is authoritative for the /api/multi-region-quotes
     // response shape under the `rates` key.
-    indices: [
-      { symbol: 'UST2Y', name: '2-Yr', yahooSymbol: '^FVX', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'UST5Y', name: '5-Yr', provider: 'fred', secType: 'ECONOMIC' },
-      { symbol: 'UST10Y', name: '10-Yr', yahooSymbol: '^TNX', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'UST30Y', name: '30-Yr', yahooSymbol: '^TYX', provider: 'yahoo', secType: 'IND' },
-      { symbol: 'UST13W', name: '13-Wk', provider: 'fred', secType: 'ECONOMIC' },
-      { symbol: 'FEDFUNDS', name: 'Fed Funds', provider: 'fred', secType: 'ECONOMIC' }
-    ],
-    tabs: {
-      us_treasuries: {
-        label: 'Treasuries',
-        indices: [
-          { symbol: 'UST2Y', name: '2-Yr', unit: 'yield', yahooSymbol: '^FVX', provider: 'yahoo', secType: 'IND' },
-          { symbol: 'UST5Y', name: '5-Yr', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'UST10Y', name: '10-Yr', unit: 'yield', yahooSymbol: '^TNX', provider: 'yahoo', secType: 'IND' },
-          { symbol: 'UST30Y', name: '30-Yr', unit: 'yield', yahooSymbol: '^TYX', provider: 'yahoo', secType: 'IND' }
-        ],
-        // Derived rows (computed server-side from the indices above)
-        derived: [
-          { symbol: 'CURVE_2s10s', name: '2s10s', unit: 'bps', formula: ['UST10Y', 'UST2Y'] },
-          { symbol: 'CURVE_5s30s', name: '5s30s', unit: 'bps', formula: ['UST30Y', 'UST5Y'] },
-          { symbol: 'CURVE_3m10y', name: '3M10Y', unit: 'bps', formula: ['UST10Y', 'UST13W'] }
-        ]
-      },
-      policy: {
-        label: 'Policy',
-        indices: [
-          { symbol: 'FEDFUNDS', name: 'Fed Funds', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'SOFR', name: 'SOFR', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'UST13W', name: '13-Wk', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'IORB', name: 'IORB', unit: 'yield', provider: 'fred', secType: 'ECONOMIC' }
-        ]
-      },
-      credit: {
-        label: 'Credit',
-        indices: [
-          { symbol: 'IG_OAS', name: 'IG OAS', unit: 'oas', provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'HY_OAS', name: 'HY OAS', unit: 'oas', provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'LQD', name: 'LQD', unit: 'price' },
-          { symbol: 'HYG', name: 'HYG', unit: 'price' },
-          { symbol: 'EMB', name: 'EMB', unit: 'price' }
-        ]
-      },
-      eu_sovereigns: {
-        label: 'EU',
-        indices: [
-          { symbol: 'BUND10Y', name: 'Bund 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'GILT10Y', name: 'Gilt 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'OAT10Y', name: 'OAT 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'BTP10Y', name: 'BTP 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' }
-        ]
-      },
-      asia_sovereigns: {
-        label: 'Asia',
-        indices: [
-          { symbol: 'JGB10Y', name: 'JGB 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'CGB10Y', name: 'CGB 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'ACGB10Y', name: 'ACGB 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' },
-          { symbol: 'KTB10Y', name: 'KTB 10Y', unit: 'yield', intl: true, provider: 'fred', secType: 'ECONOMIC' }
-        ]
-      }
-    }
+    indices: getBackdropRegionIndices('rates'),
+    tabs: buildBackdropRateTabs()
   },
   commodities: {
     label: 'Commodities',
-    indices: [
-      { symbol: 'BZ', name: 'Brent Crude', yahooSymbol: 'BZ=F', provider: 'yahoo', secType: 'FUT' },
-      { symbol: 'CL', name: 'WTI Crude', yahooSymbol: 'CL=F', provider: 'yahoo', secType: 'FUT' },
-      { symbol: 'GC', name: 'Gold', yahooSymbol: 'GC=F', provider: 'yahoo', secType: 'FUT' },
-      { symbol: 'SI', name: 'Silver', yahooSymbol: 'SI=F', provider: 'yahoo', secType: 'FUT' },
-      { symbol: 'HG', name: 'Copper', yahooSymbol: 'HG=F', provider: 'yahoo', secType: 'FUT' },
-      { symbol: 'PL', name: 'Platinum', yahooSymbol: 'PL=F', provider: 'yahoo', secType: 'FUT' }
-    ]
+    indices: getBackdropRegionIndices('commodities')
   },
   currencies: {
     label: 'Currencies',
@@ -1617,6 +2382,10 @@ function getTickerMapping(symbol) {
     return { source: 'fred', ticker: FRED_SERIES[upperSymbol] };
   }
 
+  if (INTL_BOND_FRED_FALLBACK[upperSymbol]) {
+    return { source: 'fred', ticker: INTL_BOND_FRED_FALLBACK[upperSymbol] };
+  }
+
   // Check Yahoo Finance special mappings
   if (YAHOO_TICKER_MAP[upperSymbol]) {
     return { source: 'yahoo', ticker: YAHOO_TICKER_MAP[upperSymbol] };
@@ -1626,6 +2395,21 @@ function getTickerMapping(symbol) {
   return { source: 'yahoo', ticker: upperSymbol };
 }
 
+const exposureLabSecurityIdentityResolver = createExposureLabSecurityIdentityResolver({
+  httpClient: axios,
+  secUserAgent: process.env.EXPOSURE_LAB_SEC_USER_AGENT
+    || 'market-dashboard/1.0 (local research operator)',
+  resolveYahooSymbol: (ticker) => resolveExposureLabYahooSymbol(ticker, (normalizedTicker) => {
+    const mapping = getTickerMapping(normalizedTicker);
+    if (mapping.source !== 'yahoo') return null;
+    return /^[A-Z]{1,5}\.[A-Z]$/.test(normalizedTicker)
+      ? normalizedTicker.replace('.', '-')
+      : mapping.ticker;
+  }),
+});
+
+app.get('/api/security-identities', createSecurityIdentitiesHandler({ resolver: exposureLabSecurityIdentityResolver }));
+
 function enforceSecurityRiskMetricsCacheCapacity() {
   while (securityRiskMetricsHistoryCache.size > SECURITY_RISK_METRICS_CACHE_MAX_ENTRIES) {
     const oldestKey = securityRiskMetricsHistoryCache.keys().next().value;
@@ -1633,7 +2417,12 @@ function enforceSecurityRiskMetricsCacheCapacity() {
   }
 }
 
-async function fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh = false } = {}) {
+async function fetchYahooAdjustedHistory(symbol, {
+  forceRefresh = false,
+  cacheScope = 'maximum',
+  period1 = '-2208988800',
+  period2 = String(Math.floor(Date.now() / 1000)),
+} = {}) {
   const mapping = getTickerMapping(symbol);
   if (mapping.source !== 'yahoo') {
     const error = new Error(`Yahoo maximum history is unsupported for ${symbol}`);
@@ -1641,8 +2430,8 @@ async function fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh = false }
     throw error;
   }
 
-  const yahooSymbol = mapping.ticker;
-  const cacheKey = yahooSymbol.toUpperCase();
+  const yahooSymbol = resolveExposureLabYahooSymbol(symbol, normalized => /^[A-Z]{1,5}\.[AB]$/.test(normalized) ? normalized.replace('.', '-') : mapping.ticker);
+  const cacheKey = `${yahooSymbol.toUpperCase()}::${cacheScope}`;
   const now = Date.now();
   const cached = securityRiskMetricsHistoryCache.get(cacheKey);
   if (!forceRefresh && cached && now - cached.timestamp < SECURITY_RISK_METRICS_CACHE_TTL) {
@@ -1660,37 +2449,10 @@ async function fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh = false }
   if (pending) return pending;
 
   const request = (async () => {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`;
-    const response = await axios.get(url, {
-      params: {
-        // Yahoo can silently coarsen `range=max` responses to monthly bars.
-        // An explicit epoch window preserves daily granularity while still
-        // requesting all history the provider can return.
-        period1: '-2208988800',
-        period2: String(Math.floor(Date.now() / 1000)),
-        interval: '1d',
-        includePrePost: 'false',
-        includeAdjustedClose: 'true',
-        events: 'div,splits',
-      },
-      timeout: 20000,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
+    const { bars, fetchedAt, instrumentType, exchangeTimezone, regularSession } = await fetchYahooAdjustedHistoryData({
+      symbol: yahooSymbol, httpClient: axios, period1, period2,
     });
-    const chart = response.data?.chart;
-    if (chart?.error) {
-      throw new Error(chart.error.description || chart.error.code || 'Yahoo chart error');
-    }
-    const chartResult = chart?.result?.[0];
-    if (chartResult?.meta?.dataGranularity !== '1d') {
-      throw new Error(`Yahoo returned ${chartResult?.meta?.dataGranularity || 'unknown'} granularity instead of daily bars`);
-    }
-    const bars = parseYahooChartBars(chartResult);
-    if (bars.length === 0) {
-      throw new Error('Yahoo returned no explicit adjusted daily bars');
-    }
-
-    const fetchedAt = new Date().toISOString();
-    const data = { bars, yahooSymbol, fetchedAt };
+    const data = { bars, yahooSymbol, fetchedAt, instrumentType, exchangeTimezone, regularSession };
     securityRiskMetricsHistoryCache.set(cacheKey, { data, timestamp: Date.now() });
     enforceSecurityRiskMetricsCacheCapacity();
     return { ...data, cacheStatus: 'miss', cacheAgeSeconds: 0 };
@@ -1700,6 +2462,25 @@ async function fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh = false }
 
   securityRiskMetricsHistoryInFlight.set(cacheKey, request);
   return request;
+}
+
+async function fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh = false } = {}) {
+  return fetchYahooAdjustedHistory(symbol, {
+    forceRefresh,
+    cacheScope: 'maximum',
+    period1: '-2208988800',
+  });
+}
+
+async function fetchYahooExposureLabAdjustedHistory(symbol, { forceRefresh = false } = {}) {
+  const period2 = Math.floor(Date.now() / 1000);
+  const period1 = period2 - (EXPOSURE_LAB_HISTORY_CALENDAR_DAYS * 24 * 60 * 60);
+  return fetchYahooAdjustedHistory(symbol, {
+    forceRefresh,
+    cacheScope: `exposure-lab-${EXPOSURE_LAB_HISTORY_CALENDAR_DAYS}d`,
+    period1: String(period1),
+    period2: String(period2),
+  });
 }
 
 // Fetch from Yahoo Finance
@@ -1747,7 +2528,7 @@ async function fetchYahooQuote(yahooTicker) {
       return null;
     }
     const meta = result.meta || {};
-    const isRateProxyTicker = yahooTicker === '^FVX' || yahooTicker === '^TNX' || yahooTicker === '^TYX';
+    const isRateProxyTicker = yahooTicker === '^TNX' || yahooTicker === '^TYX';
 
     // Log available price fields for debugging
     const availablePriceFields = Object.keys(meta).filter(key =>
@@ -1867,6 +2648,7 @@ async function fetchFredQuoteFromCsv(seriesId) {
     const changePercent = previous.value > 0 ? (change / previous.value) * 100 : 0;
 
     return {
+      receivedAt: new Date().toISOString(),
       price: latest.value.toFixed(2),
       change: change.toFixed(2),
       changePercent: changePercent.toFixed(2),
@@ -1918,6 +2700,7 @@ async function fetchFredQuote(seriesId) {
         console.log(`[FRED] Successfully fetched ${seriesId}: price=${price}, change=${change}`);
 
         return {
+          receivedAt: new Date().toISOString(),
           price: price.toFixed(2),
           change: change.toFixed(2),
           changePercent: changePercent.toFixed(2),
@@ -1991,6 +2774,7 @@ async function fetchStooqBondQuote(stooqSymbol) {
     console.log(`[Stooq] ${stooqSymbol}: price=${latest.close}, change=${change.toFixed(3)} (${rows.length} rows)`);
 
     return {
+      receivedAt: new Date().toISOString(),
       price: latest.close.toFixed(2),
       change: change.toFixed(2),
       changePercent: changePercent.toFixed(2),
@@ -2004,19 +2788,46 @@ async function fetchStooqBondQuote(stooqSymbol) {
   }
 }
 
-// Fetch international bond yield: Stooq primary, FRED monthly fallback.
+// Prefer dated official daily histories for international sovereign yields.
+// Their quote and period comparisons use the same published benchmark series.
 // `symbol` is an internal symbol like BUND10Y / JGB10Y.
 async function fetchIntlBondQuote(symbol) {
   const upper = symbol.toUpperCase();
+  const official = await fetchOfficialSovereignSeries(upper);
+  if (official?.closes?.length) {
+    const latest = official.closes[official.closes.length - 1];
+    const previous = official.closes[official.closes.length - 2];
+    const dailyChange = latestObservationChange(official.closes);
+    const hasDailyChange = dailyChange?.interval === 'daily';
+    return {
+      price: String(latest.close),
+      change: hasDailyChange ? String(latest.close - previous.close) : null,
+      changePercent: hasDailyChange ? dailyChange.value : null,
+      timestamp: new Date(latest.t).toISOString(),
+      receivedAt: official.receivedAt,
+      source: official.source,
+      sourceUrl: official.sourceUrl,
+      sourceInstrument: official.sourceInstrument,
+      sourceSeriesId: official.seriesId,
+      observationFrequency: official.observationFrequency,
+      dataType: 'historical',
+      displayOnly: true,
+      executable: false,
+      warning: 'official_daily_observation',
+    };
+  }
+  const tradingEconomicsRows = await fetchTradingEconomicsBondSnapshot();
+  const tradingEconomicsQuote = tradingEconomicsRows.get(upper);
+  if (tradingEconomicsQuote) return tradingEconomicsQuote;
   const stooqSym = STOOQ_BOND_SYMBOLS[upper];
   if (stooqSym) {
     const stooqQuote = await fetchStooqBondQuote(stooqSym);
-    if (stooqQuote) return { ...stooqQuote, source: 'stooq' };
+    if (stooqQuote) return { ...stooqQuote, source: 'stooq', observationFrequency: 'daily' };
   }
   const fredSeries = INTL_BOND_FRED_FALLBACK[upper];
   if (fredSeries) {
     const fredQuote = await fetchFredQuote(fredSeries);
-    if (fredQuote) return { ...fredQuote, source: 'fred' };
+    if (fredQuote) return { ...fredQuote, source: 'fred', sourceSeriesId: fredSeries, observationFrequency: 'monthly' };
   }
   return null;
 }
@@ -2035,19 +2846,29 @@ compositeMarketDataProvider.setSpecialQuoteFetcher(async (symbol) => {
     quoteData = await fetchFredQuote(mapping.ticker);
   }
   if (quoteData && quoteData.price) {
+    const source = quoteData.source || mapping.source;
+    const isDatedReference = quoteData.dataType === 'historical' || source === 'fred' || source === 'stooq';
     return {
       legacy: {
         symbol: upperSym,
         ...quoteData,
-        source: quoteData.source || mapping.source,
-        dataType: 'historical',
+        source,
+        sourceSeriesId: quoteData.sourceSeriesId || (source === 'fred' ? mapping.ticker : null),
+        observationFrequency: quoteData.observationFrequency || (source === 'fred' ? 'daily' : null),
+        dataType: quoteData.dataType || (isDatedReference ? 'historical' : 'delayed'),
         entitlementStatus: null,
-        warning: 'historical_observation'
+        warning: quoteData.warning || (isDatedReference ? 'historical_observation' : 'delayed_data')
       }
     };
   }
   return null;
 });
+
+function isQuoteUsableNow(quote, instrument) {
+  if (!buildQuoteMetadata(quote).usable) return false;
+  const provider = getProviderStatusSnapshot().ibkr;
+  return validateQuoteObservation(quote, { instrument, connected: provider.connected, connectionGeneration: quote.source === 'ibkr' ? provider.connectionGeneration : undefined }).valid;
+}
 
 // Fetch quote with caching (IBKR-first via composite provider)
 async function getQuote(symbolOrInstrument) {
@@ -2059,9 +2880,7 @@ async function getQuote(symbolOrInstrument) {
 
   const cachedQuote = getFreshCachedQuote(quotesCache, cacheKey, now, CACHE_TTL);
   if (cachedQuote) {
-    const cachedMeta = buildQuoteMetadata(cachedQuote);
-    const ibkrConnected = getProviderStatusSnapshot().ibkr.connected === true;
-    if (cachedMeta.usable && (cachedQuote.source !== 'ibkr' || ibkrConnected)) {
+    if (isQuoteUsableNow(cachedQuote, symbolOrInstrument)) {
       return cachedQuote;
     }
     quotesCache.delete(cacheKey);
@@ -2069,17 +2888,17 @@ async function getQuote(symbolOrInstrument) {
 
   if (ibkrStreamBridge.STREAM_ENABLED && canUseSymbolStream(symbolOrInstrument)) {
     const streamLegacy = ibkrStreamBridge.getCachedLegacy(symbol);
-    if (streamLegacy && streamLegacy.price) {
+    if (streamLegacy && streamLegacy.price && isQuoteUsableNow(streamLegacy, symbolOrInstrument)) {
       quotesCache.set(cacheKey, { data: streamLegacy, timestamp: now });
       return streamLegacy;
     }
   }
 
   try {
-    const quoteResult = await compositeMarketDataProvider.getQuote(symbolOrInstrument);
+    const quoteResult = await scheduleQuoteFetch(cacheKey, () => compositeMarketDataProvider.getQuote(symbolOrInstrument));
     const quoteMeta = buildQuoteMetadata(quoteResult);
-    if (quoteMeta.usable) {
-      quotesCache.set(cacheKey, { data: quoteResult, timestamp: now });
+    if (quoteMeta.usable && isQuoteUsableNow(quoteResult, symbolOrInstrument)) {
+      quotesCache.set(cacheKey, { data: quoteResult, timestamp: Date.now() });
       return quoteResult;
     }
   } catch (error) {
@@ -2091,6 +2910,11 @@ async function getQuote(symbolOrInstrument) {
 
 // Fetch intraday data for sparklines (5-minute intervals, last 50 points)
 async function getIntradayData(symbol, range = '1d') {
+  const mapping = getTickerMapping(symbol);
+  // FRED observations are dated daily references; never substitute a
+  // Yahoo intraday series for them (notably UST2Y/DGS2).
+  if (mapping.source !== 'yahoo') return [];
+
   const cacheKey = `intraday:${symbol.toUpperCase()}`;
 
   // Check cache
@@ -2104,11 +2928,9 @@ async function getIntradayData(symbol, range = '1d') {
 
   try {
     const upperSymbol = symbol.toUpperCase();
-    const isRateProxy = upperSymbol === 'UST2Y' || upperSymbol === 'UST10Y' || upperSymbol === 'UST30Y';
+    const isRateProxy = upperSymbol === 'UST10Y' || upperSymbol === 'UST30Y';
 
-    // Get the Yahoo/FRED ticker mapping
-    const mapping = getTickerMapping(symbol);
-    const yahooSymbol = mapping.source === 'yahoo' ? mapping.ticker : symbol;
+    const yahooSymbol = mapping.ticker;
 
     const url = `https://query2.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?range=${range}&interval=5m`;
 
@@ -2149,158 +2971,41 @@ async function getIntradayData(symbol, range = '1d') {
   }
 }
 
-// Mock portfolio data
-const generatePortfolioData = () => {
-  const totalValue = 250000 + Math.random() * 50000;
-  const dayChange = (Math.random() - 0.5) * 5000;
-  const dayChangePercent = (dayChange / totalValue) * 100;
-  const totalGainLoss = (Math.random() - 0.3) * 20000;
-  const totalGainLossPercent = (totalGainLoss / totalValue) * 100;
-
+// Legacy endpoints explicitly report unavailable without fabricated market observations.
+const fetchVolatilityData = async (symbol) => {
+  const quote = await getQuote(symbol);
+  const usable = quote && isQuoteUsableNow(quote, symbol);
   return {
-    summary: {
-      totalValue: Math.floor(totalValue),
-      totalDayChange: Math.floor(dayChange),
-      totalDayChangePercent: dayChangePercent.toFixed(2),
-      totalGainLoss: Math.floor(totalGainLoss),
-      totalGainLossPercent: totalGainLossPercent.toFixed(2),
-      positionCount: Math.floor(Math.random() * 20) + 5
-    },
-    assetAllocation: {
-      'US Stocks': (Math.random() * 40 + 30).toFixed(1),
-      'International': (Math.random() * 20 + 10).toFixed(1),
-      'Bonds': (Math.random() * 20 + 5).toFixed(1),
-      'Cash': (Math.random() * 10 + 5).toFixed(1),
-      'Alternatives': (Math.random() * 15 + 5).toFixed(1)
-    },
-    topHoldings: [
-      { symbol: 'AAPL', marketValue: Math.floor(Math.random() * 50000) + 20000, accountPercent: (Math.random() * 15 + 5).toFixed(1) },
-      { symbol: 'MSFT', marketValue: Math.floor(Math.random() * 40000) + 15000, accountPercent: (Math.random() * 12 + 4).toFixed(1) },
-      { symbol: 'GOOGL', marketValue: Math.floor(Math.random() * 30000) + 10000, accountPercent: (Math.random() * 10 + 3).toFixed(1) },
-      { symbol: 'TSLA', marketValue: Math.floor(Math.random() * 25000) + 8000, accountPercent: (Math.random() * 8 + 2).toFixed(1) },
-      { symbol: 'NVDA', marketValue: Math.floor(Math.random() * 20000) + 5000, accountPercent: (Math.random() * 6 + 2).toFixed(1) }
-    ],
-    lastUpdated: new Date().toLocaleTimeString()
+    observation: usable ? quote.observation : null,
+    observedAt: usable ? quote.observedAt : null,
+    receivedAt: usable ? quote.receivedAt : null,
+    expiresAt: usable ? quote.expiresAt : null,
+    current: usable ? quote.price : null,
+    change: usable ? quote.change : null,
+    changePercent: usable ? quote.changePercent : null,
+    timestamp: usable ? quote.timestamp : null,
+    source: usable ? quote.source : null,
+    dataType: usable ? quote.dataType : null,
+    status: usable ? 'available' : 'unavailable',
+    warning: usable ? quote.warning : 'No verified market observation available',
+    high: null, low: null, open: null, volume: null,
   };
-};
-
-// Fixed options data
-const generateOptionsData = () => ([
-  { symbol: 'SPY', strike: '455', expiration: '12/20', type: 'C', bid: '1.25', ask: '1.35', volume: 1200, openInterest: 12430 },
-  { symbol: 'QQQ', strike: '171', expiration: '12/20', type: 'P', bid: '2.10', ask: '2.20', volume: 765, openInterest: 16352 },
-  { symbol: 'AAPL', strike: '289', expiration: '12/20', type: 'C', bid: '3.05', ask: '3.20', volume: 167, openInterest: 7386 },
-  { symbol: 'TSLA', strike: '221', expiration: '12/20', type: 'P', bid: '4.50', ask: '4.70', volume: 453, openInterest: 5931 },
-  { symbol: 'NVDA', strike: '217', expiration: '12/20', type: 'C', bid: '2.80', ask: '2.95', volume: 1081, openInterest: 6327 }
-]);
-
-// Real volatility index data from Yahoo Finance (VIX, VVIX, RVX, etc.)
-const fetchVolatilityData = async (yahooTicker) => {
-  // Only use a hardcoded fallback for the most common series to avoid
-  // showing misleading values for thinner / less reliable tickers like RVX.
-  const fallbackMap = { '^VIX': '18.42', '^VVIX': '90' };
-  const fallbackCurrent = fallbackMap[yahooTicker] ?? null;
-  try {
-    const encoded = encodeURIComponent(yahooTicker);
-    const response = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encoded}`, {
-      params: { interval: '1d', range: '1d' },
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    const data = response.data;
-
-    if (data.chart && data.chart.result && data.chart.result[0]) {
-      const result = data.chart.result[0];
-      const meta = result.meta;
-
-      const latestPrice = meta.regularMarketPrice ?? meta.previousClose ?? null;
-      const previousClose = meta.previousClose ?? null;
-      const hasPrices = latestPrice != null && previousClose != null;
-      const change = hasPrices ? latestPrice - previousClose : null;
-      const changePercent = hasPrices && previousClose !== 0
-        ? (change / previousClose) * 100
-        : null;
-
-      return {
-        current: latestPrice != null ? latestPrice.toFixed(2) : null,
-        change: change != null ? change.toFixed(2) : null,
-        changePercent: changePercent != null ? changePercent.toFixed(2) : null,
-        timestamp: new Date().toISOString(),
-        high: meta.regularMarketDayHigh || 0,
-        low: meta.regularMarketDayLow || 0,
-        open: meta.regularMarketOpen || 0,
-        volume: meta.regularMarketVolume || 0
-      };
-    }
-
-    return {
-      current: fallbackCurrent,
-      change: fallbackCurrent != null ? '0.00' : null,
-      changePercent: fallbackCurrent != null ? '0.00' : null,
-      timestamp: new Date().toISOString(),
-      high: 0,
-      low: 0,
-      open: 0,
-      volume: 0
-    };
-  } catch (error) {
-    console.error(`Error fetching volatility data for ${yahooTicker}:`, error);
-    return {
-      current: fallbackCurrent,
-      change: fallbackCurrent != null ? '0.00' : null,
-      changePercent: fallbackCurrent != null ? '0.00' : null,
-      timestamp: new Date().toISOString(),
-      high: 0,
-      low: 0,
-      open: 0,
-      volume: 0
-    };
-  }
 };
 
 const fetchVIXData = async () => fetchVolatilityData('^VIX');
 
-// Helper to batch process with delays (rate limiting)
-async function batchProcess(items, batchSize, delayMs, processor) {
-  const batchStartTime = Date.now();
-  const results = [];
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const batchNum = Math.floor(i / batchSize) + 1;
-    const totalBatches = Math.ceil(items.length / batchSize);
-    console.log(`[API] Processing batch ${batchNum}/${totalBatches} (${batch.length} symbols)`);
-
-    // Process batch with small delay between each item to avoid rate limiting
-    const batchResults = [];
-    const itemStartTime = Date.now();
-    for (const item of batch) {
-      const itemStart = Date.now();
-      const result = await processor(item);
-      const itemTime = Date.now() - itemStart;
-      batchResults.push(result);
-      // Small delay between requests (100ms to avoid rate limiting)
-      if (batch.indexOf(item) < batch.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
-    const batchTime = Date.now() - itemStartTime;
-    console.log(`[API] Batch ${batchNum} completed in ${batchTime}ms (avg ${(batchTime / batch.length).toFixed(0)}ms per item)`);
-    results.push(...batchResults);
-
-    // Add delay between batches to avoid rate limiting (except for last batch)
-    if (i + batchSize < items.length) {
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-  }
-  const totalTime = Date.now() - batchStartTime;
-  console.log(`[API] Batch processing completed: ${items.length} items in ${totalTime}ms (avg ${(totalTime / items.length).toFixed(0)}ms per item)`);
-  return results;
+// Cache hits resolve immediately. Provider misses are deduplicated and bounded by identity.
+async function batchProcess(items, _batchSize, _delayMs, processor) {
+  return Promise.all(items.map(processor));
 }
 
 // API Routes
 app.get('/api/quotes', async (req, res) => {
   const startTime = Date.now();
   try {
-    const symbols = req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ', 'AAPL'];
+    if (req.query.symbols !== undefined && typeof req.query.symbols !== 'string') return res.status(400).json({ error: 'symbols must be a comma-separated string' });
+    const symbols = [...new Set((req.query.symbols ? req.query.symbols.split(',') : ['SPY', 'QQQ', 'AAPL']).map(symbol => symbol.trim().toUpperCase()).filter(Boolean))];
+    if (symbols.length > 100 || symbols.some(symbol => symbol.length > 80)) return res.status(400).json({ error: 'At most 100 valid symbols are supported' });
     const requestKey = `GET /api/quotes?symbols=${symbols.map(s => s.trim()).join(',')}`;
     const quotes = await runInFlight(requestKey, async () => {
       console.log(`[API] /api/quotes called with ${symbols.length} symbols:`, symbols.slice(0, 5), '...');
@@ -2350,6 +3055,10 @@ app.get('/api/quotes', async (req, res) => {
       return quoteMap;
     });
 
+    // One slow symbol must not cause an earlier observation to age into the response.
+    for (const [symbol, quote] of Object.entries(quotes)) {
+      if (!isQuoteUsableNow(quote, symbol)) delete quotes[symbol];
+    }
     res.json(quotes);
   } catch (error) {
     const totalTime = Date.now() - startTime;
@@ -2399,6 +3108,22 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
   };
   const cacheTTL = cacheTTLMap[range];
 
+  // Resolve the source before consulting the chart cache. This prevents a
+  // previously cached proxy series from reintroducing intraday ranges after a
+  // symbol is corrected to a dated FRED observation (UST2Y/DGS2).
+  const mapping = getTickerMapping(symbol);
+  const upperSym = symbol.toUpperCase();
+  const isRateProxy = upperSym === 'UST10Y' || upperSym === 'UST30Y';
+  if (mapping.source === 'fred' && !isRateProxy && (range === '1d' || range === '5d')) {
+    return res.json({
+      symbol: upperSym,
+      name: upperSym,
+      error: 'Intraday data not available for Treasury yields',
+      availableRanges: ['1mo', '3mo', '6mo', '1y', '2y'],
+      chartData: []
+    });
+  }
+
   const cacheKey = `chart:${symbol.toUpperCase()}:${range}`;
 
   // Check cache
@@ -2409,27 +3134,10 @@ app.get('/api/chart-data/:symbol', async (req, res) => {
   }
 
   try {
-    // Get the Yahoo ticker mapping
-    const mapping = getTickerMapping(symbol);
-    const upperSym = symbol.toUpperCase();
-    const isRateProxy =
-      upperSym === 'UST2Y' || upperSym === 'UST10Y' || upperSym === 'UST30Y';
-
     // Check if this is a FRED symbol (Treasury yields)
-    // For UST2Y/UST10Y/UST30Y we always want to use Yahoo
-    // rate indices instead, so skip the FRED path for those.
+    // UST2Y is an explicitly daily FRED observation. UST10Y/UST30Y remain
+    // Yahoo yield-index proxies for the compact current-market surface.
     if (mapping.source === 'fred' && !isRateProxy) {
-      // For FRED data, we only have daily data, so disable intraday ranges
-      if (range === '1d' || range === '5d') {
-        return res.json({
-          symbol: symbol.toUpperCase(),
-          name: symbol.toUpperCase(),
-          error: 'Intraday data not available for Treasury yields',
-          availableRanges: ['1mo', '3mo', '6mo', '1y', '2y'],
-          chartData: []
-        });
-      }
-
       // Fetch FRED historical data
       const fredData = await fetchFREDHistorical(mapping.ticker, range);
       if (fredData) {
@@ -2614,13 +3322,13 @@ async function fetchFREDHistorical(seriesId, range) {
 const periodReturnsCache = new Map();
 const PERIOD_RETURNS_CACHE_TTL = parseInt(process.env.PERIOD_RETURNS_CACHE_TTL_MS || '900000', 10);
 /** Bump when `computePeriodPercentsFromCloses` grows new fields — avoids serving stale cached objects lacking them. */
-const PERIOD_RETURNS_CACHE_KEY_VERSION = '5';
+const PERIOD_RETURNS_CACHE_KEY_VERSION = '9';
 
 function symbolIsYahooRateProxy(upperSym) {
-  return upperSym === 'UST2Y' || upperSym === 'UST10Y' || upperSym === 'UST30Y';
+  return upperSym === 'UST10Y' || upperSym === 'UST30Y';
 }
 
-function computePeriodPercentsFromCloses(closes) {
+function computePeriodPercentsFromCloses(closes, { absoluteBase = false } = {}) {
   if (!closes || closes.length < 2) return null;
   const n = closes.length;
   const last = closes[n - 1].close;
@@ -2668,10 +3376,23 @@ function computePeriodPercentsFromCloses(closes) {
     ytdRef = closes[0].close;
   }
 
+  const lastTimestamp = Number(closes[n - 1].t);
+  const oneYearTarget = Number.isFinite(lastTimestamp)
+    ? lastTimestamp - (365 * 24 * 60 * 60 * 1000)
+    : null;
+  const oneYearRef = Number.isFinite(oneYearTarget)
+    ? findClosestClose(closes, oneYearTarget)?.close
+    : null;
+
   const pct = (ref) =>
     ref != null && Number.isFinite(ref) && ref !== 0
-      ? Math.round((((last / ref) - 1) * 100) * 100) / 100
+      ? absoluteBase ? percentageChange(last, ref) : Math.round((((last / ref) - 1) * 100) * 100) / 100
       : null;
+  const absolute = (ref) => (
+    ref != null && Number.isFinite(ref)
+      ? Math.round((last - ref) * 1000000) / 1000000
+      : null
+  );
 
   const asOfTime = Number(closes[n - 1].t);
   return {
@@ -2685,8 +3406,107 @@ function computePeriodPercentsFromCloses(closes) {
     mtdChangePct: pct(mtdRef),
     qtdChangePct: pct(qtdRef),
     ytdChangePct: pct(ytdRef),
+    oneYearChangePct: pct(oneYearRef),
+    weekChangeValue: absolute(weekRef),
+    fifteenDayChangeValue: absolute(fifteenDayRef),
+    monthChangeValue: absolute(monthRef),
+    threeMonthChangeValue: absolute(threeMonthRef),
+    sixMonthChangeValue: absolute(sixMonthRef),
+    mtdChangeValue: absolute(mtdRef),
+    qtdChangeValue: absolute(qtdRef),
+    ytdChangeValue: absolute(ytdRef),
+    oneYearChangeValue: absolute(oneYearRef),
     asOf: Number.isFinite(asOfTime) ? new Date(asOfTime).toISOString() : null
   };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function findCloseAtOrBefore(closes, targetTimestamp, maxGapMs) {
+  if (!Array.isArray(closes) || !Number.isFinite(Number(targetTimestamp))) return null;
+  let match = null;
+  for (const row of closes) {
+    const timestamp = Number(row?.t);
+    const close = Number(row?.close);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(close)) continue;
+    if (timestamp > Number(targetTimestamp)) break;
+    match = { t: timestamp, close };
+  }
+  if (!match || Number(targetTimestamp) - match.t > maxGapMs) return null;
+  return match;
+}
+
+function computePeriodBpsFromCloses(closes, { observationFrequency = 'daily' } = {}) {
+  if (!Array.isArray(closes) || closes.length < 2) return null;
+  const ordered = closes
+    .filter((row) => row?.t != null && row?.close != null && row.close !== '')
+    .map((row) => ({ t: Number(row.t), close: Number(row.close) }))
+    .filter((row) => Number.isFinite(row.t) && Number.isFinite(row.close))
+    .sort((left, right) => left.t - right.t);
+  if (ordered.length < 2) return null;
+  const latest = ordered[ordered.length - 1];
+  const targetMonthsAgo = (months) => {
+    const date = new Date(latest.t);
+    const dayOfMonth = date.getUTCDate();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() - months);
+    const lastDayOfTargetMonth = new Date(Date.UTC(
+      date.getUTCFullYear(), date.getUTCMonth() + 1, 0,
+    )).getUTCDate();
+    date.setUTCDate(Math.min(dayOfMonth, lastDayOfTargetMonth));
+    return date.getTime();
+  };
+  const reference = (target, maxGapDays) => (
+    findCloseAtOrBefore(ordered, target, maxGapDays * DAY_MS)?.close ?? null
+  );
+  const toBps = (value) => (
+    Number.isFinite(value)
+      ? Math.round((latest.close - value) * 1000) / 10
+      : null
+  );
+  const latestDate = new Date(latest.t);
+  const yearStart = Date.UTC(latestDate.getUTCFullYear(), 0, 1);
+  const firstYearObservation = ordered.find((row) => row.t >= yearStart && row.t <= latest.t);
+  const ytdReference = firstYearObservation && firstYearObservation.t - yearStart <= 7 * DAY_MS
+    ? firstYearObservation.close : null;
+
+  const hasDailyObservations = observationFrequency === 'daily';
+  const references = {
+    day: hasDailyObservations ? reference(latest.t - DAY_MS, 7) : null,
+    week: hasDailyObservations ? reference(latest.t - (7 * DAY_MS), 7) : null,
+    fifteenDay: hasDailyObservations ? reference(latest.t - (15 * DAY_MS), 7) : null,
+    month: reference(targetMonthsAgo(1), 7),
+    threeMonth: reference(targetMonthsAgo(3), 7),
+    sixMonth: reference(targetMonthsAgo(6), 7),
+    ytd: ytdReference,
+    oneYear: reference(targetMonthsAgo(12), 7),
+  };
+  return {
+    ...Object.fromEntries(Object.entries(references).map(([period, value]) => [`${period}ChangeBps`, toBps(value)])),
+    // Calculate percentages from the same dated endpoints as rate deltas.
+    // Do not turn 15 monthly observations into a supposed 15-day return.
+    backdropPercentageReturns: Object.fromEntries(Object.entries(references)
+      .map(([period, value]) => [`${period}ChangePct`, percentageChange(latest.close, value)])),
+  };
+}
+
+const ONE_YEAR_REFERENCE_MAX_GAP_MS = 7 * 24 * 60 * 60 * 1000;
+
+function findClosestClose(closes, targetTimestamp) {
+  if (!Array.isArray(closes) || !Number.isFinite(Number(targetTimestamp))) return null;
+  let closest = null;
+  let closestDistance = Number.POSITIVE_INFINITY;
+  for (const row of closes) {
+    const timestamp = Number(row?.t);
+    const close = Number(row?.close);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(close)) continue;
+    const distance = Math.abs(timestamp - Number(targetTimestamp));
+    if (distance < closestDistance) {
+      closest = row;
+      closestDistance = distance;
+    }
+  }
+  return closestDistance <= ONE_YEAR_REFERENCE_MAX_GAP_MS ? closest : null;
 }
 
 async function fetchYahooDailyClosesSeries(symbol, range = '1y') {
@@ -2749,28 +3569,197 @@ async function fetchFredDailyClosesSeries(seriesId) {
   return out.length >= 2 ? out : null;
 }
 
-async function computePeriodReturnsForSymbol(symbol) {
+async function fetchGoldCorrelationFredSeries(seriesId) {
+  const keyed = await fetchFredDailyClosesSeries(seriesId);
+  if (keyed) return keyed;
+
+  const endDate = new Date();
+  const startDate = new Date(endDate.getTime() - 800 * 24 * 60 * 60_000);
+  const response = await axios.get('https://fred.stlouisfed.org/graph/fredgraph.csv', {
+    params: {
+      id: seriesId,
+      cosd: startDate.toISOString().slice(0, 10),
+      coed: endDate.toISOString().slice(0, 10),
+    },
+    timeout: 12_000,
+    responseType: 'text',
+  });
+  const lines = String(response?.data || '').trim().split(/\r?\n/);
+  if (lines.length < 3) return null;
+  const values = lines.slice(1).map((line) => {
+    const [date, rawValue] = line.split(',');
+    const close = Number(rawValue);
+    return {
+      t: /^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))
+        ? Date.parse(`${date}T00:00:00.000Z`)
+        : NaN,
+      close,
+    };
+  }).filter((row) => Number.isFinite(row.t) && Number.isFinite(row.close));
+  return values.length >= 2 ? values : null;
+}
+
+function parseHistoricalBarTimestamp(value) {
+  const raw = String(value || '').trim();
+  if (/^\d{8}$/.test(raw)) {
+    const year = Number(raw.slice(0, 4));
+    const month = Number(raw.slice(4, 6)) - 1;
+    const day = Number(raw.slice(6, 8));
+    return Date.UTC(year, month, day);
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function fetchGoldCorrelationBasisSeries() {
+  const response = await predictionPerformanceIbkrProvider.getHistoricalBars(
+    GOLD_SPOT_PROXY_INSTRUMENT,
+    '2y',
+    '1d',
+    { useRth: false },
+  );
+  const provenance = [
+    response?.error,
+    response?.warning,
+    response?.provenance,
+    response?.cacheStatus,
+    response?.cacheState,
+    response?.fromCache ? 'cached' : null,
+    response?.cached ? 'cached' : null,
+    response?.mock ? 'mock' : null,
+    response?.seeded ? 'seed' : null,
+  ].filter(Boolean).join(' ');
+  if (
+    String(response?.source || '').toLowerCase() !== 'ibkr'
+    || !Array.isArray(response?.bars)
+    || response.bars.length < 2
+    || /delayed|frozen|stale|cache|mock|seed|fallback|offline|disconnected|synthetic|inferred|derived/i.test(provenance)
+  ) {
+    const error = new Error('IBKR did not return verified native XAUUSD daily history.');
+    error.code = 'GOLD_CORRELATION_BASIS_UNAVAILABLE';
+    throw error;
+  }
+  const values = response.bars.map((bar) => ({
+    t: parseHistoricalBarTimestamp(bar?.date || bar?.timestamp || bar?.time),
+    close: Number(bar?.close),
+  })).filter((row) => Number.isFinite(row.t) && Number.isFinite(row.close) && row.close > 0)
+    .sort((left, right) => left.t - right.t);
+  if (values.length < 2) {
+    const error = new Error('IBKR XAUUSD daily history contains insufficient verified closes.');
+    error.code = 'GOLD_CORRELATION_BASIS_UNAVAILABLE';
+    throw error;
+  }
+  return values;
+}
+
+async function fetchGoldCorrelationComparatorSeries(definition) {
+  const history = definition.transform === 'yield_change_bps'
+    ? await fetchGoldCorrelationFredSeries(definition.symbol)
+    : await fetchYahooDailyClosesSeries(definition.symbol, '2y');
+  if (!Array.isArray(history) || history.length < 2) {
+    throw new Error(`${definition.source} returned no usable completed daily observations.`);
+  }
+  return history;
+}
+
+async function fetchIbkrDailyClosesSeries(instrument, range = '1y') {
+  const response = await compositeMarketDataProvider.getHistoricalBars(instrument, range, '1d');
+  const bars = Array.isArray(response?.bars) ? response.bars : [];
+  const out = bars
+    .map((bar) => ({
+      t: parseHistoricalBarTimestamp(bar?.date || bar?.timestamp || bar?.time),
+      close: Number(bar?.close),
+    }))
+    .filter((row) => Number.isFinite(row.t) && Number.isFinite(row.close))
+    .sort((left, right) => left.t - right.t);
+  return out.length >= 2 ? out : null;
+}
+
+async function computePeriodReturnsForSymbol(symbol, instrument = null, referenceQuote = null) {
   const mapping = getTickerMapping(symbol);
   const upperSym = symbol.toUpperCase();
   const isRateProxy = symbolIsYahooRateProxy(upperSym);
   let closes = null;
-  if (mapping.source === 'fred' && !isRateProxy) {
+  let observationFrequency = 'daily';
+  let periodReturnsSource = mapping.source;
+  let periodSourceSeriesId = mapping.ticker;
+  let periodSourceInstrument = null;
+  let periodSourceUrl = null;
+  if (INTL_BOND_FRED_FALLBACK[upperSym]) {
+    if (referenceQuote?.source !== 'fred') {
+      const official = await fetchOfficialSovereignSeries(upperSym);
+      if (official && (!referenceQuote || (
+        referenceQuote.source === official.source && referenceQuote.sourceSeriesId === official.seriesId
+      ))) {
+        closes = official.closes;
+        if (referenceQuote) {
+          const quoteTime = Date.parse(referenceQuote.timestamp);
+          closes = closes.filter((row) => row.t <= quoteTime);
+          const endpoint = closes[closes.length - 1];
+          if (endpoint?.t !== quoteTime || endpoint.close !== Number(referenceQuote.price)) return null;
+        }
+        periodReturnsSource = official.source;
+        periodSourceSeriesId = official.seriesId;
+        periodSourceInstrument = official.sourceInstrument;
+        periodSourceUrl = official.sourceUrl;
+      } else if (referenceQuote) {
+        // A quote from another benchmark cannot borrow FRED monthly history
+        // to fill its period columns.
+        return null;
+      }
+    }
+    if (!closes) {
+      closes = await fetchFredDailyClosesSeries(mapping.ticker);
+      observationFrequency = 'monthly';
+    }
+  } else if (instrument?.provider === 'ibkr') {
+    closes = await fetchIbkrDailyClosesSeries(instrument);
+    periodReturnsSource = 'ibkr';
+    periodSourceSeriesId = upperSym;
+  } else if (mapping.source === 'fred' && !isRateProxy) {
     closes = await fetchFredDailyClosesSeries(mapping.ticker);
   } else {
     closes = await fetchYahooDailyClosesSeries(symbol);
   }
   if (!closes || closes.length < 2) return null;
-  return computePeriodPercentsFromCloses(closes);
+  const ratePeriods = computePeriodBpsFromCloses(closes, { observationFrequency });
+  if (!ratePeriods) return null;
+  // Monthly FRED observations cannot support trading-day offsets. Keep the
+  // calendar-month comparisons without populating legacy short-horizon fields
+  // from 15 or 21 monthly rows.
+  const percentPeriods = observationFrequency === 'monthly'
+    ? {
+      ...ratePeriods.backdropPercentageReturns,
+      thirtyDayChangePct: null,
+      ninetyDayChangePct: null,
+      mtdChangePct: null,
+      qtdChangePct: null,
+      asOf: new Date(closes[closes.length - 1].t).toISOString(),
+    }
+    : computePeriodPercentsFromCloses(closes);
+  return {
+    ...percentPeriods,
+    ...ratePeriods,
+    observationFrequency,
+    periodReturnsSource,
+    periodSourceSeriesId,
+    periodSourceInstrument,
+    periodSourceUrl,
+    latestObservationChange: latestObservationChange(closes),
+  };
 }
 
-async function getPeriodReturnsCached(symbol) {
-  const key = `${symbol.toUpperCase()}:${PERIOD_RETURNS_CACHE_KEY_VERSION}`;
+async function getPeriodReturnsCached(symbol, instrument = null, referenceQuote = null) {
+  const identity = instrument ? instrumentCacheKey(instrument) : symbol.toUpperCase();
+  const referenceSeries = referenceQuote
+    ? `${referenceQuote.source || ''}:${referenceQuote.sourceSeriesId || ''}:${referenceQuote.timestamp || ''}` : '';
+  const key = `${identity}:${referenceSeries}:${PERIOD_RETURNS_CACHE_KEY_VERSION}`;
   const now = Date.now();
   const hit = periodReturnsCache.get(key);
   if (hit && now - hit.ts < PERIOD_RETURNS_CACHE_TTL) {
     return hit.data;
   }
-  const data = await computePeriodReturnsForSymbol(symbol);
+  const data = await computePeriodReturnsForSymbol(symbol, instrument, referenceQuote);
   periodReturnsCache.set(key, { data, ts: now });
   return data;
 }
@@ -2779,26 +3768,6 @@ async function getPeriodReturnsCached(symbol) {
 // deltas without re-fetching both legs on every request.
 const dailyClosesCache = new Map();
 const DAILY_CLOSES_CACHE_TTL = parseInt(process.env.DAILY_CLOSES_CACHE_TTL_MS || '3600000', 10);
-const portfolioCorrelationResultCache = new Map();
-const portfolioCorrelationInFlight = new Map();
-const parsedPortfolioCorrelationCacheTtl = parseInt(process.env.PORTFOLIO_CORRELATION_CACHE_TTL_MS || '300000', 10);
-const PORTFOLIO_CORRELATION_CACHE_TTL = Number.isFinite(parsedPortfolioCorrelationCacheTtl)
-  ? Math.max(0, parsedPortfolioCorrelationCacheTtl)
-  : 300000;
-const parsedPortfolioCorrelationConcurrency = parseInt(process.env.PORTFOLIO_CORRELATION_HISTORY_CONCURRENCY || '8', 10);
-const PORTFOLIO_CORRELATION_HISTORY_CONCURRENCY = Number.isFinite(parsedPortfolioCorrelationConcurrency)
-  ? Math.max(1, parsedPortfolioCorrelationConcurrency)
-  : 8;
-
-function addPortfolioCorrelationMeta(concentration, meta = {}) {
-  return {
-    ...concentration,
-    meta: {
-      ...(concentration?.meta || {}),
-      ...meta,
-    },
-  };
-}
 
 async function mapWithConcurrency(items, concurrency, processor) {
   const results = new Array(items.length);
@@ -2871,7 +3840,7 @@ function buildSpreadBpsSeries(longSeries, shortSeries) {
   return out.length >= 2 ? out : null;
 }
 
-// Compute period deltas in bps for a spread series using the same calendar
+// Compute period deltas in bps for a spread series using the same session
 // boundaries as computePeriodPercentsFromCloses. Returns `null` if the series
 // is too short. All values are rounded to 0.1 bps for display.
 function computeSpreadBpsDeltas(spreadSeries) {
@@ -2882,13 +3851,23 @@ function computeSpreadBpsDeltas(spreadSeries) {
   if (!Number.isFinite(last)) return null;
 
   const weekIdx = Math.max(0, n - 1 - 5);
+  const fifteenDayIdx = Math.max(0, n - 1 - 15);
   const monthIdx = Math.max(0, n - 1 - 21);
   const threeMonthIdx = Math.max(0, n - 1 - 63);
   const sixMonthIdx = Math.max(0, n - 1 - 126);
   const weekRef = spreadSeries[weekIdx].close;
+  const fifteenDayRef = spreadSeries[fifteenDayIdx].close;
   const monthRef = spreadSeries[monthIdx].close;
   const threeMonthRef = spreadSeries[threeMonthIdx].close;
   const sixMonthRef = spreadSeries[sixMonthIdx].close;
+
+  const lastTimestamp = Number(spreadSeries[n - 1].t);
+  const oneYearTarget = Number.isFinite(lastTimestamp)
+    ? lastTimestamp - (365 * 24 * 60 * 60 * 1000)
+    : null;
+  const oneYearRef = Number.isFinite(oneYearTarget)
+    ? findClosestClose(spreadSeries, oneYearTarget)?.close
+    : null;
 
   const nowDate = new Date();
   const yNow = nowDate.getUTCFullYear();
@@ -2917,12 +3896,14 @@ function computeSpreadBpsDeltas(spreadSeries) {
   return {
     dayDeltaBps: delta(prev),
     weekDeltaBps: delta(weekRef),
+    fifteenDayDeltaBps: delta(fifteenDayRef),
     monthDeltaBps: delta(monthRef),
     threeMonthDeltaBps: delta(threeMonthRef),
     sixMonthDeltaBps: delta(sixMonthRef),
     mtdDeltaBps: delta(mtdRef),
     qtdDeltaBps: delta(qtdRef),
     ytdDeltaBps: delta(ytdRef),
+    oneYearDeltaBps: delta(oneYearRef),
     latestBps: Math.round(last * 10) / 10,
     asOf: Number.isFinite(Number(spreadSeries[n - 1].t))
       ? new Date(Number(spreadSeries[n - 1].t)).toISOString()
@@ -2984,9 +3965,209 @@ function summarizeSecurityRiskMetricsCache(statuses) {
   return 'mixed';
 }
 
+function readExposureLabSeedSecurities() {
+  const sourcePath = path.join(__dirname, 'src', 'constants', 'securitiesList.js');
+  return parseSeedSecurities(fs.readFileSync(sourcePath, 'utf8'));
+}
+
+async function loadExposureLabUniverse({ forceRefresh = false } = {}) {
+  const now = Date.now();
+  if (
+    !forceRefresh
+    && exposureLabUniverseCache.value
+    && now - exposureLabUniverseCache.timestamp < EXPOSURE_LAB_UNIVERSE_CACHE_TTL
+  ) {
+    return {
+      ...exposureLabUniverseCache.value,
+      cache: {
+        status: 'hit',
+        ageSeconds: Math.max(0, Math.floor((now - exposureLabUniverseCache.timestamp) / 1000)),
+        ttlSeconds: Math.floor(EXPOSURE_LAB_UNIVERSE_CACHE_TTL / 1000),
+      },
+    };
+  }
+
+  if (exposureLabUniverseCache.inFlight) return exposureLabUniverseCache.inFlight;
+
+  const request = (async () => {
+    const snapshotTableName = process.env.HEDGEYE_DAILY_SNAPSHOT_TABLE
+      || 'HedgeyeDailySnapshot';
+    const [snapshots, riskRangeRows, securityMasterResult] = await Promise.all([
+      scanAllPages(dynamodb, { TableName: snapshotTableName }),
+      scanAllPages(dynamodb, {
+        TableName: RISK_RANGE_DATA_TABLE,
+        ProjectionExpression: '#date, #ticker',
+        ExpressionAttributeNames: {
+          '#date': 'date',
+          '#ticker': 'ticker',
+        },
+      }),
+      exposureLabSecurityMaster.listCurrentReviews()
+        .then((reviews) => ({ status: 'available', reviews }))
+        .catch((error) => ({
+          status: 'unavailable',
+          reviews: [],
+          reason: error.code || 'security_master_unavailable',
+        })),
+    ]);
+    const discoveredUniverse = buildHedgeyeSecurityUniverse({
+      snapshots,
+      riskRangeRows,
+      seedSecurities: readExposureLabSeedSecurities(),
+    });
+    const identifiedUniverse = await exposureLabSecurityIdentityResolver.resolve(
+      discoveredUniverse,
+      { forceRefresh },
+    );
+    const universe = mergeSecurityMasterReviews(
+      identifiedUniverse,
+      securityMasterResult.reviews,
+    );
+    const generatedAt = new Date().toISOString();
+    const value = {
+      ...universe,
+      generatedAt,
+      securityMaster: {
+        status: securityMasterResult.status,
+        reason: securityMasterResult.reason || null,
+        table: exposureLabSecurityMaster.tableName,
+        reviewedCount: securityMasterResult.reviews.length,
+      },
+      provenance: {
+        snapshotTable: snapshotTableName,
+        riskRangeTable: RISK_RANGE_DATA_TABLE,
+        securityMasterTable: exposureLabSecurityMaster.tableName,
+        seedFile: 'src/constants/securitiesList.js',
+        identitySources: [
+          'SEC company_tickers_exchange.json',
+          'Yahoo Finance chart metadata for structured non-SEC symbols',
+          'reviewed Exposure Lab security master',
+        ],
+        archiveScan: 'complete paginated DynamoDB scan',
+      },
+    };
+    exposureLabUniverseCache.value = value;
+    exposureLabUniverseCache.timestamp = Date.now();
+    return {
+      ...value,
+      cache: {
+        status: 'miss',
+        ageSeconds: 0,
+        ttlSeconds: Math.floor(EXPOSURE_LAB_UNIVERSE_CACHE_TTL / 1000),
+      },
+    };
+  })().finally(() => {
+    exposureLabUniverseCache.inFlight = null;
+  });
+
+  exposureLabUniverseCache.inFlight = request;
+  return request;
+}
+
+// Full, read-only discovery ledger assembled from every persisted Hedgeye API
+// pull. The Call positions are bounded by their explicit article declaration;
+// unresolved fallback/text mentions remain non-executable pending identity QA.
+app.get('/api/risk/exposure-lab/universe', async (req, res) => {
+  const forceRefresh = ['1', 'true'].includes(
+    String(req.query.forceRefresh || '').trim().toLowerCase(),
+  );
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Data-Use', 'historical-research-only');
+  try {
+    return res.json(await loadExposureLabUniverse({ forceRefresh }));
+  } catch (error) {
+    console.error('[ExposureLab] Complete Hedgeye universe scan unavailable:', error);
+    return res.status(503).json({
+      status: 'unavailable',
+      reason: 'hedgeye_archive_scan_unavailable',
+      error: error.message,
+      rows: [],
+      historicalOnly: true,
+      executable: false,
+      generatedAt: new Date().toISOString(),
+    });
+  }
+});
+
+app.get('/api/risk/exposure-lab/security-master', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Data-Use', 'risk-governance-non-executable');
+  try {
+    const reviews = await exposureLabSecurityMaster.listCurrentReviews();
+    return res.json({
+      status: 'available',
+      table: exposureLabSecurityMaster.tableName,
+      reviews,
+      count: reviews.length,
+      executable: false,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return res.status(503).json({
+      status: 'unavailable',
+      reason: error.code || 'security_master_unavailable',
+      reviews: [],
+      executable: false,
+    });
+  }
+});
+
+app.get('/api/risk/exposure-lab/security-master/:ticker/audit', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Data-Use', 'risk-governance-non-executable');
+  try {
+    const events = await exposureLabSecurityMaster.listAuditEvents(req.params.ticker, {
+      limit: req.query.limit,
+    });
+    return res.json({
+      status: 'available',
+      ticker: String(req.params.ticker || '').trim().toUpperCase(),
+      events,
+      count: events.length,
+      executable: false,
+    });
+  } catch (error) {
+    const status = Number.isInteger(error?.status) ? error.status : 503;
+    return res.status(status).json({
+      status: 'unavailable',
+      reason: error.code || 'security_review_audit_unavailable',
+      events: [],
+      executable: false,
+    });
+  }
+});
+
+app.put('/api/risk/exposure-lab/security-master/:ticker', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Data-Use', 'risk-governance-non-executable');
+  try {
+    const review = await exposureLabSecurityMaster.writeReview(req.params.ticker, req.body || {});
+    exposureLabUniverseCache.value = null;
+    exposureLabUniverseCache.timestamp = 0;
+    return res.json({
+      status: 'available',
+      review,
+      auditRecorded: true,
+      executable: false,
+    });
+  } catch (error) {
+    const status = Number.isInteger(error?.status) ? error.status : 503;
+    return res.status(status).json({
+      status: 'unavailable',
+      reason: error.code || 'security_review_write_failed',
+      error: error.message,
+      auditRecorded: false,
+      executable: false,
+    });
+  }
+});
+
 // Read-only historical research metrics, including completed daily price
 // structure. This route deliberately contains no spot, NLV, position, action,
 // or order data and can never be executable.
+app.get('/api/security-risk-metrics/spx-realized-volatility', createCompletedSessionVolatilityHandler({
+  loadHistory: fetchYahooAdjustedHistory,
+}));
 app.get('/api/security-risk-metrics', async (req, res) => {
   const rawSymbols = Array.isArray(req.query.symbols)
     ? req.query.symbols.join(',')
@@ -3001,6 +4182,10 @@ app.get('/api/security-risk-metrics', async (req, res) => {
     String(req.query.includeVolSeries || '').trim().toLowerCase(),
   );
   const assetTypeBySymbol = parseSecurityRiskAssetTypes(req.query.assetTypes);
+  const sizingOnly = ['1', 'true'].includes(String(req.query.sizingOnly || '').toLowerCase());
+  const fetchHistory = sizingOnly
+    ? (symbol) => fetchYahooAdjustedHistory(symbol, { forceRefresh, cacheScope: 'sizing-2y', period1: String(Math.floor(Date.now() / 1000) - 2 * 366 * 86400) })
+    : (symbol) => fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh });
 
   res.set('Cache-Control', 'no-store');
   res.set('X-Data-Use', 'historical-research-only');
@@ -3027,11 +4212,17 @@ app.get('/api/security-risk-metrics', async (req, res) => {
   const cacheStatuses = [];
   let benchmarkHistory = null;
   try {
-    benchmarkHistory = await fetchYahooMaximumAdjustedHistory('SPY', { forceRefresh });
+    benchmarkHistory = await fetchHistory('SPY');
     cacheStatuses.push(benchmarkHistory.cacheStatus);
   } catch (error) {
     console.warn('[SecurityRiskMetrics] SPY maximum-history fetch unavailable:', error.message);
   }
+  // The SPY history is shared by every beta calculation in this response.
+  // Normalize it once so a large portfolio does not repeatedly parse and sort
+  // the same maximum-history payload for every symbol.
+  const normalizedBenchmarkBars = benchmarkHistory
+    ? normalizeAdjustedPriceBars(benchmarkHistory.bars)
+    : [];
 
   const rowEntries = await mapWithConcurrency(symbols, 6, async (symbol) => {
     if (!validSecurityRiskMetricsSymbol(symbol)) {
@@ -3050,7 +4241,7 @@ app.get('/api/security-risk-metrics', async (req, res) => {
       } else if (symbol === 'SPY') {
         throw new Error('SPY benchmark history is unavailable');
       } else {
-        securityHistory = await fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh });
+        securityHistory = await fetchHistory(symbol);
         cacheStatuses.push(securityHistory.cacheStatus);
       }
     } catch (error) {
@@ -3070,7 +4261,7 @@ app.get('/api/security-risk-metrics', async (req, res) => {
       provider: 'Yahoo Finance',
       dataset: 'chart',
       range: null,
-      requestWindow: '1900-01-01 through request time (maximum returned provider history)',
+      requestWindow: sizingOnly ? 'Two years through request time; up to 252 aligned returns for sizing' : '1900-01-01 through request time (maximum returned provider history)',
       interval: '1d',
       adjustedCloseRequired: true,
       security: {
@@ -3079,6 +4270,8 @@ app.get('/api/security-risk-metrics', async (req, res) => {
         fetchedAt: securityHistory.fetchedAt,
         cacheStatus: securityHistory.cacheStatus,
         cacheAgeSeconds: securityHistory.cacheAgeSeconds,
+        exchangeTimezone: securityHistory.exchangeTimezone,
+        regularSession: securityHistory.regularSession,
       },
       benchmark: benchmarkHistory ? {
         symbol: 'SPY',
@@ -3100,6 +4293,9 @@ app.get('/api/security-risk-metrics', async (req, res) => {
       provenance,
       assetType: assetTypeBySymbol[symbol] || 'equity',
       includeVolSeries: includeVolSeries && symbols.length === 1,
+      normalizedBenchmarkBars,
+      instrumentType: securityHistory.instrumentType,
+      sizingOnly,
     });
 
     if (!benchmarkHistory) {
@@ -3109,7 +4305,7 @@ app.get('/api/security-risk-metrics', async (req, res) => {
         source: SECURITY_RISK_METRICS_SOURCE,
       }).beta;
       const availableNonBetaMetrics = [row.atr14, row.records, row.priceStructure]
-        .filter((metric) => metric.status === 'available').length;
+        .filter((metric) => metric?.status === 'available').length;
       row = {
         ...row,
         status: availableNonBetaMetrics > 0 ? 'partial' : 'unavailable',
@@ -3137,6 +4333,10 @@ app.get('/api/security-risk-metrics', async (req, res) => {
     0,
     ...rowValues.map((row) => Number(row.provenance?.security?.cacheAgeSeconds) || 0),
   );
+  const expectedCompletedSession = mostRecentCompletedTradingDateKey(new Date());
+  const completedSessionRows = rowValues.filter((row) => row.status !== 'unavailable');
+  const completedSessionCurrent = completedSessionRows.length > 0
+    && completedSessionRows.every((row) => row.asOf === expectedCompletedSession);
 
   res.set('X-Data-Cache', cacheStatus);
   res.set('X-Data-Age', String(cacheAgeSeconds));
@@ -3153,9 +4353,247 @@ app.get('/api/security-risk-metrics', async (req, res) => {
       ageSeconds: cacheAgeSeconds,
       ttlSeconds: Math.floor(SECURITY_RISK_METRICS_CACHE_TTL / 1000),
     },
+    completedSession: {
+      status: completedSessionCurrent ? 'current' : 'unavailable',
+      expectedAsOf: expectedCompletedSession,
+      observedAsOf: asOf,
+    },
     historicalOnly: true,
     executable: false,
   });
+});
+
+function isExposureLabModelHolding(holding = {}) {
+  if (holding?.isPredictionMarket === true) return false;
+  const secType = String(
+    holding?.secType || holding?.securityType || holding?.assetType || '',
+  ).trim().toUpperCase();
+  if (['OPT', 'OPTION', 'FOP', 'CASH'].includes(secType)) return false;
+  const symbol = String(holding?.symbol || '').trim().toUpperCase();
+  const marketValue = Number(holding?.marketValue);
+  return Boolean(symbol) && Number.isFinite(marketValue) && marketValue !== 0;
+}
+
+function unavailableExposureLabSnapshot(reason, portfolio = null, extra = {}) {
+  return {
+    status: 'unavailable',
+    reason,
+    modelVersion: EXPOSURE_LAB_MODEL_VERSION,
+    historicalOnly: true,
+    executable: false,
+    actionable: false,
+    factors: [],
+    positions: [],
+    portfolio: null,
+    correlations: {},
+    correlation: buildEmptyCorrelation(reason),
+    geography: buildEmptyGeography(reason),
+    coverage: {
+      modeledPositionCount: 0,
+      totalPositionCount: 0,
+      modeledGrossNavPct: 0,
+      unmodeledGrossNavPct: 0,
+    },
+    portfolioState: portfolio ? {
+      accountId: portfolio.accountId || null,
+      dataSource: portfolio.dataSource || null,
+      liveSessionVerified: portfolio.liveSessionVerified === true,
+      fromCache: portfolio.fromCache ?? null,
+      fetchedAt: portfolio.fetchedAt || null,
+      socketVerifiedAt: portfolio.socketVerifiedAt || null,
+      markState: portfolio.dataQuality?.markState || 'unavailable',
+      dataQuality: portfolio.dataQuality || null,
+    } : null,
+    hedgeScenarios: {
+      available: false,
+      executable: false,
+      orderSubmitted: false,
+      blockers: [reason],
+      rows: [],
+    },
+    generatedAt: new Date().toISOString(),
+    ...extra,
+  };
+}
+
+// Read-only factor-risk snapshot. Live IBKR supplies positions/NLV; adjusted
+// completed-session history supplies the model. No route in Exposure Lab can
+// create, preview, stage, or submit an order.
+app.get('/api/risk/exposure-lab/snapshot', async (req, res) => {
+  const startTime = Date.now();
+  const accountId = req.query.account || process.env.IBKR_ACCOUNT_ID || undefined;
+  const forceRefresh = ['1', 'true'].includes(
+    String(req.query.forceRefresh || '').trim().toLowerCase(),
+  );
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Data-Use', 'historical-research-only');
+
+  let portfolioData;
+  try {
+    portfolioData = await portfolioDataProvider.getPortfolioSnapshot(accountId);
+  } catch (error) {
+    console.warn('[ExposureLab] Live portfolio snapshot unavailable:', error.message);
+    return res.status(503).json(unavailableExposureLabSnapshot(
+      'live_portfolio_unavailable',
+      null,
+      { error: error.message },
+    ));
+  }
+
+  const portfolioGate = classifyExposureLabPortfolioInput(portfolioData);
+  if (!portfolioGate.verified) {
+    return res.status(503).json(unavailableExposureLabSnapshot(
+      portfolioGate.reason,
+      portfolioData,
+    ));
+  }
+
+  const sourceHoldings = Array.isArray(portfolioData.holdings)
+    ? portfolioData.holdings
+    : [];
+  const holdings = sourceHoldings.filter(isExposureLabModelHolding);
+  const excludedHoldings = sourceHoldings
+    .filter((holding) => !isExposureLabModelHolding(holding))
+    .map((holding) => ({
+      symbol: holding?.symbol || holding?.localSymbol || null,
+      secType: holding?.secType || holding?.assetType || null,
+      reason: holding?.isPredictionMarket === true
+        ? 'prediction_market_separate_ledger'
+        : 'unsupported_or_unpriced_instrument',
+    }));
+  const positionSymbols = [...new Set(
+    holdings.map((holding) => String(holding.symbol || '').trim().toUpperCase()).filter(Boolean),
+  )];
+  const parsedMaxPositionSymbols = parseInt(
+    process.env.EXPOSURE_LAB_MAX_POSITION_SYMBOLS || '75',
+    10,
+  );
+  const maxPositionSymbols = Number.isFinite(parsedMaxPositionSymbols)
+    ? Math.max(1, parsedMaxPositionSymbols)
+    : 75;
+  if (positionSymbols.length > maxPositionSymbols) {
+    return res.status(422).json(unavailableExposureLabSnapshot(
+      'portfolio_scope_exceeds_model_limit',
+      portfolioData,
+      {
+        sourceScope: {
+          sourceHoldingCount: sourceHoldings.length,
+          eligibleHoldingCount: holdings.length,
+          eligibleSymbolCount: positionSymbols.length,
+          excludedHoldings,
+          maxPositionSymbols,
+        },
+      },
+    ));
+  }
+
+  const factorProxySymbols = getFactorProxySymbols(EXPOSURE_LAB_FACTOR_DEFINITIONS);
+  const geographyHistorySymbols = getExposureLabGeographyHistorySymbols();
+  const requestedSymbols = [...new Set([
+    ...positionSymbols,
+    ...factorProxySymbols,
+    ...geographyHistorySymbols,
+  ])];
+  const securityMasterPromise = exposureLabSecurityMaster.listCurrentReviews()
+    .then((reviews) => ({ status: 'available', reviews }))
+    .catch((error) => ({
+      status: 'unavailable',
+      reviews: [],
+      reason: error.code || 'security_master_unavailable',
+    }));
+  const historyFailures = [];
+  const historyResults = await mapWithConcurrency(requestedSymbols, 6, async (symbol) => {
+    if (!validSecurityRiskMetricsSymbol(symbol)) {
+      historyFailures.push({ symbol, reason: 'invalid_symbol' });
+      return [symbol, []];
+    }
+    try {
+      const history = await fetchYahooExposureLabAdjustedHistory(symbol, { forceRefresh });
+      return [symbol, history.bars];
+    } catch (error) {
+      historyFailures.push({
+        symbol,
+        reason: error.code || 'history_unavailable',
+        message: error.message,
+      });
+      return [symbol, []];
+    }
+  });
+  const histories = Object.fromEntries(historyResults);
+  const risk = buildPortfolioFactorRiskSnapshot({
+    holdings,
+    totalValue: portfolioData.summary?.totalValue,
+    histories,
+    factorDefinitions: EXPOSURE_LAB_FACTOR_DEFINITIONS,
+  });
+
+  const markState = portfolioData.dataQuality?.markState || 'unavailable';
+  const liveMarksVerified = (
+    markState === 'live'
+    && portfolioData.dataQuality?.status === 'ok'
+  );
+  const securityMasterResult = await securityMasterPromise;
+  const diagnostics = buildExposureLabDiagnostics({
+    holdings,
+    allocationHoldings: sourceHoldings,
+    totalValue: portfolioData.summary?.totalValue,
+    histories,
+    factorDefinitions: EXPOSURE_LAB_FACTOR_DEFINITIONS,
+    securityReviews: securityMasterResult.reviews,
+    securityMasterAvailable: securityMasterResult.status === 'available',
+    now: new Date(),
+  });
+  const hedgeScenarios = buildFactorNeutralizationScenarios({
+    riskSnapshot: risk,
+    totalValue: portfolioData.summary?.totalValue,
+    factorDefinitions: EXPOSURE_LAB_FACTOR_DEFINITIONS,
+    securityReviews: securityMasterResult.reviews,
+    portfolioMode: liveMarksVerified ? 'live' : 'reference',
+    securityMasterAvailable: securityMasterResult.status === 'available',
+  });
+  const response = {
+    ...risk,
+    correlation: diagnostics.correlation,
+    geography: diagnostics.geography,
+    actionable: false,
+    generatedAt: new Date().toISOString(),
+    portfolioState: {
+      accountId: portfolioData.accountId || accountId || null,
+      mode: liveMarksVerified ? 'live' : 'reference',
+      dataSource: portfolioData.dataSource,
+      liveSessionVerified: true,
+      fromCache: false,
+      fetchedAt: portfolioData.fetchedAt || null,
+      socketVerifiedAt: portfolioData.socketVerifiedAt || null,
+      markState,
+      dataQuality: portfolioData.dataQuality || null,
+      referenceMarks: portfolioData.referenceMarks || null,
+    },
+    sourceScope: {
+      sourceHoldingCount: sourceHoldings.length,
+      eligibleHoldingCount: holdings.length,
+      eligibleSymbolCount: positionSymbols.length,
+      excludedHoldings,
+      factorProxySymbolCount: factorProxySymbols.length,
+      geographyHistorySymbolCount: geographyHistorySymbols.length,
+      requestedHistorySymbolCount: requestedSymbols.length,
+      historyCalendarDays: EXPOSURE_LAB_HISTORY_CALENDAR_DAYS,
+      historyFailureCount: historyFailures.length,
+      historyFailures,
+      maxPositionSymbols,
+    },
+    securityMaster: {
+      status: securityMasterResult.status,
+      reason: securityMasterResult.reason || null,
+      reviewedCount: securityMasterResult.reviews.length,
+      table: exposureLabSecurityMaster.tableName,
+    },
+    hedgeScenarios,
+  };
+  console.log(
+    `[ExposureLab] snapshot completed in ${Date.now() - startTime}ms positions=${holdings.length} histories=${requestedSymbols.length} failures=${historyFailures.length}`,
+  );
+  return res.json(response);
 });
 
 // Risk Range Data endpoint - fetches LRR/HRR from Hedgeye
@@ -3165,10 +4603,7 @@ app.get('/api/risk-ranges', async (req, res) => {
     const { tickers, date } = req.query;
     const wantsEnvelope = String(req.query.envelope || '') === '1';
     const tickerList = tickers ? tickers.split(',').map(t => t.trim().toUpperCase()) : null;
-    const expectation = date ? null : expectedRiskRangePublication(new Date(), {
-      deadlineHour: Number(process.env.RISK_RANGE_DEADLINE_HOUR_ET || 8),
-      deadlineMinute: Number(process.env.RISK_RANGE_DEADLINE_MINUTE_ET || 15),
-    });
+    const expectation = date ? null : expectedRiskRangePublication(new Date());
 
     const cacheKey = JSON.stringify({
       tickers: tickerList ? [...tickerList].sort() : null,
@@ -3334,6 +4769,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
     // Now uses the explicit content 'date' from the item, compared to 'today' (NY time)
     const now = new Date();
     const today = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+    const marketSession = isUsMarketOpen(now) ? 'open' : 'closed';
 
     const getFreshnessStatus = (itemDate) => {
       if (!itemDate) return 'missing';
@@ -3370,23 +4806,17 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
     // Other types are stored as single snapshot items per day
-    const snapshotTypes = ['early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'volume', 'market-structure', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
+    const snapshotTypes = ['top-3-things', 'early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'volume', 'market-structure', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
 
-    // Single scan of HedgeyeDailySnapshot, then pick the latest item per snapshotType.
-    // This reports the true most recent upload regardless of age, matching how
-    // Risk Ranges is handled above. Handles paginated results via LastEvaluatedKey.
-    let latestByType = {};
-    let scanError = null;
-    try {
-      let ExclusiveStartKey;
-      do {
-        const snapResult = await dynamodb.scan({
-          TableName: 'HedgeyeDailySnapshot',
-          ExclusiveStartKey,
-          // Freshness only needs compact metadata. Pulling every snapshot's
-          // embedded research payload made this small status view transfer the
-          // entire table on each request.
-          ProjectionExpression: [
+    // Query one bounded latest row per product through the metadata-only GSI.
+    // This replaced the previous full-table scan on every status refresh.
+    const latestByType = {};
+    const snapshotErrors = {};
+    await Promise.all(snapshotTypes.map(async (snapshotType) => {
+      try {
+        const rows = await queryLatestSnapshotsByType(snapshotType, {
+          limit: 1,
+          projectionExpression: [
             '#snapshotType',
             '#date',
             '#scrapedAt',
@@ -3398,8 +4828,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
             '#itemCount',
             '#changeCount',
           ].join(', '),
-          ExpressionAttributeNames: {
-            '#snapshotType': 'snapshotType',
+          expressionAttributeNames: {
             '#date': 'date',
             '#scrapedAt': 'scrapedAt',
             '#riskRangeCount': 'riskRangeCount',
@@ -3410,39 +4839,19 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
             '#itemCount': 'itemCount',
             '#changeCount': 'changeCount',
           },
-        }).promise();
-
-        for (const item of snapResult.Items || []) {
-          if (!item || !item.snapshotType || !item.date) continue;
-          const cur = latestByType[item.snapshotType];
-          if (!cur || item.date.localeCompare(cur.date) > 0) {
-            latestByType[item.snapshotType] = item;
-          }
-        }
-        // Debug: Log CFTC items found
-        const cftcItems = snapResult.Items?.filter(i => i.snapshotType === 'cftc-positioning') || [];
-        if (cftcItems.length > 0) {
-          console.log(`[Freshness] Found ${cftcItems.length} CFTC items:`, cftcItems.map(i => ({ date: i.date, metricsCount: i.metricsCount })));
-        }
-
-        ExclusiveStartKey = snapResult.LastEvaluatedKey;
-      } while (ExclusiveStartKey);
-
-      // Debug: Log what we found for CFTC
-      console.log('[Freshness] latestByType after scan:', Object.keys(latestByType));
-      if (latestByType['cftc-positioning']) {
-        console.log('[Freshness] CFTC latest:', { date: latestByType['cftc-positioning'].date, metricsCount: latestByType['cftc-positioning'].metricsCount });
-      } else {
-        console.log('[Freshness] No CFTC data found in latestByType');
+        });
+        if (rows[0]) latestByType[snapshotType] = rows[0];
+      } catch (error) {
+        snapshotErrors[snapshotType] = error;
       }
-    } catch (err) {
-      console.error('[API] Error scanning HedgeyeDailySnapshot:', err.message);
-      scanError = err;
-    }
+    }));
 
     for (const snapshotType of snapshotTypes) {
-      if (scanError) {
-        results[snapshotType] = { status: 'error', error: scanError.message };
+      if (snapshotErrors[snapshotType]) {
+        results[snapshotType] = {
+          status: 'error',
+          error: snapshotErrors[snapshotType].message,
+        };
         continue;
       }
 
@@ -3560,6 +4969,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     res.json({
       date: today,
+      marketSession,
       dataTypes: results,
       alerts: alerts,
       meta: {
@@ -3577,6 +4987,9 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
 async function buildWorkflowStatusResponse() {
   const workflowStatus = await buildWorkflowStatusSnapshot();
+  if (legacyHermesIsReadOnly(legacyHermesMode)) {
+    return stripLegacyHermesWorkflowFields(workflowStatus);
+  }
   const hermesSnapshot = await getDirectorSnapshot({
     dynamodb,
     workflowSnapshot: workflowStatus,
@@ -3598,6 +5011,9 @@ async function buildHermesDirectorStatusResponse() {
     ...snapshot,
     workflowSnapshot,
     workersCatalog: listWorkerDefinitions(),
+    legacyMode: legacyHermesMode,
+    readOnly: legacyHermesIsReadOnly(legacyHermesMode),
+    retired: legacyHermesIsReadOnly(legacyHermesMode),
   };
 }
 
@@ -3638,6 +5054,9 @@ app.get('/api/hermes/director/status', async (req, res) => {
 });
 
 app.post('/api/hermes/director/command', async (req, res) => {
+  if (legacyHermesIsReadOnly(legacyHermesMode)) {
+    return rejectLegacyHermesMutation(res, legacyHermesMode);
+  }
   const startTime = Date.now();
   try {
     const { command, payload = {} } = req.body || {};
@@ -3672,6 +5091,9 @@ app.post('/api/hermes/director/command', async (req, res) => {
 });
 
 app.post('/api/hermes/alerts/:alertId/action', async (req, res) => {
+  if (legacyHermesIsReadOnly(legacyHermesMode)) {
+    return rejectLegacyHermesMutation(res, legacyHermesMode);
+  }
   try {
     const { alertId } = req.params;
     const { action, hours } = req.body || {};
@@ -3838,7 +5260,17 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
     // LIST OF COLUMNS FOR EACH TYPE
     const COLUMNS = {
       'risk-ranges': ['ticker', 'lrr', 'close', 'hrr', 'trend'],
-      'momo-tracker': ['ticker', 'buyTrade', 'sellTrade', 'upside', 'downside', 'trend', 'index']
+      'momo-tracker': [
+        'ticker',
+        'rangeStatus',
+        'rangeStatusDate',
+        'buyTrade',
+        'sellTrade',
+        'upside',
+        'downside',
+        'trend',
+        'index'
+      ]
     };
 
     // If we have data but no pre-generated CSV in S3 (or if we want to enforce sorting),
@@ -3850,19 +5282,7 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
 
       let items = [];
       if (type === 'momo-tracker') {
-        items = Object.entries(data).map(([ticker, info]) => ({
-          ticker,
-          ...info,
-          // Ensure numbers are formatted nicely
-          buyTrade: parseFloat(info.buyTrade || 0).toFixed(2),
-          sellTrade: parseFloat(info.sellTrade || 0).toFixed(2),
-          upside: parseFloat(info.upside || 0).toFixed(2) + '%',
-          downside: parseFloat(info.downside || 0).toFixed(2) + '%',
-          index: info.index ?? 999
-        }));
-
-        // Sort by index
-        items.sort((a, b) => a.index - b.index);
+        items = buildMomoTrackerCsvRows(data);
       } else if (type === 'risk-ranges') {
         // Fallback logic for risk-ranges if needed
         items = Object.entries(data).map(([ticker, info]) => ({
@@ -3906,7 +5326,7 @@ app.get('/api/hedgeye/csv/:date', async (req, res) => {
       ResponseContentDisposition: `attachment; filename="hedgeye_${type}_${date}.csv"`
     };
 
-    const presignedUrl = s3.getSignedUrl('getObject', params);
+    const presignedUrl = await s3.getSignedUrlPromise('getObject', params);
 
     console.log(`[API] Generated presigned URL for CSV: ${s3Key}`);
     res.json({
@@ -4078,95 +5498,351 @@ app.post('/api/hedgeye/etfpro', (req, res) => {
   }
 });
 
+// Morning TL;DR archive. The archive is reconstructed from the canonical
+// dated HedgeyeDailySnapshot rows; no duplicate aggregate records or S3
+// objects are written. Exact-date reads deliberately fail closed when a
+// publication is missing instead of carrying a prior edition forward.
+app.get('/api/hedgeye/tldr/archive', async (req, res) => {
+  try {
+    const archive = await buildMorningTldrArchive(dynamodb, {
+      visibleDays: TLDR_ARCHIVE_VISIBLE_DAYS,
+      retentionDays: TLDR_ARCHIVE_RETENTION_DAYS,
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(archive);
+  } catch (error) {
+    console.error('[API] Error building Morning TL;DR archive:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch the Morning TL;DR archive',
+      code: error.code || 'TLDR_ARCHIVE_UNAVAILABLE',
+    });
+  }
+});
+
+app.get('/api/hedgeye/tldr/archive/:date/status', async (req, res) => {
+  let parsedDate;
+  try {
+    parsedDate = assertArchiveDate(req.params.date);
+  } catch (error) {
+    return res.status(400).json({ error: error.message, code: error.code || 'INVALID_TLDR_DATE' });
+  }
+
+  if (!isMarketDay(parsedDate)) {
+    return res.status(404).json({
+      error: 'No market-day TL;DR publication status exists for this date',
+      date: req.params.date,
+      code: 'TLDR_MARKET_DAY_NOT_FOUND',
+    });
+  }
+
+  try {
+    const status = await buildMorningTldrStatus(dynamodb, req.params.date, {
+      snapshotTableName: process.env.HEDGEYE_DAILY_SNAPSHOT_TABLE || 'HedgeyeDailySnapshot',
+      manifestTableName: RESEARCH_PRODUCT_MANIFEST_TABLE,
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(status);
+  } catch (error) {
+    console.error(`[API] Error building Morning TL;DR status ${req.params.date}:`, error);
+    return res.status(500).json({
+      error: 'Failed to fetch the Morning TL;DR publication status',
+      code: error.code || 'TLDR_STATUS_UNAVAILABLE',
+    });
+  }
+});
+
+app.get('/api/hedgeye/tldr/archive/:date', async (req, res) => {
+  let parsedDate;
+  try {
+    parsedDate = assertArchiveDate(req.params.date);
+  } catch (error) {
+    return res.status(400).json({ error: error.message, code: error.code || 'INVALID_TLDR_DATE' });
+  }
+
+  if (!isMarketDay(parsedDate)) {
+    return res.status(404).json({
+      error: 'No market-day TL;DR edition exists for this date',
+      date: req.params.date,
+      code: 'TLDR_MARKET_DAY_NOT_FOUND',
+    });
+  }
+
+  try {
+    const day = await buildMorningTldrDay(dynamodb, req.params.date, {
+      retentionDays: TLDR_ARCHIVE_RETENTION_DAYS,
+    });
+    if (!day) {
+      return res.status(404).json({
+        error: 'No TL;DR publication is saved for this date',
+        date: req.params.date,
+        code: 'TLDR_DATE_NOT_FOUND',
+      });
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(day);
+  } catch (error) {
+    console.error(`[API] Error building Morning TL;DR edition ${req.params.date}:`, error);
+    return res.status(500).json({
+      error: 'Failed to fetch the Morning TL;DR edition',
+      code: error.code || 'TLDR_DAY_UNAVAILABLE',
+    });
+  }
+});
+
+// Hedgeye CPI nowcast history. This is historical/model research only; it is
+// deliberately separate from live prediction-market quote and order routes.
+app.get('/api/hedgeye/inflation-nowcast/history', async (req, res) => {
+  const from = req.query.from ? String(req.query.from).trim() : null;
+  const to = req.query.to ? String(req.query.to).trim() : null;
+  try {
+    const snapshotCache = await researchResponseCache.get(
+      'hedgeye:inflation-nowcast:history:snapshots',
+      () => queryLatestSnapshotsByType('inflation-nowcast', { limit: 200 }),
+    );
+    const response = buildCpiNowcastHistory(snapshotCache.value || [], {
+      from,
+      to,
+      now: new Date(),
+    });
+    setDataCacheHeaders(res, snapshotCache);
+    return res.json(response);
+  } catch (error) {
+    if (error.code === 'CPI_HISTORY_RANGE_INVALID') {
+      return res.status(400).json({
+        error: error.message,
+        code: error.code,
+      });
+    }
+    console.error('[API] Failed to build Hedgeye inflation nowcast history:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch Hedgeye inflation nowcast history',
+      code: error.code || 'CPI_HISTORY_UNAVAILABLE',
+    });
+  }
+});
+
+// Private Market Structure chart proxy. The dashboard principal can read only
+// the dedicated asset prefix; raw email keys and S3 object names stay server-side.
+app.get('/api/hedgeye/market-structure/:date/charts/:chartId', async (req, res) => {
+  const date = String(req.params.date || '').trim();
+  const chartId = String(req.params.chartId || '').trim().toLowerCase();
+  if (!isMarketStructureIsoDate(date)) {
+    return res.status(400).json({
+      error: 'Market Structure chart date must use YYYY-MM-DD.',
+      code: 'MARKET_STRUCTURE_DATE_INVALID',
+    });
+  }
+
+  try {
+    const result = await dynamodb.get({
+      TableName: 'HedgeyeDailySnapshot',
+      Key: { date, snapshotType: 'market-structure' },
+      ConsistentRead: false,
+    }).promise();
+    let chart;
+    try {
+      chart = resolveMarketStructureChartAsset(result.Item || null, date, chartId);
+    } catch (error) {
+      if (error.code === 'MARKET_STRUCTURE_CHART_ID_INVALID') {
+        return res.status(400).json({ error: error.message, code: error.code });
+      }
+      throw error;
+    }
+    if (!chart) {
+      return res.status(404).json({
+        error: 'Market Structure chart not found',
+        code: 'MARKET_STRUCTURE_CHART_NOT_FOUND',
+      });
+    }
+
+    const object = await s3.getObject({
+      Bucket: HEDGEYE_BUCKET,
+      Key: chart.s3Key,
+    }).promise();
+    res.setHeader('Content-Type', chart.contentType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=86400, immutable');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${safeMarketStructureFilename(chart.name, chart.contentType)}"`,
+    );
+    if (object.ContentLength != null) {
+      res.setHeader('Content-Length', String(object.ContentLength));
+    }
+    return res.status(200).send(object.Body);
+  } catch (error) {
+    if (['NoSuchKey', 'NotFound'].includes(error.code)) {
+      return res.status(404).json({
+        error: 'Market Structure chart not found',
+        code: 'MARKET_STRUCTURE_CHART_NOT_FOUND',
+      });
+    }
+    console.error(`[API] Failed to stream Market Structure chart ${date}/${chartId}:`, error);
+    return res.status(500).json({
+      error: 'Failed to fetch Market Structure chart',
+      code: 'MARKET_STRUCTURE_CHART_UNAVAILABLE',
+    });
+  }
+});
+
 // Hedgeye Snapshot Data endpoint - returns full extracted data for any snapshot type
+const { loadGlobalQuads } = require('./src/services/globalQuadsService.cjs');
+const { createQuadResearchHandler } = require('./src/routes/quadResearch.cjs');
+app.get('/api/research/quad-ranks', createQuadResearchHandler());
+const hedgaiResearchHandlers = createHedgaiResearchHandlers({
+  loadResearch: loadHedgaiResearch, loadBaseline: loadReviewedBaseline, root: __dirname,
+});
+app.get('/api/research/hedgai', hedgaiResearchHandlers.research);
+app.get('/api/research/hedgai/source/:sourceId', hedgaiResearchHandlers.source);
+app.get('/api/hedgeye/snapshot/global-quads', async (_req, res) => {
+  try {
+    const result = await researchResponseCache.get('global-quads', () => loadGlobalQuads(dynamodb));
+    return res.json(result.value);
+  } catch (_error) {
+    return res.status(503).json({ error: 'Global Quads unavailable' });
+  }
+});
+app.get('/api/hedgeye/global-quads/source/:sourceId', async (req, res) => {
+  if (!/^[a-f0-9]{64}$/.test(req.params.sourceId)) return res.sendStatus(404);
+  try {
+    const result = await dynamodb.get({ TableName: 'HedgeyeDailySnapshot', Key: { date: 'LATEST', snapshotType: 'global-quads' } }).promise();
+    const source = result.Item?.data?.sources?.[req.params.sourceId];
+    if (!source || !new RegExp(`^hedgeye-email/assets/global-quads/${req.params.sourceId}\\.(png|jpg)$`).test(source.s3Key || '')) return res.sendStatus(404);
+    const object = await s3.getObject({ Bucket: process.env.HERMES_S3_BUCKET || 'market-dashboard-csv-data', Key: source.s3Key }).promise();
+    res.set('Content-Type', source.s3Key.endsWith('.png') ? 'image/png' : 'image/jpeg');
+    res.set('Cache-Control', 'private, max-age=86400');
+    return res.send(object.Body);
+  } catch (_error) { return res.sendStatus(404); }
+});
+
+// Sparse, explicitly published commodity Trends remain dated research evidence
+// when later reports omit them. This never supplies quote or executable data.
+app.get('/api/dashboard/research-narrative', async (_req, res) => {
+  try {
+    const date = defaultResearchMarketDate(new Date());
+    const result = await researchResponseCache.get(`dashboard:research-narrative:${date}`, async () => {
+      const { normalizeDashboardNarrativeResearch } = require('./src/utils/dashboardNarrativeResearch.cjs');
+      const [snapshots, tracker, cryptoQuant] = await Promise.all([
+        queryLatestSnapshotsByType('early-look', { limit: 60 }),
+        queryLatestSnapshotsByType('bitcoin-trend-tracker', { limit: 60 }),
+        queryLatestSnapshotsByType('crypto-quant', { limit: 60 }),
+      ]);
+      return {
+        schemaVersion: 1,
+        verified: true,
+        source: 'early-look-archive',
+        readings: normalizeDashboardNarrativeResearch(snapshots, { date }),
+        cryptoPublications: [...cryptoQuant, ...tracker].map(({ article, data, ...publication }) => ({
+          ...publication,
+          article: { feedUrl: article?.feedUrl },
+          data: { cryptos: data?.cryptos },
+        })),
+      };
+    });
+    setDataCacheHeaders(res, result);
+    return res.json(result.value);
+  } catch (error) {
+    console.error('[API] Archived dashboard research unavailable:', error.message);
+    return res.status(503).json({ error: 'Published research unavailable' });
+  }
+});
+
 app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
   const startTime = Date.now();
   const { snapshotType } = req.params;
   const date = req.query.date; // Optional date, defaults to latest
+  const cacheKey = `hedgeye:snapshot:${String(snapshotType || '').trim()}:${date || 'latest'}`;
 
   console.log(`[API] /api/hedgeye/snapshot/${snapshotType}?date=${date} called`);
 
   try {
-    let item = null;
+    // Snapshot payloads are immutable dated research artifacts. Cache the
+    // bounded response for five minutes so dashboard polling does not repeat
+    // the same multi-KB DynamoDB read. For latest requests, use the
+    // snapshotType/date GSI first instead of probing seven dates (which was
+    // especially wasteful for weekly products such as CFTC positioning).
+    const cacheResult = await researchResponseCache.get(cacheKey, async () => {
+      let item = null;
+      if (date) {
+        const result = await dynamodb.get({
+          TableName: 'HedgeyeDailySnapshot',
+          Key: { date, snapshotType },
+        }).promise();
+        item = result.Item || null;
+      } else {
+        item = (await queryLatestSnapshotsByType(snapshotType, { limit: 1 }))[0] || null;
+      }
 
-    if (date) {
-      // Fetch specific date
-      const params = {
-        TableName: 'HedgeyeDailySnapshot',
-        Key: { date: date, snapshotType: snapshotType }
+      if (!item) return null;
+      const response = {
+        date: item.date,
+        reportDate: item.reportDate,
+        snapshotType,
+        schemaVersion: item.schemaVersion,
+        contentComplete: item.contentComplete,
+        decisionEligible: item.decisionEligible,
+        metricsCount: item.metricsCount,
+        availableMetricsCount: item.availableMetricsCount,
+        scrapedAt: item.scrapedAt,
+        retrievedAt: item.retrievedAt,
+        publishedAt: item.publishedAt,
+        source: item.source,
+        sourceUrl: item.sourceUrl,
+        sourceUrls: item.sourceUrls,
+        apiUrls: item.apiUrls,
+        datasetIds: item.datasetIds,
+        calculationVersion: item.calculationVersion,
+        windowContract: item.windowContract,
+        sourceContentHash: item.sourceContentHash,
+        data: item.data,
+        trendChanges: item.trendChanges,
+        outbucket: item.outbucket,
+        meta: {
+          riskRangeCount: item.riskRangeCount,
+          stockCount: item.stockCount,
+          cryptoCount: item.cryptoCount,
+          rankingCount: item.rankingCount,
+          itemCount: item.itemCount,
+          forecastCount: item.forecastCount,
+          signalCount: item.signalCount,
+          chartCount: item.chartCount,
+        },
+        article: item.article,
+        htmlSource: item.htmlSource,
+        reportType: item.reportType,
+        warnings: item.warnings,
+        sourceQuality: item.sourceQuality,
+        rangeValidation: item.rangeValidation,
+        sourceProduct: item.sourceProduct,
+        sourcePriority: item.sourcePriority,
+        pdfSource: item.pdfSource,
+        screenshotS3Key: item.screenshotS3Key,
       };
-      const result = await dynamodb.get(params).promise();
-      item = result.Item;
-    } else {
-      // Find latest by scanning last 7 days
-      for (let i = 0; i < 7; i++) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      return snapshotType === 'market-structure'
+        ? buildPublicMarketStructureSnapshot(response)
+        : response;
+    });
+    setDataCacheHeaders(res, cacheResult);
 
-        const params = {
-          TableName: 'HedgeyeDailySnapshot',
-          Key: { date: dateStr, snapshotType: snapshotType }
-        };
-        const result = await dynamodb.get(params).promise();
-        if (result.Item) {
-          item = result.Item;
-          break;
-        }
-      }
-
-      if (!item) {
-        const baseParams = {
-          TableName: 'HedgeyeDailySnapshot',
-          FilterExpression: 'snapshotType = :type',
-          ExpressionAttributeValues: {
-            ':type': snapshotType
-          }
-        };
-        const matchingSnapshots = await scanAllPages(dynamodb, baseParams);
-
-        item = matchingSnapshots
-          .sort((a, b) => {
-            const aTime = new Date(a.publishedAt || a.scrapedAt || a.date || 0).getTime();
-            const bTime = new Date(b.publishedAt || b.scrapedAt || b.date || 0).getTime();
-            return bTime - aTime;
-          })[0];
-      }
-    }
-
-    if (!item) {
+    if (!cacheResult.value) {
       return res.status(404).json({ error: 'Snapshot not found', snapshotType, date });
     }
 
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/hedgeye/snapshot/${snapshotType} completed in ${totalTime}ms`);
-
-    res.json({
-      date: item.date,
-      snapshotType: snapshotType,
-      scrapedAt: item.scrapedAt,
-      publishedAt: item.publishedAt,
-      data: item.data,
-      trendChanges: item.trendChanges,
-      outbucket: item.outbucket,
-      meta: {
-        riskRangeCount: item.riskRangeCount,
-        stockCount: item.stockCount,
-        cryptoCount: item.cryptoCount,
-        rankingCount: item.rankingCount,
-        itemCount: item.itemCount,
-        signalCount: item.signalCount,
-        chartCount: item.chartCount,
-      },
-      article: item.article,
-      htmlSource: item.htmlSource,
-      reportType: item.reportType,
-      warnings: item.warnings,
-      sourceProduct: item.sourceProduct,
-      sourcePriority: item.sourcePriority,
-      pdfSource: item.pdfSource,
-      screenshotS3Key: item.screenshotS3Key
-    });
+    if (snapshotType === 'cftc-positioning') {
+      return res.json({
+        ...cacheResult.value,
+        cacheState: cacheResult.status,
+        decisionEligible: cacheResult.status === 'stale'
+          ? false
+          : cacheResult.value.decisionEligible,
+        warnings: cacheResult.status === 'stale'
+          ? [...(cacheResult.value.warnings || []), 'STALE_CACHE_REFERENCE_ONLY']
+          : cacheResult.value.warnings,
+      });
+    }
+    return res.json(cacheResult.value);
 
   } catch (error) {
     const totalTime = Date.now() - startTime;
@@ -4206,6 +5882,7 @@ async function buildRealTimeAlertPositionsResponse() {
   const summary = summarizeRealTimeAlertPositions(materialized.snapshots, {
     windowDays,
     baseline: rtaBenchmark,
+    resolutions: loadRtaResolutions(path.join(__dirname, 'data', 'hedgeye', 'rta', 'resolutions.json')),
   });
   if (!rtaBenchmark?.checkpointValidation?.valid) {
     const reasons = rtaBenchmark?.checkpointValidation?.reasons || ['checkpoint-missing'];
@@ -4348,19 +6025,16 @@ async function buildHedgeyeChangelogResponse() {
     // Use the two most recent actual publications for every product. The old
     // seven-calendar-day lookup treated weekly/irregular products as if they
     // had no comparison history and generated false "no change" states.
-    const snapshotHistoryByType = {};
-    const allSnapshots = await scanAllPages(dynamodb, { TableName: 'HedgeyeDailySnapshot' });
-    for (const snapshot of allSnapshots) {
-      if (!snapshotTypes.includes(snapshot?.snapshotType) || !snapshot?.date) continue;
-      if (!snapshotHistoryByType[snapshot.snapshotType]) snapshotHistoryByType[snapshot.snapshotType] = [];
-      snapshotHistoryByType[snapshot.snapshotType].push(snapshot);
-    }
-    for (const type of snapshotTypes) {
-      snapshotHistoryByType[type] = (snapshotHistoryByType[type] || [])
-        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
-        .filter((snapshot, index, rows) => index === rows.findIndex((row) => row.date === snapshot.date))
-        .slice(0, 2);
-    }
+    const snapshotHistoryByType = Object.fromEntries(
+      await Promise.all(snapshotTypes.map(async (type) => {
+        const rows = await queryLatestSnapshotsByType(type, { limit: 2 });
+        const unique = rows.filter((snapshot, index, all) => (
+          snapshot?.date
+          && index === all.findIndex((row) => row.date === snapshot.date)
+        ));
+        return [type, unique];
+      })),
+    );
 
     const normalizeRealTimeAlerts = (snapshot) => {
       const data = snapshot?.data || {};
@@ -4925,6 +6599,30 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
   }
 });
 
+const { createPublishedTradeArchiveWorkerService } = require('./src/services/publishedTradeArchiveWorkerService.cjs');
+const publishedTradeArchive = createPublishedTradeArchiveWorkerService();
+const securityIntelligenceInputCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 12 });
+const securityIntelligenceProjection = createSecurityIntelligenceWorkerService();
+
+// All security surfaces consume the same dated Trade evidence, including sparse
+// publications outside the bounded history displayed in the research window.
+async function loadCanonicalSecurityIntelligence({ symbols, date, historyDays = SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS,
+  now = new Date(), scope = 'symbols', limit, cursor, version = 2 } = {}) {
+  const marketDate = date || defaultResearchMarketDate(now);
+  const [inputResult, publishedTradeReadings] = await Promise.all([
+    securityIntelligenceInputCache.get(`${marketDate}:${historyDays}`, () => loadSecurityIntelligenceInputs({
+      dynamodb, marketDate, historyDays, now,
+      riskRangeLoader: ({ now: requestNow }) => loadRiskRangePublicationEnvelope({ now: requestNow }),
+      entityEventsTable: RESEARCH_ENTITY_EVENTS_TABLE,
+      productManifestTable: RESEARCH_PRODUCT_MANIFEST_TABLE,
+      entityEventsIndex: RESEARCH_ENTITY_EVENTS_DATE_INDEX,
+    })),
+    publishedTradeArchive.load({ date: marketDate }),
+  ]);
+  return securityIntelligenceProjection.build({ version, symbols, scope, limit, cursor,
+    marketDate, historyDays, now, ...inputResult.value, publishedTradeReadings });
+}
+
 app.get('/api/research/security-intelligence', async (req, res) => {
   const now = new Date();
   const rawSymbols = String(req.query.symbols || '')
@@ -4962,29 +6660,7 @@ app.get('/api/research/security-intelligence', async (req, res) => {
   }
 
   try {
-    const inputs = await loadSecurityIntelligenceInputs({
-      dynamodb,
-      marketDate,
-      historyDays,
-      now,
-      riskRangeLoader: ({ now: requestNow }) => loadRiskRangePublicationEnvelope({
-        now: requestNow,
-      }),
-      entityEventsTable: RESEARCH_ENTITY_EVENTS_TABLE,
-      productManifestTable: RESEARCH_PRODUCT_MANIFEST_TABLE,
-      entityEventsIndex: RESEARCH_ENTITY_EVENTS_DATE_INDEX,
-    });
-    const response = buildSecurityIntelligence({
-      symbols,
-      marketDate,
-      historyDays,
-      now,
-      snapshots: inputs.snapshots,
-      entityEvents: inputs.entityEvents,
-      productManifests: inputs.productManifests,
-      riskRangeEnvelope: inputs.riskRangeEnvelope,
-      loadErrors: inputs.loadErrors,
-    });
+    const response = await loadCanonicalSecurityIntelligence({ symbols, date: marketDate, historyDays, now, version: 1 });
     res.setHeader('Cache-Control', 'no-store');
     return res.json(response);
   } catch (error) {
@@ -4992,6 +6668,83 @@ app.get('/api/research/security-intelligence', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     return res.status(500).json({
       error: 'Failed to build security intelligence',
+      details: error.message,
+      bySymbol: {},
+    });
+  }
+});
+
+app.get('/api/research/security-intelligence/v2', async (req, res) => {
+  const now = new Date();
+  const scope = String(req.query.scope || 'symbols').trim().toLowerCase();
+  const rawSymbols = String(req.query.symbols || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const symbols = normalizeRequestedSymbols(rawSymbols);
+  const marketDate = req.query.date || defaultResearchMarketDate(now);
+  const historyDays = req.query.historyDays === undefined
+    ? scope === 'universe' ? 0 : SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS
+    : Number(req.query.historyDays);
+  const limit = req.query.limit === undefined
+    ? SECURITY_INTELLIGENCE_MAX_SYMBOLS
+    : Number(req.query.limit);
+  const cursor = req.query.cursor === undefined ? null : String(req.query.cursor);
+
+  if (!['symbols', 'universe'].includes(scope)) {
+    return res.status(400).json({ error: 'scope must be symbols or universe' });
+  }
+  if (scope === 'symbols' && (rawSymbols.length === 0 || symbols.length === 0)) {
+    return res.status(400).json({ error: 'symbols must contain at least one valid ticker' });
+  }
+  if (scope === 'universe' && rawSymbols.length > 0) {
+    return res.status(400).json({ error: 'universe scope cannot include symbols' });
+  }
+  if (rawSymbols.length > SECURITY_INTELLIGENCE_MAX_SYMBOLS) {
+    return res.status(400).json({
+      error: `symbols supports at most ${SECURITY_INTELLIGENCE_MAX_SYMBOLS} tickers`,
+    });
+  }
+  if (
+    scope === 'symbols'
+    && symbols.length !== new Set(rawSymbols.map((value) => value.toUpperCase())).size
+  ) {
+    return res.status(400).json({ error: 'symbols contains an invalid ticker' });
+  }
+  if (!isValidMarketDate(marketDate)) {
+    return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  }
+  if (
+    !Number.isInteger(historyDays)
+    || historyDays < 0
+    || historyDays > SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS
+    || (scope === 'universe' && historyDays !== 0)
+  ) {
+    return res.status(400).json({
+      error: scope === 'universe'
+        ? 'universe historyDays must be 0'
+        : `historyDays must be an integer from 0 to ${SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS}`,
+    });
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > SECURITY_INTELLIGENCE_MAX_SYMBOLS) {
+    return res.status(400).json({
+      error: `limit must be an integer from 1 to ${SECURITY_INTELLIGENCE_MAX_SYMBOLS}`,
+    });
+  }
+  if (cursor !== null && !/^\d+$/.test(cursor)) {
+    return res.status(400).json({ error: 'cursor must be a non-negative integer' });
+  }
+
+  try {
+    const response = await loadCanonicalSecurityIntelligence({ symbols, scope, limit, cursor, date: marketDate, historyDays, now });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(response);
+  } catch (error) {
+    console.error('[API] Error in /api/research/security-intelligence/v2:', error);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(500).json({
+      schemaVersion: 2,
+      error: 'Failed to build security intelligence v2',
       details: error.message,
       bySymbol: {},
     });
@@ -5141,17 +6894,23 @@ app.get('/api/macro-indicators', async (req, res) => {
     let successCount = 0;
     macroIndicators.forEach((symbol, index) => {
       const quote = results[index];
-      if (quote && quote.price) {
+      if (quote && quote.price && isQuoteUsableNow(quote, symbol)) {
         indicators[symbol] = {
+          ...quote,
           symbol: symbol,
           price: quote.price,
           change: quote.change || null,
           changePercent: quote.changePercent || null,
-          timestamp: quote.timestamp || new Date().toISOString()
+          timestamp: quote.timestamp,
+          source: quote.source,
+          dataType: quote.dataType,
+          availability: buildQuoteMetadata(quote).availability,
+          warning: quote.warning
         };
         successCount++;
       } else {
         indicators[symbol] = {
+          ...quote,
           symbol: symbol,
           price: null,
           error: 'No data available'
@@ -5169,16 +6928,28 @@ app.get('/api/macro-indicators', async (req, res) => {
   }
 });
 
+const rateValueToBps = (value) => {
+  if (value === '' || value == null || !Number.isFinite(Number(value))) return null;
+  return Math.round(Number(value) * 1000) / 10;
+};
+
 // Build a uniform quote row for the multi-region response.
 async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
   try {
-    const quote = await getQuote(toQuoteInstrument(index));
-    const quoteMetadata = buildQuoteMetadata(quote);
+    const quoteInstrument = toQuoteInstrument(index);
+    const quote = await getQuote(quoteInstrument);
+    let quoteMetadata = buildQuoteMetadata(quote);
     const mapping = getTickerMapping(index.symbol);
     const isIntl = index.intl === true;
 
     let sparklineData = [];
-    if (quoteMetadata.usable && includeSparklines && !isIntl && mapping.source === 'yahoo') {
+    if (
+      quoteMetadata.usable
+      && includeSparklines
+      && !isIntl
+      && index.provider !== 'ibkr'
+      && mapping.source === 'yahoo'
+    ) {
       sparklineData = await getIntradayData(index.symbol);
     }
 
@@ -5192,10 +6963,11 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
     let mtdChangePct = null;
     let qtdChangePct = null;
     let ytdChangePct = null;
+    let oneYearChangePct = null;
     let periods = null;
-    if (wantPeriodReturns && !isIntl) {
+    if (wantPeriodReturns) {
       try {
-        periods = await getPeriodReturnsCached(index.symbol);
+        periods = await getPeriodReturnsCached(index.symbol, quoteInstrument, quote);
         if (periods) {
           weekChangePct = periods.weekChangePct;
           fifteenDayChangePct = periods.fifteenDayChangePct ?? null;
@@ -5207,20 +6979,39 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
           mtdChangePct = periods.mtdChangePct ?? null;
           qtdChangePct = periods.qtdChangePct ?? null;
           ytdChangePct = periods.ytdChangePct;
+          oneYearChangePct = periods.oneYearChangePct ?? null;
         }
       } catch (periodErr) {
         console.warn(`[API] Period returns failed for ${index.symbol}:`, periodErr.message);
       }
     }
+    // Slow historical requests must not let the quote age into a current row.
+    if (!isQuoteUsableNow(quote, quoteInstrument)) quoteMetadata = { ...quoteMetadata, usable: false, availability: 'unavailable', quoteAsOf: null };
     const periodMetadata = buildPeriodReturnsMetadata(periods);
+    const usesBasisPointChanges = index.changeUnit === 'bps';
+    const hasTrueDailyRateChange = !isIntl || quote?.observationFrequency === 'daily';
+    const dayChangeBps = usesBasisPointChanges && hasTrueDailyRateChange
+      ? rateValueToBps(quote?.change)
+      : null;
+    const publishedChange = usesBasisPointChanges && !hasTrueDailyRateChange
+      ? null
+      : quote?.change ?? null;
+    const publishedChangePercent = usesBasisPointChanges && !hasTrueDailyRateChange
+      ? null
+      : quote?.changePercent ?? null;
 
     return {
+      ...quote,
       symbol: index.symbol,
       name: index.name,
       unit: index.unit || undefined,
+      changeUnit: index.changeUnit || undefined,
       price: quoteMetadata.usable ? quote.price : null,
-      change: quoteMetadata.usable ? (quote.change ?? null) : null,
-      changePercent: quoteMetadata.usable ? (quote.changePercent ?? null) : null,
+      change: quoteMetadata.usable ? publishedChange : null,
+      changePercent: quoteMetadata.usable ? publishedChangePercent : null,
+      latestObservationChange: quoteMetadata.usable ? periods?.latestObservationChange ?? null : null,
+      backdropPercentageReturns: quoteMetadata.usable && usesBasisPointChanges
+        ? periods?.backdropPercentageReturns ?? null : null,
       timestamp: quoteMetadata.quoteAsOf,
       source: quoteMetadata.source,
       dataType: quoteMetadata.dataType,
@@ -5239,8 +7030,22 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
       mtdChangePct,
       qtdChangePct,
       ytdChangePct,
+      oneYearChangePct,
+      dayChangeBps,
+      weekChangeBps: usesBasisPointChanges ? periods?.weekChangeBps ?? null : null,
+      fifteenDayChangeBps: usesBasisPointChanges ? periods?.fifteenDayChangeBps ?? null : null,
+      monthChangeBps: usesBasisPointChanges ? periods?.monthChangeBps ?? null : null,
+      threeMonthChangeBps: usesBasisPointChanges ? periods?.threeMonthChangeBps ?? null : null,
+      sixMonthChangeBps: usesBasisPointChanges ? periods?.sixMonthChangeBps ?? null : null,
+      ytdChangeBps: usesBasisPointChanges ? periods?.ytdChangeBps ?? null : null,
+      oneYearChangeBps: usesBasisPointChanges ? periods?.oneYearChangeBps ?? null : null,
       periodReturnsAsOf: periodMetadata.periodReturnsAsOf,
-      periodReturnsStatus: periodMetadata.periodReturnsStatus
+      periodReturnsStatus: periodMetadata.periodReturnsStatus,
+      periodObservationFrequency: periods?.observationFrequency ?? null,
+      periodReturnsSource: periods?.periodReturnsSource ?? null,
+      periodSourceSeriesId: periods?.periodSourceSeriesId ?? null,
+      periodSourceInstrument: periods?.periodSourceInstrument ?? null,
+      periodSourceUrl: periods?.periodSourceUrl ?? null,
     };
   } catch (error) {
     console.error(`[API] Error fetching ${index.symbol}:`, error.message);
@@ -5248,6 +7053,7 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
       symbol: index.symbol,
       name: index.name,
       unit: index.unit || undefined,
+      changeUnit: index.changeUnit || undefined,
       price: null,
       change: null,
       changePercent: null,
@@ -5270,6 +7076,15 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
       mtdChangePct: null,
       qtdChangePct: null,
       ytdChangePct: null,
+      oneYearChangePct: null,
+      dayChangeBps: null,
+      weekChangeBps: null,
+      fifteenDayChangeBps: null,
+      monthChangeBps: null,
+      threeMonthChangeBps: null,
+      sixMonthChangeBps: null,
+      ytdChangeBps: null,
+      oneYearChangeBps: null,
       periodReturnsAsOf: null,
       periodReturnsStatus: 'unavailable'
     };
@@ -5325,29 +7140,38 @@ async function buildRatesPayload(region, opts) {
         // period fields null and the row falls back to em-dashes on the UI.
         let dayDeltaBps = null;
         let weekDeltaBps = null;
+        let fifteenDayDeltaBps = null;
         let monthDeltaBps = null;
         let threeMonthDeltaBps = null;
         let sixMonthDeltaBps = null;
         let mtdDeltaBps = null;
         let qtdDeltaBps = null;
         let ytdDeltaBps = null;
+        let oneYearDeltaBps = null;
         let periodReturnsAsOf = null;
+        let backdropPercentageReturns = null;
         try {
           const [longCloses, shortCloses] = await Promise.all([
             getDailyClosesCached(longSym),
             getDailyClosesCached(shortSym)
           ]);
           const spreadSeries = buildSpreadBpsSeries(longCloses, shortCloses);
+          backdropPercentageReturns = {
+            ...computePeriodPercentsFromCloses(spreadSeries, { absoluteBase: true }),
+            latestObservationChange: latestObservationChange(spreadSeries),
+          };
           const deltas = computeSpreadBpsDeltas(spreadSeries);
           if (deltas) {
             dayDeltaBps = deltas.dayDeltaBps;
             weekDeltaBps = deltas.weekDeltaBps;
+            fifteenDayDeltaBps = deltas.fifteenDayDeltaBps;
             monthDeltaBps = deltas.monthDeltaBps;
             threeMonthDeltaBps = deltas.threeMonthDeltaBps;
             sixMonthDeltaBps = deltas.sixMonthDeltaBps;
             mtdDeltaBps = deltas.mtdDeltaBps;
             qtdDeltaBps = deltas.qtdDeltaBps;
             ytdDeltaBps = deltas.ytdDeltaBps;
+            oneYearDeltaBps = deltas.oneYearDeltaBps;
             periodReturnsAsOf = deltas.asOf || null;
           }
         } catch (err) {
@@ -5366,12 +7190,14 @@ async function buildRatesPayload(region, opts) {
           symbol: derived.symbol,
           name: derived.name,
           unit: derived.unit || 'bps',
+          changeUnit: derived.changeUnit || 'bps',
           price: derivedAvailable ? priceStr : null,
           change: derivedAvailable ? dayDeltaBps : null,
           // For bps-denominated derived rows the UI renders these fields with
           // a " bps" suffix (see getRowMetrics), so we populate them with the
           // bps delta rather than a percent change.
           changePercent: derivedAvailable ? dayDeltaBps : null,
+          backdropPercentageReturns: derivedAvailable ? backdropPercentageReturns : null,
           timestamp: derivedAvailable ? derivedAsOf : null,
           source: 'derived',
           dataType: 'derived',
@@ -5381,12 +7207,22 @@ async function buildRatesPayload(region, opts) {
           entitlementStatus: null,
           sparklineData: [],
           weekChangePct: weekDeltaBps,
+          fifteenDayChangePct: fifteenDayDeltaBps,
           monthChangePct: monthDeltaBps,
           threeMonthChangePct: threeMonthDeltaBps,
           sixMonthChangePct: sixMonthDeltaBps,
           mtdChangePct: mtdDeltaBps,
           qtdChangePct: qtdDeltaBps,
           ytdChangePct: ytdDeltaBps,
+          oneYearChangePct: oneYearDeltaBps,
+          dayChangeBps: dayDeltaBps,
+          weekChangeBps: weekDeltaBps,
+          fifteenDayChangeBps: fifteenDayDeltaBps,
+          monthChangeBps: monthDeltaBps,
+          threeMonthChangeBps: threeMonthDeltaBps,
+          sixMonthChangeBps: sixMonthDeltaBps,
+          ytdChangeBps: ytdDeltaBps,
+          oneYearChangeBps: oneYearDeltaBps,
           periodReturnsAsOf,
           periodReturnsStatus: periodReturnsAsOf ? 'historical' : 'unavailable',
           derived: true
@@ -5394,7 +7230,17 @@ async function buildRatesPayload(region, opts) {
       }
     }
 
-    out[tabKey] = rows;
+    const displayableRows = rows.filter(isDisplayableQuoteRow);
+    out[tabKey] = marketQuoteReferenceStore.reconcileRows({
+      mode: opts.wantPeriodReturns ? 'periods' : 'current',
+      scope: `rates.${tabKey}`,
+      incomingRows: displayableRows,
+      expectedSymbols: [
+        ...(tab.indices || []).map((index) => index.symbol),
+        ...(tab.derived || []).map((index) => index.symbol),
+      ],
+      retentionReason: 'rate_provider_refresh_unavailable',
+    });
   }));
 
   return out;
@@ -5439,16 +7285,39 @@ app.get('/api/multi-region-quotes', async (req, res) => {
 
         console.log(`[API] Fetching ${region.indices.length} indices for ${regionKey}...`);
         const quotes = await Promise.all(region.indices.map((index) => buildQuoteRow(index, opts)));
-        payload[regionKey] = quotes;
-        console.log(`[API] Completed ${regionKey}: ${quotes.length} quotes fetched`);
+        const displayableQuotes = quotes.filter(isDisplayableQuoteRow);
+        payload[regionKey] = marketQuoteReferenceStore.reconcileRows({
+          mode: wantPeriodReturns ? 'periods' : 'current',
+          scope: regionKey,
+          incomingRows: displayableQuotes,
+          expectedSymbols: region.indices.map((index) => index.symbol),
+          retentionReason: `${regionKey}_provider_refresh_unavailable`,
+        });
+        console.log(`[API] Completed ${regionKey}: ${displayableQuotes.length}/${quotes.length} verified quotes fetched, ${payload[regionKey].length} rows published`);
       }));
 
+      marketQuoteReferenceStore.flush();
+      payload.meta = {
+        observedAt: new Date().toISOString(),
+        displayRole: 'informational',
+        executable: false,
+      };
       const totalTime = Date.now() - startTime;
       console.log(`[API] /api/multi-region-quotes completed in ${totalTime}ms`);
       return payload;
     });
 
-    res.json(results);
+    const revalidateRows = (rows) => rows.map((row) => {
+      if (row.availability === 'reference') return row;
+      if (row.source === 'derived') return row;
+      if (isQuoteUsableNow(row)) return row;
+      return markRetainedReference(row, 'observation_expired_during_refresh');
+    }).filter(Boolean);
+    const delivered = Object.fromEntries(Object.entries(results).map(([key, value]) => [key,
+      key === 'meta' ? value : Array.isArray(value) ? revalidateRows(value)
+        : Object.fromEntries(Object.entries(value).map(([tab, rows]) => [tab, revalidateRows(rows)])),
+    ]));
+    res.json(delivered);
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`[API] Error in /api/multi-region-quotes after ${totalTime}ms:`, error);
@@ -5745,6 +7614,97 @@ app.get('/api/securities/signal-strength', async (req, res) => {
   }
 });
 
+// Current issuer-published constituent overlap for supported leveraged-product proxies.
+// This endpoint deliberately performs a fresh upstream read and never serves a cache fallback.
+app.get('/api/leveraged-products/overlap', createLeveragedProductOverlapHandler({ leveragedProductOverlapService }));
+
+function portfolioBalanceUnavailable(error, accountId = null) {
+  return {
+    available: false,
+    status: 'unavailable',
+    source: 'unavailable',
+    accountId: accountId || null,
+    fromCache: false,
+    errorCode:
+      error?.sidecarCode
+      || error?.code
+      || 'PORTFOLIO_BALANCE_UNAVAILABLE',
+    message:
+      error?.sidecarMessage
+      || error?.message
+      || 'Verified live IBKR portfolio balance is unavailable.',
+    observedAt: new Date().toISOString(),
+    // The producer's Gateway classification; consumers treat a dedicated
+    // client failure as a disconnect only when this says so.
+    ...(error?.gatewayErrorCode ? { gatewayErrorCode: error.gatewayErrorCode } : {}),
+  };
+}
+
+async function readVerifiedPortfolioBalance(accountId) {
+  const balance = await runInFlight(
+    `portfolio-balance:${accountId || 'default'}`,
+    () => portfolioDataProvider.getPortfolioBalance(accountId),
+  );
+  try {
+    recordIbkrInterestBalanceObservation(balance);
+  } catch (trackingError) {
+    console.warn(
+      '[IBKR Interest Validation] verified MTD checkpoint was not persisted:',
+      trackingError?.code || 'interest_balance_observation_storage_error',
+    );
+  }
+  return balance;
+}
+
+// Portfolio balance: independent, live, account-scoped, and never cached.
+app.get('/api/portfolio/balance', async (req, res) => {
+  const startTime = Date.now();
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const accountId = String(
+      req.query.account || process.env.IBKR_ACCOUNT_ID || '',
+    ).trim() || undefined;
+    const balance = await readVerifiedPortfolioBalance(accountId);
+    console.log(
+      `[API] /api/portfolio/balance completed in ${Date.now() - startTime}ms account=${balance.accountId}`,
+    );
+    return res.json(balance);
+  } catch (error) {
+    const accountId = String(req.query.account || '').trim() || null;
+    const status = Number.isInteger(error?.status) ? error.status : 503;
+    console.warn(
+      `[API] /api/portfolio/balance unavailable after ${Date.now() - startTime}ms:`,
+      error.message,
+    );
+    return res.status(status).json(portfolioBalanceUnavailable(error, accountId));
+  }
+});
+
+// Read-only projection. This route never creates, modifies, or transmits an order.
+app.post('/api/portfolio/balance/preview', async (req, res) => {
+  const startTime = Date.now();
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const preview = await portfolioDataProvider.getPortfolioBalancePreview(
+      req.body || {},
+    );
+    console.log(
+      `[API] /api/portfolio/balance/preview completed in ${Date.now() - startTime}ms account=${preview.accountId} action=${preview.action}`,
+    );
+    return res.json(preview);
+  } catch (error) {
+    const accountId = String(
+      req.body?.accountId || req.body?.account || '',
+    ).trim() || null;
+    const status = Number.isInteger(error?.status) ? error.status : 503;
+    console.warn(
+      `[API] /api/portfolio/balance/preview unavailable after ${Date.now() - startTime}ms:`,
+      error.message,
+    );
+    return res.status(status).json(portfolioBalanceUnavailable(error, accountId));
+  }
+});
+
 // Portfolio: IBKR API live snapshot (read-only)
 app.get('/api/portfolio', async (req, res) => {
   const startTime = Date.now();
@@ -5763,9 +7723,6 @@ app.get('/api/portfolio', async (req, res) => {
     // statements remain archival and retain their original dated prices; this
     // route never blends Yahoo/current quotes into either source.
 
-    if (typeof portfolioData.lastUpdated === 'string' && portfolioData.lastUpdated.includes('T')) {
-      portfolioData.lastUpdated = portfolioData.lastUpdated;
-    }
 
     const totalTime = Date.now() - startTime;
     console.log(
@@ -5777,134 +7734,6 @@ app.get('/api/portfolio', async (req, res) => {
     console.error(`[API] Error in /api/portfolio after ${totalTime}ms:`, error);
     res.status(500).json({
       error: 'Failed to fetch portfolio data',
-      details: error.message,
-    });
-  }
-});
-
-app.post('/api/portfolio/correlation-concentration', async (req, res) => {
-  const startTime = Date.now();
-  try {
-    const holdings = Array.isArray(req.body?.holdings) ? req.body.holdings : [];
-    const totalValue = Number(req.body?.totalValue);
-    const normalizedTotalValue = Number.isFinite(totalValue) ? totalValue : null;
-    const windows = Array.isArray(req.body?.windows) && req.body.windows.length > 0
-      ? req.body.windows
-      : PORTFOLIO_CORRELATION_WINDOWS;
-    const primaryWindow = Number(req.body?.primaryWindow) || PORTFOLIO_CORRELATION_PRIMARY_WINDOW;
-    const forceRefresh = req.body?.forceRefresh === true;
-    const cacheKey = buildCorrelationCacheKey({
-      holdings,
-      totalValue: normalizedTotalValue,
-      windows,
-      primaryWindow,
-    });
-
-    const cached = portfolioCorrelationResultCache.get(cacheKey);
-    const now = Date.now();
-    if (!forceRefresh && cached && now - cached.ts < PORTFOLIO_CORRELATION_CACHE_TTL) {
-      const totalTime = Date.now() - startTime;
-      console.log(
-        `[API] /api/portfolio/correlation-concentration cache hit in ${totalTime}ms`,
-      );
-      return res.json(addPortfolioCorrelationMeta(cached.data, {
-        cached: true,
-        deduped: false,
-        durationMs: totalTime,
-        cacheAgeMs: now - cached.ts,
-      }));
-    }
-
-    if (!forceRefresh && portfolioCorrelationInFlight.has(cacheKey)) {
-      const concentration = await portfolioCorrelationInFlight.get(cacheKey);
-      const totalTime = Date.now() - startTime;
-      console.log(
-        `[API] /api/portfolio/correlation-concentration deduped in ${totalTime}ms`,
-      );
-      return res.json(addPortfolioCorrelationMeta(concentration, {
-        cached: false,
-        deduped: true,
-        durationMs: totalTime,
-      }));
-    }
-
-    const calculationPromise = (async () => {
-      const symbols = getCorrelationScorableSymbols(holdings);
-      const histories = {};
-
-      if (symbols.length > 0) {
-        console.log(
-          `[API] Correlation concentration fetching ${symbols.length} scorable histories from ${holdings.length} holdings`,
-        );
-      }
-
-      const historyResults = await mapWithConcurrency(
-        symbols,
-        PORTFOLIO_CORRELATION_HISTORY_CONCURRENCY,
-        async (symbol) => {
-          try {
-            const series = await getDailyClosesCached(symbol);
-            return { symbol, series: series || [] };
-          } catch (error) {
-            console.warn(`[API] Correlation history fetch failed for ${symbol}:`, error.message);
-            return { symbol, series: [] };
-          }
-        },
-      );
-
-      historyResults.forEach((result) => {
-        if (result?.symbol) {
-          histories[result.symbol] = (result.series || []).map((row) => ({
-            date: row.date || (row.t ? new Date(row.t).toISOString().slice(0, 10) : null),
-            close: row.close,
-          })).filter((row) => row.date && Number.isFinite(Number(row.close)));
-        }
-      });
-
-      const concentration = computePortfolioCorrelationConcentration({
-        holdings,
-        totalValue: normalizedTotalValue,
-        histories,
-        windows,
-        primaryWindow,
-        asOf: new Date().toISOString(),
-      });
-
-      return addPortfolioCorrelationMeta(concentration, {
-        fetchedSymbols: symbols.length,
-        scorableSymbols: symbols.length,
-      });
-    })();
-
-    portfolioCorrelationInFlight.set(cacheKey, calculationPromise);
-
-    let concentration;
-    try {
-      concentration = await calculationPromise;
-      portfolioCorrelationResultCache.set(cacheKey, {
-        data: concentration,
-        ts: Date.now(),
-      });
-    } finally {
-      if (portfolioCorrelationInFlight.get(cacheKey) === calculationPromise) {
-        portfolioCorrelationInFlight.delete(cacheKey);
-      }
-    }
-
-    const totalTime = Date.now() - startTime;
-    console.log(
-      `[API] /api/portfolio/correlation-concentration completed in ${totalTime}ms fetched=${concentration.meta?.fetchedSymbols || 0} scored=${concentration.coverage.scoredCount}`,
-    );
-    res.json(addPortfolioCorrelationMeta(concentration, {
-      cached: false,
-      deduped: false,
-      durationMs: totalTime,
-    }));
-  } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`[API] Error in /api/portfolio/correlation-concentration after ${totalTime}ms:`, error);
-    res.status(500).json({
-      error: 'Failed to calculate portfolio correlation concentration',
       details: error.message,
     });
   }
@@ -6183,14 +8012,49 @@ app.get('/api/portfolio/exposure/reconciliation', (req, res) => {
   }
 });
 
-app.get('/api/ibkr/interest-validation/status', (req, res) => {
+app.get('/api/ibkr/interest-validation/status', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   try {
-    res.json(getIbkrInterestValidationStatus({
+    const refreshLive = ['1', 'true'].includes(
+      String(req.query.refreshLive || '').trim().toLowerCase(),
+    );
+    let liveRefreshError = null;
+    if (refreshLive) {
+      const accountId = String(
+        req.query.account || process.env.IBKR_ACCOUNT_ID || '',
+      ).trim() || undefined;
+      try {
+        await readVerifiedPortfolioBalance(accountId);
+      } catch (error) {
+        liveRefreshError = error;
+        console.warn(
+          '[IBKR Interest Validation] live MTD refresh unavailable:',
+          error?.code || error?.message || 'portfolio_balance_unavailable',
+        );
+      }
+    }
+    const status = await getIbkrInterestValidationStatusAsync({
       account: req.query.account,
-    }));
+    });
+    if (!liveRefreshError) return res.json(status);
+    return res.json({
+      ...status,
+      mtd: {
+        ...status.mtd,
+        liveNetAccrued: null,
+        liveNetAccruedStatus: 'unavailable',
+        liveNetAccruedObservedAt: null,
+        liveNetAccruedSource: null,
+      },
+      guard: {
+        ...status.guard,
+        liveNegativeAccrued: null,
+        combinedReserve: null,
+      },
+    });
   } catch (error) {
     console.error('[API] Error in /api/ibkr/interest-validation/status:', error);
-    res.status(500).json({
+    return res.status(500).json({
       source: 'ibkr_interest_validation',
       available: false,
       status: 'unavailable',
@@ -6207,9 +8071,9 @@ app.get('/api/ibkr/interest-validation/status', (req, res) => {
   }
 });
 
-app.get('/api/ibkr/interest-validation/history', (req, res) => {
+app.get('/api/ibkr/interest-validation/history', async (req, res) => {
   try {
-    res.json(getIbkrInterestValidationHistory({
+    res.json(await getIbkrInterestValidationHistoryAsync({
       limit: req.query.limit,
     }));
   } catch (error) {
@@ -6220,6 +8084,44 @@ app.get('/api/ibkr/interest-validation/history', (req, res) => {
       actuals: [],
       misses: [],
       error: 'IBKR interest validation history is unavailable.',
+    });
+  }
+});
+
+app.get('/api/ibkr/interest-validation/ledger', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const accountId = String(req.query.account || '').trim();
+  if (!accountId) {
+    return res.status(400).json({
+      source: 'ibkr_verified_interest_ledger',
+      available: false,
+      status: 'unavailable',
+      accountMatched: false,
+      fromCache: false,
+      error: {
+        code: 'interest_ledger_account_required',
+        message: 'An explicit IBKR account is required for the interest ledger.',
+      },
+    });
+  }
+  try {
+    return res.json(await readPrivateInterestLedgerAsync({ accountId }));
+  } catch (error) {
+    const status = Number.isInteger(error?.status) ? error.status : 503;
+    console.warn(
+      '[API] /api/ibkr/interest-validation/ledger unavailable:',
+      error?.code || 'interest_ledger_unavailable',
+    );
+    return res.status(status).json({
+      source: 'ibkr_verified_interest_ledger',
+      available: false,
+      status: 'unavailable',
+      accountMatched: false,
+      fromCache: false,
+      error: {
+        code: error?.code || 'interest_ledger_unavailable',
+        message: 'Verified IBKR interest-ledger evidence is unavailable.',
+      },
     });
   }
 });
@@ -6256,233 +8158,41 @@ app.post('/api/ibkr/interest-validation/run', async (req, res) => {
 });
 
 app.get('/api/options', (req, res) => {
-  res.json(generateOptionsData());
+  res.status(503).json({ status: 'unavailable', options: [], reason: 'verified_options_provider_unavailable' });
 });
 
-const VOL_YAHOO_SYMBOLS = { vix: '^VIX', vvix: '^VVIX', rvx: '^RVX' };
 
-app.get('/api/indicators/vix', async (req, res) => {
-  try {
-    const vixData = await fetchVIXData();
-    res.json(vixData);
-  } catch (error) {
-    console.error('Error in VIX endpoint:', error);
-    res.status(500).json({ error: 'Failed to fetch VIX data' });
-  }
-});
+app.get('/api/indicators/vix', createVixHandler({ fetchVIXData }));
 
-app.get('/api/indicators/volatility/:ticker', async (req, res) => {
-  const ticker = (req.params.ticker || '').toLowerCase();
-  const yahooSymbol = VOL_YAHOO_SYMBOLS[ticker];
-  if (!yahooSymbol) {
-    return res.status(400).json({ error: `Unknown volatility ticker: ${req.params.ticker}. Use vix, vvix, or rvx.` });
-  }
-  try {
-    const data = await fetchVolatilityData(yahooSymbol);
-    res.json(data);
-  } catch (error) {
-    console.error(`Error in volatility endpoint (${ticker}):`, error);
-    res.status(500).json({ error: `Failed to fetch ${ticker.toUpperCase()} data` });
-  }
-});
+app.get('/api/indicators/volatility/:ticker', createVolatilityHandler({ fetchVolatilityData }));
 
-app.get('/api/volatility-snapshot', async (req, res) => {
-  try {
-    const snapshot = await volatilitySnapshotService.fetchSnapshot();
-    return res.status(snapshot.status === 'unavailable' ? 503 : 200).json(snapshot);
-  } catch (error) {
-    console.error('[volatility-snapshot] unexpected snapshot failure:', error);
-    return res.status(503).json({
-      status: 'unavailable',
-      generatedAt: new Date().toISOString(),
-      lastUpdated: null,
-      error: 'Volatility providers are unavailable',
-    });
-  }
-});
+app.get('/api/volatility-snapshot', createVolatilitySnapshotHandler({ volatilitySnapshotService }));
 
-function loadLocalMarketStructureBundle() {
-  const filePath = path.join(__dirname, DEFAULT_CACHE_PATH);
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (Array.isArray(parsed)) {
-      return {
-        meta: {},
-        records: parsed
-      };
-    }
-
-    return {
-      meta: parsed.meta || {},
-      records: Array.isArray(parsed.records) ? parsed.records : []
-    };
-  } catch (error) {
-    console.error('[API] Failed to parse local market-structure cache:', error.message);
-    return null;
-  }
-}
-
-function loadLocalMarketStructureCalibrationReport() {
-  const filePath = path.join(__dirname, DEFAULT_CALIBRATION_REPORT_PATH);
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch (error) {
-    console.error('[API] Failed to parse local market-structure calibration report:', error.message);
-    return null;
-  }
-}
-
-async function getPersistedMarketStructureRecords(days) {
-  const limit = Math.max(parseInt(days, 10) || 365, 260);
-  const params = {
-    TableName: process.env.MARKET_STRUCTURE_TABLE || DEFAULT_MARKET_STRUCTURE_TABLE,
-    KeyConditionExpression: '#seriesId = :seriesId',
-    ExpressionAttributeNames: {
-      '#seriesId': 'seriesId'
-    },
-    ExpressionAttributeValues: {
-      ':seriesId': MARKET_STRUCTURE_SERIES_ID
-    },
-    ScanIndexForward: false,
-    Limit: limit
-  };
-
-  try {
-    const result = await dynamodb.query(params).promise();
-    const records = sortRecordsDescending(
-      (result.Items || [])
-        .map((item) => normalizeMarketStructureRecord(item))
-        .filter(Boolean)
-    );
-
-    if (records.length > 0) {
-      return {
-        storage: 'dynamodb',
-        meta: {},
-        records,
-        calibrationReport: loadLocalMarketStructureCalibrationReport()
-      };
-    }
-  } catch (error) {
-    console.warn('[API] MarketStructureDaily query failed, falling back to local cache:', error.message);
-  }
-
-  const bundle = loadLocalMarketStructureBundle();
-  if (bundle && bundle.records.length > 0) {
-    return {
-      storage: 'local-cache',
-      meta: bundle.meta || {},
-      records: sortRecordsDescending(
-        bundle.records
-          .map((record) => normalizeMarketStructureRecord(record, bundle.meta || {}))
-          .filter(Boolean)
-      ),
-      calibrationReport: loadLocalMarketStructureCalibrationReport()
-    };
-  }
-
-  return {
-    storage: 'missing',
-    meta: { status: 'missing' },
-    records: [],
-    calibrationReport: loadLocalMarketStructureCalibrationReport()
-  };
-}
-
-async function getLatestHedgeyeVolumeSnapshot(maxLookbackDays = 7) {
-  for (let i = 0; i < maxLookbackDays; i += 1) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const dateStr = date.toLocaleDateString('en-CA', {
-      timeZone: 'America/New_York'
-    });
-
-    const result = await dynamodb
-      .get({
-        TableName: 'HedgeyeDailySnapshot',
-        Key: {
-          date: dateStr,
-          snapshotType: 'volume'
-        }
-      })
-      .promise();
-
-    if (result.Item) {
-      return result.Item;
-    }
-  }
-
-  return null;
-}
-
-app.get('/api/volume/market-share', async (req, res) => {
-  const startTime = Date.now();
-  const daysParam = req.query.days || '365';
-  const days = Number.isNaN(Number(daysParam)) ? 365 : parseInt(daysParam, 10);
-
-  try {
-    const volumeSnapshot = await getLatestHedgeyeVolumeSnapshot();
-    if (volumeSnapshot) {
-      const response = buildHedgeyeVolumeSnapshotResponse(volumeSnapshot);
-      const totalTime = Date.now() - startTime;
-      console.log(
-        `[API] /api/volume/market-share completed in ${totalTime}ms (source=hedgeye-volume-snapshot, asOf=${response.asOf}, uploadDate=${response.meta.uploadDate})`
-      );
-      return res.json(response);
-    }
-
-    const dataset = await getPersistedMarketStructureRecords(days);
-    const response = buildMarketShareVolumeResponse(dataset.records, {
-      days,
-      fetchedAt: dataset.meta?.fetchedAt || dataset.meta?.generatedAt || null,
-      methodologyVersion: dataset.meta?.methodologyVersion || null,
-      sourceBreakdown: dataset.meta?.sourceBreakdown || null,
-      status: dataset.meta?.status || null,
-      calibrationReport: dataset.calibrationReport || null
-    });
-    response.meta.storage = dataset.storage;
-    response.meta.calibration = response.meta.calibration || dataset.meta?.calibration || null;
-    response.meta.sourceType = 'market-structure-fallback';
-
-    if (response.totalMarket.length < 2 || response.totalExchange.length < 2) {
-      const totalTime = Date.now() - startTime;
-      return res.status(503).json({
-        error: 'Market structure daily dataset is unavailable',
-        elapsedMs: totalTime,
-        ...response,
-        meta: {
-          ...response.meta,
-          status: response.meta.status || 'missing'
-        }
-      });
-    }
-
-    const totalTime = Date.now() - startTime;
-    console.log(
-      `[API] /api/volume/market-share completed in ${totalTime}ms (days=${days}, storage=${dataset.storage}, market=${response.totalMarket.length}, exchange=${response.totalExchange.length})`
-    );
-
-    res.json(response);
-  } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error('[API] Error in /api/volume/market-share:', error);
-    res.status(500).json({
-      error: 'Failed to fetch market share volume data',
-      details: error.message,
-      elapsedMs: totalTime
-    });
-  }
-});
+// Each completed-session volume source is verified independently on refresh.
+app.get('/api/volume/market-share', createExchangeVolumeHandler({ exchangeVolumeService }));
 
 // USD Macro Dashboard API Endpoints
+
+// Verified, current-week tier-one macro calendar. The provider service owns the
+// bounded upstream cache; the API itself is never browser/proxy cached.
+app.get('/api/market-events', createMarketEventsHandler({ marketEventsService }));
+app.get('/api/market/daily-snapshot', createMarketDailyHandler());
+app.get('/api/market/rotation-snapshot', createMarketRotationHandler());
+app.get('/api/market/sp500-contributors', createSp500ContributorsHandler({
+  loadMomoSnapshot: async () => {
+    const date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const result = await dynamodb.get({
+      TableName: 'HedgeyeDailySnapshot',
+      Key: { date, snapshotType: 'momo-tracker' },
+      ConsistentRead: true,
+    }).promise();
+    if (!result.Item) return null;
+    // Keep publication evidence and rejection flags, but omit article/media
+    // bodies from the frequently refreshed market-data response.
+    const { article, htmlSource, screenshotS3Key, ...snapshot } = result.Item;
+    return { ...snapshot, meta: { ...snapshot.meta, stockCount: snapshot.stockCount ?? snapshot.meta?.stockCount } };
+  },
+}));
 
 // Get latest DXY value
 app.get('/api/usd/dxy', async (req, res) => {
@@ -6529,60 +8239,43 @@ app.get('/api/usd/dxy', async (req, res) => {
   }
 });
 
-// Get currency pairs (mock data for now - will be replaced with real Yahoo Finance data)
-app.get('/api/usd/currency-pairs', async (req, res) => {
-  try {
-    // For now, return mock data. In production, this would fetch from Yahoo Finance
-    const currencyPairs = [
-      { pair: 'USDEUR', name: 'USD/EUR', rate: '0.9234', change: '-0.0012', changePercent: '-0.13%', timestamp: new Date().toISOString() },
-      { pair: 'USDJPY', name: 'USD/JPY', rate: '149.23', change: '0.67', changePercent: '0.45%', timestamp: new Date().toISOString() },
-      { pair: 'USDGBP', name: 'USD/GBP', rate: '1.2345', change: '0.0022', changePercent: '0.18%', timestamp: new Date().toISOString() },
-      { pair: 'USDCHF', name: 'USD/CHF', rate: '0.8765', change: '-0.0034', changePercent: '-0.39%', timestamp: new Date().toISOString() },
-      { pair: 'USDCAD', name: 'USD/CAD', rate: '1.3456', change: '0.0011', changePercent: '0.08%', timestamp: new Date().toISOString() },
-      { pair: 'USDCNY', name: 'USD/CNY', rate: '7.2345', change: '0.0123', changePercent: '0.17%', timestamp: new Date().toISOString() },
-      { pair: 'USDAUD', name: 'USD/AUD', rate: '1.5234', change: '-0.0023', changePercent: '-0.15%', timestamp: new Date().toISOString() }
-    ];
-
-    res.json(currencyPairs);
-
-  } catch (error) {
-    console.error('Error fetching currency pairs:', error);
-    res.status(500).json({ error: 'Failed to fetch currency pairs' });
-  }
-});
+// Currency-pair quotes remain unavailable until a verified provider is wired.
+app.get('/api/usd/currency-pairs', createCurrencyPairsHandler());
 
 const fxvlSnapshotService = createFxvlSnapshotService({
   fetchPairHistory: (symbol) => fetchYahooDailyClosesSeries(symbol, '2y'),
 });
 const usdCorrelationService = createUsdCorrelationService({
-  fetchHistory: (symbol) => fetchYahooDailyClosesSeries(symbol, '2y'),
+  // Yahoo has no 2-year yield index; the Treasury par curve publishes it the same day.
+  fetchHistory: (symbol) => (symbol === 'UST2Y'
+    ? fetchTreasuryParYieldSeries('2 Yr', { httpGet: axios.get })
+    : fetchYahooDailyClosesSeries(YAHOO_TICKER_MAP[symbol] || symbol, '2y')),
   fetchFxvlSnapshot: () => fxvlSnapshotService.getSnapshot(),
+});
+const goldCorrelationService = createGoldCorrelationService({
+  fetchBasisHistory: fetchGoldCorrelationBasisSeries,
+  fetchComparatorHistory: fetchGoldCorrelationComparatorSeries,
+  verifyBasisAvailability: async () => {
+    try {
+      const status = await predictionPerformanceIbkrProvider.getProviderStatus();
+      if (status?.connected === true || String(status?.status || '').toLowerCase() === 'connected') {
+        return true;
+      }
+      const token = String(status?.status || '').toLowerCase();
+      if (['disconnected', 'offline', 'not_connected'].includes(token)) return false;
+      return null;
+    } catch (_error) {
+      return null;
+    }
+  },
 });
 
 // Get USD correlations from current daily market history.
-app.get('/api/usd/correlations', async (req, res) => {
-  const startTime = Date.now();
-  try {
-    const snapshot = await usdCorrelationService.getSnapshot();
-    const totalTime = Date.now() - startTime;
-    console.log(`[API] /api/usd/correlations completed in ${totalTime}ms (${snapshot.calculationDate})`);
-    res.json(snapshot);
+app.get('/api/usd/correlations', createUsdCorrelationHandler({ usdCorrelationService }));
 
-  } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`[API] Error in /api/usd/correlations after ${totalTime}ms:`, error);
-    res.status(503).json({
-      correlations: null,
-      rollingStats: null,
-      timestamp: null,
-      calculationDate: null,
-      source: 'Yahoo Finance daily bars',
-      sourceStatus: 'unavailable',
-      error: error.message || 'Current USD correlation data is unavailable',
-      code: error.code || 'USD_CORRELATION_DATA_UNAVAILABLE',
-    });
-  }
-});
+// Gold correlations use verified IBKR XAUUSD completed sessions as the fixed
+// basis. Comparator rows fail independently; a missing basis fails the matrix.
+app.get('/api/gold/correlations', createGoldCorrelationHandler({ goldCorrelationService }));
 
 // Helper function to normalize currency pair symbols
 function normalizeCurrencySymbol(symbol) {
@@ -6817,6 +8510,7 @@ app.get('/api/usd/historical', async (req, res) => {
 
 const systemReadinessService = createSystemReadinessService({
   sidecarRequest,
+  expectedIbkrAccounts: expectedPredictionMarketAccounts(),
   getDirectorSnapshot,
   buildWorkflowStatusSnapshot: async () => {
     const cache = await researchResponseCache.get('workflow-snapshot:readiness', buildWorkflowStatusSnapshot);
@@ -6849,6 +8543,14 @@ const systemReadinessService = createSystemReadinessService({
   dynamodb,
   cloudwatch,
   listWorkerDefinitions,
+  legacyMode: legacyHermesMode,
+  // The reliability controller defers stack restarts while this reports work.
+  readAnalystActivity: ({ windowSeconds }) => analystRoutes.workspace.call(
+    'activity',
+    { windowSeconds },
+    { timeoutMs: 5_000 },
+  ),
+  readPortfolioCloseBaseline: () => analystRoutes.dailyWorkflow.portfolioCloseBaseline(),
 });
 
 async function readDashboardStatusEvidence() {
@@ -6899,87 +8601,27 @@ async function readDashboardStatusEvidence() {
 }
 
 function readMarketDataStatusEvidence() {
-  const nowMs = Date.now();
-  const providerStatus = getProviderStatusSnapshot();
-  const cachedProviderEvidence = [...quotesCache.values()]
-    .filter((entry) => (
-      entry
-      && Number.isFinite(Number(entry.timestamp))
-      && nowMs - Number(entry.timestamp) >= 0
-      && nowMs - Number(entry.timestamp) <= Math.min(CACHE_TTL, 60_000)
-    ))
-    .map((entry) => ({
-      observedAt: new Date(Number(entry.timestamp)).toISOString(),
-      metadata: buildQuoteMetadata(entry.data),
-    }))
-    .filter(({ metadata }) => (
-      metadata.usable === true
-      && ['ibkr', 'yahoo'].includes(String(metadata.source || '').toLowerCase())
-      && (
-        String(metadata.source || '').toLowerCase() !== 'ibkr'
-        || providerStatus?.ibkr?.connected === true
-      )
-    ))
-    .sort((left, right) => Date.parse(right.observedAt) - Date.parse(left.observedAt))[0];
-
-  if (cachedProviderEvidence) {
-    return {
-      verified: true,
-      available: true,
-      observedAt: cachedProviderEvidence.observedAt,
-      source: cachedProviderEvidence.metadata.source,
-    };
-  }
-
-  const lastIbkrQuoteAt = providerStatus?.ibkr?.lastQuoteAt;
-  if (
-    providerStatus?.ibkr?.connected === true
-    && lastIbkrQuoteAt
-    && nowMs - Date.parse(lastIbkrQuoteAt) >= 0
-    && nowMs - Date.parse(lastIbkrQuoteAt) <= 60_000
-  ) {
-    return {
-      verified: true,
-      available: true,
-      observedAt: lastIbkrQuoteAt,
-      source: 'ibkr',
-    };
-  }
-
-  if (providerStatus?.market?.lastWarning === 'no_quote_available') {
-    return {
-      verified: true,
-      available: false,
-      reason: 'Market-data providers are unavailable.',
-    };
-  }
-
-  return {
-    verified: false,
-    available: null,
-  };
+  return summarizeMarketDataStatusEvidence({
+    quoteEntries: [...quotesCache.values()],
+    providerStatus: getProviderStatusSnapshot(),
+    nowMs: Date.now(),
+    maxAgeMs: 60_000,
+    cacheTtlMs: CACHE_TTL,
+  });
 }
 
-async function readAutomationStatusEvidence() {
-  const expectedWorkerKeys = ['quant-analyst', 'quant-developer', 'security'];
-  const configuredWorkers = new Map(
-    listWorkerDefinitions().map((definition) => [definition.key, definition]),
-  );
-  const records = expectedWorkerKeys.map((key) => {
-    const definition = configuredWorkers.get(key) || {};
-    return {
-      serviceId: definition.heartbeatServiceId || `hermes:${key}`,
-      label: definition.name || `Hermes ${key}`,
-      scheduleId: definition.scheduleId || null,
-      maxAgeMinutes: definition.readinessMaxAgeMinutes || 45,
-    };
+async function readAiStatusEvidence() {
+  const evaluationNow = new Date();
+  const analyst = buildAnalystRuntimeCheck({
+    supervisor: getSupervisorProvenance(),
+    now: evaluationNow,
   });
   const gmailAccount = String(
     process.env.HERMES_GMAIL_ACCOUNT || 'timsmithaviation@gmail.com',
   ).trim().toLowerCase();
-  records.push({
+  const gmailRecord = {
     serviceId: `gmail:${gmailAccount}`,
-    label: 'Gmail ingestion',
+    label: 'Gmail Function',
     scheduleId: process.env.HERMES_GMAIL_SCHEDULE_ID
       || GMAIL_SERVICE_DEFINITION?.aws?.scheduleId
       || 'market-dashboard-gmail-v2-every-15m',
@@ -6988,22 +8630,126 @@ async function readAutomationStatusEvidence() {
       || GMAIL_SERVICE_DEFINITION?.readinessMaxAgeMinutes
       || 45,
     ),
-  });
+  };
 
   // Heartbeat reads are intentionally independent of the startup S3
   // HeadBucket check. The local runtime may be allowed to read DynamoDB even
   // when unrelated upload-bucket access is unavailable.
-  return collectAutomationHeartbeatEvidence({
-    records,
+  const gmail = await collectScheduledHeartbeatEvidence({
+    records: [gmailRecord],
     readHeartbeat: (serviceId) => getServiceHeartbeat(dynamodb, serviceId),
   });
+  return { analyst, gmail };
+}
+
+const PREDICTION_MONITOR_HEALTH_MARKETS = new Set(['silver', 'gold', 'wti', 'brent', 'bitcoin', 'ethereum', 'sp500']);
+
+function latestHealthTimestamp(rows, keys) {
+  return rows.flatMap((row) => keys.map((key) => row?.[key]))
+    .filter((value) => Number.isFinite(Date.parse(String(value || ''))))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] || null;
+}
+
+function monitorProviderEvidence(rows, ids, { applicable = true, label = 'Source' } = {}) {
+  if (!applicable) return { status: 'not_applicable', lastSuccessAt: null, error: null };
+  const selected = rows.filter((row) => ids.includes(row?.id) && row?.applicable !== false);
+  if (!selected.length) return { status: 'not_started', lastSuccessAt: null, error: null };
+  const statuses = selected.map((row) => String(row?.status || 'unavailable').toLowerCase());
+  const healthy = statuses.filter((status) => status === 'live').length;
+  const partlyHealthy = statuses.filter((status) => status === 'partial').length;
+  const pending = statuses.filter((status) => status === 'refreshing').length;
+  const failure = selected.find((row) => [
+    'unavailable', 'auth_required', 'entitlement_required', 'refresh_failed',
+  ].includes(String(row?.status || '').toLowerCase()));
+  const status = healthy === selected.length
+    ? 'available'
+    : healthy || partlyHealthy || pending ? 'partial'
+      : failure ? 'unavailable' : 'not_started';
+  const reason = failure?.reason
+    || (pending ? `${label} refresh is in progress.` : partlyHealthy ? `${label} is only partially available.` : null);
+  return {
+    status,
+    lastSuccessAt: latestHealthTimestamp(selected.filter((row) => ['live', 'partial'].includes(row.status)), ['lastSuccessAt', 'asOf']),
+    lastAttemptAt: latestHealthTimestamp(selected, ['lastAttemptAt', 'asOf']),
+    error: reason ? { code: failure?.errorCode || (pending ? 'PM_SOURCE_REFRESHING' : 'PM_SOURCE_PARTIAL'), message: reason } : null,
+  };
+}
+
+function resolverSourcesEvidenceForMonitor({ marketId } = {}) {
+  const base = predictionMarketTest.service.getHealth();
+  const monitors = predictionMarketTest.marketMonitorCoordinator.getHealth();
+  const selectedMarketId = PREDICTION_MONITOR_HEALTH_MARKETS.has(String(marketId || '').toLowerCase())
+    ? String(marketId).toLowerCase()
+    : null;
+  const selectedMonitor = selectedMarketId ? monitors[selectedMarketId] : null;
+  const rows = Array.isArray(selectedMonitor?.sourceHealth) ? selectedMonitor.sourceHealth : [];
+  const hasSelectedMonitor = Boolean(selectedMarketId && selectedMonitor);
+  return {
+    ...base,
+    selectedMarketId,
+    monitor: selectedMonitor || null,
+    monitors,
+    lastSnapshotAt: selectedMonitor?.completedAt || base.lastSnapshotAt || null,
+    providers: {
+      ...(base.providers || {}),
+      kalshi: monitorProviderEvidence(rows, ['kalshi_catalog', 'kalshi_book'], {
+        applicable: hasSelectedMonitor && (!rows.length || rows.some((row) => row.id === 'kalshi_catalog' && row.applicable !== false)),
+        label: 'Kalshi catalog and native book',
+      }),
+      forecastex: monitorProviderEvidence(rows, ['forecastex_catalog', 'forecastex_activity'], {
+        applicable: hasSelectedMonitor && (!rows.length || rows.some((row) => row.id === 'forecastex_catalog' && row.applicable !== false)),
+        label: 'ForecastEx official publication',
+      }),
+      coinbase: monitorProviderEvidence(rows.filter((row) => /coinbase/i.test(String(row.source || row.reason || ''))), ['resolver_spot', 'resolver_chart'], {
+        applicable: ['bitcoin', 'ethereum'].includes(selectedMarketId),
+        label: 'Coinbase proxy',
+      }),
+    },
+  };
 }
 
 const systemStatusService = createSystemStatusService({
   readDashboardEvidence: readDashboardStatusEvidence,
   readMarketDataEvidence: readMarketDataStatusEvidence,
-  readLivePortfolioEvidence: () => sidecarRequest('/status', { timeoutMs: 600 }),
-  readAutomationEvidence: readAutomationStatusEvidence,
+  // Gateway connectivity and live-position readiness are separate facts. The
+  // portfolio status probe is intentionally lightweight and only reports
+  // "ready" after /portfolio/live-positions has verified a fresh snapshot.
+  readLivePortfolioEvidence: () => sidecarRequest('/portfolio/status', { timeoutMs: 600 }),
+  // Resolver source status is process-local observation only. Systems must not
+  // trigger a resolver snapshot or contact any provider just to render health.
+  readResolverSourcesEvidence: (context) => resolverSourcesEvidenceForMonitor(context),
+  // The Analyst runtime check proves only assistant availability. Portfolio and
+  // market-data services remain the authority for verified live trading data.
+  readAiEvidence: readAiStatusEvidence,
+});
+
+const loginGmailAccount = String(
+  process.env.HERMES_GMAIL_ACCOUNT || 'timsmithaviation@gmail.com',
+).trim().toLowerCase();
+const loginGmailScheduleId = process.env.HERMES_GMAIL_SCHEDULE_ID
+  || GMAIL_SERVICE_DEFINITION?.aws?.scheduleId
+  || 'market-dashboard-gmail-v2-every-15m';
+const loginStatusService = createLoginStatusService({
+  readIbkr: () => sidecarRequest('/status', { timeoutMs: 1_500 }),
+  readGmail: () => getServiceHeartbeat(dynamodb, `gmail:${loginGmailAccount}`),
+  readAwsProfile: createAwsProfileProbe({ repoRoot: __dirname }),
+  gmailAccount: loginGmailAccount,
+  gmailScheduleId: loginGmailScheduleId,
+});
+let loginActionService;
+async function collectLoginStatus(options = {}) {
+  const report = await loginStatusService.collect(options);
+  loginActionService?.syncVerification(report);
+  return {
+    ...report,
+    actions: loginActionService?.getStatus() || {},
+  };
+}
+loginActionService = createLoginActionService({
+  repoRoot: __dirname,
+  onSettled: () => {
+    collectLoginStatus({ force: true }).catch(() => {});
+  },
 });
 
 const systemReadinessRepairService = createSystemReadinessRepairService({
@@ -7014,74 +8760,72 @@ const systemReadinessRepairService = createSystemReadinessRepairService({
 // Lightweight, on-demand status for the SYS flyout. Each dependency is
 // independently bounded by systemStatusService; this route never invokes the
 // full operational-readiness collector.
-app.get('/api/system-status', async (_req, res) => {
+app.get('/api/system-status', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    return res.json(await systemStatusService.collect());
+    const marketId = PREDICTION_MONITOR_HEALTH_MARKETS.has(String(req.query?.marketId || '').toLowerCase())
+      ? String(req.query.marketId).toLowerCase()
+      : null;
+    return res.json(await systemStatusService.collect({ marketId }));
   } catch (error) {
     console.warn('[API] Lightweight system status failed:', error.message);
     return res.json(createUnavailableSystemStatus());
   }
 });
 
-// Full operational readiness. Unlike /api/health, this verifies the live
-// dependencies required for a trustworthy dashboard and never serves stale
-// success after a collector failure.
-app.get('/api/system-readiness', async (_req, res) => {
-  const startedAt = Date.now();
+// Cached, asynchronous authentication checks are deliberately separate from
+// the sub-second Systems collector. Public results contain no credential,
+// principal, account-ID, key-path, or balance values.
+app.get('/api/login-status', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    // `refresh=1` remains accepted for backward compatibility, but public
-    // requests always share the readiness service's hard collection budget.
-    const report = await systemReadinessService.collect();
-    return res.json({
-      ...report,
-      durationMs: Date.now() - startedAt,
-    });
+    const refresh = String(req.query.refresh || '').trim().toLowerCase();
+    return res.json(await collectLoginStatus({
+      force: refresh === '1' || refresh === 'true',
+      fast: refresh === 'fast',
+      slow: refresh === 'slow',
+    }));
   } catch (error) {
-    console.error('[API] System readiness failed:', error);
-    return res.status(500).json({
-      version: 1,
-      status: 'blocked',
-      ready: false,
-      checkedAt: new Date().toISOString(),
-      error: 'System readiness check failed',
-      detail: error.message,
+    console.warn('[API] Login status collection failed:', error.message);
+    loginActionService?.syncVerification(loginStatusService.report());
+    return res.json({
+      ...loginStatusService.report(),
+      actions: loginActionService?.getStatus() || {},
     });
   }
 });
 
-// Repair requests select a fixed, repository-owned executor. Request values
-// never become command arguments, and socket provenance is used instead of
-// spoofable proxy headers.
-app.post('/api/system-readiness/actions/:actionId', async (req, res) => {
+app.post('/api/login-status/actions/:actionId', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  if (req.get('X-Readiness-Repair') !== '1') {
-    return res.status(400).json({
+  if (req.get('X-Login-Action') !== '1') {
+    return res.status(403).json({
       accepted: false,
-      code: 'READINESS_REPAIR_CONFIRMATION_REQUIRED',
-      error: 'The readiness repair confirmation header is required.',
+      errorCode: 'LOGIN_ACTION_CONFIRMATION_REQUIRED',
+      error: 'Login action confirmation is required.',
     });
   }
   try {
-    const result = await systemReadinessRepairService.run(req.params.actionId, {
+    const result = await loginActionService.run(req.params.actionId, {
       remoteAddress: req.socket?.remoteAddress,
     });
-    if (req.params.actionId === 'rebuild-research-projections') {
-      checkpointFirstResearchResponse.invalidate('rta-positions:90');
-      researchResponseCache.delete('readiness:rta-positions:90');
-    }
     return res.status(202).json(result);
   } catch (error) {
-    const statusCode = Number(error.statusCode) || 500;
-    if (statusCode >= 500) console.error('[API] System readiness repair failed:', error);
-    return res.status(statusCode).json({
+    return res.status(error.statusCode || 503).json({
       accepted: false,
-      code: error.code || 'READINESS_REPAIR_FAILED',
-      error: error.message,
+      errorCode: error.code || 'LOGIN_ACTION_FAILED',
+      error: error.message || 'The approved login action could not be started.',
     });
   }
 });
+
+app.use('/api/system-readiness', createSystemReadinessRoutes({
+  readinessService: systemReadinessService,
+  repairService: systemReadinessRepairService,
+  invalidateResearchProjections: () => {
+    checkpointFirstResearchResponse.invalidate('rta-positions:90');
+    researchResponseCache.delete('readiness:rta-positions:90');
+  },
+}));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -7101,7 +8845,7 @@ app.get('/api/notes', async (req, res) => {
       }
     };
 
-    const result = await dynamodb.scan(params).promise();
+    const result = await readAllDynamoItems(dynamodb, 'scan', params);
 
     // Extract dates and sort descending (newest first)
     const dates = result.Items
@@ -7415,8 +9159,7 @@ app.get('/api/prediction-markets/contracts', async (req, res) => {
       params = { TableName: PM_TABLE };
     }
 
-    const op = status || assetClass ? dynamodb.query(params) : dynamodb.scan(params);
-    const result = await op.promise();
+    const result = await readAllDynamoItems(dynamodb, status || assetClass ? 'query' : 'scan', params);
     res.json({ contracts: result.Items || [] });
   } catch (err) {
     console.error('[PM] GET contracts error:', err.message);
@@ -7547,7 +9290,7 @@ app.put('/api/prediction-markets/settings', async (req, res) => {
 // GET /api/prediction-markets/analytics — aggregate P&L, win rate, Brier score
 app.get('/api/prediction-markets/analytics', async (req, res) => {
   try {
-    const result = await dynamodb.scan({ TableName: PM_TABLE }).promise();
+    const result = await readAllDynamoItems(dynamodb, 'scan', { TableName: PM_TABLE });
     const all = result.Items || [];
     const closed = all.filter(c => c.status === 'settled' || c.status === 'closed');
 
@@ -7593,13 +9336,13 @@ app.get('/api/prediction-markets/analytics', async (req, res) => {
 // GET /api/prediction-markets/risk — open risk breakdown by asset class / category
 app.get('/api/prediction-markets/risk', async (req, res) => {
   try {
-    const result = await dynamodb.query({
+    const result = await readAllDynamoItems(dynamodb, 'query', {
       TableName: PM_TABLE,
       IndexName: 'status-index',
       KeyConditionExpression: '#s = :s',
       ExpressionAttributeNames: { '#s': 'status' },
       ExpressionAttributeValues: { ':s': 'open' },
-    }).promise();
+    });
     const open = result.Items || [];
     const byAssetClass = {}, byCategory = {}, bySettlementDate = {}, byCorrelationGroup = {};
     let totalMaxLoss = 0, totalMaxProfit = 0;
@@ -7654,12 +9397,48 @@ const server = app.listen(PORT, HOST, async () => {
   console.log(`📊 Market data API available at http://${HOST}:${PORT}/api`);
   console.log(`💼 Portfolio data available at http://${HOST}:${PORT}/api/portfolio`);
 
+  analystRoutes.cleanupStaging().catch((error) => {
+    console.warn('[Analyst] Initial staging cleanup failed:', error.message);
+  });
+  if (process.env.ANALYST_SERVICE_TOKEN) {
+    const analystSidecarBase = String(
+      process.env.ANALYST_SIDECAR_URL || 'http://127.0.0.1:6951',
+    ).replace(/\/$/, '');
+    axios.post(`${analystSidecarBase}/internal/sync`, {}, {
+      headers: { Authorization: `Bearer ${process.env.ANALYST_SERVICE_TOKEN}` },
+      timeout: 10 * 60 * 1000,
+    }).then((response) => {
+      console.log(`[Analyst] Initial research sync ${response.data?.status || 'completed'}.`);
+    }).catch((error) => {
+      console.warn('[Analyst] Initial research sync deferred:', error.message);
+    });
+  }
+
+  predictionMarketTest.start();
+  if (process.env.NODE_ENV !== 'test') pcaRiskService.start();
+
+  loginStatusService.start().catch((error) => {
+    console.warn('[Login status] Initial collection failed:', error.message);
+  });
+
   if (ibkrStreamBridge.STREAM_ENABLED) {
     ibkrStreamBridge.startIbkrStreamBridge();
     console.log('📡 IBKR stream bridge enabled (SSE → quotes state cache)');
   }
 
   if (process.env.NODE_ENV !== 'test') {
+    predictionMarketPerformance.historyService.warm({ rebuild: false }).catch((error) => {
+      console.warn('[Prediction P&L] historical projection warm-up paused:', error.message);
+    });
+    try {
+      const historicalImport = await importBundledPredictionMarketHistory();
+      const accountSummary = Object.entries(historicalImport.accounts || {})
+        .map(([accountId, outcome]) => `${accountId}:${outcome.status}:${outcome.count}`)
+        .join(', ');
+      console.log(`[Prediction P&L] historical CPI import ${historicalImport.status} (${accountSummary})`);
+    } catch (error) {
+      console.warn('[Prediction P&L] historical CPI import paused:', error.message);
+    }
     startCpiCatalogReconciler().then((outcome) => {
       const release = outcome.releaseKey ? ` ${outcome.releaseKey}` : '';
       console.log(`[PM Reconciler] startup ${outcome.status}${release} (${outcome.code})`);
@@ -7674,11 +9453,22 @@ const server = app.listen(PORT, HOST, async () => {
     }).catch((err) => {
       console.warn('[IBKR Interest Validation] startup failed:', err.message);
     });
+    predictionMarketPerformance.researchService.start();
+    predictionMarketPerformance.reconciler.start(trackedPredictionMarketAccounts);
+    startFlexActivitySync({
+      onSnapshot: async () => predictionMarketPerformance.reconciler.runOnce(trackedPredictionMarketAccounts),
+      logger: console,
+    });
+    console.log('[Prediction P&L] background ledger reconciler started');
+    console.log('[FES Research] prospective SP500 collector started');
   }
 
   // Validate AWS credentials after server starts
   await validateAWSCredentials();
 });
+
+analystGatewayProxy = attachAnalystGatewayProxy(server, { runtimeGate: analystRuntimeGate });
+analystRoutes.dailyWorkflow.start();
 
 // Fail loud and fast on listen errors so the process exits with a non-zero
 // code instead of being swallowed by the uncaughtException FATAL-GUARD
@@ -7701,12 +9491,32 @@ server.on('error', (err) => {
 // -----------------------------
 // WebSocket: /ws/market
 // -----------------------------
-const wss = new WebSocketServer({ server, path: '/ws/market' });
+// Each WebSocket surface owns only its exact upgrade path. Using multiple
+// WebSocketServer({ server, path }) instances on the same HTTP server lets
+// competing upgrade listeners touch the same socket and corrupt frames.
+const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
+const handleMarketWebSocketUpgrade = (request, socket, head) => {
+  let pathname;
+  try {
+    pathname = new URL(request.url || '/', 'http://localhost').pathname;
+  } catch (_error) {
+    return;
+  }
+  if (pathname !== '/ws/market') return;
+  const trust = validateLocalRequest(request);
+  if (!trust.ok) return rejectWebSocketUpgrade(socket, trust.statusCode);
+  if (wss.clients.size >= 20) return rejectWebSocketUpgrade(socket, 429);
+  wss.handleUpgrade(request, socket, head, (client) => {
+    wss.emit('connection', client, request);
+  });
+};
+server.on('upgrade', handleMarketWebSocketUpgrade);
 
 // Simple subscription tracking (by channel)
 const channelToClients = new Map();
-const wsClientSymbols = new Map();
-const symbolRefCount = new Map();
+const quoteSubscriptions = require('./src/services/ibkr/quoteSubscriptions.cjs').createQuoteSubscriptionRegistry();
+const wsClientSymbols = quoteSubscriptions.clients;
+const symbolRefCount = quoteSubscriptions.refCounts;
 const wsLastBroadcast = new Map();
 const WS_QUOTE_THROTTLE_MS = Number(process.env.IBKR_WS_QUOTE_THROTTLE_MS || 250);
 
@@ -7726,87 +9536,23 @@ function removeClientFromAllChannels(ws) {
   });
 }
 
-function broadcastToChannel(channel, payload) {
-  const clients = channelToClients.get(channel);
-  if (!clients) return;
-  const message = JSON.stringify({ channel, payload });
-  clients.forEach(client => {
-    if (client.readyState === client.OPEN) {
-      client.send(message);
-    }
-  });
-}
-
-function incrementSymbolRefs(symbols) {
-  const newlySubscribed = [];
-  for (const sym of symbols) {
-    const key = String(sym).toUpperCase();
-    if (!key) continue;
-    const next = (symbolRefCount.get(key) || 0) + 1;
-    symbolRefCount.set(key, next);
-    if (next === 1) newlySubscribed.push(key);
-  }
-  return newlySubscribed;
-}
-
-function decrementSymbolRefs(symbols) {
-  const removed = [];
-  for (const sym of symbols) {
-    const key = String(sym).toUpperCase();
-    const prev = symbolRefCount.get(key) || 0;
-    if (prev <= 1) {
-      symbolRefCount.delete(key);
-      removed.push(key);
-    } else {
-      symbolRefCount.set(key, prev - 1);
-    }
-  }
-  return removed;
-}
-
 function releaseWsSymbols(ws) {
-  const symbols = wsClientSymbols.get(ws);
-  if (!symbols || symbols.size === 0) return;
-  const removed = decrementSymbolRefs([...symbols]);
-  wsClientSymbols.delete(ws);
-  if (removed.length && ibkrStreamBridge.STREAM_ENABLED) {
-    ibkrStreamBridge.sidecarUnsubscribe(removed).catch(err => {
-      console.warn('[WS] sidecar unsubscribe failed:', err.message);
-    });
-  }
+  quoteSubscriptions.release(ws);
+  ibkrStreamBridge.setDesiredSymbols(quoteSubscriptions.desiredSymbols());
 }
 
 async function subscribeWsSymbols(ws, symbols) {
-  const list = [...new Set(symbols.map(s => String(s).toUpperCase()).filter(Boolean))];
-  if (!list.length) return;
-
-  const prev = wsClientSymbols.get(ws) || new Set();
-  const toAdd = list.filter(s => !prev.has(s));
-  const toRemove = [...prev].filter(s => !list.includes(s));
-
-  if (toRemove.length) {
-    decrementSymbolRefs(toRemove);
-    if (ibkrStreamBridge.STREAM_ENABLED) {
-      ibkrStreamBridge.sidecarUnsubscribe(toRemove).catch(() => {});
-    }
+  let list;
+  try {
+    list = quoteSubscriptions.replace(ws, symbols);
+  } catch (error) {
+    ws.close(1008, error.message);
+    return;
   }
-
-  const newlySubscribed = incrementSymbolRefs(toAdd);
-  wsClientSymbols.set(ws, new Set(list));
-
-  if (newlySubscribed.length && ibkrStreamBridge.STREAM_ENABLED) {
-    try {
-      await ibkrStreamBridge.sidecarSubscribe(newlySubscribed);
-    } catch (err) {
-      console.warn('[WS] sidecar subscribe failed:', err.message);
-    }
-  }
-
+  ibkrStreamBridge.setDesiredSymbols(quoteSubscriptions.desiredSymbols());
   for (const sym of list) {
     const cached = ibkrStreamBridge.getCachedLegacy(sym);
-    if (cached && ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify({ channel: 'quotes', payload: cached }));
-    }
+    if (cached && isQuoteUsableNow(cached, sym) && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ channel: 'quotes', payload: cached }));
   }
 }
 
@@ -7820,19 +9566,29 @@ if (ibkrStreamBridge.STREAM_ENABLED) {
     const last = wsLastBroadcast.get(sym) || 0;
     if (Date.now() - last < WS_QUOTE_THROTTLE_MS) return;
     wsLastBroadcast.set(sym, Date.now());
-    broadcastToChannel('quotes', legacy);
+    if (!isQuoteUsableNow(legacy, sym)) return;
+    const message = JSON.stringify({ channel: 'quotes', payload: legacy });
+    clients.forEach(client => {
+      if (client.readyState === client.OPEN && wsClientSymbols.get(client)?.has(sym)) {
+        if (client.bufferedAmount > 1024 * 1024) client.close(1013, 'Slow consumer');
+        else client.send(message);
+      }
+    });
   });
 }
 
 wss.on('connection', (ws) => {
   console.log('🔌 WebSocket client connected');
 
+  const consumeMessageBudget = createMessageBudget();
   ws.on('message', (msg) => {
+    if (!consumeMessageBudget()) { ws.close(1008, 'Message rate exceeded'); return; }
     try {
       const data = JSON.parse(msg.toString());
+      if (data?.channel !== 'quotes') { ws.close(1008, 'Unsupported channel'); return; }
       if (data && data.action === 'subscribe' && data.channel) {
         addClientToChannel(ws, data.channel);
-        if (data.channel === 'quotes' && Array.isArray(data.symbols) && data.symbols.length) {
+        if (data.channel === 'quotes' && Array.isArray(data.symbols)) {
           subscribeWsSymbols(ws, data.symbols).catch(err => {
             console.error('[WS] subscribe symbols error:', err.message);
           });
@@ -7963,7 +9719,22 @@ const shutdown = (signal) => {
   const done = () => process.exit(0);
   try {
     stopCpiCatalogReconciler();
+    predictionMarketTest.stop();
+    publishedTradeArchive.dispose();
+    securityIntelligenceProjection.close();
+    void closeWorkbookReaders();
+    void portfolioResearchCapture.close();
+    void hedgaiResearchWorker.close();
+    pcaRiskService.stop();
     stopIbkrInterestValidation();
+    void closeIbkrInterestEvidenceWorker();
+    stopFlexActivitySync();
+    clearInterval(analystStagingCleanupTimer);
+    analystGatewayProxy?.close?.();
+    server.off('upgrade', handleMarketWebSocketUpgrade);
+    predictionMarketPerformance.reconciler.stop();
+    predictionMarketPerformance.researchService.stop();
+    loginStatusService.stop();
     ibkrStreamBridge.stopIbkrStreamBridge();
     wss.clients.forEach((c) => { try { c.terminate(); } catch (_) {} });
     server.close(done);

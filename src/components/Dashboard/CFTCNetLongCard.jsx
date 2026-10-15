@@ -1,58 +1,63 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Title, Text, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell } from '@tremor/react';
-import { Info, TrendingUp, RefreshCw, DollarSign, Package, LayoutGrid, ArrowUp, ArrowDown } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { useTheme } from '../../context/ThemeContext';
+import { CFTC_REPORT_COLUMNS, CFTC_REPORT_CONTRACT_ORDER, CFTC_STALE_AFTER_MS } from '../../constants/cftcPositioning';
 import LoadingIndicator from '../common/LoadingIndicator';
+import CFTCPositioningDetail from './CFTCPositioningDetail';
+import {
+  cftcValueClass,
+  formatCftcDate,
+  formatCftcReportNumber,
+  getCftcDisplayRow,
+  getCftcMethodologyNote,
+  getCftcRowKey,
+  isCftcReportDate,
+  isCftcResearchSnapshot,
+} from '../../utils/cftcPositioningPresentation';
+import './CFTCNetLongCard.css';
 
-const CATEGORY_META = {
-  EQUITIES:    { Icon: TrendingUp,  color: '#2563eb', bgLight: '#eff6ff',  bgDark: 'rgba(37,99,235,0.12)',   label: 'EQUITIES'    },
-  RATES:       { Icon: RefreshCw,   color: '#7c3aed', bgLight: '#f5f3ff',  bgDark: 'rgba(124,58,237,0.12)',  label: 'RATES'       },
-  CURRENCIES:  { Icon: DollarSign,  color: '#d97706', bgLight: '#fffbeb',  bgDark: 'rgba(217,119,6,0.12)',   label: 'CURRENCIES'  },
-  COMMODITIES: { Icon: Package,     color: '#059669', bgLight: '#ecfdf5',  bgDark: 'rgba(5,150,105,0.12)',   label: 'COMMODITIES' },
-  OTHER:       { Icon: LayoutGrid,  color: '#6b7280', bgLight: '#f3f4f6',  bgDark: 'rgba(107,114,128,0.12)', label: 'UNKNOWN'     },
-};
+const CATEGORY_ORDER = ['EQUITIES', 'RATES', 'CURRENCIES', 'COMMODITIES', 'CRYPTO', 'OTHER'];
+const CONTRACT_RANK = new Map(CFTC_REPORT_CONTRACT_ORDER.map((code, index) => [code, index]));
 
-const METRIC_EMOJI = {
-  'Corn':        '🌽',
-  'Wheat':       '🌾',
-  'Lean Hogs':   '🐷',
-  'Sugar':       '🍬',
-  'Cotton':      '🧶',
-  'Coffee':      '☕',
-  'Cocoa':       '🍫',
-  'Orange Juice':'🍊',
-  'Soybeans':    '🫘',
-  'Gold':        '🥇',
-  'Silver':      '🥈',
-  'Copper':      '🟤',
-  'Crude Oil':   '🛢️',
-  'Natural Gas': '🔥',
-  'Bitcoin':     '₿',
-  'Ethereum':    '⬡',
-};
-
-const CFTC_STALE_AFTER_MS = 10 * 24 * 60 * 60 * 1000;
-
-const getCftcFreshness = (date, refreshFailed = false) => {
-  if (!date) return { label: 'UNAVAILABLE', stale: true };
+export const getCftcFreshness = (date, {
+  refreshFailed = false,
+  cacheState = null,
+  sourceVerified = false,
+  decisionEligible = false,
+  contentComplete = false,
+} = {}) => {
+  if (!isCftcReportDate(date)) return { label: 'UNAVAILABLE', stale: true, referenceOnly: true };
   const asOf = new Date(`${date}T23:59:59Z`);
-  const stale = refreshFailed || Number.isNaN(asOf.getTime()) || Date.now() - asOf.getTime() > CFTC_STALE_AFTER_MS;
+  const stale = refreshFailed
+    || cacheState === 'stale'
+    || Number.isNaN(asOf.getTime())
+    || Date.now() - asOf.getTime() > CFTC_STALE_AFTER_MS;
   const formatted = Number.isNaN(asOf.getTime())
     ? date
     : asOf.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  return { label: `${stale ? 'STALE · ' : ''}AS OF ${formatted}`.toUpperCase(), stale };
+  const referenceOnly = stale || !sourceVerified || !decisionEligible;
+  const prefix = stale
+    ? 'STALE · REFERENCE ONLY · '
+    : !sourceVerified || !decisionEligible
+      ? 'UNVERIFIED · REFERENCE ONLY · '
+      : !contentComplete
+        ? 'PARTIAL · '
+        : '';
+  return {
+    label: `${prefix}AS OF ${formatted}`.toUpperCase(),
+    stale,
+    referenceOnly,
+  };
 };
 
-const CFTCNetLongCard = () => {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
-  
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+const CFTCNetLongCard = ({ resourceState = null }) => {
+  const [localData, setData] = useState(null);
+  const [localLoading, setLoading] = useState(true);
+  const [localError, setError] = useState(null);
+  const [selectedSeries, setSelectedSeries] = useState(null);
+  const closeDetail = useCallback(() => setSelectedSeries(null), []);
 
   useEffect(() => {
+    if (resourceState) return undefined;
     const fetchData = async () => {
       try {
         setLoading(true);
@@ -73,70 +78,40 @@ const CFTCNetLongCard = () => {
     // Refresh every 15 minutes
     const interval = setInterval(fetchData, 15 * 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [resourceState]);
 
-  const formatNumber = (num, isPercent = false) => {
-    if (num === null || num === undefined) return '--';
-    const n = Number(num);
-    return isPercent ? `${n.toFixed(2)}%` : n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  };
-
-  const formatZScore = (num) => {
-    if (num === null || num === undefined) return '--';
-    return Number(num).toFixed(2);
-  };
-
-  const getZScoreColor = (z) => {
-    if (z === null || z === undefined) return isDark ? '#9ca3af' : '#6b7280';
-    if (z > 2) return '#059669'; // Very positive (green)
-    if (z > 1) return isDark ? '#059669' : '#059669'; // Positive (light green)
-    if (z < -2) return '#dc2626'; // Very negative (red)
-    if (z < -1) return isDark ? '#dc2626' : '#dc2626'; // Negative (light red)
-    return isDark ? '#d1d5db' : '#374151'; // Neutral
-  };
+  const data = resourceState ? resourceState.data : localData;
+  const loading = resourceState ? resourceState.loading : localLoading;
+  const error = resourceState ? resourceState.error : localError;
 
   if (loading && !data) {
     return (
-      <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{
-        height: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border, #d7e5ef)'}`,
-        borderRadius: 'var(--dashboard-radius, 6px)',
-        boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
-      }}>
+      <div className="cftc-positioning cftc-positioning--empty">
         <LoadingIndicator label="Loading CFTC Data..." size="md" centered />
-      </Card>
+      </div>
     );
   }
 
   if (error && !data) {
-    return (
-      <Card className={isDark ? 'dark:bg-gray-800' : ''} style={{
-        height: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border, #d7e5ef)'}`,
-        borderRadius: 'var(--dashboard-radius, 6px)',
-        boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
-      }}>
-        <Text style={{ color: '#dc2626' }}>{error}</Text>
-      </Card>
-    );
+    return <div className="cftc-positioning cftc-positioning--empty">UNAVAILABLE</div>;
   }
 
-  // Group data by category
-  const groupedData = (data?.data || []).reduce((acc, row) => {
+  // Dated official research remains reference-only through refresh failures.
+  // Unverified, mocked or seeded observations never become visible numbers.
+  const sourceVerified = isCftcResearchSnapshot(data);
+  const rows = sourceVerified && Array.isArray(data?.data)
+    ? data.data.filter(row => row && typeof row === 'object').map(row => getCftcDisplayRow(row, data)) : [];
+  const selectedRow = rows.find(row => getCftcRowKey(row) === selectedSeries);
+  const groupedData = rows.reduce((acc, row) => {
     const cat = row.category || 'OTHER';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(row);
     return acc;
   }, {});
+  Object.values(groupedData).forEach(categoryRows => categoryRows.sort((a, b) =>
+    (CONTRACT_RANK.get(a.cftcContractMarketCode) ?? Infinity)
+    - (CONTRACT_RANK.get(b.cftcContractMarketCode) ?? Infinity)));
 
-  // Predefined category order
-  const CATEGORY_ORDER = ['EQUITIES', 'RATES', 'CURRENCIES', 'COMMODITIES', 'OTHER'];
   const categories = Object.keys(groupedData).sort((a, b) => {
     const idxA = CATEGORY_ORDER.indexOf(a);
     const idxB = CATEGORY_ORDER.indexOf(b);
@@ -145,112 +120,111 @@ const CFTCNetLongCard = () => {
     if (idxB === -1) return -1;
     return idxA - idxB;
   });
-  const freshness = getCftcFreshness(data?.date, Boolean(error));
+  const reportDate = data?.reportDate || data?.date;
+  const freshness = getCftcFreshness(reportDate, {
+    refreshFailed: Boolean(error),
+    cacheState: data?.cacheState,
+    sourceVerified,
+    decisionEligible: data?.decisionEligible === true,
+    contentComplete: data?.contentComplete === true,
+  });
 
   return (
-    <Card 
-      className={isDark ? 'dark:bg-gray-800' : ''}
-      style={{
-        border: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border, #d7e5ef)'}`,
-        borderRadius: 'var(--dashboard-radius, 6px)',
-        boxShadow: isDark ? undefined : 'var(--dashboard-shadow, 0 1px 3px rgba(15, 23, 42, 0.08))',
-        padding: '0',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
-      }}
-    >
-      <div style={{ padding: '6px 10px', borderBottom: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`, backgroundColor: isDark ? '#1f2937' : '#ffffff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <LayoutGrid size={14} color={isDark ? '#60a5fa' : '#2563eb'} strokeWidth={2.5} style={{ flexShrink: 0 }} />
-        <Title style={{ fontSize: '13px', fontWeight: 800, color: isDark ? '#f9fafb' : '#111827', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          CFTC Non-Commercial Net Long Positioning
-        </Title>
-        <Info size={13} color={isDark ? '#6b7280' : '#9ca3af'} style={{ flexShrink: 0 }} />
-        <div style={{ marginLeft: 'auto' }}>
-          <span
-            title={error || `CFTC positioning ${freshness.label.toLowerCase()}`}
-            style={{
-              display: 'inline-flex', alignItems: 'center', border: `1px solid ${freshness.stale ? '#f59e0b' : '#cbd5e1'}`,
-              borderRadius: '4px', padding: '2px 6px', color: freshness.stale ? '#b45309' : (isDark ? '#cbd5e1' : '#64748b'),
-              background: freshness.stale ? '#fffbeb' : (isDark ? '#1f2937' : '#f8fafc'),
-              fontSize: '9px', fontWeight: 700, letterSpacing: '0.04em', whiteSpace: 'nowrap',
-            }}
-          >
-            {freshness.label}
-          </span>
+    <div className="cftc-positioning">
+      {categories.length === 0 ? (
+        <div data-testid="cftc-unavailable" className="cftc-positioning--empty">
+          OFFICIAL CFTC ROWS UNAVAILABLE
         </div>
-      </div>
-
-      <div style={{ flex: 1, overflow: 'auto', padding: '0 8px 4px' }}>
-        {categories.map((category) => {
-          const meta = CATEGORY_META[category] || CATEGORY_META.OTHER;
-          const { Icon: CatIcon } = meta;
-          const hdr = { padding: '6px 8px', fontSize: '10px', fontWeight: 700, color: isDark ? '#9ca3af' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' };
-          return (
-            <div key={category} style={{ marginTop: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', backgroundColor: isDark ? meta.bgDark : meta.bgLight, borderRadius: '4px', marginBottom: '6px', borderLeft: `3px solid ${meta.color}` }}>
-                <CatIcon size={12} color={meta.color} />
-                <span style={{ fontSize: '11px', fontWeight: 700, color: meta.color, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-                  {meta.label || category}
-                </span>
-              </div>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableHeaderCell style={hdr}>CONTRACT</TableHeaderCell>
-                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>LATEST</TableHeaderCell>
-                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>W/W CHANGE</TableHeaderCell>
-                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>1Y Z-SCORE</TableHeaderCell>
-                    <TableHeaderCell style={{ ...hdr, textAlign: 'right' }}>3Y Z-SCORE</TableHeaderCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {groupedData[category].map((row, idx) => {
-                    const wwColor = row.wwChg > 0
-                      ? (isDark ? '#059669' : '#059669')
-                      : row.wwChg < 0
-                        ? (isDark ? '#dc2626' : '#dc2626')
-                        : (isDark ? '#d1d5db' : '#374151');
-                    return (
-                      <TableRow key={idx}>
-                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 500, color: isDark ? '#d1d5db' : '#374151' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                            {METRIC_EMOJI[row.metric] && (
-                              <span style={{ fontSize: '13px', lineHeight: 1, flexShrink: 0 }}>{METRIC_EMOJI[row.metric]}</span>
-                            )}
-                            {row.metric}
+      ) : (
+        <div className="cftc-positioning__report">
+          <table className="cftc-positioning__table" aria-label="CFTC positioning">
+            <colgroup>
+              <col className="cftc-positioning__category-col" />
+              <col className="cftc-positioning__contract-col" />
+              {CFTC_REPORT_COLUMNS.map(column => (
+                <col key={column.key} className={column.score ? 'cftc-positioning__score-col' : 'cftc-positioning__value-col'} />
+              ))}
+            </colgroup>
+            <thead>
+              <tr>
+                <th rowSpan={2} aria-label="Asset class" />
+                <th rowSpan={2} scope="col">Metric</th>
+                {CFTC_REPORT_COLUMNS.filter(column => !column.group).map(column => (
+                  <th key={column.key} rowSpan={2} scope="col" title={column.key === 'latest' ? freshness.label : undefined}>
+                    {column.key === 'latest' ? formatCftcDate(reportDate, { compact: true }) : column.label}
+                  </th>
+                ))}
+                <th colSpan={2} scope="colgroup">3Y</th>
+                <th colSpan={2} scope="colgroup">Z-Score</th>
+              </tr>
+              <tr>
+                {CFTC_REPORT_COLUMNS.filter(column => column.group).map(column => (
+                  <th key={column.key} scope="col">{column.label}</th>
+                ))}
+              </tr>
+            </thead>
+            {categories.map(category => (
+              <tbody key={category} aria-label={category}>
+                {groupedData[category].map((row, idx) => {
+                  const rowStatus = String(row.status || 'unavailable').toLowerCase();
+                  const unavailable = rowStatus === 'unavailable';
+                  const partial = rowStatus === 'partial';
+                  const discontinued = rowStatus === 'discontinued';
+                  const statistics = data.schemaVersion === 'cftc-positioning-v3' ? row.historyStatistics : null;
+                  return (
+                    <tr
+                      key={getCftcRowKey(row)}
+                      className="cftc-positioning__instrument-row"
+                      onClick={() => setSelectedSeries(getCftcRowKey(row))}
+                    >
+                      {idx === 0 && <th scope="rowgroup" rowSpan={groupedData[category].length} className="cftc-positioning__category">
+                        <span>{category === 'OTHER' ? 'UNKNOWN' : category}</span>
+                      </th>}
+                      <th scope="row" className="cftc-positioning__metric">
+                        <button
+                          type="button"
+                          className="cftc-positioning__detail-button"
+                          aria-haspopup="dialog"
+                          aria-expanded={selectedSeries === getCftcRowKey(row)}
+                          title="Open positioning details"
+                        >
+                          {row.metric}
+                        </button>
+                        {(unavailable || partial || discontinued) && (
+                          <span
+                            data-testid={`cftc-row-status-${row.cftcContractMarketCode || idx}`}
+                            className={`cftc-positioning__row-status${partial ? ' is-partial' : ''}`}
+                          >
+                            {discontinued
+                              ? `DISCONTINUED · ${row.asOf}`
+                              : partial ? 'PARTIAL' : 'UNAVAILABLE'}
                           </span>
-                        </TableCell>
-                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: isDark ? '#f3f4f6' : '#111827' }}>
-                          {formatNumber(row.latest)}
-                        </TableCell>
-                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: wwColor }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', justifyContent: 'flex-end' }}>
-                            {row.wwChg !== null && row.wwChg > 0 ? '+' : ''}{formatNumber(row.wwChg)}
-                            {row.wwChg != null && row.wwChg > 0 && <ArrowUp size={10} />}
-                            {row.wwChg != null && row.wwChg < 0 && <ArrowDown size={10} />}
-                          </span>
-                        </TableCell>
-                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: getZScoreColor(row.zScore1Y) }}>
-                          {formatZScore(row.zScore1Y)}
-                        </TableCell>
-                        <TableCell style={{ padding: '4px 8px', fontSize: '11px', fontFamily: 'monospace', textAlign: 'right', color: getZScoreColor(row.zScore3Y) }}>
-                          {formatZScore(row.zScore3Y)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ padding: '5px 10px', fontSize: '10px', fontStyle: 'italic', color: isDark ? '#9ca3af' : '#6b7280', borderTop: `1px solid ${isDark ? '#374151' : 'var(--dashboard-border-soft, #e6eef5)'}`, backgroundColor: isDark ? '#1f2937' : '#f9fafb' }}>
-        All values represent net contracts
-      </div>
-    </Card>
+                        )}
+                      </th>
+                      {CFTC_REPORT_COLUMNS.map(column => {
+                        const value = column.history ? statistics?.[column.key] : row[column.key];
+                        return <td key={column.key} className={`${column.score ? 'cftc-positioning__z-score ' : ''}${cftcValueClass(value, { score: column.score })}`}>
+                          {formatCftcReportNumber(value, { score: column.score })}
+                        </td>;
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            ))}
+          </table>
+        </div>
+      )}
+      <p className="cftc-positioning__note">
+        {getCftcMethodologyNote(rows)}
+      </p>
+      {selectedRow && <CFTCPositioningDetail
+        row={selectedRow}
+        snapshot={data}
+        freshness={freshness}
+        onClose={closeDetail}
+      />}
+    </div>
   );
 };
 

@@ -1,0 +1,135 @@
+/* Expanded windows share a viewport-centered frame; anchored menus keep their placement. */
+@media screen {
+  body :is(
+    .process-overlay-backdrop,
+    .efr-reference-overlay,
+    .efr-backdrop-overlay,
+    .dashboard-book-reader-host,
+    .dashboard-interest-ledger-host,
+    .vol-explainer-backdrop,
+    .quad-research-backdrop,
+    .pcv2-verification-backdrop,
+    .pcv2-leveraged-product-backdrop,
+    .pm-gdp-modal-backdrop,
+    .pmv2-modal-overlay,
+    .dashboard-security-detail-host
+  ) {
+    background: var(--dashboard-window-backdrop);
+    backdrop-filter: blur(var(--dashboard-window-blur));
+    -webkit-backdrop-filter: blur(var(--dashboard-window-blur));
+  }
+
+  :is(
+    .process-overlay-dialog,
+    .dashboard-table-dialog.efr-backdrop-dialog,
+    .dashboard-table-dialog.efr-reference-dialog,
+    .dashboard-book-reader-dialog,
+    .interest-ledger-panel,
+    .vol-explainer-modal,
+    .quad-research-dialog,
+    .pcv2-verification-dialog,
+    .pcv2-leveraged-product-dialog,
+    .pm-gdp-card.pm-gdp-modal,
+    .pmv2-modal,
+    .dashboard-security-detail-dialog
+  ) {
+    border: 1px solid var(--dashboard-window-border);
+    border-radius: 0;
+    background: #fff;
+    box-shadow: var(--dashboard-window-shadow);
+    overscroll-behavior: contain;
+  }
+
+  .efr-reference-overlay.efr-reference-overlay,
+  .efr-backdrop-overlay,
+  .dashboard-interest-ledger-host {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .efr-backdrop-overlay {
+    z-index: 2147483000;
+    pointer-events: auto;
+  }
+
+  .efr-backdrop-overlay > .efr-backdrop-dialog {
+    position: relative;
+    top: auto;
+    left: auto;
+    transform: none;
+    max-height: var(--dashboard-dialog-max-height);
+    pointer-events: auto;
+  }
+
+  .efr-reference-overlay > .efr-reference-dialog {
+    max-height: var(--dashboard-dialog-max-height);
+  }
+
+  .process-overlay-host.process-overlay-host,
+  .dashboard-shell .process-overlay-host,
+  .dashboard-book-reader-host {
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    padding: var(--modern-workspace-top, 16px) 16px var(--modern-workspace-bottom, 16px);
+  }
+
+  .process-overlay-host > .process-overlay-dialog,
+  .dashboard-shell .process-overlay-host > .process-overlay-dialog {
+    width: min(1000px, 100%);
+    height: min(1040px, var(--dashboard-window-available-height, calc(100dvh - 32px)));
+    max-height: var(--dashboard-window-available-height, calc(100dvh - 32px));
+  }
+
+  .process-overlay-host .process-wiki__site-header {
+    padding-right: 18px;
+  }
+
+  .process-overlay-host.market-events-briefing-host > .market-events-briefing-modal {
+    height: min(940px, calc(100dvh - 32px));
+    max-height: calc(100dvh - 32px);
+  }
+
+  .dashboard-book-reader-host {
+    position: fixed;
+    z-index: 2000;
+    display: flex;
+  }
+
+  .dashboard-book-reader-dialog {
+    display: flex;
+    flex-direction: row;
+    min-width: 0;
+    width: min(var(--dashboard-book-width, 1200px), 100%);
+    max-height: var(--dashboard-window-available-height, calc(100dvh - 32px));
+    overflow: hidden;
+  }
+
+  .dashboard-interest-ledger-host {
+    z-index: 1450;
+    padding: 16px 16px var(--modern-workspace-bottom, 72px);
+    pointer-events: auto;
+  }
+
+  .dashboard-interest-ledger-host > .interest-ledger-panel {
+    position: relative;
+    width: min(1100px, 100%);
+    height: calc(100dvh - 16px - var(--modern-workspace-bottom, 72px));
+    max-height: 900px;
+    pointer-events: auto;
+  }
+
+  .dashboard-security-detail-host {
+    z-index: 1600;
+  }
+
+  @media (max-width: 760px) {
+    .process-overlay-host .process-wiki__site-header {
+      padding-right: 8px;
+    }
+  }
+}

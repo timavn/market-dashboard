@@ -6,6 +6,14 @@ const {
   deriveSubtract,
   toMonthly,
 } = require('./liquidityModel.cjs');
+const {
+  GLOBAL_LIQUIDITY_RATIO_PRESSURE_WEIGHTS,
+  GLOBAL_LIQUIDITY_REGIME_THRESHOLDS,
+  GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS,
+  GLOBAL_LIQUIDITY_WEIGHTS,
+  US_LIQUIDITY_ACCELERATION_TOLERANCE,
+  US_LIQUIDITY_GREEN_STACK_TO_GDP,
+} = require('../constants/liquidityModelMetadata.cjs');
 
 const monthlySeries = (start, values) => {
   const startDate = new Date(`${start}T00:00:00Z`);
@@ -20,6 +28,33 @@ const monthlySeries = (start, values) => {
 };
 
 describe('liquidity model math', () => {
+  test('publishes immutable methodology metadata used by the operator guide', () => {
+    expect(GLOBAL_LIQUIDITY_WEIGHTS).toEqual({
+      m2_growth_1m: 0.10,
+      m2_growth_3m: 0.25,
+      m2_growth_6m: 0.25,
+      growth_gap: 0.25,
+      m2_to_gdp_pressure: 0.15,
+    });
+    expect(GLOBAL_LIQUIDITY_RATIO_PRESSURE_WEIGHTS).toEqual({
+      level: 0.50,
+      trend3m: 0.25,
+      trend6m: 0.25,
+    });
+    expect(GLOBAL_LIQUIDITY_REGIME_THRESHOLDS).toEqual({
+      supportiveBelow: 30,
+      neutralCautionBelow: 60,
+      yellowRiskBelow: 80,
+    });
+    expect(GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS.growth).toEqual([
+      [-0.05, 100], [0, 65], [0.05, 35], [0.10, 10], [0.15, 0],
+    ]);
+    expect(US_LIQUIDITY_ACCELERATION_TOLERANCE).toBe(0.0025);
+    expect(US_LIQUIDITY_GREEN_STACK_TO_GDP).toBe(1.05);
+    expect(Object.isFrozen(GLOBAL_LIQUIDITY_WEIGHTS)).toBe(true);
+    expect(Object.isFrozen(GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS.growth)).toBe(true);
+  });
+
   test('one-month positive growth annualizes', () => {
     expect(annualizedRate(100.5, 100, 1)).toBeCloseTo((1.005 ** 12) - 1);
   });

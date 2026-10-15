@@ -15,11 +15,25 @@ describe('prediction market position integrity', () => {
     ['KXWTI-26JUL2114-T84.49_YES', 'wti', 'daily'],
     ['KXWTIW-26JUL2414-B84.50_YES', 'wti', 'weekly'],
     ['KXWTIMIN-26JUL-T84_YES', 'wti', 'unsupported'],
+    ['COMCO_081326_82_NO', 'wti', 'forecastex-daily'],
     ['KXFEDDECISION-26JUL_YES', 'other', 'other'],
   ])('classifies %s without hiding unsupported contracts', (symbol, family, product) => {
     expect(classifyPredictionMarketPosition({ symbol })).toMatchObject({
       marketFamily: family,
       marketProduct: product,
+    });
+  });
+
+  test('identifies the broker-native ForecastEx venue for COMCO WTI positions', () => {
+    expect(classifyPredictionMarketPosition({
+      symbol: 'COMCO',
+      localSymbol: 'COMCO_081326_82_NO',
+      conId: 910445730,
+    })).toMatchObject({
+      marketFamily: 'wti',
+      marketProduct: 'forecastex-daily',
+      marketVenue: 'forecastex',
+      supported: false,
     });
   });
 

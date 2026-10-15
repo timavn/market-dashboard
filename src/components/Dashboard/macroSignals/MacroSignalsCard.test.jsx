@@ -2,6 +2,7 @@ import React from 'react';
 import '@testing-library/jest-dom/extend-expect';
 import { fireEvent, render, screen } from '@testing-library/react';
 import MacroSignalsCard from './MacroSignalsCard';
+import LegacyInflationNowcastPanel from './InflationNowcastPanel 2';
 
 function makeSignal({
   ticker,
@@ -121,6 +122,14 @@ const NOWCAST = {
 };
 
 describe('MacroSignalsCard inflation nowcast', () => {
+  test('the legacy duplicate nowcast component also requires supplied observations', () => {
+    const { rerender } = render(<LegacyInflationNowcastPanel />);
+    expect(screen.getByText('Verified inflation nowcast unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('0.30%')).not.toBeInTheDocument();
+    rerender(<LegacyInflationNowcastPanel inflationNowcast={NOWCAST} />);
+    expect(screen.getByText('0.30%')).toBeInTheDocument();
+    expect(screen.getByText('Published 06/15/2026 08:48 AM EDT')).toBeInTheDocument();
+  });
   test('shows the supplied inflation nowcast snapshot on the MACRO tab', () => {
     render(<MacroSignalsCard signals={[]} inflationNowcast={NOWCAST} />);
 
@@ -143,25 +152,53 @@ describe('MacroSignalsCard inflation nowcast', () => {
     expect(screen.queryByText('Inflation Nowcast')).not.toBeInTheDocument();
   });
 
-  test('renders manual nowcast values even when no snapshot is supplied', () => {
+  test('missing snapshots leave both the nowcast and signals explicitly unavailable', () => {
     render(<MacroSignalsCard signals={[]} inflationNowcast={null} />);
 
     expect(screen.getByText('Inflation Nowcast')).toBeInTheDocument();
-    expect(screen.getByText('0.30%')).toBeInTheDocument();
-    expect(screen.getByText('SHORTS')).toBeInTheDocument();
-    expect(screen.getByText('VIX')).toBeInTheDocument();
+    expect(screen.getByText('Verified inflation nowcast unavailable.')).toBeInTheDocument();
+    expect(screen.getByText('Verified signals unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('0.30%')).not.toBeInTheDocument();
+    expect(screen.queryByText('SHORTS')).not.toBeInTheDocument();
+    expect(screen.queryByText('VIX')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Published/)).not.toBeInTheDocument();
   });
 
   test('does not fall back to manual values when a snapshot cannot be parsed', () => {
     render(<MacroSignalsCard signals={[]} inflationNowcast={{ data: { metric: 'Core PCE' } }} />);
 
     expect(screen.getByText('Inflation Nowcast')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Latest Hedgeye nowcast is not a native Headline CPI nowcast');
+    expect(screen.getByText(/Latest Hedgeye nowcast is not a native Headline CPI nowcast/)).toHaveAttribute('role', 'status');
     expect(screen.queryByText('0.30%')).not.toBeInTheDocument();
   });
 });
 
 describe('MacroSignalsCard asset tab filtering', () => {
+  test.each([undefined, null, []])('missing signals %j do not create selectable demo rows on any tab', (signals) => {
+    render(<MacroSignalsCard signals={signals} inflationNowcast={NOWCAST} />);
+    expect(screen.getByText('Verified signals unavailable.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'EQ' }));
+    expect(screen.getByText('Verified signals unavailable.')).toBeInTheDocument();
+    expectTickerAbsent('COMPQ');
+    expectTickerAbsent('SPX');
+    expectTickerAbsent('VIX');
+  });
+
+  test('supplied signals retain their canonical publication date and clear on provider failure', () => {
+    const onSelectSignal = jest.fn();
+    const signal = { ...MIXED_SIGNALS[1], canonical: { ...MIXED_SIGNALS[1].canonical,
+      date: '2026-08-31', publishedAt: '2026-08-31T12:00:00Z' } };
+    const { rerender } = render(<MacroSignalsCard signals={[signal]} onSelectSignal={onSelectSignal} inflationNowcast={NOWCAST} />);
+    fireEvent.click(screen.getByRole('button', { name: /DXY Dollar Index/ }));
+    expect(onSelectSignal).toHaveBeenCalledWith(signal);
+    expect(onSelectSignal.mock.calls[0][0].canonical.publishedAt).toBe('2026-08-31T12:00:00Z');
+    rerender(<MacroSignalsCard signals={[signal]} error="Provider offline" inflationNowcast={NOWCAST} />);
+    expectTickerAbsent('DXY');
+    expect(screen.getByText('Verified signals unavailable.')).toBeInTheDocument();
+    expect(screen.getByText(/Provider offline/)).toBeInTheDocument();
+    expect(screen.getByText('Published 06/15/2026 08:48 AM EDT')).toBeInTheDocument();
+  });
+
   test('MACRO tab includes only broad macro indicators', () => {
     render(<MacroSignalsCard signals={MIXED_SIGNALS} inflationNowcast={NOWCAST} />);
 
@@ -181,6 +218,7 @@ describe('MacroSignalsCard asset tab filtering', () => {
     render(<MacroSignalsCard signals={MIXED_SIGNALS} inflationNowcast={NOWCAST} />);
 
     fireEvent.click(screen.getByRole('tab', { name: 'EQ' }));
+    expect(screen.getByRole('tab', { name: 'EQ' })).toHaveAttribute('aria-selected', 'true');
     expectTickerVisible('DRAM');
     expectTickerVisible('COMPQ');
     expectTickerVisible('SPX');

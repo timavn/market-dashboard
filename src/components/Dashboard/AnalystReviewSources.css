@@ -1,0 +1,134 @@
+.analyst-review-sources {
+  container: analyst-sources / inline-size;
+  margin: 0;
+  border: 1px solid var(--analyst-border, #dbe1e8);
+  border-radius: 0;
+  background: #fff;
+  color: var(--analyst-ink, #172033);
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.analyst-review-sources-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: #f3f4f6;
+  border-bottom: 1px solid var(--analyst-border, #dbe1e8);
+}
+
+.analyst-review-sources-heading h3 {
+  grid-column: 2;
+  margin: 0;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: inherit;
+}
+
+.analyst-review-sources-heading > span {
+  justify-self: end;
+  color: #667085;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.analyst-review-sources-heading > .analyst-review-sources-progress {
+  grid-column: 1;
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.analyst-review-sources-elapsed:not(:first-child) { margin-left: 6px; }
+
+.analyst-review-sources-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr));
+  grid-auto-rows: 21px;
+  align-content: start;
+  gap: 0 16px;
+  margin: 0;
+  padding: 3px 8px;
+  list-style: none;
+}
+
+.analyst-review-source {
+  box-sizing: border-box;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17ch 74px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 0;
+  font-weight: 400;
+}
+
+.analyst-review-source-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.analyst-review-source-time { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.analyst-review-source-time .analyst-process--key { font: inherit; color: var(--portfolio-review-blue, #2563eb); }
+.analyst-review-source-status { display: flex; align-items: center; color: #667085; white-space: nowrap; }
+.analyst-review-source-status-content {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+}
+.analyst-review-source-status-content > svg { display: block; }
+.analyst-review-source-status-button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.analyst-review-source-status-button:focus-visible,
+.analyst-review-source-explanation button:focus-visible { outline: 2px solid #64748b; outline-offset: 2px; }
+.analyst-review-source-explanation {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 0;
+  z-index: 20;
+  box-sizing: border-box;
+  width: min(320px, 100%);
+  padding: 8px;
+  border: 1px solid var(--analyst-border, #dbe1e8);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(23, 32, 51, 0.12);
+  color: var(--analyst-ink, #172033);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.analyst-review-source-explanation-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.analyst-review-source-explanation-heading strong { font-weight: 500; }
+.analyst-review-source-explanation-heading button {
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+}
+.analyst-review-source-explanation-detail,
+.analyst-review-source-explanation-remedy { display: block; margin-top: 6px; }
+.analyst-review-source-explanation-remedy strong { font-weight: 500; }
+.analyst-review-source.is-ready .analyst-review-source-status { color: var(--dashboard-positive, #188557); }
+/* Only a capture that is actually being checked turns its icon (shared analyst-spin keyframes). */
+.analyst-review-sources[aria-busy='true'] .analyst-review-source.is-checking .analyst-review-source-status-content > svg {
+  animation: analyst-spin 1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .analyst-review-sources[aria-busy='true'] .analyst-review-source.is-checking .analyst-review-source-status-content > svg { animation: none; }
+}
+.analyst-review-sources-empty { margin: 0; padding: 6px 8px; color: #667085; }

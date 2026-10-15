@@ -40,9 +40,22 @@ const DEFAULT_READINESS_TIMEOUT_MS = 120_000;
 // confirms child termination before returning. The client timeout must remain
 // longer so it cannot abandon the server while that global action is running.
 const DEFAULT_REQUEST_TIMEOUT_MS = 330_000;
+// A live deferral check is one bounded loopback read made immediately before
+// a dispatch decision; it never waits on the cached readiness collection.
+const DEFAULT_LIVE_CHECK_TIMEOUT_MS = 15_000;
+const MAX_DEFERRAL_CHECK_AGE_MS = 60_000;
+const MAX_UNVERIFIED_DEFERRAL_MS = 30 * 60_000;
+// A deferred action is re-evaluated on every poll. A deferral not re-evaluated
+// within this gap ended (the action stopped being eligible); a new one starts.
+// The gap grows with a slower configured poll so a hold cannot restart forever.
+const DEFERRAL_EPISODE_GAP_MS = 5 * 60_000;
+const deferralEpisodeGapMs = (pollIntervalMs) => Math.max(
+  DEFERRAL_EPISODE_GAP_MS,
+  2 * pollIntervalMs + DEFAULT_READINESS_TIMEOUT_MS + DEFAULT_LIVE_CHECK_TIMEOUT_MS,
+);
 const MAX_STATE_ACTIONS = 200;
 const MAX_RESOLVED_INCIDENTS = 100;
-const CONTROLLER_SERVICE_ID = 'hermes-reliability-controller';
+const CONTROLLER_SERVICE_ID = 'dashboard-readiness-controller';
 const CONTROLLER_STATE_VERSION = 1;
 const ACTIVE_MODE = 'active';
 const SHADOW_MODE = 'shadow';
@@ -66,6 +79,10 @@ const ACTION_EXECUTORS = Object.freeze({
   },
   'restart-local-stack': {
     manifestExecutor: 'dev-stack-restart',
+    controllerExecutor: 'loopback-readiness-api',
+  },
+  'restart-ibkr-sidecar': {
+    manifestExecutor: 'dev-stack-sidecar-restart',
     controllerExecutor: 'loopback-readiness-api',
   },
   'rebuild-sidecar-runtime': {
@@ -134,8 +151,19 @@ function boundedText(value, length = 500) {
   return String(value || '').slice(0, length);
 }
 
+function compatibilityEnvValue(env, primaryName, legacyName) {
+  if (Object.prototype.hasOwnProperty.call(env, primaryName)) return env[primaryName];
+  return env[legacyName];
+}
+
 function controllerStateFile(env = process.env) {
-  const configured = String(env.HERMES_CONTROLLER_STATE_FILE || '').trim();
+  const configured = String(
+    compatibilityEnvValue(
+      env,
+      'READINESS_CONTROLLER_STATE_FILE',
+      'HERMES_CONTROLLER_STATE_FILE',
+    ) || '',
+  ).trim();
   return configured ? path.resolve(configured) : DEFAULT_STATE_FILE;
 }
 
@@ -239,6 +267,7 @@ function restoreState(raw, {
   const restored = {
     ...fresh,
     ...raw,
+    serviceId: CONTROLLER_SERVICE_ID,
     mode: normalizedMode,
     enabledActionIds: [...enabledActionIds],
     status: normalizedMode === ACTIVE_MODE ? 'monitoring' : 'shadow',
@@ -343,6 +372,29 @@ function policyValidationErrors(manifest = SERVICE_MANIFEST) {
         );
       }
     }
+    if (action.deferrals != null && !Array.isArray(action.deferrals)) {
+      errors.push(`${action.id}: deferrals must be an array`);
+    }
+    for (const deferral of Array.isArray(action.deferrals) ? action.deferrals : []) {
+      if (!/^[a-z][a-zA-Z0-9.-]+$/.test(String(deferral?.checkId || ''))) {
+        errors.push(`${action.id}: deferral checkId must be an exact check id`);
+      }
+      const maxAgeMs = Number(deferral?.maxAgeMs);
+      if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0 || maxAgeMs > MAX_DEFERRAL_CHECK_AGE_MS) {
+        errors.push(`${action.id}: deferral maxAgeMs must be positive and at most ${MAX_DEFERRAL_CHECK_AGE_MS}`);
+      }
+      const unverifiedMs = Number(deferral?.unverifiedMaxDeferralMs);
+      if (!Number.isFinite(unverifiedMs) || unverifiedMs < 0 || unverifiedMs > MAX_UNVERIFIED_DEFERRAL_MS) {
+        errors.push(
+          `${action.id}: deferral unverifiedMaxDeferralMs must be from 0 to ${MAX_UNVERIFIED_DEFERRAL_MS}`,
+        );
+      }
+      if (deferral?.errorCodes != null && (!Array.isArray(deferral.errorCodes)
+          || deferral.errorCodes.length === 0
+          || deferral.errorCodes.some((code) => !(action.triggeringErrorCodes || []).includes(code)))) {
+        errors.push(`${action.id}: deferral errorCodes must be a non-empty subset of triggeringErrorCodes`);
+      }
+    }
     if (!Array.isArray(action.verificationChecks)
         || action.verificationChecks.length === 0) {
       errors.push(`${action.id}: verificationChecks must be a non-empty array`);
@@ -386,6 +438,7 @@ function compilePolicies(manifest = SERVICE_MANIFEST) {
       triggeringCheckIds: [...new Set(action.triggeringCheckIds || [])],
       verificationChecks: [...new Set(action.verificationChecks)],
       prerequisites: action.prerequisites.map((item) => ({ ...item })),
+      deferrals: (action.deferrals || []).map((item) => ({ ...item })),
     }));
 }
 
@@ -477,6 +530,73 @@ function evaluatePrerequisites(policy, checksById, now = Date.now()) {
   return { ok: true, reason: null, detail: null };
 }
 
+function currentDeferral(incident, now, episodeGapMs = DEFERRAL_EPISODE_GAP_MS) {
+  const lastEvaluatedAt = timestamp(incident?.deferral?.lastEvaluatedAt);
+  return lastEvaluatedAt !== null && now - lastEvaluatedAt <= episodeGapMs
+    ? incident.deferral
+    : null;
+}
+
+// A deferral protects work only from the causes it names, such as code drift.
+// Any other trigger, for example a process the user disabled, is not held.
+function applicableDeferrals(policy, incident) {
+  return (policy.deferrals || []).filter((deferral) => !deferral.errorCodes
+    || deferral.errorCodes.includes(incident?.errorCode));
+}
+
+// A deferral check passes while the work it protects is verifiably idle and
+// warns while that work is verifiably in progress. A failed, stale, or missing
+// check leaves the work unverified: that defers only until
+// unverifiedMaxDeferralMs after the deferral began or the work was last seen
+// in progress, so an unreadable check cannot hold recovery indefinitely.
+function evaluateDeferrals(policy, liveChecksById, incident, now = Date.now(), {
+  episodeGapMs = DEFERRAL_EPISODE_GAP_MS,
+} = {}) {
+  for (const deferral of applicableDeferrals(policy, incident)) {
+    const check = liveChecksById.get(deferral.checkId) || null;
+    const observedAt = timestamp(check?.observedAt);
+    const ageMs = observedAt === null ? null : now - observedAt;
+    const fresh = ageMs !== null && ageMs >= -30_000 && ageMs <= Number(deferral.maxAgeMs);
+    if (fresh && check.status === 'pass') continue;
+    if (fresh && check.status === 'warn') {
+      return {
+        defer: true,
+        reason: 'DEFERRED_FOR_ACTIVE_WORK',
+        detail: `${deferral.checkId}: ${boundedText(check.summary || check.errorCode, 200)}`,
+        workActive: true,
+      };
+    }
+    const episode = currentDeferral(incident, now, episodeGapMs);
+    const startedAt = timestamp(episode?.startedAt) ?? now;
+    const heldSince = Math.max(startedAt, timestamp(episode?.lastActiveAt) ?? startedAt);
+    if (now - heldSince < Number(deferral.unverifiedMaxDeferralMs)) {
+      return {
+        defer: true,
+        reason: 'DEFERRED_ACTIVITY_UNVERIFIED',
+        detail: `${deferral.checkId}: ${check ? (fresh ? check.errorCode || check.status : 'stale') : 'unavailable'}`,
+        workActive: false,
+      };
+    }
+  }
+  return { defer: false, reason: null, detail: null, workActive: false };
+}
+
+// A deferral is quiet: it records no action attempt, opens no circuit, and
+// sends no notification. The episode clock survives polls until dispatch.
+function deferIncident(incident, deferral, now, episodeGapMs = DEFERRAL_EPISODE_GAP_MS) {
+  const observedAt = iso(now);
+  const episode = currentDeferral(incident, now, episodeGapMs);
+  incident.status = 'deferred';
+  incident.suppressionReason = deferral.reason;
+  incident.suppressionDetail = deferral.detail;
+  incident.nextRetryAt = null;
+  incident.deferral = {
+    startedAt: episode?.startedAt || observedAt,
+    lastActiveAt: deferral.workActive ? observedAt : (episode?.lastActiveAt || null),
+    lastEvaluatedAt: observedAt,
+  };
+}
+
 function verificationCheckIds(incident, policy) {
   return [...new Set([
     incident.checkId,
@@ -520,9 +640,15 @@ function notificationBody(kind, incident) {
   const code = incident.errorCode || 'UNKNOWN_ERROR';
   if (kind === 'recovery') return `${code} cleared after two verified clean observations.`;
   if (kind === 'circuit') {
+    if (incident.actionId === 'restart-ibkr-sidecar') {
+      return `${code} persisted after two sidecar-only repairs. Relaunch and log in to IB Gateway manually; automatic Gateway quit/login/MFA is disabled.`;
+    }
     return `${code} reached the two-attempt limit; automatic repair is paused until ${incident.circuitOpenUntil}.`;
   }
   if (kind === 'escalation') {
+    if (incident.actionId === 'restart-ibkr-sidecar') {
+      return `${code}: sidecar-only recovery is unavailable. Relaunch and log in to IB Gateway manually.`;
+    }
     return `${code}: ${incident.suppressionReason || 'manual operator action is required'}.`;
   }
   return `${code}: ${incident.summary || 'readiness is degraded'}.`;
@@ -716,6 +842,50 @@ function observeReport(state, report, {
       incident.capabilityIds = [...new Set(cause.capabilityIds || [])];
       incident.cleanObservationCount = 0;
       incident.lastCleanObservedAt = null;
+      const conflictingInFlightAction = state.inFlight?.incidentId === incident.id
+        && state.inFlight?.actionId !== policy?.id;
+      if (policy && conflictingInFlightAction) {
+        const supersededFlight = state.inFlight;
+        const supersededRecord = state.actions.find(
+          (item) => item.id === supersededFlight.actionRecordId,
+        );
+        if (supersededRecord && !supersededRecord.completedAt) {
+          supersededRecord.completedAt = observedAt;
+          supersededRecord.outcome = 'superseded';
+          supersededRecord.verificationOutcome = 'policy-rebound';
+          supersededRecord.errorCode = 'CONTROLLER_ACTION_POLICY_REBOUND';
+          supersededRecord.detail = (
+            `Recovery policy changed from ${supersededFlight.actionId} to ${policy.id}.`
+          );
+        }
+        // A conflicting flight can only survive from persisted controller
+        // state: policies are immutable within a running controller process.
+        // Retire that stale global hold so the incident can adopt the current
+        // bounded action instead of dispatching the old recovery again.
+        state.inFlight = null;
+      }
+      if (
+        policy
+        && (
+          !incident.actionId
+          || incident.actionId !== policy.id
+          || incident.suppressionReason === 'NO_AUTOMATIC_POLICY'
+        )
+      ) {
+        const actionChanged = Boolean(
+          incident.actionId && incident.actionId !== policy.id,
+        );
+        incident.actionId = policy.id;
+        if (incident.status === 'manual' || actionChanged) {
+          incident.status = 'open';
+          incident.suppressionReason = null;
+          incident.suppressionDetail = null;
+          incident.nextRetryAt = null;
+          incident.circuitOpenedAt = null;
+          incident.circuitOpenUntil = null;
+          incident.verificationOutcome = actionChanged ? 'policy-rebound' : null;
+        }
+      }
       if (incident.status === 'verifying') {
         incident.verificationOutcome = 'failed';
         incident.status = 'open';
@@ -778,7 +948,25 @@ function eligibleActions(state, checksById, {
   for (const incident of state.incidents) {
     if (['resolved', 'manual', 'verifying'].includes(incident.status)) continue;
     const policy = policies.find((item) => item.id === incident.actionId);
-    if (!policy) continue;
+    // A persisted actionId is not permission to execute a policy whose exact
+    // trigger allowlist has changed since this incident was first observed.
+    if (!policy || !policyForCause(incident, [policy])) {
+      incident.status = 'manual';
+      incident.suppressionReason = 'NO_AUTOMATIC_POLICY';
+      incident.nextRetryAt = null;
+      continue;
+    }
+    const currentTrigger = checksById.get(incident.checkId);
+    if (policy.id === 'restart-ibkr-sidecar' && (!currentTrigger
+        || currentTrigger.status === 'pass' || currentTrigger.errorCode !== incident.errorCode)) {
+      // Persisted incidents can remain unresolved while another dependency
+      // fails. Only the currently observed exact broker failure can restart
+      // its process, never an obsolete transport or session diagnosis.
+      incident.status = 'suppressed';
+      incident.suppressionReason = 'CURRENT_TRIGGER_CHANGED';
+      incident.nextRetryAt = null;
+      continue;
+    }
     if (Number(incident.observationCount || 0) < 2) {
       incident.status = 'observing';
       incident.suppressionReason = 'AWAITING_SECOND_OBSERVATION';
@@ -823,7 +1011,7 @@ function eligibleActions(state, checksById, {
     if (mode === ACTIVE_MODE && !enabledActions.has(policy.id)) {
       incident.status = 'suppressed';
       incident.suppressionReason = 'ACTION_CLASS_DISABLED';
-      incident.suppressionDetail = `${policy.id} is not in HERMES_RELIABILITY_ENABLED_ACTIONS.`;
+      incident.suppressionDetail = `${policy.id} is not in READINESS_CONTROLLER_ENABLED_ACTIONS.`;
       incident.nextRetryAt = null;
       continue;
     }
@@ -973,6 +1161,13 @@ function createDefaultIo({
         { fetchImpl, timeoutMs: DEFAULT_READINESS_TIMEOUT_MS },
       );
     },
+    async fetchLiveCheck(checkId) {
+      return fetchJson(
+        `${urls.readinessUrl}/checks/${encodeURIComponent(checkId)}`,
+        {},
+        { fetchImpl, timeoutMs: DEFAULT_LIVE_CHECK_TIMEOUT_MS },
+      );
+    },
     async dispatch(policy) {
       if (policy.controllerExecutor === 'dashboard-log-prune') {
         return {
@@ -1032,7 +1227,11 @@ function controllerHeartbeat(state) {
 function createController({
   manifest = SERVICE_MANIFEST,
   env = process.env,
-  mode = normalizeMode(env.HERMES_RELIABILITY_CONTROLLER_MODE),
+  mode = normalizeMode(compatibilityEnvValue(
+    env,
+    'READINESS_CONTROLLER_MODE',
+    'HERMES_RELIABILITY_CONTROLLER_MODE',
+  )),
   enabledActionIds: requestedEnabledActionIds = null,
   statePath = controllerStateFile(env),
   state: suppliedState = null,
@@ -1044,11 +1243,17 @@ function createController({
   emit = (payload) => process.stdout.write(`${JSON.stringify(payload)}\n`),
   minObservationSeparationMs = DEFAULT_MIN_OBSERVATION_SEPARATION_MS,
   telemetryMaxAgeMs = DEFAULT_TELEMETRY_MAX_AGE_MS,
+  pollIntervalMs = configuredPollIntervalMs(env),
 } = {}) {
   const policies = compilePolicies(manifest);
+  const episodeGapMs = deferralEpisodeGapMs(pollIntervalMs);
   const enabledActionIds = normalizeEnabledActionIds(
     requestedEnabledActionIds == null
-      ? env.HERMES_RELIABILITY_ENABLED_ACTIONS
+      ? compatibilityEnvValue(
+        env,
+        'READINESS_CONTROLLER_ENABLED_ACTIONS',
+        'HERMES_RELIABILITY_ENABLED_ACTIONS',
+      )
       : requestedEnabledActionIds,
     policies,
   );
@@ -1146,6 +1351,46 @@ function createController({
     }
     state.inFlight = null;
     return true;
+  }
+
+  // Deferrable actions read their live checks here, immediately before the
+  // dispatch decision, never from the cached readiness report. A deferred
+  // action leaves later eligible actions free to run.
+  async function firstUndeferredAction(candidates) {
+    for (const candidate of candidates) {
+      const { incident, policy } = candidate;
+      const deferrals = applicableDeferrals(policy, incident);
+      if (deferrals.length === 0) return candidate;
+      const liveChecks = new Map();
+      for (const { checkId } of deferrals) {
+        if (liveChecks.has(checkId)) continue;
+        try {
+          const check = await io.fetchLiveCheck(checkId);
+          if (check?.id === checkId) liveChecks.set(checkId, check);
+        } catch {
+          // An unreadable live check leaves the protected work unverified.
+        }
+      }
+      const evaluatedAt = now();
+      const deferral = evaluateDeferrals(policy, liveChecks, incident, evaluatedAt, { episodeGapMs });
+      if (!deferral.defer) {
+        delete incident.deferral;
+        return candidate;
+      }
+      deferIncident(incident, deferral, evaluatedAt, episodeGapMs);
+    }
+    return null;
+  }
+
+  // A poll that could not re-evaluate a deferral, because another action was
+  // in flight or just ran, still observed its incident eligible. Keep that
+  // episode current so a busy poll never restarts its bounded hold.
+  function keepDeferrals(eligible, observedAt) {
+    const keptAt = now();
+    for (const { incident } of eligible) {
+      if (!currentDeferral(incident, observedAt, episodeGapMs)) continue;
+      incident.deferral.lastEvaluatedAt = iso(Math.max(keptAt, timestamp(incident.deferral.lastEvaluatedAt)));
+    }
   }
 
   async function runAction(candidate) {
@@ -1329,8 +1574,10 @@ function createController({
         && !releasedRecoveryHold
         && eligible.length > 0
       ) {
-        await runAction(eligible[0]);
+        const candidate = await firstUndeferredAction(eligible);
+        if (candidate) await runAction(candidate);
       }
+      keepDeferrals(eligible, observedAt);
       if (!state.lastError) {
         state.status = state.inFlight
           ? 'acting'
@@ -1356,13 +1603,22 @@ function createController({
   };
 }
 
+function configuredPollIntervalMs(env = process.env) {
+  return Math.max(
+    DEFAULT_POLL_INTERVAL_MS,
+    Number(compatibilityEnvValue(
+      env,
+      'READINESS_CONTROLLER_POLL_INTERVAL_MS',
+      'HERMES_CONTROLLER_POLL_INTERVAL_MS',
+    ))
+      || DEFAULT_POLL_INTERVAL_MS,
+  );
+}
+
 async function runDaemon({
   env = process.env,
-  controller = createController({ env }),
-  intervalMs = Math.max(
-    DEFAULT_POLL_INTERVAL_MS,
-    Number(env.HERMES_CONTROLLER_POLL_INTERVAL_MS) || DEFAULT_POLL_INTERVAL_MS,
-  ),
+  intervalMs = configuredPollIntervalMs(env),
+  controller = createController({ env, pollIntervalMs: intervalMs }),
 } = {}) {
   let stopping = false;
   let wake = null;
@@ -1394,7 +1650,7 @@ async function runDaemon({
 if (require.main === module) {
   runDaemon().catch((error) => {
     process.stderr.write(
-      `[hermes-reliability-controller] fatal: ${boundedText(error?.stack || error)}\n`,
+      `[readiness-controller] fatal: ${boundedText(error?.stack || error)}\n`,
     );
     process.exitCode = 1;
   });
@@ -1405,6 +1661,7 @@ module.exports = {
   ACTIVE_MODE,
   CONTROLLER_SERVICE_ID,
   CONTROLLER_BUILD_FINGERPRINT,
+  DEFAULT_LIVE_CHECK_TIMEOUT_MS,
   DEFAULT_LOG_DIR,
   DEFAULT_MIN_OBSERVATION_SEPARATION_MS,
   DEFAULT_POLL_INTERVAL_MS,
@@ -1416,11 +1673,15 @@ module.exports = {
   SHADOW_MODE,
   buildDependentSuppressions,
   compilePolicies,
+  compatibilityEnvValue,
   controllerHeartbeat,
   controllerStateFile,
   createController,
   createDefaultIo,
+  deferIncident,
+  deferralEpisodeGapMs,
   eligibleActions,
+  evaluateDeferrals,
   evaluatePrerequisites,
   flattenChecks,
   incidentId,

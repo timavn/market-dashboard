@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { formatMarketDate } = require('./marketDateFormat.cjs');
 
 const GENERIC_POSITION_CHANGES_SUBJECT = /^\s*\d+\s+Changes?:/i;
 
@@ -151,7 +152,7 @@ function snapshotDateForItem(item, timeZone = 'America/New_York') {
   if (item.snapshotDate) return item.snapshotDate;
   const itemTime = new Date(getItemTime(item) || 0);
   if (!Number.isFinite(itemTime.getTime())) return null;
-  return itemTime.toLocaleDateString('en-CA', { timeZone });
+  return formatMarketDate(itemTime, timeZone);
 }
 
 async function materializeRtaLedgerItems(items, {

@@ -11,6 +11,18 @@ const longEntryRule = getProcessRule('entry.long.range_half');
 const shortEntryRule = getProcessRule('entry.short.range_half');
 
 export const METRIC_DEFINITIONS = {
+  minMax: {
+    name: 'MIN / MAX (% of NLV)',
+    definition: 'Per-security planning limits using the Portfolio Review’s beta band and ATR risk cap, independent of whether published Trade and Trend are available.',
+    calculation: 'Effective beta = clamp(|beta vs SPY|, 0.5, 2). MIN = 2% / effective beta, rounded up to 0.5 percentage points. MAX = the smaller of 6% / effective beta and 0.50% / (2 × ATR14 / closing price), rounded down to 0.5 percentage points.',
+    interpretation: [
+      'Uses up to 252 aligned daily returns, with at least 126 required for beta, and 14 completed sessions for ATR.',
+      'The date is the last completed daily bar. A missing input remains a verification gap.',
+      'If MAX is below MIN, the risk cap leaves no positive sizing target.',
+      'Trade/Trend, entry rules, and verified live holdings still determine whether an adjustment is eligible.'
+    ],
+    source: 'Site Position Sizing v1.1; sourced adjusted daily history from Yahoo Finance chart API'
+  },
   'zScore': {
     name: 'Z-Score',
     definition: 'Measures how many standard deviations the current price is from the mean price over a given period (typically 1-year or TTM).',

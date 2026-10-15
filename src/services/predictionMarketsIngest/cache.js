@@ -22,6 +22,7 @@ const CONTRACT_METADATA_FIELDS = Object.freeze([
   'conid',
   'conId',
   'contract_title',
+  'contractId',
   'currency',
   'description',
   'event_date',
@@ -35,10 +36,13 @@ const CONTRACT_METADATA_FIELDS = Object.freeze([
   'multiplier',
   'native_side',
   'question',
+  'publicContractId',
+  'productCode',
   'quote_side',
   'releaseCode',
   'reportMonthId',
   'right',
+  'rulesUrl',
   'secType',
   'series',
   'settlement_source',
@@ -53,7 +57,7 @@ const CONTRACT_METADATA_FIELDS = Object.freeze([
 
 function getDynamo() {
   if (!dynamodb) {
-    const DynamoDB = require('aws-sdk/clients/dynamodb');
+    const { DynamoDB } = require('../aws/clients.cjs');
     dynamodb = new DynamoDB.DocumentClient({
       region: process.env.AWS_REGION || 'us-west-1',
     });

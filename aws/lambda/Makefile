@@ -28,3 +28,7 @@ build-HedgeyePdfProcessorFunction:
 		-t "$(ARTIFACTS_DIR)"
 	cp $(PDF_PROCESSOR_SOURCES) "$(ARTIFACTS_DIR)"
 	cp "$(RESEARCH_PRODUCT_REGISTRY)" "$(ARTIFACTS_DIR)"
+
+	cp "$(PDF_PROCESSOR_DIR)../../infra/lambdas/gmail_ingestor/analyst_change_journal.py" "$(ARTIFACTS_DIR)"
+
+	cp "$(PDF_PROCESSOR_DIR)../../infra/lambdas/gmail_ingestor/global_quads.py" "$(ARTIFACTS_DIR)"

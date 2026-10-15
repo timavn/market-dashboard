@@ -43,28 +43,12 @@ export class PortfolioAnalytics {
   /**
    * Calculate risk metrics
    */
-  static calculateRiskMetrics(holdings, totalValue) {
-    // Calculate portfolio volatility (simplified)
-    const returns = holdings.map(h => h.gainLossPercent || 0); // Using returns as simple proxy
-    const avgReturn = returns.reduce((sum, r) => sum + r, 0) / (returns.length || 1);
-    const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (returns.length || 1);
-    const volatility = Math.sqrt(variance);
-
-    // Calculate Sharpe ratio (simplified - assumes 2% risk-free rate)
-    const riskFreeRate = 2.0;
-    const sharpeRatio = volatility > 0 ? (avgReturn - riskFreeRate) / volatility : 0;
-
-    // Calculate VaR (simplified - 95% confidence)
-    const sortedReturns = [...returns].sort((a, b) => a - b);
-    const varIndex = Math.floor(sortedReturns.length * 0.05);
-    const var95Percent = sortedReturns[Math.max(0, varIndex)] || 0;
-
+  static calculateRiskMetrics() {
+    // Cross-sectional position gain/loss is not an account return series.
     return {
-      volatility: volatility.toFixed(2),
-      sharpeRatio: sharpeRatio.toFixed(2),
-      sortinoRatio: volatility > 0 ? (avgReturn / volatility).toFixed(2) : "0.00", // Simplified
-      var95: (totalValue * Math.abs(var95Percent) / 100).toFixed(0),
-      maxDrawdown: this.calculateMaxDrawdown(holdings)
+      volatility: null, sharpeRatio: null, sortinoRatio: null, var95: null, maxDrawdown: null,
+      riskMetricsStatus: 'unavailable',
+      riskMetricsReason: 'Verified account return history and benchmark inputs are required.'
     };
   }
 
@@ -72,6 +56,10 @@ export class PortfolioAnalytics {
    * Calculate exposure metrics
    */
   static calculateExposureMetrics(holdings, totalValue) {
+    if (!Number.isFinite(totalValue) || totalValue <= 0) return {
+      grossExposure: null, netLongExposure: null, netShortExposure: null, netExposure: null,
+      longCount: null, shortCount: null
+    };
     let grossExposure = 0;
     let netLongExposure = 0;
     let netShortExposure = 0;
@@ -119,10 +107,10 @@ export class PortfolioAnalytics {
     // Sort holdings by absolute market value (risk sizing)
     const sortedHoldings = [...holdings].sort((a, b) => Math.abs(b.marketValue || 0) - Math.abs(a.marketValue || 0));
 
-    if (totalValue === 0) return {
-      top10HoldingsPercent: "0.0",
-      largestPositionPercent: "0.0",
-      hhiIndex: "0.000"
+    if (!Number.isFinite(totalValue) || totalValue <= 0) return {
+      top10HoldingsPercent: null,
+      largestPositionPercent: null,
+      hhiIndex: null
     };
 
     // Top 10 holdings percentage
@@ -149,146 +137,32 @@ export class PortfolioAnalytics {
   /**
    * Calculate factor exposures
    */
-  static calculateFactorExposures(holdings, totalValue) {
-    // Legacy support for flat factor structure if needed, or implement similarly to LongShortFactors
-    // For now, keeping the simplified original logic but ensuring safety
-    if (totalValue === 0) return {};
-
-    const factors = {
-      largeCap: 0, midCap: 0, smallCap: 0,
-      technology: 0, healthcare: 0, financials: 0, consumer: 0, energy: 0,
-      northAmerica: 0, europe: 0, asiaPacific: 0, emergingMarkets: 0
-    };
-
-    holdings.forEach(holding => {
-      const weight = (Math.abs(holding.marketValue || 0) / totalValue) * 100;
-      const description = (holding.description || '').toUpperCase();
-      const symbol = (holding.symbol || '').toUpperCase();
-
-      // Simple heuristic mapping
-      if (this.isTechnologySector(symbol, description)) factors.technology += weight;
-      else if (this.isHealthcareSector(symbol, description)) factors.healthcare += weight;
-      else if (this.isFinancialSector(symbol, description)) factors.financials += weight;
-      else if (this.isEnergySector(symbol, description)) factors.energy += weight;
-      else factors.consumer += weight;
-
-      if (this.isInternational(symbol, description)) {
-        factors.europe += weight * 0.4;
-        factors.asiaPacific += weight * 0.4;
-        factors.emergingMarkets += weight * 0.2;
-      } else {
-        factors.northAmerica += weight;
-      }
-
-      factors.largeCap += weight * 0.8;
-      factors.midCap += weight * 0.15;
-      factors.smallCap += weight * 0.05;
-    });
-
-    Object.keys(factors).forEach(key => factors[key] = factors[key].toFixed(1));
+  static calculateFactorExposures() {
+    // A ticker/description cannot establish an ETF's underlying factor weights.
     return {
-      marketCap: { largeCap: factors.largeCap, midCap: factors.midCap, smallCap: factors.smallCap },
-      sectors: { technology: factors.technology, healthcare: factors.healthcare, financials: factors.financials, consumer: factors.consumer, energy: factors.energy },
-      geographic: { northAmerica: factors.northAmerica, europe: factors.europe, asiaPacific: factors.asiaPacific, emergingMarkets: factors.emergingMarkets }
+      marketCap: { largeCap: null, midCap: null, smallCap: null },
+      sectors: { technology: null, healthcare: null, financials: null, consumer: null, energy: null },
+      geographic: { northAmerica: null, europe: null, asiaPacific: null, emergingMarkets: null },
+      factorExposureStatus: 'unavailable',
+      factorExposureReason: 'Verified security classifications and fund constituent weights are required.'
     };
   }
 
   /**
    * Split macros into Long vs Short contribution for decision making
    */
-  static calculateLongShortFactors(holdings, totalValue) {
-    const factors = {
-      Rates: { long: 0, short: 0 },
-      FX: { long: 0, short: 0 },
-      Inflation: { long: 0, short: 0 },
-      Growth: { long: 0, short: 0 },
-      Credit: { long: 0, short: 0 },
-      Equities: { long: 0, short: 0 },
-      Commodities: { long: 0, short: 0 }
-    };
-
-    if (totalValue === 0) return factors;
-
-    // Heuristic Factor Mapping
-    const mapToFactor = (symbol, desc) => {
-      if (symbol === 'TLT' || symbol === 'IEF' || symbol === 'BND') return 'Rates';
-      if (symbol === 'UUP' || symbol === 'FXE' || desc.includes('CURRENCY')) return 'FX';
-      if (symbol === 'GLD' || symbol === 'TIP' || desc.includes('GOLD')) return 'Inflation';
-      if (symbol === 'HYG' || symbol === 'LQD' || desc.includes('BOND')) return 'Credit';
-      if (symbol === 'SPY' || symbol === 'QQQ' || desc.includes('EQUITY')) return 'Equities';
-      if (symbol === 'USO' || symbol === 'DBC' || desc.includes('OIL')) return 'Commodities';
-      return 'Growth'; // Default bucket
-    };
-
-    holdings.forEach(h => {
-      const val = h.marketValue || 0;
-      const weight = (val / totalValue) * 100;
-      const factor = mapToFactor((h.symbol || '').toUpperCase(), (h.description || '').toUpperCase());
-
-      if (weight > 0) {
-        factors[factor].long += weight;
-      } else {
-        factors[factor].short += Math.abs(weight);
-      }
-    });
-
-    // Format
-    Object.keys(factors).forEach(k => {
-      factors[k].long = parseFloat(factors[k].long.toFixed(1));
-      factors[k].short = parseFloat(factors[k].short.toFixed(1));
-    });
-
-    return factors;
+  static calculateLongShortFactors() {
+    return Object.fromEntries(['Rates', 'FX', 'Inflation', 'Growth', 'Credit', 'Equities', 'Commodities']
+      .map((factor) => [factor, { long: null, short: null, status: 'unavailable' }]));
   }
 
   /**
    * Calculate portfolio sensitivities (Beta, DV01 approximations)
    */
-  static calculateSensitivityMetrics(holdings, totalValue) {
-    // PROXY IMPLEMENTATION - in real app, this would use regression betas
-    // We are essentially hardcoding betas for demonstration based on asset classes
-
-    let ratesDV01 = 0;
-    let fxBeta = 0;
-    let equityBeta = 0; // Global
-    let commBeta = 0;
-
-    holdings.forEach(h => {
-      const weight = (h.marketValue || 0) / totalValue;
-      const sym = (h.symbol || '').toUpperCase();
-      const desc = (h.description || '').toUpperCase();
-
-      // Equity Beta Proxy
-      if (sym === 'SPY' || sym === 'QQQ' || desc.includes('EQUITY')) {
-        equityBeta += weight * 1.0;
-      } else if (sym === 'IWM') {
-        equityBeta += weight * 1.2;
-      } else if (desc.includes('BOND')) {
-        equityBeta += weight * 0.1;
-      }
-
-      // Rates DV01 Proxy (very rough approximation: 10yr duration for bonds)
-      if (sym === 'IEF' || sym === 'TLT' || desc.includes('TREASURY')) {
-        // Assume 1% move in rates approx 8% move in price for 10yr
-        ratesDV01 += weight * 800; // basis points per 1% portfolio
-      }
-
-      // Commodity Beta (Oil/Gold)
-      if (sym === 'USO' || sym === 'GLD' || desc.includes('COMMODITY')) {
-        commBeta += weight * 1.0;
-      }
-
-      // FX Beta (USD) - Inverted for international
-      if (desc.includes('INTERNATIONAL') || sym === 'EFA' || sym === 'EEM') {
-        fxBeta -= weight * 0.5; // Short USD
-      }
-    });
-
+  static calculateSensitivityMetrics() {
     return {
-      ratesBPV: Math.round(ratesDV01), // Basis Point Value
-      fxBeta: parseFloat(fxBeta.toFixed(2)),
-      equityBeta: parseFloat(equityBeta.toFixed(2)),
-      commodityBeta: parseFloat(commBeta.toFixed(2))
+      ratesBPV: null, fxBeta: null, equityBeta: null, commodityBeta: null,
+      status: 'unavailable', reason: 'Verified instrument sensitivities and aligned return history are required.'
     };
   }
 
@@ -296,53 +170,29 @@ export class PortfolioAnalytics {
    * Liquidity and Concentration Checks
    */
   static calculateLiquidityMetrics(holdings, totalValue) {
-    // Mock ADV (Average Daily Volume) data
-    // In production, fetch from API
-
-    const liquidityBuckets = {
-      'Liquid (<1 day)': 0,
-      'Moderate (1-5 days)': 0,
-      'Illiquid (>5 days)': 0
-    };
-
-    const riskContributors = holdings.map(h => {
-      return {
-        ticker: h.symbol,
-        contribution: (Math.abs(h.marketValue || 0) / totalValue) * 100, // naive risk contrib
-        daysToExit: Math.random() * 2 // Random mock for demo
-      };
-    }).sort((a, b) => b.contribution - a.contribution).slice(0, 5); // Top 5
-
-    // Mock aggregation
-    liquidityBuckets['Liquid (<1 day)'] = 85;
-    liquidityBuckets['Moderate (1-5 days)'] = 12;
-    liquidityBuckets['Illiquid (>5 days)'] = 3;
-
+    const hasDenominator = Number.isFinite(totalValue) && totalValue > 0;
+    const positions = [...holdings].sort((a, b) => Math.abs(b.marketValue || 0) - Math.abs(a.marketValue || 0));
     return {
-      buckets: liquidityBuckets,
-      topRiskContributors: riskContributors
+      status: 'unavailable',
+      reason: 'Verified trading volume and an explicit participation-rate assumption are required.',
+      buckets: { 'Liquid (<1 day)': null, 'Moderate (1-5 days)': null, 'Illiquid (>5 days)': null },
+      topRiskContributors: positions.slice(0, 5).map((holding) => ({
+        ticker: holding.symbol,
+        // Retain the legacy field, but identify it as position size, not model risk.
+        contribution: hasDenominator && Number.isFinite(holding.marketValue)
+          ? Math.abs(holding.marketValue) / totalValue * 100 : null,
+        contributionBasis: 'absolute-position-value-percent-of-account',
+        daysToExit: null
+      }))
     };
   }
 
   /**
    * Scenario Analysis P&L estimates
    */
-  static calculateScenarioAnalysis(holdings, totalValue) {
-    // Estimated P&L % given simple shocks
-    // Uses the sensitivities calculated previously as drivers
-
-    const sensitivities = this.calculateSensitivityMetrics(holdings, totalValue);
-    const eqBeta = sensitivities.equityBeta;
-    const ratesSens = sensitivities.ratesBPV / 100; // approx % impact of 100bps? Very rough.
-    const commBeta = sensitivities.commodityBeta;
-
-    return [
-      { name: "Equities -10%", impact: (eqBeta * -10).toFixed(1) + "%" },
-      { name: "Rates +50bps", impact: (-1 * ratesSens * 0.5).toFixed(1) + "%" }, // bond prices fall
-      { name: "USD +5%", impact: "-1.2%" }, // Hardcoded estimate
-      { name: "Oil -20%", impact: (commBeta * -20 * 0.5).toFixed(1) + "%" },
-      { name: "Credit Spreads +100bps", impact: "-2.5%" } // Hardcoded
-    ];
+  static calculateScenarioAnalysis() {
+    return ['Equities -10%', 'Rates +50bps', 'USD +5%', 'Oil -20%', 'Credit Spreads +100bps']
+      .map((name) => ({ name, impact: null, status: 'unavailable', reason: 'Verified scenario model inputs are required.' }));
   }
 
   /**
@@ -386,10 +236,8 @@ export class PortfolioAnalytics {
   /**
    * Calculate maximum drawdown (proxy)
    */
-  static calculateMaxDrawdown(holdings) {
-    // Simplified calculation without historical series access here
-    // In a real app, this needs timeseries data
-    return "5.2";
+  static calculateMaxDrawdown() {
+    return null; // Requires verified account equity history.
   }
 
   /**

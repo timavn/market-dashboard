@@ -1,0 +1,362 @@
+{
+  "reportDate": "2026-09-08",
+  "showDate": "2026-09-17",
+  "expectedSource": "User-supplied Hedgeye Macro Show slide, September 17, 2026; manually transcribed, not runtime market data.",
+  "rows": [
+    {
+      "code": "13874A",
+      "metric": "SPX (Index + E-mini)",
+      "latest": -63533,
+      "wwChg": 1118,
+      "zScore1Y": 0.72,
+      "zScore3Y": 0.35,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "1170E1",
+      "metric": "VIX",
+      "latest": -94829,
+      "wwChg": -10644,
+      "zScore1Y": -1.16,
+      "zScore3Y": -1.7,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "239742",
+      "metric": "Russell 2000 (mini)",
+      "latest": -82921,
+      "wwChg": -11705,
+      "zScore1Y": -2.21,
+      "zScore3Y": -2.04,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "124603",
+      "metric": "Dow Jones (mini)",
+      "latest": 16278,
+      "wwChg": -1017,
+      "zScore1Y": 1.59,
+      "zScore3Y": 1.04,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "209742",
+      "metric": "Nasdaq (mini)",
+      "latest": 22712,
+      "wwChg": -4377,
+      "zScore1Y": 0.19,
+      "zScore3Y": 0.25,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "043602",
+      "metric": "10Y UST",
+      "latest": -827248,
+      "wwChg": 69988,
+      "zScore1Y": -0.26,
+      "zScore3Y": -0.51,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "042601",
+      "metric": "2Y UST",
+      "latest": -944839,
+      "wwChg": -53645,
+      "zScore1Y": 1.8,
+      "zScore3Y": 1.73,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "044601",
+      "metric": "5Y UST",
+      "latest": -1287956,
+      "wwChg": 105787,
+      "zScore1Y": 1.17,
+      "zScore3Y": 1.04,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "020601",
+      "metric": "UST Bonds",
+      "latest": -207769,
+      "wwChg": 1470,
+      "zScore1Y": -1.55,
+      "zScore3Y": -2.06,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "045601",
+      "metric": "30D Fed Funds",
+      "latest": -83889,
+      "wwChg": 219895,
+      "zScore1Y": 0.13,
+      "zScore3Y": 0.1,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "098662",
+      "metric": "$USD",
+      "latest": 17606,
+      "wwChg": 584,
+      "zScore1Y": 1.48,
+      "zScore3Y": 1.32,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "097741",
+      "metric": "JPY",
+      "latest": 12575,
+      "wwChg": 108356,
+      "zScore1Y": 0.79,
+      "zScore3Y": 0.4,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "099741",
+      "metric": "EUR",
+      "latest": -61548,
+      "wwChg": -15878,
+      "zScore1Y": -1.3,
+      "zScore3Y": -1.55,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "096742",
+      "metric": "GBP",
+      "latest": -57603,
+      "wwChg": -8029,
+      "zScore1Y": -0.22,
+      "zScore3Y": -1.14,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "232741",
+      "metric": "AUD",
+      "latest": -35108,
+      "wwChg": 2881,
+      "zScore1Y": -0.51,
+      "zScore3Y": 0.08,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "090741",
+      "metric": "CAD",
+      "latest": -70146,
+      "wwChg": 37998,
+      "zScore1Y": 0.27,
+      "zScore3Y": 0.4,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "095741",
+      "metric": "MXN",
+      "latest": 94784,
+      "wwChg": 1448,
+      "zScore1Y": 1.04,
+      "zScore3Y": 0.93,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "112741",
+      "metric": "NZD",
+      "latest": 5490,
+      "wwChg": 14177,
+      "zScore1Y": 3.19,
+      "zScore3Y": 1.27,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "092741",
+      "metric": "CHF",
+      "latest": -30389,
+      "wwChg": -5402,
+      "zScore1Y": 0.73,
+      "zScore3Y": -0.09,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "067651",
+      "metric": "CRUDE OIL",
+      "latest": 204526,
+      "wwChg": 7155,
+      "zScore1Y": 0.28,
+      "zScore3Y": -0.24,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "088691",
+      "metric": "GOLD",
+      "latest": 139548,
+      "wwChg": -1263,
+      "zScore1Y": 1.21,
+      "zScore3Y": -0.1,
+      "seriesType": "disaggregated-managed-money-combined"
+    },
+    {
+      "code": "085692",
+      "metric": "COPPER",
+      "latest": 91912,
+      "wwChg": 11388,
+      "zScore1Y": 2.21,
+      "zScore3Y": 2.14,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "023651",
+      "metric": "Natural Gas",
+      "latest": -220234,
+      "wwChg": -10742,
+      "zScore1Y": -1.85,
+      "zScore3Y": -2.28,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "111659",
+      "metric": "RBOB Gasoline",
+      "latest": 73193,
+      "wwChg": 3565,
+      "zScore1Y": 0.47,
+      "zScore3Y": 1.04,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "022651",
+      "metric": "ULSD Heating Oil",
+      "latest": 12100,
+      "wwChg": -2458,
+      "zScore1Y": -0.19,
+      "zScore3Y": 0.11,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "084691",
+      "metric": "SILVER",
+      "latest": 24736,
+      "wwChg": -500,
+      "zScore1Y": -0.41,
+      "zScore3Y": -0.89,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "076651",
+      "metric": "Platinum",
+      "latest": 15848,
+      "wwChg": 1208,
+      "zScore1Y": -0.12,
+      "zScore3Y": -0.02,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "002602",
+      "metric": "Corn",
+      "latest": 486620,
+      "wwChg": 5888,
+      "zScore1Y": 2.25,
+      "zScore3Y": 2.55,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "005602",
+      "metric": "Soybeans",
+      "latest": 276843,
+      "wwChg": 27712,
+      "zScore1Y": 1.57,
+      "zScore3Y": 2.09,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "001602",
+      "metric": "Wheat",
+      "latest": 7153,
+      "wwChg": -13932,
+      "zScore1Y": 1.66,
+      "zScore3Y": 2.12,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "057642",
+      "metric": "Live Cattle",
+      "latest": 42614,
+      "wwChg": 699,
+      "zScore1Y": -2.65,
+      "zScore3Y": -1.78,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "054642",
+      "metric": "Lean Hogs",
+      "latest": -28778,
+      "wwChg": 6343,
+      "zScore1Y": -1.43,
+      "zScore3Y": -1.78,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "080732",
+      "metric": "Sugar",
+      "latest": 245211,
+      "wwChg": 34016,
+      "zScore1Y": 3.27,
+      "zScore3Y": 2.28,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "033661",
+      "metric": "Cotton",
+      "latest": 121714,
+      "wwChg": -11433,
+      "zScore1Y": 1.41,
+      "zScore3Y": 2.15,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "083731",
+      "metric": "Coffee",
+      "latest": 17479,
+      "wwChg": -6344,
+      "zScore1Y": -0.82,
+      "zScore3Y": -1.19,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "073732",
+      "metric": "Cocoa",
+      "latest": -16467,
+      "wwChg": -5194,
+      "zScore1Y": -0.31,
+      "zScore3Y": -1.2,
+      "seriesType": "legacy-noncommercial-combined"
+    },
+    {
+      "code": "040701",
+      "metric": "Orange Juice",
+      "latest": 380,
+      "wwChg": 408,
+      "zScore1Y": -0.27,
+      "zScore3Y": -1.12,
+      "seriesType": "legacy-noncommercial-combined"
+    }
+  ],
+  "historyStatistics": {
+    "13874A": {
+      "average3M": -36951,
+      "average6M": -72883,
+      "average1Y": -105816,
+      "maximum3Y": 128528,
+      "minimum3Y": -236347
+    },
+    "002602": {
+      "average3M": 178288,
+      "average6M": 218121,
+      "average1Y": 93195,
+      "maximum3Y": 486620,
+      "minimum3Y": -277559
+    }
+  },
+  "managedMoneySilver": {
+    "latest": 14176,
+    "wwChg": 2006,
+    "zScore1Y": -0.13,
+    "zScore3Y": -0.68
+  }
+}

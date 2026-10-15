@@ -1,0 +1,106 @@
+[
+  {
+    "id": "us",
+    "label": "US",
+    "railLabel": "US",
+    "rows": [
+      { "symbol": "SPX", "label": "S&P 500", "summary": true, "provider": { "provider": "auto", "ibkrSymbol": "SPX", "yahooSymbol": "^GSPC", "conId": 416904, "secType": "IND", "exchange": "CBOE", "currency": "USD" } },
+      { "symbol": "RSP", "label": "S&P Equal Weight", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "RSP", "secType": "ETF" } },
+      { "symbol": "MID", "label": "S&P MidCap 400", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^MID", "secType": "IND" } },
+      { "symbol": "RUT", "label": "Russell 2000", "summary": true, "provider": { "provider": "auto", "ibkrSymbol": "RUT", "yahooSymbol": "^RUT", "conId": 416888, "secType": "IND", "exchange": "RUSSELL", "currency": "USD" } },
+      { "symbol": "NDX", "label": "Nasdaq 100", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^NDX", "secType": "IND" } },
+      { "symbol": "DJI", "label": "Dow 30", "summary": false, "provider": { "provider": "auto", "ibkrSymbol": "INDU", "yahooSymbol": "^DJI", "conId": 1935181, "secType": "IND", "exchange": "CME", "currency": "USD" } },
+      { "symbol": "IXIC", "label": "Nasdaq Composite", "summary": false, "provider": { "provider": "auto", "ibkrSymbol": "COMP", "yahooSymbol": "^IXIC", "conId": 18342287, "secType": "IND", "exchange": "NASDAQ", "currency": "USD" } },
+      { "symbol": "SMH", "label": "Semiconductors", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "SMH", "secType": "ETF" } },
+      { "symbol": "XLF", "label": "Financials", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "XLF", "secType": "ETF" } },
+      { "symbol": "VNQ", "label": "Real Estate", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "VNQ", "secType": "ETF" } }
+    ]
+  },
+  {
+    "id": "europe",
+    "label": "Europe",
+    "railLabel": "EU",
+    "rows": [
+      { "symbol": "STOXX600", "label": "STOXX Europe 600", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^STOXX", "secType": "IND" } },
+      { "symbol": "SX5E", "label": "Euro STOXX 50", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^STOXX50E", "secType": "IND" } },
+      { "symbol": "FTSE", "label": "FTSE 100", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^FTSE", "secType": "IND" } },
+      { "symbol": "DAX", "label": "DAX", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^GDAXI", "secType": "IND" } },
+      { "symbol": "CAC", "label": "CAC 40", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^FCHI", "secType": "IND" } },
+      { "symbol": "FTSEMIB", "label": "FTSE MIB", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "FTSEMIB.MI", "secType": "IND" } },
+      { "symbol": "IBEX", "label": "IBEX 35", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^IBEX", "secType": "IND" } },
+      { "symbol": "SMI", "label": "SMI", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^SSMI", "secType": "IND" } }
+    ]
+  },
+  {
+    "id": "asia",
+    "label": "Asia",
+    "railLabel": "ASIA",
+    "rows": [
+      { "symbol": "N225", "label": "Nikkei 225", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^N225", "secType": "IND" } },
+      { "symbol": "HSI", "label": "Hang Seng", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^HSI", "secType": "IND" } },
+      { "symbol": "CSI300", "label": "CSI 300", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "000300.SS", "secType": "IND" } },
+      { "symbol": "NIFTY50", "label": "Nifty 50", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^NSEI", "secType": "IND" } },
+      { "symbol": "SSEC", "label": "Shanghai Composite", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "000001.SS", "secType": "IND" } },
+      { "symbol": "KOSPI", "label": "KOSPI", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^KS11", "secType": "IND" } },
+      { "symbol": "TAIEX", "label": "TAIEX", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^TWII", "secType": "IND" } },
+      { "symbol": "AXJO", "label": "ASX 200", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^AXJO", "secType": "IND" } },
+      { "symbol": "JKSE", "label": "Jakarta Composite", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^JKSE", "secType": "IND" } },
+      { "symbol": "KLSE", "label": "Malaysia KLCI", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "^KLSE", "secType": "IND" } }
+    ]
+  },
+  {
+    "id": "commodities",
+    "label": "Commodities",
+    "railLabel": "CMDTY",
+    "rows": [
+      { "symbol": "CRB", "label": "CRB Index", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^TRCCRB", "secType": "IND" } },
+      { "symbol": "CL", "label": "WTI Oil", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "CL=F", "secType": "FUT" } },
+      { "symbol": "BZ", "label": "Brent Oil", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "BZ=F", "secType": "FUT" } },
+      { "symbol": "NG", "label": "Natural Gas", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "NG=F", "secType": "FUT" } },
+      { "symbol": "RB", "label": "RBOB Gasoline", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "RB=F", "secType": "FUT" } },
+      { "symbol": "GC", "label": "Gold", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "GC=F", "secType": "FUT" } },
+      { "symbol": "HG", "label": "Copper", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "HG=F", "secType": "FUT" } },
+      { "symbol": "SI", "label": "Silver", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "SI=F", "secType": "FUT" } },
+      { "symbol": "PL", "label": "Platinum", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "PL=F", "secType": "FUT" } },
+      { "symbol": "PA", "label": "Palladium", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "PA=F", "secType": "FUT" } },
+      { "symbol": "ZC", "label": "Corn", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "ZC=F", "secType": "FUT" } },
+      { "symbol": "ZW", "label": "Wheat", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "ZW=F", "secType": "FUT" } },
+      { "symbol": "ZS", "label": "Soybeans", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "ZS=F", "secType": "FUT" } }
+    ]
+  },
+  {
+    "id": "rates",
+    "label": "Rates",
+    "railLabel": "RATES",
+    "rows": [
+      { "symbol": "UST2Y", "label": "UST 2Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "us_treasuries", "provider": { "provider": "fred", "secType": "ECONOMIC" } },
+      { "symbol": "UST10Y", "label": "UST 10Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "us_treasuries", "provider": { "provider": "yahoo", "yahooSymbol": "^TNX", "secType": "IND" } },
+      { "symbol": "BUND10Y", "label": "Germany 10Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "eu_sovereigns", "country": "Germany", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
+      { "symbol": "JGB10Y", "label": "Japan 10Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "asia_sovereigns", "country": "Japan", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
+      { "symbol": "GILT10Y", "label": "UK 10Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "eu_sovereigns", "country": "United Kingdom", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
+      { "symbol": "CURVE_2s10s", "label": "2s10s Curve", "summary": true, "unit": "bps", "changeUnit": "bps", "tab": "us_treasuries", "derived": { "formula": ["UST10Y", "UST2Y"] } },
+      { "symbol": "OAT10Y", "label": "France 10Y", "summary": false, "unit": "yield", "changeUnit": "bps", "tab": "eu_sovereigns", "country": "France", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
+      { "symbol": "BTP10Y", "label": "Italy 10Y", "summary": false, "unit": "yield", "changeUnit": "bps", "tab": "eu_sovereigns", "country": "Italy", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
+      { "symbol": "ACGB10Y", "label": "Australia 10Y", "summary": false, "unit": "yield", "changeUnit": "bps", "tab": "asia_sovereigns", "country": "Australia", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
+      { "symbol": "CAN10Y", "label": "Canada 10Y", "summary": false, "unit": "yield", "changeUnit": "bps", "tab": "americas_sovereigns", "country": "Canada", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
+      { "symbol": "KTB10Y", "label": "Korea 10Y", "summary": false, "unit": "yield", "changeUnit": "bps", "tab": "asia_sovereigns", "country": "South Korea", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
+      { "symbol": "IG_OAS", "label": "IG OAS", "summary": true, "unit": "yield", "changeUnit": "bps", "inversePerformance": true, "tab": "credit", "provider": { "provider": "fred", "secType": "ECONOMIC" } },
+      { "symbol": "HY_OAS", "label": "HY OAS", "summary": true, "unit": "yield", "changeUnit": "bps", "inversePerformance": true, "tab": "credit", "provider": { "provider": "fred", "secType": "ECONOMIC" } }
+    ]
+  },
+  {
+    "id": "crypto",
+    "label": "Crypto",
+    "railLabel": "CRYPTO",
+    "rows": [
+      { "symbol": "BTC", "label": "Bitcoin/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "BTC-USD", "secType": "CRYPTO" } },
+      { "symbol": "ETH", "label": "Ethereum/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "ETH-USD", "secType": "CRYPTO" } },
+      { "symbol": "BNB", "label": "BNB/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "BNB-USD", "secType": "CRYPTO" } },
+      { "symbol": "XRP", "label": "XRP/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "XRP-USD", "secType": "CRYPTO" } },
+      { "symbol": "SOL", "label": "Solana/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "SOL-USD", "secType": "CRYPTO" } },
+      { "symbol": "ADA", "label": "Cardano/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "ADA-USD", "secType": "CRYPTO" } },
+      { "symbol": "DOGE", "label": "Dogecoin/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "DOGE-USD", "secType": "CRYPTO" } },
+      { "symbol": "LINK", "label": "Chainlink/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "LINK-USD", "secType": "CRYPTO" } }
+    ]
+  }
+]

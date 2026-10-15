@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "checks": [
+    { "id": "npm-clean-install", "groups": ["release"], "command": ["npm", "ci"] },
+    { "id": "node-contracts", "groups": ["local", "release", "node"], "command": ["npm", "run", "test:node"] },
+    { "id": "jest-dashboard", "groups": ["local", "release", "node"], "command": ["npm", "test", "--", "--watchAll=false", "--runInBand", "--silent"] },
+    { "id": "javascript-lint", "groups": ["local", "release", "node"], "command": ["npm", "run", "lint"] },
+    { "id": "production-build", "groups": ["local", "release", "node"], "command": ["npm", "run", "build"] },
+    { "id": "python-ibkr-environment", "groups": ["release", "setup-ibkr"], "command": ["node", "scripts/testing/setup-python.cjs", "ibkr"] },
+    { "id": "python-analyst-environment", "groups": ["release", "setup-analyst"], "command": ["node", "scripts/testing/setup-python.cjs", "analyst"] },
+    { "id": "python-ibkr", "groups": ["local", "release", "ibkr"], "command": ["node", "scripts/testing/run-python.cjs", "ibkr"] },
+    { "id": "python-analyst", "groups": ["local", "release", "analyst"], "command": ["node", "scripts/testing/run-python.cjs", "analyst"] },
+    { "id": "generated-contract", "groups": ["local", "release", "infra"], "command": ["python3", "infra/scripts/render_hermes_contract.py", "--check"] },
+    { "id": "python-infrastructure", "groups": ["local", "release", "infra"], "command": ["python3", "-m", "unittest", "discover", "-s", "infra/tests", "-p", "test_*.py"] },
+    { "id": "sam-validation", "groups": ["release", "infra"], "command": ["sam", "validate", "--lint", "--template-file", "infra/template.yaml"] }
+  ]
+}

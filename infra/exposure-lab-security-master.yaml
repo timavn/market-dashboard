@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Versioned Exposure Lab security master and immutable review audit ledger.
+
+Resources:
+  ExposureLabSecurityMaster:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: ExposureLabSecurityMasterV1
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      AttributeDefinitions:
+        - AttributeName: ticker
+          AttributeType: S
+        - AttributeName: recordKey
+          AttributeType: S
+        - AttributeName: recordType
+          AttributeType: S
+        - AttributeName: sortKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ticker
+          KeyType: HASH
+        - AttributeName: recordKey
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: recordType-sortKey-index
+          KeySchema:
+            - AttributeName: recordType
+              KeyType: HASH
+            - AttributeName: sortKey
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: market-dashboard:owner
+          Value: exposure-lab
+        - Key: market-dashboard:purpose
+          Value: reviewed-security-master-and-audit
+        - Key: market-dashboard:data-classification
+          Value: risk-governance
+
+Outputs:
+  ExposureLabSecurityMasterName:
+    Description: DynamoDB table used for current reviews and append-only audit events.
+    Value:
+      Ref: ExposureLabSecurityMaster
+  ExposureLabSecurityMasterArn:
+    Description: ARN of the Exposure Lab security master.
+    Value:
+      Fn::GetAtt:
+        - ExposureLabSecurityMaster
+        - Arn

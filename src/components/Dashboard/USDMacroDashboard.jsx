@@ -1,36 +1,44 @@
 import React from 'react';
 import useUsdCorrelations from '../../hooks/useUsdCorrelations';
+import useDashboardResearch from '../../hooks/useDashboardResearch';
 import useVolatilitySnapshot from '../../hooks/useVolatilitySnapshot';
 import ExceptionFirstRadar from './ExceptionFirstRadar';
 
 /**
  * Owns the single analytical polling state used by both the radar and its
  * detailed tables. Current regional quotes and provider health remain owned by
- * PortfolioDashboard so a failed refresh can clear them at the page boundary.
+ * PortfolioDashboard so their last verified snapshot can stay mounted while
+ * a replacement request is in flight or delayed.
  */
 const USDMacroDashboard = ({
   multiRegionMarketData = {},
+  pulseMarketData,
   multiRegionLoading = true,
   multiRegionError = null,
   providerStatus = null,
   ibkrConnection = null,
+  onDashboardStatusChange,
 }) => {
   const volatilityState = useVolatilitySnapshot();
+  const dashboardResearchState = useDashboardResearch();
   const correlationState = useUsdCorrelations();
 
   return (
     <div className="usd-macro-dashboard-shell">
       <ExceptionFirstRadar
         marketData={multiRegionMarketData}
+        pulseMarketData={pulseMarketData}
         marketDataLoading={multiRegionLoading}
         marketDataError={multiRegionError}
         providerStatus={providerStatus}
         ibkrConnection={ibkrConnection}
         volatilityState={volatilityState}
+        dashboardResearchState={dashboardResearchState}
         correlationState={correlationState}
+        onDashboardStatusChange={onDashboardStatusChange}
       />
     </div>
   );
 };
 
-export default USDMacroDashboard;
+export default React.memo(USDMacroDashboard);

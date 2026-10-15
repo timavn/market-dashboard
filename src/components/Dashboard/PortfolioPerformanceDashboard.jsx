@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import {
   TrendingUp,
   BarChart2,
@@ -21,10 +21,7 @@ import {
 } from 'recharts';
 import {
   PERFORMANCE_DEFINITIONS,
-  MOCK_PERFORMANCE_METRICS,
-  MOCK_MONTHLY_RETURNS,
   formatPerformanceValue,
-  getMonthName
 } from '../../utils/portfolioPerformanceUtils';
 
 const formatMoney = (v) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v || 0);
@@ -48,14 +45,14 @@ const getMetricIcon = (key) => {
   }
 };
 
-const SummaryCard = ({ metricKey, isDark }) => {
+const SummaryCard = ({ metricKey }) => {
   const definition = PERFORMANCE_DEFINITIONS[metricKey];
-  const metric = MOCK_PERFORMANCE_METRICS.find(m => m.key === metricKey);
+  const metric = { value: null, format: 'percent' };
   if (!definition || !metric) return null;
 
   const valStr = formatPerformanceValue(metric.value, metric.format);
   const isNegative = metric.value < 0;
-  
+
   return (
     <div className="flex items-center gap-4 bg-white dark:bg-gray-800 p-3 rounded-lg border border-[#e5e7eb] dark:border-gray-700 shadow-sm relative group cursor-help transition-all">
       <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white dark:bg-gray-700 border border-[#e5e7eb] dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -90,21 +87,21 @@ const RealizedOutcomeCard = ({ label, value, valueClass }) => (
   </div>
 );
 
-const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
+const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs, observedAt = null, loading = false, error = null }) => {
   const summaryLayout = [
     ['annualizedReturn', 'sharpeRatio', 'sp500Correlation'],
     ['standardDeviation', 'sortinoRatio', 'sp500Beta'],
     ['maxDrawdown', 'gainToPainRatio', 'downsideDeviation']
   ];
 
-  // Mock trend data to match the visual
-  const trendData = [
-    { month: 'JAN', value: 4.0 },
-    { month: 'FEB', value: -5.0 },
-    { month: 'MAR', value: 12.0 },
-    { month: 'APR', value: 4.0 },
-    { month: 'MAY', value: 19.4 }
-  ];
+  // Realized trades alone do not establish total portfolio returns, risk, or
+  // benchmark statistics. Keep those capabilities explicitly unavailable until
+  // verified account-equity history is connected.
+  const trendData = [];
+  const monthlyReturns = [{ year: 'unavailable', returns: Array(12).fill(null), total: null }];
+  const checkedDate = observedAt && Number.isFinite(Date.parse(observedAt))
+    ? new Date(observedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
 
   return (
     <div className="flex flex-col bg-[#fdfaf4] dark:bg-gray-900 p-6 font-sans min-h-screen text-gray-900 dark:text-white">
@@ -112,17 +109,19 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
       <div className="flex justify-between items-baseline mb-4">
         <h1 className="text-3xl font-serif font-bold text-gray-900 dark:text-white m-0 tracking-tight">Performance</h1>
         <div className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-widest font-medium">
-          All data as of {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+          {checkedDate ? `Realized history checked ${checkedDate}` : 'Verified performance history unavailable'}
         </div>
       </div>
 
+      <p role="status">{loading ? 'Loading verified realized history…' : error || 'Portfolio returns and risk metrics require verified account-equity history.'}</p>
+
       <div className="border border-[#e5e7eb] dark:border-gray-700 rounded-xl p-5 bg-white dark:bg-gray-800/50 shadow-sm flex flex-col gap-6">
-        
+
         {/* Performance Summary */}
         <div>
           <h2 className="text-[11px] font-bold tracking-widest text-gray-600 dark:text-gray-400 uppercase mb-3">Performance Summary</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {summaryLayout.map((row, rIdx) => 
+            {summaryLayout.map((row) =>
               row.map((key) => (
                 <SummaryCard key={key} metricKey={key} isDark={isDark} />
               ))
@@ -134,7 +133,7 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* Monthly Returns */}
           <div>
-            <h2 className="text-[11px] font-bold tracking-widest text-gray-600 dark:text-gray-400 uppercase mb-3">Monthly Returns (2026)</h2>
+            <h2 className="text-[11px] font-bold tracking-widest text-gray-600 dark:text-gray-400 uppercase mb-3">Monthly Returns</h2>
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-[#e5e7eb] dark:border-gray-700 shadow-sm overflow-hidden h-[180px]">
               <table className="w-full text-center border-collapse h-full">
                 <thead>
@@ -150,7 +149,7 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {MOCK_MONTHLY_RETURNS.map((row) => (
+                  {monthlyReturns.map((row) => (
                     <tr key={row.year} className="bg-white dark:bg-gray-800 h-full">
                       {row.returns.map((val, i) => (
                         <td key={i} className="py-4 px-1 border-r border-[#e5e7eb] dark:border-gray-700 last:border-r-0 align-top pt-6">
@@ -161,7 +160,7 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
                       ))}
                       <td className="py-4 px-2 align-top pt-6 border-l border-[#e5e7eb] dark:border-gray-700 bg-[#fdfaf4] dark:bg-gray-800/50">
                         <span className="text-[11px] font-bold text-gray-900 dark:text-white">
-                          {row.total > 0 ? '+' : ''}{row.total}%
+                          {row.total == null ? '—' : `${row.total}%`}
                         </span>
                       </td>
                     </tr>
@@ -174,24 +173,25 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
           {/* Performance Trend */}
           <div>
             <h2 className="text-[11px] font-bold tracking-widest text-gray-600 dark:text-gray-400 uppercase mb-3 flex justify-between items-center">
-              <span>Performance Trend (2026 YTD)</span>
+              <span>Performance Trend</span>
               <div className="bg-white dark:bg-gray-800 px-3 py-1 rounded-md border border-[#e5e7eb] dark:border-gray-700 flex flex-col items-center shadow-sm">
                 <span className="text-[8px] text-gray-400 uppercase tracking-widest leading-none mb-1">YTD Total</span>
-                <span className="text-[13px] font-bold font-serif leading-none">+19.4%</span>
+                <span className="text-[13px] font-bold font-serif leading-none">—</span>
               </div>
             </h2>
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-[#e5e7eb] dark:border-gray-700 shadow-sm p-4 h-[180px]">
-              <ResponsiveContainer width="100%" height="100%">
+              <p>Verified account-equity history unavailable.</p>
+              {trendData.length > 0 && <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#374151' : '#e5dfce'} />
-                  <XAxis 
-                    dataKey="month" 
+                  <XAxis
+                    dataKey="month"
                     axisLine={{ stroke: isDark ? '#4b5563' : '#d1d5db' }}
                     tickLine={false}
                     tick={{ fontSize: 10, fill: isDark ? '#9ca3af' : '#6b7280' }}
                     dy={10}
                   />
-                  <YAxis 
+                  <YAxis
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(v) => `${v}%`}
@@ -200,20 +200,20 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
                     ticks={[-20, -10, 0, 10, 20, 30]}
                   />
                   <ReferenceLine y={0} stroke={isDark ? '#6b7280' : '#9ca3af'} strokeWidth={1} />
-                  <Tooltip 
+                  <Tooltip
                     formatter={(value) => [`${value}%`, 'Return']}
                     contentStyle={{ borderRadius: '8px', fontSize: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
                   />
-                  <Line 
-                    type="linear" 
-                    dataKey="value" 
-                    stroke="#cda875" 
+                  <Line
+                    type="linear"
+                    dataKey="value"
+                    stroke="#cda875"
                     strokeWidth={2}
                     dot={{ r: 3, fill: '#ffffff', stroke: '#cda875', strokeWidth: 2 }}
                     activeDot={{ r: 5, fill: '#cda875' }}
                   />
                 </LineChart>
-              </ResponsiveContainer>
+              </ResponsiveContainer>}
             </div>
           </div>
         </div>
@@ -222,28 +222,28 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs }) => {
         <div>
           <h2 className="text-[11px] font-bold tracking-widest text-gray-600 dark:text-gray-400 uppercase mb-3">Realized Trade Outcomes (YTD)</h2>
           <div className="flex gap-3">
-            <RealizedOutcomeCard 
-              label="Net Realized P/L" 
-              value={realizedKPIs ? formatMoney(realizedKPIs.netRealized) : '-$10,575.42'} 
-              valueClass={realizedKPIs ? (realizedKPIs.netRealized >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400') : 'text-red-600'} 
+            <RealizedOutcomeCard
+              label="Net Realized P/L"
+              value={realizedKPIs ? formatMoney(realizedKPIs.netRealized) : '—'}
+              valueClass={realizedKPIs ? (realizedKPIs.netRealized >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400') : 'text-red-600'}
             />
-            <RealizedOutcomeCard 
-              label="Total Gains" 
-              value={realizedKPIs ? formatMoney(realizedKPIs.totalGains) : '$74,077.09'} 
-              valueClass="text-green-600 dark:text-green-400" 
+            <RealizedOutcomeCard
+              label="Total Gains"
+              value={realizedKPIs ? formatMoney(realizedKPIs.totalGains) : '—'}
+              valueClass="text-green-600 dark:text-green-400"
             />
-            <RealizedOutcomeCard 
-              label="Total Losses" 
-              value={realizedKPIs ? formatMoney(realizedKPIs.totalLosses) : '-$84,652.51'} 
-              valueClass="text-red-600 dark:text-red-400" 
+            <RealizedOutcomeCard
+              label="Total Losses"
+              value={realizedKPIs ? formatMoney(realizedKPIs.totalLosses) : '—'}
+              valueClass="text-red-600 dark:text-red-400"
             />
-            <RealizedOutcomeCard 
-              label="Win Rate" 
-              value={realizedKPIs ? `${realizedKPIs.winRate.toFixed(1)}%` : '45.4%'} 
+            <RealizedOutcomeCard
+              label="Win Rate"
+              value={realizedKPIs ? `${realizedKPIs.winRate.toFixed(1)}%` : '—'}
             />
-            <RealizedOutcomeCard 
-              label="Profit Factor" 
-              value={realizedKPIs ? (realizedKPIs.profitFactor === Infinity ? '∞' : realizedKPIs.profitFactor.toFixed(2)) : '0.88'} 
+            <RealizedOutcomeCard
+              label="Profit Factor"
+              value={realizedKPIs ? (realizedKPIs.profitFactor === Infinity ? '∞' : realizedKPIs.profitFactor.toFixed(2)) : '—'}
             />
           </div>
         </div>

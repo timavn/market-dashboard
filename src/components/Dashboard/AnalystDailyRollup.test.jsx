@@ -1,0 +1,1214 @@
+import React from 'react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import AnalystDailyRollup from './AnalystDailyRollup';
+import usePortfolioSecurityNames from '../../hooks/usePortfolioSecurityNames';
+import hedgaiBaseline from '../../../data/research/hedgai/2026-09-28-baseline.json';
+
+const wholeText = expected => (_, element) => element.textContent === expected
+  && !Array.from(element.children).some(child => child.textContent === expected);
+
+jest.mock('../../hooks/usePortfolioSecurityNames', () => ({ __esModule: true, default: jest.fn(() => ({})) }));
+
+const source = { id: 'early', product: 'early-look', title: 'The Great Finding Out', publicationDate: '2026-09-18' };
+
+test('saved high-priority realignment uses compact separate columns and retains all eight captured rows and evidence', () => {
+  const citation = { id: 'refresh-rta', product: 'real-time-alerts', productLabel: 'Real-Time Alerts', title: 'Captured partial sale', publicationDate: '2026-09-30' };
+  const rows = [
+    ['EWZ', '—', 'Long · 3.12%', 'Removed source Long', 'Requalify against the dated source action', 'Sep 28, 2026'],
+    ['VFLO', '—', 'Long · 2.85%', 'Removed source Long', 'Requalify against the dated source action', 'Sep 17, 2026'],
+    ['GSL', '—', 'Long · 2.47%', 'Sell some', 'Requalify against the dated source action', 'Sep 24, 2026'],
+    ['CVI', 'CVR Energy', 'Long · 2.20%', 'Sell some', 'Review partial Long reduction', 'Sep 30, 2026'],
+    ['EMIF', '—', 'Short · 2.19%', 'Removed source Short', 'Requalify against the dated source action', 'Aug 31, 2026'],
+    ['AAPL', '—', 'Long · 2.10%', 'Sell some', 'Review partial Long reduction', 'Sep 30, 2026'],
+    ['MSFT', '—', 'Long · 2.02%', 'Sell some', 'Requalify against the dated source action', 'Aug 19, 2026'],
+    ['CHH', '—', 'Short · 2.00%', 'Cover', 'Requalify against the dated source action', 'Sep 24, 2026'],
+  ];
+  const data = { version: 1, citations: [citation], sections: [{ id: 'refresh-realignment', title: 'Highest-priority realignment', blocks: [{
+    type: 'table', columns: ['Ticker', 'Security', 'Position', 'Source reading', 'Review action', 'Date'],
+    rows: rows.map(cells => ({ cells, citationIds: [citation.id] })),
+  }] }] };
+  const saved = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} holdingsAsOf="2026-09-30T17:53:10Z" />);
+  const table = screen.getByRole('table', { name: 'Highest-priority realignment' });
+  expect(table).toHaveClass('analyst-refresh-realignment');
+  expect(table.parentElement).toHaveClass('analyst-realignment-table-wrap');
+  expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Ticker', 'Security', 'Bias', 'Size', 'Source action', 'Notes', 'Source date']);
+  const displayedRows = [...table.querySelectorAll('tbody tr')];
+  expect(displayedRows).toHaveLength(8);
+  displayedRows.forEach((row, index) => {
+    const [bias, size] = rows[index][2].split(' · ');
+    expect([...row.querySelectorAll('td')].map(cell => cell.textContent)).toEqual([rows[index][0], rows[index][1], bias, size, ...rows[index].slice(3)]);
+    within(row).getAllByText(bias).forEach(word => expect(word).toHaveClass(bias === 'Long' ? 'analyst-process--positive' : 'analyst-process--negative'));
+  });
+  const dateline = screen.getByRole('region', { name: 'Highest-priority realignment' }).querySelector('.portfolio-review-dateline');
+  expect(dateline).toHaveClass('has-period');
+  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Positioning: Sep 30, 2026 10:53 PDT');
+  expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Sep 30, 2026');
+  expect(dateline).not.toHaveTextContent(/·|Research:/);
+  expect(within(table).getByText('CVR Energy').closest('.analyst-security-name')).toHaveAttribute('title', 'CVR Energy');
+  fireEvent.click(screen.getByRole('button', { name: 'Source: Captured partial sale · Sep 30, 2026' }));
+  expect(onCitation).toHaveBeenCalledWith(citation, expect.objectContaining({ highlightTexts: expect.arrayContaining(['Sell some', 'Review partial Long reduction', 'Sep 30, 2026']) }));
+  expect(JSON.stringify(data)).toBe(saved);
+});
+
+test('new compact realignment keeps unavailable size and short-term prose distinct from position directions', () => {
+  const data = { version: 1, sections: [{ id: 'refresh-realignment', title: 'Highest-priority realignment', blocks: [{
+    type: 'table', columns: ['Ticker', 'Security', 'Bias', 'Size', 'Source action', 'Notes', 'Source date'], rows: [{
+      cells: ['CHH', 'Choice Hotels', 'Short', '—', 'Cover some', 'Review a partial Short cover; short-term trend unchanged.', 'Sep 24, 2026'],
+    }],
+  }] }] };
+  render(<AnalystDailyRollup rollup={data} />);
+  const table = screen.getByRole('table', { name: 'Highest-priority realignment' });
+  expect(table.querySelector('tbody td:nth-child(4)')).toHaveTextContent('—');
+  expect(table.querySelector('tbody td:nth-child(5)')).toHaveTextContent('Cover some');
+  within(table).getAllByText('Short').forEach(word => expect(word).toHaveClass('analyst-process--negative'));
+  expect(table.querySelector('tbody td:nth-child(6)')).toHaveTextContent('short-term trend unchanged');
+  expect(within(table).queryByText('short-term', { selector: '.analyst-process--negative' })).not.toBeInTheDocument();
+});
+
+test('all portfolio alignment sections separate their captured holdings date from the complete source period', () => {
+  const sections = ['position-confirmations', 'position-contradictions', 'refresh-realignment', 'refresh-watch-list', 'refresh-aligned', 'refresh-sequence'];
+  const citations = [
+    { id: 'prior', product: 'the-call', publicationDate: '2026-09-27' },
+    { id: 'current', product: 'risk-ranges', publicationDate: '2026-09-29' },
+  ];
+  const cells = ['SPY', 'SPDR S&P 500 ETF Trust', 'Bullish', 'Sep 27, 2026'];
+  const data = { version: 1, citations, sections: sections.map(id => ({ id, title: id, citationIds: ['current'], blocks: [{
+    type: 'table', columns: ['Ticker', 'Security', 'Reading', 'Source date'], rows: [{ cells, citationIds: ['prior'] }],
+  }] })) };
+  const captured = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} holdingsAsOf="2026-09-30T17:53:10Z" />);
+  for (const id of sections) {
+    const region = screen.getByRole('region', { name: id });
+    const dateline = region.querySelector('.portfolio-review-dateline');
+    expect(dateline).toHaveClass('has-period');
+    expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Positioning: Sep 30, 2026 10:53 PDT');
+    expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Sep 27, 2026 – Sep 29, 2026');
+    expect(dateline).not.toHaveTextContent(/·|Research:/);
+    expect(within(region).getAllByRole('cell').map(cell => cell.textContent)).toEqual(cells);
+  }
+  expect(JSON.stringify(data)).toBe(captured);
+});
+
+test('research comparisons retain the latest publication at left and the full source interval at right', () => {
+  const citations = [
+    { id: 'first-range', product: 'risk-ranges', publicationDate: '2026-08-31' },
+    { id: 'middle-range', product: 'risk-ranges', publicationDate: '2026-09-03' },
+    { id: 'latest-range', product: 'risk-ranges', publishedAt: '2026-09-04T14:30:00Z', publicationDate: '2026-09-04' },
+  ];
+  const cells = ['SPY', 'SPDR S&P 500 ETF Trust', 'Bullish', 'Neutral'];
+  const data = { version: 1, citations, sections: [{ id: 'risk-ranges', title: 'Trend & range changes', citationIds: ['middle-range'], blocks: [{
+    type: 'table', columns: ['Ticker', 'Security', 'Prior Trend', 'Trend'], rows: [{ cells, citationIds: ['first-range', 'latest-range'] }],
+  }] }] };
+  const captured = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} holdingsAsOf="2026-09-30T17:53:10Z" />);
+  const region = screen.getByRole('region', { name: 'Trend/Ranges/Coverage/Outbucket' });
+  const dateline = region.querySelector('.portfolio-review-dateline');
+  expect(dateline).toHaveClass('has-period');
+  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Published: Sep 4, 2026 07:30 PDT');
+  expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Aug 31, 2026 – Sep 4, 2026');
+  expect(dateline).not.toHaveTextContent(/Sep 30|·|Compared with/);
+  expect(within(region).getAllByRole('cell').map(cell => cell.textContent)).toEqual(cells);
+  expect(JSON.stringify(data)).toBe(captured);
+});
+
+test('statistics and model datelines keep their meanings without becoming publication periods', () => {
+  const positioning = 'Positioning: Sep 30, 2026 10:53 PDT';
+  const tickDates = `${positioning} · Statistics: Sep 28, 2026`;
+  const modelDates = `${positioning} · Statistics: Sep 25, 2026 · 252-session model · 72% of gross exposure modeled`;
+  const data = { version: 1, sections: [
+    { id: 'hedgai-signals', title: 'HedgAI Signals', blocks: [
+      { type: 'paragraph', text: tickDates }, { type: 'paragraph', text: 'Captured Tick research.' },
+    ] },
+    { id: 'factor-exposure', title: 'Factor exposure', portfolioObservedAt: '2026-09-30T17:53:10Z', asOf: '2026-09-25', blocks: [
+      { type: 'paragraph', text: 'Portfolio captured Sep 30, 2026 10:53 PDT · 252-session model through Sep 25, 2026 · 72% of gross exposure modeled' },
+      { type: 'paragraph', text: 'Captured factor research.' },
+    ] },
+  ] };
+  const captured = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} holdingsAsOf="2026-10-01T17:00:00Z" />);
+  for (const [title, expected] of [['Tick', tickDates], ['Factor exposure', modelDates]]) {
+    const region = screen.getByRole('region', { name: title });
+    const dateline = region.querySelector('.portfolio-review-dateline');
+    expect(dateline).toHaveTextContent(expected);
+    expect(dateline).not.toHaveClass('has-period');
+    expect(region.querySelector('.portfolio-review-period')).toBeNull();
+    expect(dateline).not.toHaveTextContent('Oct 1');
+  }
+  expect(JSON.stringify(data)).toBe(captured);
+});
+
+test.each(['Report: Sep 28, 2026', 'Published Sep 28, 2026 · Data as of Sep 25, 2026'])(
+  'market structure separates publication and data dates in saved and new reports: %s', publication => {
+    const citation = { id: 'structure', product: 'market-structure', title: 'Market Situation Report', publicationDate: '2026-09-28' };
+    const data = { version: 1, citations: [citation], sections: [{ id: 'market-structure', title: 'Market structure & flows', blocks: [
+      { type: 'paragraph', text: publication, citationIds: [citation.id] },
+      { type: 'table', columns: ['SPX metric', 'Reading', 'As of'], rows: [
+        { cells: ['Gamma throttle', '6.82', 'Sep 25, 2026'], citationIds: [citation.id], provenance: { publicationDate: '2026-09-28', chartDate: '2026-09-25' } },
+        { cells: ['10-day realized volatility', '10.98', 'Sep 25, 2026'], citationIds: [citation.id] },
+      ] },
+    ] }] };
+    const captured = JSON.stringify(data);
+    const onCitation = jest.fn();
+    render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+    expect(screen.getByText(wholeText('Published: Sep 28, 2026 · Data as of: Sep 25, 2026'))).toBeVisible();
+    expect(screen.getByRole('columnheader', { name: 'Data as of' })).toBeVisible();
+    expect(screen.getAllByRole('cell', { name: 'Sep 25, 2026' })).toHaveLength(2);
+    expect(screen.getByRole('cell', { name: '6.82' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /Source: Market Situation Report/ }));
+    expect(onCitation).toHaveBeenCalledWith(citation, expect.objectContaining({ highlightTexts: expect.arrayContaining(['6.82', 'Sep 25, 2026']) }));
+    expect(JSON.stringify(data)).toBe(captured);
+  },
+);
+
+test.each(['Sep 24, 2026', '—'])('market structure does not claim a shared data date when another row is %s', otherDate => {
+  render(<AnalystDailyRollup rollup={{ version: 1, sections: [{ id: 'market-structure', title: 'Market structure & flows', blocks: [
+    { type: 'paragraph', text: 'Report: Sep 28, 2026' },
+    { type: 'table', columns: ['SPX metric', 'Reading', 'As of'], rows: [
+      { cells: ['Gamma throttle', '6.82', 'Sep 25, 2026'] },
+      { cells: ['Zero-gamma level', '7,659', otherDate] },
+    ] },
+  ] }] }} />);
+  expect(screen.getByText(wholeText('Published: Sep 28, 2026'))).toBeVisible();
+  expect(screen.queryByText(/· Data as of/)).not.toBeInTheDocument();
+  expect(screen.getByRole('cell', { name: 'Sep 25, 2026' })).toBeVisible();
+  expect(screen.getByRole('cell', { name: otherDate })).toBeVisible();
+});
+
+test('bottom position tables keep product evidence visible and the explanation in the rightmost column', () => {
+  const call = { id: 'call', product: 'the-call', productLabel: 'The Call', title: 'The Call — Sep 29', publishedAt: '2026-09-29T14:00:00Z' };
+  const current = { id: 'risk-new', product: 'risk-ranges', productLabel: 'Risk Ranges', title: 'Risk Ranges — Sep 29', publicationDate: '2026-09-29' };
+  const prior = { ...current, id: 'risk-prior', title: 'Risk Ranges — Sep 28', publicationDate: '2026-09-28' };
+  const columns = ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'];
+  const confirmRow = {
+    cells: ['MSFT', 'Microsoft Corporation', 'Long 3.18%', 'The Call · Sep 29', 'Buying opportunity', 'The buying opportunity supports the held Long.'],
+    citationIds: [call.id], cellCitationIds: [[], [], [], [call.id], [call.id], [call.id]],
+    evidenceTexts: ['Microsoft remains a buying opportunity.'],
+  };
+  const contradictionRow = {
+    cells: ['XLE', 'Energy Select Sector SPDR Fund', 'Long 3.00%', 'Risk Ranges · Sep 29', 'Bullish → Bearish', 'Trend turned Bearish against the held Long; review the position.'],
+    citationIds: [current.id, prior.id], cellCitationIds: [[], [], [], [current.id, prior.id], [current.id, prior.id], [current.id]],
+    evidenceTexts: ['XLE Bearish', 'XLE Bullish'],
+  };
+  const data = { version: 1, citations: [call, current, prior], sections: [
+    { id: 'research', title: 'Research', blocks: [{ type: 'paragraph', text: 'The captured daily research.' }] },
+    { id: 'position-confirmations', title: 'Position confirmations', blocks: [{ type: 'table', columns, rows: [confirmRow] }] },
+    { id: 'position-contradictions', title: 'Position contradictions', blocks: [{ type: 'table', columns, rows: [contradictionRow] }] },
+  ] };
+  const before = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  expect(screen.getAllByRole('region').map(region => region.getAttribute('aria-label'))).toEqual(['Research', 'Position confirmations', 'Position contradictions']);
+  for (const title of ['Position confirmations', 'Position contradictions']) {
+    const region = screen.getByRole('region', { name: title });
+    const table = within(region).getByRole('table', { name: title });
+    expect(table).toHaveClass('analyst-security-table', 'analyst-position-alignment');
+    expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(columns);
+    expect(table.querySelector('tbody tr td:last-child')).toHaveTextContent(/held Long/);
+    expect(within(region).getByRole('heading', { name: title })).toHaveClass('analyst-portfolio-title');
+    expect(region.querySelector('details')).not.toBeInTheDocument();
+    within(table).getAllByText('Long').forEach(word => expect(word).toHaveClass('analyst-process--positive'));
+  }
+  const confirmations = screen.getByRole('region', { name: 'Position confirmations' });
+  const contradictions = screen.getByRole('region', { name: 'Position contradictions' });
+  expect(within(confirmations).getByText('MSFT')).toHaveClass('analyst-process--ticker');
+  expect(within(contradictions).getByText('Energy Select Sector SPDR Fund').closest('.analyst-security-name')).toHaveAttribute('title', 'Energy Select Sector SPDR Fund');
+  expect(within(contradictions).getByText('Bullish')).toHaveClass('analyst-process--positive');
+  within(contradictions).getAllByText('Bearish').forEach(word => expect(word).toHaveClass('analyst-process--negative'));
+  fireEvent.click(within(confirmations).getByRole('button', { name: 'Product evidence: The Call · Sep 29' }));
+  expect(onCitation).toHaveBeenLastCalledWith(call, { highlightTexts: confirmRow.evidenceTexts });
+  fireEvent.click(within(contradictions).getByRole('button', { name: 'Product evidence: Risk Ranges · Sep 29' }));
+  expect(onCitation).toHaveBeenLastCalledWith(current, {
+    highlightTexts: contradictionRow.evidenceTexts,
+    relatedSources: [{ ...current, highlightTexts: contradictionRow.evidenceTexts }, { ...prior, highlightTexts: contradictionRow.evidenceTexts }],
+  });
+  expect(within(confirmations).getByRole('button', { name: 'Source: The Call — Sep 29 · Sep 29, 2026 07:00 PDT' })).toBeVisible();
+  expect(within(contradictions).getByRole('button', { name: 'Source: Risk Ranges' })).toBeVisible();
+  expect(JSON.stringify(data)).toBe(before);
+});
+
+test('position tables show uncited products as text and preserve an unavailable position without inventing evidence', () => {
+  const data = { version: 1, sections: [{ id: 'position-confirmations', title: 'Position confirmations', blocks: [{
+    type: 'table', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: [{
+      cells: ['MSFT', 'Microsoft', 'Unavailable', 'The Call', 'Bullish', 'Published research only.'],
+      cellCitationIds: [[], [], [], ['missing-source']],
+    }],
+  }] }] };
+  render(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
+  expect(screen.getByText('The Call')).toBeVisible();
+  expect(screen.getByText('Unavailable')).toBeVisible();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  expect(screen.queryByText(/\d+\.\d+%/)).not.toBeInTheDocument();
+});
+
+test.each(['position-confirmations', 'refresh-realignment', 'refresh-watch-list', 'refresh-aligned'])('%s resolves missing descriptive names while captured names and research stay immutable', id => {
+  usePortfolioSecurityNames.mockReturnValueOnce({
+    DBMF: { name: 'iMGP DBi Managed Futures Strategy ETF', source: 'Verified security catalog' },
+    MSFT: { name: 'Current Microsoft name', source: 'Verified security catalog' },
+  });
+  const data = { version: 1, sections: [
+    { id, title: 'Position confirmations', blocks: [{ type: 'table', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: [
+      { cells: ['DBMF', '—', 'Long 2.20%', 'The Call', 'Bullish', 'Supports the captured Long.'] },
+      { cells: ['MSFT', 'Captured Microsoft name', 'Long 3.18%', 'The Call', 'Bullish', 'Supports the captured Long.'] },
+    ] }] },
+    { id: 'other', title: 'Other research', blocks: [{ type: 'table', columns: ['Ticker', 'Security', 'Reading'], rows: [{ cells: ['DBMF', '—', 'Wait'] }] }] },
+  ] };
+  const before = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} />);
+  expect(usePortfolioSecurityNames).toHaveBeenLastCalledWith([
+    { holding: 'DBMF', securityName: '' }, { holding: 'MSFT', securityName: 'Captured Microsoft name' },
+  ]);
+  const region = screen.getByRole('region', { name: 'Position confirmations' });
+  expect(within(region).getByText('iMGP DBi Managed Futures Strategy ETF').closest('.analyst-security-name')).toHaveAttribute('title', 'iMGP DBi Managed Futures Strategy ETF · Current security name · Verified security catalog');
+  expect(within(region).getByText('Captured Microsoft name').closest('.analyst-security-name')).toHaveAttribute('title', 'Captured Microsoft name');
+  expect(screen.queryByText('Current Microsoft name')).not.toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: 'Other research' })).getByText('—')).toBeVisible();
+  expect(JSON.stringify(data)).toBe(before);
+});
+
+test('combined HedgAI table keeps ten named readings visible, groups separate, and the complete dated book expandable', () => {
+  const visible = [
+    ['QQQ', 'Nasdaq-100', 'Short', '—', 'Short 48.0%', 'Short excluded'],
+    ['GLD', 'Gold', 'Wait', '—', 'Long 63.6%', 'Await Buy'],
+    ['XLE', 'Energy', 'Long', '—', 'Long 87.5%', 'Included'],
+    ['UJB', 'High-yield credit', 'Long', '—', 'Long 81.2%', 'Included'],
+    ['SLX', 'Steel', 'Short', '—', 'Short 66.7%', 'Included'],
+    ['SPY', 'S&P 500', 'Long', '—', 'Long 60.0%', 'Included'],
+    ['PALL', 'Palladium', 'Wait', 'Closed Long', 'Long 63.2%', 'Closed'],
+    ['XLY', 'Consumer discretionary', 'Long', '—', 'Long 68.0%', 'Included'],
+    ['IWM', 'Russell 2000', 'Long', '—', 'Long 60.0%', 'Included'],
+    ['SLV', 'Silver', 'Wait', '—', 'Long 64.7%', 'Await Buy'],
+  ];
+  const data = { version: 1, sections: [{ id: 'hedgai-signals', title: 'HedgAI Signals', blocks: [
+    { type: 'table', groupRows: true, columns: ['Ticker', 'Security', 'Now', 'Today', 'History', '60% filter'],
+      rows: visible.map((cells, index) => ({ cells, group: index < 5 ? 'Top AI Signals' : 'Need More Data AI Signals',
+        cellTitles: ['', cells[0] === 'UJB' ? 'High Yield Corp Bond $HYG · Source-listed ticker UJB' : cells[1], '',
+          cells[0] === 'PALL' ? 'Sep 28, 2026 08:43 ET · Closed Long: Palladium' : '',
+          cells[0] === 'GLD' ? 'Long 63.6% · 11 signals · W/L 1.28 · Sep 28, 2026' : '', ''] })) },
+    { type: 'table', groupRows: true, disclosure: 'Full HedgAI book · 47 securities',
+      columns: ['Ticker', 'Security', 'Position'], rows: hedgaiBaseline.rows.map(row => ({
+        group: row.group === 'top' ? 'Top AI Signals' : 'Need More Data AI Signals',
+        cells: [row.ticker, row.sourceLabel, row.position],
+      })) },
+  ] }] };
+  const saved = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} />);
+  const region = screen.getByRole('region', { name: 'Tick' });
+  const table = region.querySelector('.analyst-hedgai-summary');
+  expect(table).toHaveClass('analyst-hedgai-summary');
+  expect(within(table).getByRole('columnheader', { name: 'Tick' })).toBeVisible();
+  expect(table.querySelectorAll('tbody tr:not(.analyst-research-group)')).toHaveLength(10);
+  expect(table.querySelectorAll('th[scope="rowgroup"]')).toHaveLength(2);
+  for (const security of ['Nasdaq-100', 'Gold', 'Palladium', 'S&P 500', 'Consumer discretionary']) {
+    expect(within(table).getByText(security)).toBeVisible();
+  }
+  expect(within(table).getByText('High-yield credit').closest('.analyst-security-name')).toHaveAttribute('title', 'High Yield Corp Bond $HYG · Source-listed ticker UJB');
+  expect(within(table).getByText('Gold').closest('tr')).toHaveTextContent('Wait');
+  expect(within(table).getByText('Gold').closest('tr').querySelector('td[title*="11 signals"]')).toBeInTheDocument();
+  expect(within(table).getByText('Nasdaq-100').closest('tr')).toHaveTextContent('Short excluded');
+  within(within(table).getByText('Nasdaq-100').closest('tr')).getAllByText('Short').forEach(word => expect(word).toHaveClass('analyst-process--negative'));
+  expect(within(table).getByText('Palladium').closest('tr')).toHaveTextContent('WaitClosed Long');
+  within(table).getAllByText('Wait').forEach(word => expect(word).toHaveClass('analyst-process--muted'));
+  const disclosure = within(region).getByText(wholeText('Full Tick book · 47 securities')).closest('details');
+  expect(disclosure).not.toHaveAttribute('open');
+  expect(within(disclosure).queryByText('META')).not.toBeInTheDocument();
+  expect(disclosure.querySelector('table')).toBeNull();
+  fireEvent.click(disclosure.querySelector('summary'));
+  expect(disclosure).toHaveAttribute('open');
+  expect(within(disclosure).getByText('META')).toBeVisible();
+  expect(disclosure.querySelectorAll('tbody tr:not(.analyst-research-group)')).toHaveLength(47);
+  expect(JSON.stringify(data)).toBe(saved);
+});
+
+test('HedgAI keeps six active rows above a closed 47-security disclosure with both source groups and linked evidence', () => {
+  const citation = { id: 'hedgai-image', product: 'hedgai-signals', productLabel: 'HedgAI Signals',
+    title: 'Reviewed HedgAI publication', publicationDate: '2026-09-28', sourceUri: '/api/research/hedgai/source/hedgai-image' };
+  const activeTickers = new Set(['XLE', 'SLX', 'UJB', 'SPY', 'IWM', 'XLY']);
+  const rows = hedgaiBaseline.rows;
+  const data = { version: 1, citations: [citation], sections: [{ id: 'hedgai-signals', title: 'HedgAI Signals',
+    citationIds: [citation.id], blocks: [
+      { type: 'table', columns: ['Ticker', 'Security', 'HedgAI'], rows: rows.filter(row => activeTickers.has(row.ticker))
+        .map(row => ({ cells: [row.ticker, row.sourceLabel, 'Bullish'], citationIds: [citation.id] })) },
+      { type: 'paragraph', text: 'Shorts Closed: Platinum. Remaining Long META Up 13%.', citationIds: [citation.id] },
+      { type: 'table', disclosure: `Full HedgAI book · ${rows.length} securities`,
+        columns: ['Ticker', 'Security', 'Group', 'Position', 'Bull batting', 'Bear batting'], rows: rows.map(row => ({
+          cells: [row.ticker, row.sourceLabel, row.group === 'top' ? 'Top' : 'Need more data', row.position,
+            `${(row.metrics.buy.battingAverage * 100).toFixed(1)}%`, `${(row.metrics.short.battingAverage * 100).toFixed(1)}%`], citationIds: [citation.id],
+        })) },
+    ] }] };
+  const onCitation = jest.fn();
+  const original = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  const region = screen.getByRole('region', { name: 'Tick' });
+  const disclosure = within(region).getByText(wholeText('Full Tick book · 47 securities')).closest('details');
+  expect(disclosure).not.toHaveAttribute('open');
+  expect(disclosure.querySelectorAll('tbody tr')).toHaveLength(0);
+  expect(region.querySelector('table tbody').querySelectorAll('tr')).toHaveLength(6);
+  within(region).getAllByText('Bullish').forEach(word => expect(word).toHaveClass('analyst-process--positive'));
+  expect(within(region).getByText('Long')).toHaveClass('analyst-process--positive');
+  fireEvent.click(disclosure.querySelector('summary'));
+  expect(disclosure.querySelectorAll('tbody tr')).toHaveLength(47);
+  expect(disclosure).toHaveTextContent('Top');
+  expect(disclosure).toHaveTextContent('Need more data');
+  fireEvent.click(within(region).getByRole('button', { name: 'Source: Reviewed HedgAI publication · Sep 28, 2026' }));
+  expect(onCitation).toHaveBeenCalledWith(citation, expect.objectContaining({ highlightTexts: expect.arrayContaining(['SPY', 'QQQ']) }));
+  expect(JSON.stringify(data)).toBe(original);
+});
+const rollup = () => ({ version: 1, citations: [source], sections: [{
+  id: 'macro', title: 'Macro outlook', citationIds: ['early'], blocks: [
+    { type: 'paragraph', text: 'Quad 4 is a forecast scenario. Long position remains Bullish; short-term growth is Neutral.', citationIds: ['early'] },
+    { type: 'table', columns: ['Asset', 'Trade', 'Trend'], rows: [{ cells: ['SPX', 'Bullish', 'Bearish'], citationIds: ['early'] }] },
+  ],
+}] });
+
+test('all security tables share compact identity columns and blue tickers without changing metric tables', () => {
+  const securityName = 'Brent Crude Oil Continuous Contract';
+  render(<AnalystDailyRollup rollup={{ version: 1, sections: [{ id: 'positions', title: 'Positioning', blocks: [
+    { type: 'table', columns: ['Ticker', 'Security', 'Positioning'], rows: [{ cells: ['BRENT', securityName, 'Long'] }] },
+    { type: 'table', columns: ['Ticker', 'Security', 'Research positioning change'], rows: [{ cells: ['BRENT', securityName, 'Added to Long mentions'] }] },
+    { type: 'table', columns: ['Signal', 'Published reading'], rows: [{ cells: ['SPX Gamma', 'Neutral'] }] },
+  ] }] }} />);
+  const tables = screen.getAllByRole('table');
+  for (const table of tables.slice(0, 2)) {
+    expect(table).toHaveClass('analyst-security-table');
+    expect(within(table).getByText('BRENT')).toHaveClass('analyst-process--ticker');
+    expect(within(table).getByText(securityName).closest('.analyst-security-name')).toHaveAttribute('title', securityName);
+    expect(table.querySelectorAll('col')).toHaveLength(3);
+  }
+  expect(tables[2]).not.toHaveClass('analyst-security-table');
+  expect(screen.getByRole('heading', { name: 'Positioning' })).toHaveClass('analyst-portfolio-title');
+});
+
+test.each([
+  { id: 'macro-show', title: 'Macro Show' },
+  { title: 'Macro Show' },
+  { id: 'company-catalysts', title: 'Company catalysts & sector research' },
+  { title: 'Company catalysts & sector research' },
+  { id: 'the-call', title: 'The Call' },
+  { title: 'The Call' },
+])('research securities are compact directional ticker lists for $title', section => {
+  const macroSource = { id: 'macro-source', product: 'macro-show', title: 'Daily Macro Show', publicationDate: '2026-09-21' };
+  const data = { version: 1, citations: [macroSource], sections: [{ ...section, blocks: [
+    { type: 'paragraph', text: 'Rates are the focus this morning.', citationIds: [macroSource.id] },
+    { type: 'table', columns: ['Ticker', 'Security', 'Positioning'], rows: [
+      { cells: ['TLT', 'iShares 20+ Year Treasury Bond ETF', 'Short'], citationIds: [macroSource.id] },
+      { cells: ['SPY', 'SPDR S&P 500 ETF Trust', 'Long'], citationIds: [macroSource.id] },
+      { cells: ['CORN', 'Teucrium Corn Fund', 'Long'], citationIds: [macroSource.id] },
+      { cells: ['SPY', 'SPDR S&P 500 ETF Trust', 'Long'], citationIds: [macroSource.id] },
+      { cells: ['XLF', 'Financial Select Sector SPDR Fund', 'Neutral'], citationIds: [macroSource.id] },
+      { cells: ['SPY', 'SPDR S&P 500 ETF Trust', 'Short'], citationIds: [macroSource.id] },
+    ] },
+  ] }] };
+  const original = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  const region = screen.getByRole('region', { name: section.title });
+  expect(within(region).queryByRole('table')).not.toBeInTheDocument();
+  expect([...region.querySelectorAll('p:not(.portfolio-review-dateline)')].map(node => node.textContent)).toEqual([
+    'Rates are the focus this morning.', 'Long: SPY, CORN', 'Short: TLT, SPY', 'Neutral: XLF',
+  ]);
+  expect(within(region).getByText('Long')).toHaveClass('analyst-process--positive');
+  expect(within(region).getByText('Short')).toHaveClass('analyst-process--negative');
+  expect(within(region).getByText('Neutral')).toHaveClass('analyst-process--muted');
+  ['SPY', 'CORN', 'TLT', 'XLF'].forEach(ticker => {
+    within(region).getAllByText(ticker).forEach(node => expect(node).toHaveClass('analyst-process--ticker'));
+  });
+  expect(region.lastChild).toHaveTextContent('Sources: Macro Show');
+  fireEvent.click(within(region).getByRole('button', { name: 'Source: Daily Macro Show · Sep 21, 2026' }));
+  expect(onCitation).toHaveBeenCalledWith(macroSource, expect.objectContaining({ highlightTexts: expect.arrayContaining([
+    'Rates are the focus this morning.', 'TLT', 'iShares 20+ Year Treasury Bond ETF', 'Long', 'Short', 'Neutral',
+  ]) }));
+  expect(JSON.stringify(data)).toBe(original);
+});
+
+test.each([
+  { id: 'macro-show', title: 'Macro Show' },
+  { title: 'Macro Show' },
+])('Macro Show positioning changes group added and removed tickers with original source evidence for $title', section => {
+  const macroSource = { id: 'macro-source', product: 'macro-show', title: 'Daily Macro Show', publicationDate: '2026-09-21' };
+  const changes = [
+    ['XLE', 'Energy Select Sector SPDR Fund', 'No longer listed Long'],
+    ['TLT', 'iShares 20+ Year Treasury Bond ETF', 'Added to Short mentions'],
+    ['SPY', 'SPDR S&P 500 ETF Trust', 'Added to Long mentions'],
+    ['CORN', 'Teucrium Corn Fund', 'Added to Long mentions'],
+    ['SPY', 'SPDR S&P 500 ETF Trust', 'Added to Long mentions'],
+    ['OIH', 'VanEck Oil Services ETF', 'No longer listed Short'],
+    ['XLF', 'Financial Select Sector SPDR Fund', 'Added to Neutral mentions'],
+    ['GLD', 'SPDR Gold Shares', 'No longer listed Neutral'],
+  ];
+  const data = { version: 1, citations: [macroSource], sections: [{ ...section, blocks: [
+    { type: 'table', columns: ['Ticker', 'Security', 'Research positioning change'], rows: changes.map(cells => ({ cells, citationIds: [macroSource.id] })) },
+  ] }] };
+  const original = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  const region = screen.getByRole('region', { name: section.title });
+  expect(within(region).queryByRole('table')).not.toBeInTheDocument();
+  expect([...region.querySelectorAll('p:not(.portfolio-review-dateline)')].map(node => node.textContent)).toEqual([
+    'Added Long: SPY, CORN', 'Added Short: TLT', 'Added Neutral: XLF',
+    'Removed Long: XLE', 'Removed Short: OIH', 'Removed Neutral: GLD',
+  ]);
+  ['Long', 'Short', 'Neutral'].forEach((direction, index) => {
+    within(region).getAllByText(direction).forEach(node => expect(node).toHaveClass(`analyst-process--${['positive', 'negative', 'muted'][index]}`));
+  });
+  [
+    ['Added Long:', 'Added', 'positive'],
+    ['Added Short:', 'Added', 'negative'],
+    ['Added Neutral:', 'Added', 'muted'],
+    ['Removed Long:', 'Removed', 'positive'],
+    ['Removed Short:', 'Removed', 'negative'],
+    ['Removed Neutral:', 'Removed', 'muted'],
+  ].forEach(([prefix, action, tone]) => {
+    const line = [...region.querySelectorAll('p:not(.portfolio-review-dateline)')].find(node => node.textContent.startsWith(prefix));
+    expect(within(line).getByText(action)).toHaveClass(`analyst-process--${tone}`);
+  });
+  changes.forEach(([ticker, security]) => {
+    expect(within(region).getByText(ticker)).toHaveClass('analyst-process--ticker');
+    expect(within(region).getByTitle(security)).toHaveTextContent(ticker);
+  });
+  expect(region.lastChild).toHaveTextContent('Sources: Macro Show');
+  fireEvent.click(within(region).getByRole('button', { name: 'Source: Daily Macro Show · Sep 21, 2026' }));
+  expect(onCitation).toHaveBeenCalledWith(macroSource, expect.objectContaining({ highlightTexts: expect.arrayContaining(changes.flat()) }));
+  expect(JSON.stringify(data)).toBe(original);
+});
+
+test('Macro Show change lists preserve reversals and unrecognized source labels without recasting them as additions', () => {
+  const data = { version: 1, sections: [{ id: 'macro-show', title: 'Macro Show', blocks: [
+    { type: 'table', columns: ['Ticker', 'Security', 'Research positioning change'], rows: [
+      { cells: ['SPY', 'SPDR S&P 500 ETF Trust', 'Long → Short'] },
+      { cells: ['XLF', 'Financial Select Sector SPDR Fund', 'Long → Short'] },
+      { cells: ['TLT', 'iShares 20+ Year Treasury Bond ETF', 'Short → Long'] },
+      { cells: ['CORN', 'Teucrium Corn Fund', 'Retained pending review'] },
+    ] },
+  ] }] };
+  const original = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} />);
+  const region = screen.getByRole('region', { name: 'Macro Show' });
+  expect(within(region).queryByRole('table')).not.toBeInTheDocument();
+  expect([...region.querySelectorAll('p:not(.portfolio-review-dateline)')].map(node => node.textContent)).toEqual([
+    'Long → Short: SPY, XLF', 'Short → Long: TLT', 'Retained pending review: CORN',
+  ]);
+  expect(region).not.toHaveTextContent('Added');
+  expect(region).not.toHaveTextContent('Removed');
+  within(region).getAllByText('Long').forEach(node => expect(node).toHaveClass('analyst-process--positive'));
+  within(region).getAllByText('Short').forEach(node => expect(node).toHaveClass('analyst-process--negative'));
+  expect(within(region).getByText('CORN')).toHaveClass('analyst-process--ticker');
+  expect(JSON.stringify(data)).toBe(original);
+});
+
+test('Macro Show change lists preserve unrelated positioning and company research change tables', () => {
+  const data = { version: 1, sections: [
+    { id: 'macro-show', title: 'Macro Show', blocks: [
+      { type: 'table', columns: ['Ticker', 'Security', 'Research positioning change'], rows: [{ cells: ['SPY', 'SPDR S&P 500 ETF Trust', 'Added to Long mentions'] }] },
+    ] },
+    { id: 'company-catalysts', title: 'Company catalysts & sector research', blocks: [
+      { type: 'table', columns: ['Ticker', 'Security', 'Research positioning change'], rows: [{ cells: ['CORN', 'Teucrium Corn Fund', 'Added to Long mentions'] }] },
+    ] },
+    { id: 'unrelated-positions', title: 'Positioning', blocks: [
+      { type: 'table', columns: ['Ticker', 'Security', 'Positioning'], rows: [{ cells: ['TLT', 'iShares 20+ Year Treasury Bond ETF', 'Short'] }] },
+    ] },
+  ] };
+  render(<AnalystDailyRollup rollup={data} />);
+  const macro = screen.getByRole('region', { name: 'Macro Show' });
+  const catalysts = screen.getByRole('region', { name: 'Company catalysts & sector research' });
+  const positioning = screen.getByRole('region', { name: 'Positioning' });
+  expect(within(macro).queryByRole('table')).not.toBeInTheDocument();
+  expect(macro.querySelector('p:not(.portfolio-review-dateline)')).toHaveTextContent('Added Long: SPY');
+  expect(within(catalysts).getByRole('columnheader', { name: 'Research positioning change' })).toBeVisible();
+  expect(within(catalysts).getByRole('row', { name: 'CORN Teucrium Corn Fund Added to Long mentions' })).toBeVisible();
+  expect(within(positioning).getByRole('columnheader', { name: 'Positioning' })).toBeVisible();
+  expect(within(positioning).getByRole('row', { name: 'TLT iShares 20+ Year Treasury Bond ETF Short' })).toBeVisible();
+});
+
+test.each(["Today's market drivers", 'Today’s market drivers'])('the three topic titles in %s sit above their unchanged body text', title => {
+  const blocks = [
+    { type: 'paragraph', title: 'USD', text: 'USD — Bullish TRADE with USD strength.' },
+    { type: 'paragraph', text: 'BITCOIN — Long alongside Gold.' },
+    { type: 'paragraph', text: 'SPX — Bearish below the level — Neutral at the boundary.' },
+  ];
+  render(<AnalystDailyRollup rollup={{ version: 1, sections: [{ id: 'market-drivers', title, blocks }] }} />);
+  const section = screen.getByRole('region', { name: title });
+  const headings = within(section).getAllByRole('heading', { level: 3 });
+  expect(headings.map(node => node.textContent)).toEqual(['USD', 'BITCOIN', 'SPX']);
+  headings.forEach(heading => {
+    expect(heading).toHaveClass('analyst-portfolio-topic');
+    expect(heading.nextElementSibling.tagName).toBe('P');
+  });
+  expect([...section.querySelectorAll('p:not(.portfolio-review-dateline)')].map(node => node.textContent)).toEqual([
+    'Bullish TRADE with USD strength.', 'Long alongside Gold.', 'Bearish below the level — Neutral at the boundary.',
+  ]);
+  expect(within(section).getByText('Bullish')).toHaveClass('analyst-process--positive');
+  expect(within(section).getByText('Bearish')).toHaveClass('analyst-process--negative');
+});
+
+test.each(['metadata', 'legacy'])('%s sector captions occupy their own headings without creating captions for every company paragraph', format => {
+  const sectors = [
+    ['Consumer Staples', 'Procter & Gamble (PG) remains Bullish on the captured reading.'],
+    ['Gaming, Lodging & Leisure', 'Marriott (MAR) remains Long; the outlook is unchanged.'],
+    ['Retail', 'Helen of Troy (HELE) remains Bearish after the update.'],
+    ['Health Care', 'UnitedHealth (UNH) remains Short in this publication.'],
+  ];
+  const continuation = 'Deckers (DECK) remains Neutral while the short-term outlook is unchanged.';
+  const introduction = 'The sector research remains attached to this captured publication.';
+  const untitled = 'This is a complete research sentence. Its second clause — and its original wording — remain together.';
+  const blocks = [{ type: 'paragraph', text: introduction, citationIds: [source.id] }];
+  sectors.forEach(([title, body]) => {
+    blocks.push({ type: 'paragraph', ...(format === 'metadata' ? { title } : {}), text: `${title} — ${body}`, citationIds: [source.id] });
+    if (title === 'Retail') blocks.push({ type: 'paragraph', text: continuation, citationIds: [source.id] });
+  });
+  blocks.push({ type: 'paragraph', text: untitled, citationIds: [source.id] });
+  const data = { version: 1, securityTickers: ['PG', 'MAR', 'HELE', 'DECK', 'UNH'], citations: [source], sections: [{ id: 'company-catalysts', title: 'Company catalysts & sector research', blocks }] };
+  const captured = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup stableLayout rollup={data} onCitation={onCitation} />);
+  const section = screen.getByRole('region', { name: 'Company catalysts & sector research' });
+  const body = section.querySelector('.portfolio-review-section-body');
+  const headings = within(section).getAllByRole('heading', { level: 3 });
+  expect(headings.map(node => node.textContent)).toEqual(sectors.map(([title]) => title));
+  headings.forEach((heading, index) => {
+    expect(heading).toHaveClass('analyst-portfolio-topic');
+    expect(heading.closest('p')).toBeNull();
+    expect(heading.nextElementSibling.tagName).toBe('P');
+    expect(heading.nextElementSibling).toHaveTextContent(sectors[index][1]);
+    expect(heading.nextElementSibling.textContent).toBe(sectors[index][1]);
+    expect(heading.parentElement).toHaveClass('analyst-portfolio-topic-block');
+    expect(heading.parentElement.style.height).toBe('');
+    expect(heading.parentElement.style.overflow).toBe('');
+  });
+  expect([...body.querySelectorAll('p')].map(paragraph => paragraph.textContent)).toEqual([
+    introduction, sectors[0][1], sectors[1][1], sectors[2][1], continuation, sectors[3][1], untitled,
+  ]);
+  const retail = within(section).getByRole('heading', { level: 3, name: 'Retail' });
+  expect(retail.parentElement.nextElementSibling.textContent).toBe(continuation);
+  expect(retail.parentElement.nextElementSibling.tagName).toBe('P');
+  expect(within(section).queryByRole('heading', { name: /^Deckers|Helen of Troy|Marriott|Procter|UnitedHealth/ })).not.toBeInTheDocument();
+  expect(within(section).getByText('Bullish')).toHaveClass('analyst-process--positive');
+  expect(within(section).getByText('Bearish')).toHaveClass('analyst-process--negative');
+  expect(within(section).getByText('Neutral')).toHaveClass('analyst-process--muted');
+  ['PG', 'MAR', 'HELE', 'DECK', 'UNH'].forEach(ticker => expect(within(section).getByText(ticker)).toHaveClass('analyst-process--ticker'));
+  expect(within(section).queryByText('short-term', { selector: '.analyst-process--negative' })).not.toBeInTheDocument();
+  expect(section.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
+  fireEvent.click(within(section).getByRole('button', { name: /Source: The Great Finding Out/ }));
+  expect(onCitation).toHaveBeenCalledWith(source, expect.objectContaining({ highlightTexts: expect.arrayContaining(blocks.map(block => block.text)) }));
+  expect(JSON.stringify(data)).toBe(captured);
+});
+
+test('a captured sector title in metadata appears above body-only text and leaves following company commentary uncaptioned', () => {
+  const retail = 'Helen of Troy (HELE) remains Bearish in the captured update.';
+  const continuation = 'Deckers (DECK) remains Neutral in the same retail publication.';
+  const data = { version: 1, sections: [{ id: 'company-catalysts', title: 'Company catalysts & sector research', blocks: [
+    { type: 'paragraph', title: 'Retail', text: retail },
+    { type: 'paragraph', text: continuation },
+  ] }] };
+  const captured = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} />);
+  const section = screen.getByRole('region', { name: 'Company catalysts & sector research' });
+  expect(within(section).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['Retail']);
+  const heading = within(section).getByRole('heading', { level: 3, name: 'Retail' });
+  expect(heading.nextElementSibling.textContent).toBe(retail);
+  expect(heading.parentElement.nextElementSibling.textContent).toBe(continuation);
+  expect([...section.querySelectorAll('p:not(.portfolio-review-dateline)')].map(paragraph => paragraph.textContent)).toEqual([retail, continuation]);
+  expect(JSON.stringify(data)).toBe(captured);
+});
+
+test('research paragraphs and table cells keep directional and Quad semantics', () => {
+  render(<AnalystDailyRollup rollup={rollup()} />);
+  const section = screen.getByRole('region', { name: 'Macro outlook' });
+  expect(within(section).getByText('Quad 4')).toHaveClass('analyst-process--quad-4');
+  expect(within(section).getByText('Long')).toHaveClass('analyst-process--positive');
+  expect(within(section).getByText('Neutral')).toHaveClass('analyst-process--muted');
+  expect(within(section).getByText('Bearish')).toHaveClass('analyst-process--negative');
+  expect(section.querySelector('p:not(.portfolio-review-dateline)')).toHaveTextContent('short-term growth');
+});
+
+test('exact evidence from paragraphs and rows is consolidated into source buttons below the section', () => {
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={rollup()} onCitation={onCitation} />);
+  const button = screen.getByRole('button', { name: 'Source: The Great Finding Out · Sep 18, 2026' });
+  expect(button).toHaveTextContent('Early Look');
+  expect(button.closest('section').lastChild).toContainElement(button);
+  expect(button.closest('section').lastChild).toHaveTextContent('Sources: Early Look');
+  expect(screen.getAllByRole('button')).toHaveLength(1);
+  fireEvent.click(button);
+  expect(onCitation).toHaveBeenCalledWith(source, { highlightTexts: [rollup().sections[0].blocks[0].text, 'SPX', 'Bullish', 'Bearish', 'SPX Bullish Bearish'] });
+});
+
+test('source tooltips prefer known 24-hour Pacific publication times and preserve date-only imports', () => {
+  const data = rollup();
+  data.citations = [{ ...source, publishedAt: '2026-09-18T17:05:00Z' }];
+  const { rerender } = render(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
+  expect(screen.getByRole('button')).toHaveAttribute('title', 'The Great Finding Out · Sep 18, 2026 10:05 PDT');
+  data.citations = [{ ...source, publishedAt: '2026-09-18T00:00:00Z' }];
+  rerender(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
+  expect(screen.getByRole('button')).toHaveAttribute('title', 'The Great Finding Out · Sep 18, 2026');
+});
+
+test('timestamp-only source dates use the Pacific calendar day and never assume a missing timezone', () => {
+  const data = rollup(); data.citations = [{ ...source, publicationDate: null, publishedAt: '2026-09-19T02:15:00Z' }];
+  const { rerender } = render(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
+  expect(screen.getByRole('button')).toHaveAttribute('title', 'The Great Finding Out · Sep 18, 2026 19:15 PDT');
+  data.citations = [{ ...source, publishedAt: '2026-09-18T13:05:00' }];
+  rerender(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
+  expect(screen.getByRole('button')).toHaveAttribute('title', 'The Great Finding Out · Sep 18, 2026');
+});
+
+test('message citations can supply source IDs and unknown IDs never create broken controls', () => {
+  const data = rollup(); data.citations = []; data.sections[0].citationIds = ['early', 'missing'];
+  render(<AnalystDailyRollup rollup={data} citations={[source]} onCitation={jest.fn()} />);
+  expect(screen.getAllByRole('button')).toHaveLength(1);
+  expect(screen.queryByText('missing')).not.toBeInTheDocument();
+});
+
+test('full captured citations retain publication time and excerpt after summary deduplication', () => {
+  const data = rollup();
+  const fullSource = { ...source, publishedAt: '2026-09-18T17:05:00Z', excerpt: 'The full captured source context.' };
+  data.citations = [fullSource];
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} citations={[source]} onCitation={onCitation} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Source: The Great Finding Out · Sep 18, 2026 10:05 PDT' }));
+  expect(onCitation).toHaveBeenCalledWith(fullSource, expect.objectContaining({ highlightTexts: expect.arrayContaining([data.sections[0].blocks[0].text]) }));
+});
+
+test('a readable comma-separated Sources footer passes only context attributed to the clicked source', () => {
+  const top = { id: 'top', productLabel: 'Top 3 Things', title: 'Rates, Europe, VIX', publicationDate: '2026-09-18' };
+  const rate = 'Rates — Front-end yields fell sharply as growth slowed.';
+  const europe = 'Europe — European cyclical shares weakened into the close.';
+  const data = { version: 1, citations: [top, source], sections: [{ id: 'drivers', title: 'Today’s market drivers', citationIds: ['top', 'early'], blocks: [
+    { type: 'paragraph', text: rate, citationIds: ['top'] },
+    { type: 'paragraph', text: europe, citationIds: ['early'] },
+    { type: 'table', columns: ['Security', 'Context'], rows: [
+      { cells: ['DURATION', 'Front-end yields fell sharply as growth slowed.'], citationIds: ['top'] },
+      { cells: ['EUROPE', 'European cyclical shares weakened into the close.'], citationIds: ['early'] },
+    ] },
+  ] }] };
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  expect(screen.getByRole('region', { name: 'Today’s market drivers' }).lastChild).toHaveTextContent('Sources: Top 3 Things, Early Look');
+  fireEvent.click(screen.getByRole('button', { name: 'Source: Rates, Europe, VIX · Sep 18, 2026' }));
+  const [clickedSource, context] = onCitation.mock.calls[0];
+  expect(clickedSource).toEqual(top);
+  expect(context.highlightTexts).toContain(rate);
+  expect(context.highlightTexts).toContain('Front-end yields fell sharply as growth slowed.');
+  expect(context.highlightTexts).not.toContain(europe);
+  expect(context.highlightTexts).not.toContain('European cyclical shares weakened into the close.');
+  expect(context.highlightTexts).not.toContain('Today’s market drivers');
+});
+
+test('a section citation without attributed block text opens the source without inventing highlight context', () => {
+  const data = rollup(); data.sections[0].blocks = [{ type: 'paragraph', text: 'An uncited paragraph must not become attributed source context.' }];
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  fireEvent.click(screen.getByRole('button'));
+  expect(onCitation).toHaveBeenCalledWith(source, { highlightTexts: [] });
+});
+
+test('each product has one source link while both comparison publications keep their evidence', () => {
+  const current = { id: 'risk-current', product: 'risk-ranges', productLabel: 'Risk Ranges', title: 'Current Risk Ranges', publicationDate: '2026-09-18', excerpt: 'Current report evidence.' };
+  const prior = { id: 'risk-prior', product: 'risk-ranges', title: 'Prior Risk Ranges', publicationDate: '2026-09-17', excerpt: 'Prior report evidence.' };
+  const currentText = 'The current report changed the published range.';
+  const priorText = 'The prior report records the original range.';
+  const data = { version: 1, citations: [current, prior, source], sections: [{ title: 'Trend & range changes', citationIds: [current.id, prior.id, current.id, source.id], blocks: [
+    { type: 'paragraph', text: currentText, citationIds: [current.id] },
+    { type: 'paragraph', text: priorText, citationIds: [prior.id] },
+  ] }] };
+  const original = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  const section = screen.getByRole('region', { name: 'Trend/Ranges/Coverage/Outbucket' });
+  expect(section.lastChild).toHaveTextContent('Sources: Risk Ranges, Early Look');
+  expect(within(section).getAllByRole('button')).toHaveLength(2);
+  const button = screen.getByRole('button', { name: 'Source: Risk Ranges', exact: true });
+  expect(button).toHaveAttribute('title', 'Current Risk Ranges · Sep 18, 2026; Prior Risk Ranges · Sep 17, 2026');
+  fireEvent.click(button);
+  expect(onCitation).toHaveBeenCalledWith(current, { highlightTexts: [currentText], relatedSources: [
+    { ...current, highlightTexts: [currentText] }, { ...prior, highlightTexts: [priorText] },
+  ] });
+  expect(JSON.stringify(data)).toBe(original);
+});
+
+test.each([
+  { id: 'risk-ranges', title: 'Trend & range changes' },
+  { title: 'Trend & range changes' },
+  { id: 'risk-ranges', title: 'Trend/Ranges/Coverage/Outbucket' },
+])('risk range section $title gives every comparison a concise table caption', section => {
+  const blocks = [
+    { type: 'table', columns: ['Ticker', 'Security', 'Prior Trend', 'Trend'], rows: [{ cells: ['VIX', 'Volatility Index', 'Neutral', 'Bearish'] }] },
+    { type: 'table', columns: ['Ticker', 'Security', 'Prior range', 'Published range', 'Trend'], rows: [{ cells: ['AAPL', 'Apple Inc.', '321–345', '322–345', 'Bullish'] }] },
+    { type: 'table', columns: ['Ticker', 'Security', 'Coverage change'], rows: [{ cells: ['XLE', 'Energy Select Sector SPDR Fund', '+ Risk Ranges'] }] },
+    { type: 'table', columns: ['Ticker', 'Security', 'OutBucket Trend', 'Since'], rows: [{ cells: ['OIH', 'VanEck Oil Services ETF', 'Bearish', 'Sep 18'] }] },
+  ];
+  const data = { version: 1, sections: [{ ...section, blocks }, ...rollup().sections] };
+  const original = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} />);
+  const region = screen.getByRole('region', { name: 'Trend/Ranges/Coverage/Outbucket' });
+  expect(within(region).getByRole('heading')).toHaveTextContent('Trend/Ranges/Coverage/Outbucket');
+  const captions = ['Trend', 'Ranges', 'Coverage', 'Outbucket'];
+  captions.forEach((label, index) => {
+    const table = within(region).getByRole('table', { name: label, exact: true });
+    expect(table.querySelector('caption')).toHaveTextContent(label);
+    expect(table.firstElementChild.tagName).toBe('CAPTION');
+    expect(within(table).getAllByRole('cell').map(cell => cell.textContent)).toEqual(blocks[index].rows[0].cells);
+  });
+  const macroTable = screen.getByRole('table', { name: 'Macro outlook' });
+  expect(macroTable.querySelector('caption')).toBeNull();
+  expect(JSON.stringify(data)).toBe(original);
+});
+
+test('saved security comparisons remove Research list and retain full names without inventing missing tickers', () => {
+  const security = 'Brent Crude Oil Continuous Contract';
+  const data = { version: 1, sections: [{ title: 'Trend & range changes', blocks: [
+    { type: 'table', columns: ['Instrument', 'Prior Trend', 'Trend', 'Research list'], rows: [{ cells: [security, 'Neutral', 'Bullish', 'Risk Ranges'] }] },
+    { type: 'table', columns: ['Securities', 'Prior range', 'Published range', 'Trend'], rows: [{ cells: [security, '97–112', '97–111', 'Bullish'] }] },
+  ] }] };
+  render(<AnalystDailyRollup rollup={data} />);
+  expect(screen.getAllByRole('cell', { name: security })).toHaveLength(2);
+  expect(screen.getAllByTitle(security)).toHaveLength(2);
+  expect(screen.getAllByRole('columnheader', { name: 'Ticker' })).toHaveLength(2);
+  expect(screen.getAllByRole('columnheader', { name: 'Security', exact: true })).toHaveLength(2);
+  expect(screen.queryByText('Research list')).not.toBeInTheDocument();
+  expect(screen.queryByText('Risk Ranges')).not.toBeInTheDocument();
+  expect(screen.getAllByRole('cell', { name: '—' })).toHaveLength(2);
+});
+
+test('ticker and security precede unchanged signals and ranges with source evidence in the footer', () => {
+  const security = 'Brent Crude Oil Continuous Contract';
+  const risk = { id: 'risk', productLabel: 'Risk Ranges', title: 'Risk Ranges', publicationDate: '2026-09-21' };
+  const data = { version: 1, citations: [risk], sections: [{ title: 'Trend & range changes', blocks: [
+    { type: 'table', columns: ['Ticker', 'Security', 'Prior Trend', 'Trend'], rows: [
+      { cells: ['VIX', 'Volatility Index', 'Neutral', 'Bearish'], citationIds: ['risk'] },
+    ] },
+    { type: 'table', columns: ['Ticker', 'Security', 'Prior range', 'Published range', 'Trend'], rows: [
+      { cells: ['BRENT', security, '97–111', '97–110', 'Bullish'], citationIds: ['risk'] },
+    ] },
+  ] }] };
+  const original = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  const tables = screen.getAllByRole('table');
+  expect(within(tables[0]).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Ticker', 'Security', 'Prior Trend', 'Trend']);
+  expect(within(tables[1]).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Ticker', 'Security', 'Prior range', 'Published range', 'Trend']);
+  expect(screen.getByRole('row', { name: 'VIX Volatility Index Neutral Bearish' })).toBeVisible();
+  expect(screen.getByRole('row', { name: `BRENT ${security} 97–111 97–110 Bullish` })).toBeVisible();
+  expect(screen.getByTitle(security)).toHaveClass('analyst-security-name');
+  expect(screen.getByText('Bearish')).toHaveClass('analyst-process--negative');
+  expect(screen.getByText('Bullish')).toHaveClass('analyst-process--positive');
+  const section = screen.getByRole('region', { name: 'Trend/Ranges/Coverage/Outbucket' });
+  expect(section.lastChild).toHaveTextContent('Sources: Risk Ranges');
+  expect(screen.getAllByRole('button')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button'));
+  expect(onCitation).toHaveBeenCalledWith(risk, expect.objectContaining({ highlightTexts: expect.arrayContaining(['VIX', 'Volatility Index', 'BRENT', security]) }));
+  expect(JSON.stringify(data)).toBe(original);
+});
+
+test('Research list is omitted from every table while row citation links remain available', () => {
+  const data = rollup();
+  data.sections[0].blocks = [{ type: 'table', columns: ['Security', 'Research list', 'Reading'],
+    rows: [{ cells: ['VIX', 'Internal research classification', 'Bearish'], citationIds: ['early'] }] }];
+  render(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
+  expect(screen.queryByText('Research list')).not.toBeInTheDocument();
+  expect(screen.queryByText('Internal research classification')).not.toBeInTheDocument();
+  expect(screen.getByRole('row', { name: 'VIX Bearish' })).toBeVisible();
+  expect(screen.getByRole('button')).toHaveTextContent('Early Look');
+});
+
+test('coverage changes use compact product additions and removals in saved and new reviews', () => {
+  const changes = ['was added to Risk Ranges™', 'was removed from Risk Ranges', 'moved to the #OutBucket', 'No longer in published range table', '+ Signal Strength', '- Risk Ranges'];
+  const data = rollup();
+  data.sections[0].blocks = [{ type: 'table', columns: ['Ticker', 'Security', 'Coverage change'],
+    rows: changes.map((change, i) => ({ cells: [`SEC${i}`, 'Security name', change], citationIds: ['early'] })) }];
+  const original = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  const rows = screen.getAllByRole('row').slice(1);
+  expect(rows.map(row => within(row).getAllByRole('cell')[2].textContent)).toEqual([
+    '+ Risk Ranges', '- Risk Ranges', '+ OutBucket', '- Risk Ranges', '+ Signal Strength', '- Risk Ranges',
+  ]);
+  fireEvent.click(screen.getByRole('button'));
+  expect(onCitation).toHaveBeenCalledWith(source, expect.any(Object));
+  expect(JSON.stringify(data)).toBe(original);
+});
+
+test('LOW and HIGH show independent published-boundary changes with aligned comparison columns', () => {
+  const risk = { id: 'risk', productLabel: 'Risk Ranges', title: 'Risk Ranges', publicationDate: '2026-09-21' };
+  const data = { version: 1, citations: [risk], sections: [{ title: 'Trend & range changes', blocks: [
+    { type: 'table', columns: ['Ticker', 'Security', 'Prior Trend', 'Trend'], rows: [
+      { cells: ['VIX', 'Volatility Index', 'Neutral', 'Bearish'], citationIds: ['risk'] },
+    ] },
+    { type: 'table', columns: ['Ticker', 'Security', 'Prior range', 'Published range', 'LOW', 'HIGH', 'Trend'], rows: [
+      { cells: ['AAPL', 'Apple Inc.', '321–345', '322–345', 'Higher low', 'Unchanged', 'Bullish'], citationIds: ['risk'] },
+      { cells: ['GOLD', 'Gold Spot Price', '4,250–4,424', '4,240–4,419', 'Lower low', 'Lower high', 'Neutral'], citationIds: ['risk'] },
+      { cells: ['AMZN', 'Amazon Inc.', '242–257', '244–260', 'Higher low', 'Higher high', 'Bearish'], citationIds: ['risk'] },
+      { cells: ['VIX', 'Volatility Index', '—–18.67', '14.26–18.57', '—', 'Lower high', 'Bearish'], citationIds: ['risk'] },
+    ] },
+  ] }] };
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
+  const section = screen.getByRole('region', { name: 'Trend/Ranges/Coverage/Outbucket' });
+  const tables = within(section).getAllByRole('table');
+  expect(section).toHaveClass('has-range-boundaries');
+  expect(tables[1]).toHaveClass('analyst-range-boundary-comparison');
+  expect(within(tables[1]).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(data.sections[0].blocks[1].columns);
+  expect(tables[1].querySelectorAll('col')).toHaveLength(7);
+  expect([...tables[0].querySelectorAll('col')].map(col => col.className)).toEqual([...tables[1].querySelectorAll('col')].slice(0, 4).map(col => col.className));
+  for (const label of ['Higher low', 'Higher high']) for (const node of within(tables[1]).getAllByText(label)) expect(node).toHaveClass('analyst-process--positive');
+  for (const label of ['Lower low', 'Lower high']) for (const node of within(tables[1]).getAllByText(label)) expect(node).toHaveClass('analyst-process--negative');
+  for (const label of ['Unchanged', '—']) expect(within(tables[1]).getByText(label)).toHaveClass('analyst-process--muted');
+  expect(within(tables[1]).getAllByText('Bearish')[0]).toHaveClass('analyst-process--negative');
+  fireEvent.click(within(section).getByRole('button'));
+  expect(onCitation).toHaveBeenCalledWith(risk, expect.objectContaining({ highlightTexts: expect.arrayContaining(['321–345', '322–345']) }));
+});
+
+test('source content is rendered as plain text without HTML execution', () => {
+  const data = rollup(); data.sections[0].blocks = [{ type: 'paragraph', text: '<img src=x onerror=alert(1)>' }];
+  const { container } = render(<AnalystDailyRollup rollup={data} />);
+  expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeVisible();
+  expect(container.querySelector('img')).toBeNull();
+});
+
+test('all substantive sections and rows render without summary truncation', () => {
+  const data = rollup(); data.sections = Array.from({ length: 12 }, (_, index) => ({
+    id: `section-${index}`, title: `Section ${index}`, blocks: [{ type: 'table', columns: ['Item'], rows: Array.from({ length: 20 }, (_, row) => ({ cells: [`Finding ${index}-${row}`] })) }],
+  }));
+  render(<AnalystDailyRollup rollup={data} />);
+  expect(screen.getAllByRole('region')).toHaveLength(12);
+  expect(screen.getByText('Finding 11-19')).toBeVisible();
+});
+
+test('empty and unsupported block types do not leave empty report headings', () => {
+  render(<AnalystDailyRollup rollup={{ version: 1, sections: [{ title: 'Empty', blocks: [{ type: 'paragraph', text: '' }] }, { title: 'Unsupported', blocks: [{ type: 'html', text: 'Raw content' }] }] }} />);
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+});
+
+test('Portfolio Review keeps each research section through absent, partial, ready and unavailable captures without reserved heights', () => {
+  const titles = ['Highest-priority realignment', 'Watch list', 'What is already aligned', 'Recommended sequence',
+    'PCA risk', 'Factor exposure', "Today's market drivers", 'Tick', 'Trend/Ranges/Coverage/Outbucket',
+    'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Market structure & flows'];
+  const ids = ['refresh-realignment', 'refresh-watch-list', 'refresh-aligned', 'refresh-sequence',
+    'pca-risk', 'factor-exposure', 'market-drivers', 'hedgai-signals', 'risk-ranges',
+    'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'market-structure'];
+  const { rerender } = render(<AnalystDailyRollup stableLayout loading />);
+  const cards = screen.getAllByRole('region');
+  const datelines = cards.map(card => card.querySelector('.portfolio-review-dateline'));
+  const bodies = cards.map(card => card.querySelector('.portfolio-review-section-body'));
+  const assertUnchangedLayout = () => {
+    expect(screen.getAllByRole('region').map(card => card.getAttribute('aria-label'))).toEqual(titles);
+    screen.getAllByRole('region').forEach((card, index) => {
+      expect(card).toBe(cards[index]);
+      expect(card).toHaveClass('portfolio-review-section');
+      expect(card.querySelector('.portfolio-review-dateline')).toBe(datelines[index]);
+      expect(card.querySelector('.portfolio-review-section-body')).toBe(bodies[index]);
+      expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
+    });
+  };
+  assertUnchangedLayout();
+  expect(screen.getAllByText('Loading…')).toHaveLength(14);
+  cards.forEach(card => {
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
+  });
+
+  const partial = { version: 1, citations: [source], sections: [{
+    id: 'market-drivers', title: "Today's market drivers", blocks: [{ type: 'paragraph', text: 'Captured market reading.', citationIds: [source.id] }],
+  }] };
+  const savedPartial = JSON.stringify(partial);
+  const onCitation = jest.fn();
+  rerender(<AnalystDailyRollup stableLayout loading rollup={partial} onCitation={onCitation} />);
+  assertUnchangedLayout();
+  expect(screen.getAllByText('Loading…')).toHaveLength(13);
+  const drivers = screen.getByRole('region', { name: "Today's market drivers" });
+  expect(drivers).not.toHaveAttribute('aria-busy');
+  expect(within(drivers.querySelector('.portfolio-review-section-body')).getByText('Captured market reading.')).toBeVisible();
+  const citation = within(drivers.querySelector('.portfolio-review-section-body')).getByRole('button', { name: /Source: The Great Finding Out/ });
+  fireEvent.click(citation);
+  expect(onCitation).toHaveBeenCalledWith(source, expect.objectContaining({ highlightTexts: ['Captured market reading.'] }));
+  expect(JSON.stringify(partial)).toBe(savedPartial);
+
+  const ready = { version: 1, sections: ids.map((id, index) => ({ id, title: titles[index],
+    blocks: [{ type: 'paragraph', text: `Captured reading ${id}.` }],
+  })).reverse() };
+  const savedReady = JSON.stringify(ready);
+  rerender(<AnalystDailyRollup stableLayout rollup={ready} />);
+  assertUnchangedLayout();
+  expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+  expect(screen.queryByText('Unavailable')).not.toBeInTheDocument();
+  ids.forEach(id => expect(screen.getByText(`Captured reading ${id}.`)).toBeVisible());
+  expect(JSON.stringify(ready)).toBe(savedReady);
+
+  rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [] }} />);
+  assertUnchangedLayout();
+  expect(screen.getAllByText('Unavailable')).toHaveLength(14);
+  expect(screen.queryByText(/Captured reading|Captured market reading/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});
+
+test('a paused PCA section keeps its slot with a compact Pending state while other sections load', () => {
+  const pending = { version: 1, sections: [{ id: 'pca-risk', title: 'PCA risk', status: 'pending', citationIds: [], blocks: [] }] };
+  const saved = JSON.stringify(pending);
+  const { rerender } = render(<AnalystDailyRollup stableLayout loading rollup={pending} />);
+  const pca = screen.getByRole('region', { name: 'PCA risk' });
+  const titles = screen.getAllByRole('region').map(card => card.getAttribute('aria-label'));
+  expect(within(pca).getByText('Pending')).toBeVisible();
+  expect(within(pca).queryByText(/Loading…|Unavailable/)).not.toBeInTheDocument();
+  expect(pca).not.toHaveAttribute('aria-busy');
+  expect(pca.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
+  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Loading…');
+  rerender(<AnalystDailyRollup stableLayout rollup={pending} />);
+  expect(screen.getAllByRole('region').map(card => card.getAttribute('aria-label'))).toEqual(titles);
+  expect(within(screen.getByRole('region', { name: 'PCA risk' })).getByText('Pending')).toBeVisible();
+  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Unavailable');
+  rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [{ ...pending.sections[0],
+    status: 'ready', blocks: [{ type: 'paragraph', text: 'Captured PCA reading.' }] }] }} />);
+  expect(screen.getByText('Captured PCA reading.')).toBeVisible();
+  expect(screen.queryByText('Pending')).not.toBeInTheDocument();
+  expect(JSON.stringify(pending)).toBe(saved);
+});
+
+test('legacy alignment and fresh refresh evidence occupy the same fixed cards without inserting rows above daily research', () => {
+  const { rerender } = render(<AnalystDailyRollup stableLayout loading />);
+  const watch = screen.getByRole('region', { name: 'Watch list' });
+  const aligned = screen.getByRole('region', { name: 'What is already aligned' });
+  const drivers = screen.getByRole('region', { name: "Today's market drivers" });
+  const legacy = { version: 1, sections: [
+    { id: 'position-confirmations', title: 'Position confirmations', blocks: [{ type: 'paragraph', text: 'Captured confirmation.' }] },
+    { id: 'position-contradictions', title: 'Position contradictions', blocks: [{ type: 'paragraph', text: 'Captured contradiction.' }] },
+  ] };
+  rerender(<AnalystDailyRollup stableLayout rollup={legacy} />);
+  expect(screen.getByRole('region', { name: 'Position confirmations' })).toBe(aligned);
+  expect(screen.getByRole('region', { name: 'Position contradictions' })).toBe(watch);
+  expect(screen.getByRole('region', { name: "Today's market drivers" })).toBe(drivers);
+  expect(screen.getAllByRole('region')).toHaveLength(14);
+  expect(aligned).toHaveTextContent('Captured confirmation.');
+  expect(watch).toHaveTextContent('Captured contradiction.');
+
+  const refresh = { version: 1, sections: [{ id: 'refresh-aligned', title: 'What is already aligned',
+    blocks: [{ type: 'paragraph', text: 'New captured alignment.' }],
+  }] };
+  rerender(<AnalystDailyRollup stableLayout rollup={refresh} />);
+  expect(screen.getByRole('region', { name: 'What is already aligned' })).toBe(aligned);
+  expect(screen.getByRole('region', { name: 'Watch list' })).toBe(watch);
+  expect(screen.getByRole('region', { name: "Today's market drivers" })).toBe(drivers);
+  expect(screen.getAllByRole('region')).toHaveLength(14);
+  expect(aligned).toHaveTextContent('New captured alignment.');
+  expect(screen.queryByText(/Captured confirmation|Captured contradiction/)).not.toBeInTheDocument();
+});
+
+test('fixed research cards preserve extra captured sections and both refresh and legacy evidence when a saved capture has both', () => {
+  const data = { version: 1, sections: [
+    { id: 'refresh-aligned', title: 'What is already aligned', blocks: [{ type: 'paragraph', text: 'Captured refresh alignment.' }] },
+    { id: 'position-confirmations', title: 'Position confirmations', blocks: [{ type: 'paragraph', text: 'Captured legacy confirmation.' }] },
+    { id: 'other-research', title: 'Other captured research', blocks: [{ type: 'paragraph', text: 'Additional captured evidence.' }] },
+  ] };
+  const saved = JSON.stringify(data);
+  render(<AnalystDailyRollup stableLayout rollup={data} />);
+  const aligned = screen.getByRole('region', { name: 'What is already aligned' });
+  expect(aligned).toHaveTextContent('Captured refresh alignment.');
+  expect(aligned.querySelector('.portfolio-review-section-body')).toContainElement(screen.getByRole('region', { name: 'Position confirmations' }));
+  expect(aligned).toHaveTextContent('Captured legacy confirmation.');
+  expect(screen.getAllByRole('region').at(-1)).toHaveAccessibleName('Other captured research');
+  expect(screen.getByText('Additional captured evidence.')).toBeVisible();
+  expect(JSON.stringify(data)).toBe(saved);
+});
+
+const listPreviewCases = [
+  { id: 'refresh-realignment', title: 'Highest-priority realignment', itemLabel: 'realignments', stableLayout: true },
+  { id: 'refresh-watch-list', title: 'Watch list', itemLabel: 'watch list items', stableLayout: true },
+  { id: 'refresh-aligned', title: 'What is already aligned', itemLabel: 'aligned items', stableLayout: true },
+  { id: 'position-contradictions', title: 'Position contradictions', itemLabel: 'watch list items', stableLayout: false },
+  { id: 'position-confirmations', title: 'Position confirmations', itemLabel: 'aligned items', stableLayout: false },
+];
+const capturedListRows = (count, prefix = 'PRIORITY') => Array.from({ length: count }, (_, index) => ({
+  cells: [`${prefix}_${index}`, `Captured security ${index}`, ['Long', 'Unavailable', 'Short', 'Neutral'][index % 4],
+    'Captured source', `Captured priority ${index}`, 'Captured explanation'],
+  citationIds: [source.id],
+}));
+const capturedListSection = (spec, rows) => ({ id: spec.id, title: spec.title, blocks: [
+  { type: 'paragraph', text: 'Captured section context.' },
+  { type: 'table', title: 'First captured group', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: rows.slice(0, 4) },
+  { type: 'table', title: 'Second captured group', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: rows.slice(4) },
+] });
+const sectionTickers = section => [...section.querySelectorAll('tbody tr td:first-child')].map(cell => cell.textContent);
+
+test.each(listPreviewCases)('$title previews ten total captured items across tables and expands the exact capture inline', spec => {
+  const hiddenSource = { ...source, id: 'overflow-source', product: 'the-call', title: 'Captured overflow research' };
+  const rows = capturedListRows(15).map((row, index) => ({ ...row,
+    citationIds: [index >= 10 ? hiddenSource.id : source.id],
+    trade: 'BULLISH', trend: 'BEARISH',
+  }));
+  const data = { version: 1, citations: [source, hiddenSource], sections: [capturedListSection(spec, rows)] };
+  const saved = JSON.stringify(data);
+  const onCitation = jest.fn();
+  render(<AnalystDailyRollup stableLayout={spec.stableLayout} rollup={data} onCitation={onCitation} />);
+  const section = screen.getByRole('region', { name: spec.title });
+  const tables = within(section).getAllByRole('table');
+  expect(sectionTickers(section)).toEqual(rows.slice(0, 10).map(row => row.cells[0]));
+  expect(sectionTickers(section)).toContain('PRIORITY_9');
+  expect(sectionTickers(section)).not.toContain('PRIORITY_10');
+  expect(section).toHaveTextContent('Captured section context.');
+  const expand = within(section).getByRole('button', { name: `Show all 15 ${spec.itemLabel}` });
+  expect(expand).toHaveAttribute('aria-expanded', 'false');
+  const content = spec.stableLayout ? section.querySelector('.portfolio-review-section-body') : section;
+  expect(content).toContainElement(expand);
+  fireEvent.click(expand);
+  expect(sectionTickers(section)).toEqual(rows.map(row => row.cells[0]));
+  within(section).getAllByRole('table').forEach((table, index) => expect(table).toBe(tables[index]));
+  const collapse = within(section).getByRole('button', { name: `Show fewer ${spec.itemLabel}` });
+  expect(collapse).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(collapse);
+  expect(sectionTickers(section)).toEqual(rows.slice(0, 10).map(row => row.cells[0]));
+  fireEvent.click(within(section).getByRole('button', { name: /Source: Captured overflow research/ }));
+  expect(onCitation).toHaveBeenCalledWith(hiddenSource, expect.objectContaining({ highlightTexts: expect.arrayContaining(['PRIORITY_10', 'PRIORITY_14']) }));
+  expect(JSON.stringify(data)).toBe(saved);
+});
+
+test.each(listPreviewCases.flatMap(spec => [9, 10].map(count => ({ ...spec, count }))))('$title with $count items has no redundant expansion control', spec => {
+  const rows = capturedListRows(spec.count);
+  render(<AnalystDailyRollup stableLayout={spec.stableLayout} rollup={{ version: 1, sections: [capturedListSection(spec, rows)] }} />);
+  const section = screen.getByRole('region', { name: spec.title });
+  expect(sectionTickers(section)).toEqual(rows.map(row => row.cells[0]));
+  expect(within(section).queryByRole('button', { name: /Show all|Show fewer/ })).not.toBeInTheDocument();
+});
+
+test('realignment, watch list and aligned expansions are independent and preserve each captured priority order', () => {
+  const specs = listPreviewCases.slice(0, 3);
+  const rows = specs.map((spec, index) => capturedListRows(13, `SECTION${index}`));
+  render(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: specs.map((spec, index) => capturedListSection(spec, rows[index])) }} />);
+  const regions = specs.map(spec => screen.getByRole('region', { name: spec.title }));
+  regions.forEach((region, index) => expect(sectionTickers(region)).toEqual(rows[index].slice(0, 10).map(row => row.cells[0])));
+  fireEvent.click(within(regions[1]).getByRole('button', { name: 'Show all 13 watch list items' }));
+  expect(sectionTickers(regions[0])).toHaveLength(10);
+  expect(sectionTickers(regions[1])).toEqual(rows[1].map(row => row.cells[0]));
+  expect(sectionTickers(regions[2])).toHaveLength(10);
+  fireEvent.click(within(regions[2]).getByRole('button', { name: 'Show all 13 aligned items' }));
+  expect(sectionTickers(regions[0])).toHaveLength(10);
+  expect(sectionTickers(regions[1])).toHaveLength(13);
+  expect(sectionTickers(regions[2])).toEqual(rows[2].map(row => row.cells[0]));
+  fireEvent.click(within(regions[1]).getByRole('button', { name: 'Show fewer watch list items' }));
+  expect(sectionTickers(regions[1])).toEqual(rows[1].slice(0, 10).map(row => row.cells[0]));
+  expect(sectionTickers(regions[2])).toHaveLength(13);
+});
+
+test('the ten-item list previews leave Tick readings and its full-book disclosure unchanged', () => {
+  const tickRows = capturedListRows(13, 'TICK').map(row => ({ ...row, group: 'Captured Tick group' }));
+  const fullBookRows = capturedListRows(24, 'FULLBOOK').map(row => ({ ...row, group: 'Full captured book' }));
+  const data = { version: 1, sections: [
+    capturedListSection(listPreviewCases[0], capturedListRows(12, 'REALIGN')),
+    { id: 'hedgai-signals', title: 'Tick', blocks: [
+      { type: 'table', groupRows: true, columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: tickRows },
+      { type: 'table', groupRows: true, disclosure: 'Full captured Tick book', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: fullBookRows },
+    ] },
+  ] };
+  const saved = JSON.stringify(data);
+  render(<AnalystDailyRollup stableLayout rollup={data} />);
+  const tick = screen.getByRole('region', { name: 'Tick' });
+  expect(sectionTickers(tick)).toEqual(tickRows.map(row => row.cells[0]));
+  expect(within(tick).getAllByRole('table')).toHaveLength(1);
+  expect(within(tick).queryByRole('button', { name: /Show all|Show fewer/ })).not.toBeInTheDocument();
+  fireEvent.click(within(tick).getByText('Full captured Tick book'));
+  expect(sectionTickers(tick)).toEqual([...tickRows, ...fullBookRows].map(row => row.cells[0]));
+  expect(within(tick).getAllByRole('table')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Show all 12 realignments' }));
+  expect(sectionTickers(tick)).toEqual([...tickRows, ...fullBookRows].map(row => row.cells[0]));
+  fireEvent.click(within(tick).getByText('Full captured Tick book'));
+  expect(sectionTickers(tick)).toEqual(tickRows.map(row => row.cells[0]));
+  expect(JSON.stringify(data)).toBe(saved);
+});
+
+test('aligned preview counts only alignment items while All holdings checked keeps its independent complete roster', () => {
+  const columns = ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'];
+  const alignedRows = capturedListRows(12, 'ALIGNED');
+  const allHoldings = capturedListRows(24, 'ALLHOLDINGS');
+  const data = { version: 1, sections: [{ id: 'refresh-aligned', title: 'What is already aligned', blocks: [
+    { type: 'table', title: 'Captured alignments', columns, rows: alignedRows },
+    { type: 'table', title: 'Captured holdings roster', disclosure: 'All holdings checked · 24 securities', columns, rows: allHoldings },
+  ] }] };
+  const saved = JSON.stringify(data);
+  render(<AnalystDailyRollup stableLayout rollup={data} />);
+  const section = screen.getByRole('region', { name: 'What is already aligned' });
+  const aligned = within(section).getByRole('table', { name: 'Captured alignments' });
+  expect(sectionTickers(aligned)).toEqual(alignedRows.slice(0, 10).map(row => row.cells[0]));
+  expect(within(section).getByRole('button', { name: 'Show all 12 aligned items' })).toBeVisible();
+  expect(within(section).queryByRole('button', { name: 'Show all 36 aligned items' })).not.toBeInTheDocument();
+  expect(within(section).queryByRole('table', { name: 'Captured holdings roster' })).not.toBeInTheDocument();
+
+  fireEvent.click(within(section).getByText(wholeText('All holdings checked · 24 securities')));
+  const roster = within(section).getByRole('table', { name: 'Captured holdings roster' });
+  expect(sectionTickers(roster)).toEqual(allHoldings.map(row => row.cells[0]));
+  expect(sectionTickers(aligned)).toHaveLength(10);
+  fireEvent.click(within(section).getByRole('button', { name: 'Show all 12 aligned items' }));
+  expect(sectionTickers(aligned)).toEqual(alignedRows.map(row => row.cells[0]));
+  expect(sectionTickers(roster)).toEqual(allHoldings.map(row => row.cells[0]));
+  expect(within(section).getByRole('table', { name: 'Captured holdings roster' })).toBe(roster);
+  fireEvent.click(within(section).getByRole('button', { name: 'Show fewer aligned items' }));
+  expect(sectionTickers(aligned)).toEqual(alignedRows.slice(0, 10).map(row => row.cells[0]));
+  expect(sectionTickers(roster)).toHaveLength(24);
+  expect(JSON.stringify(data)).toBe(saved);
+});
+
+test('wide Portfolio Review research tables fit their report width with visible overflow and wrapped cells', () => {
+  const style = document.createElement('style');
+  style.textContent = require('fs').readFileSync(require('path').join(__dirname, 'AnalystDailyRollup.css'), 'utf8');
+  document.head.append(style);
+  try {
+    const data = { version: 1, sections: [{ id: 'hedgai-signals', title: 'Tick', blocks: [{
+      type: 'table', groupRows: true, disclosure: 'Full captured Tick book',
+      columns: ['Ticker', 'Security', 'Position'], rows: [{ cells: ['CAPTURED', 'Full captured security name', 'Last known Wait'], group: 'Captured group' }],
+    }] }] };
+    render(<AnalystDailyRollup stableLayout rollup={data} />);
+    fireEvent.click(screen.getByText('Full captured Tick book'));
+    const table = screen.getByRole('table', { name: 'Tick' });
+    expect(table).toHaveClass('analyst-hedgai-full-book');
+    expect(window.getComputedStyle(table.parentElement).overflow).toBe('visible');
+    expect(window.getComputedStyle(table).minWidth).toBe('0');
+    expect(window.getComputedStyle(table).width).toBe('100%');
+    expect(window.getComputedStyle(table).tableLayout).toBe('fixed');
+    expect(window.getComputedStyle(table.querySelector('tbody td')).whiteSpace).toBe('normal');
+    expect(screen.getByText('Full captured security name').closest('.analyst-security-name')).toHaveAttribute('title', 'Full captured security name');
+    const reading = table.querySelector('.analyst-tick-reading');
+    expect(reading).toHaveTextContent('Last known Wait');
+    expect(window.getComputedStyle(reading).whiteSpace).toBe('nowrap');
+    expect(reading).toHaveAttribute('title', 'Last known Wait');
+    expect(style.textContent).not.toMatch(/overscroll-behavior:\s*contain|scrollbar-gutter:/);
+  } finally { style.remove(); }
+});
+
+test('Factor and Tick identities stay on one compact line while captured readings and hover evidence stay complete', () => {
+  const style = document.createElement('style');
+  style.textContent = require('fs').readFileSync(require('path').join(__dirname, 'AnalystDailyRollup.css'), 'utf8');
+  document.head.append(style);
+  try {
+    const security = 'Nasdaq-100 · source-listed QQQ proxy';
+    const factor = 'Developed markets equity with a very long captured factor name';
+    const detail = 'Last known Wait · Nasdaq-100 · source-listed QQQ · Sep 28, 2026';
+    const data = { version: 1, sections: [
+      { id: 'factor-exposure', title: 'Factor exposure', blocks: [{ type: 'table',
+        columns: ['Factor', 'Gross (% NLV)', 'Net (% NLV)', 'Risk contribution'],
+        rows: [{ cells: [factor, '20.0%', '+10.0%', '+12.0%'] }] }] },
+      { id: 'hedgai-signals', title: 'Tick', blocks: [{ type: 'table', groupRows: true,
+        columns: ['Ticker', 'Security', 'Tick', 'Today', 'History', '60% filter'],
+        rows: [{ cells: ['QQQ', security, 'Last known Wait', '—', 'Long 63.6%', 'Wait'],
+          cellTitles: ['', 'NASDAQ 100 · Source-listed ticker QQQ', detail, '', '', ''] }] }] },
+    ] };
+    const captured = JSON.stringify(data);
+    render(<AnalystDailyRollup stableLayout rollup={data} />);
+    const factorName = screen.getByText(factor).closest('.analyst-factor-name');
+    const securityName = screen.getByText(security).closest('.analyst-security-name');
+    const reading = document.querySelector('.analyst-tick-reading');
+    for (const identity of [factorName, securityName, reading]) {
+      expect(window.getComputedStyle(identity).whiteSpace).toBe('nowrap');
+      expect(window.getComputedStyle(identity).overflow).toBe('hidden');
+      expect(window.getComputedStyle(identity).textOverflow).toBe('ellipsis');
+      expect(identity.querySelector('br')).toBeNull();
+    }
+    expect(factorName).toHaveAttribute('title', factor);
+    expect(securityName).toHaveAttribute('title', 'NASDAQ 100 · Source-listed ticker QQQ');
+    expect(reading).toHaveTextContent('Last known Wait');
+    expect(reading).toHaveAttribute('title', detail);
+    expect(within(reading).getByText('Wait')).toHaveClass('analyst-process--muted');
+    const table = screen.getByRole('table', { name: 'Tick' });
+    expect(window.getComputedStyle(table.querySelector('col:nth-child(2)')).width).toBe('18%');
+    expect(window.getComputedStyle(table.querySelector('col:nth-child(3)')).width).toBe('18%');
+    expect(JSON.stringify(data)).toBe(captured);
+  } finally { style.remove(); }
+});

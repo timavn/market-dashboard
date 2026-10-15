@@ -62,6 +62,32 @@ def convert_page_to_image_bytes(pdf_path, page_number):
 # Stock: Ticker, Price, Buy, Sell, Upside, Downside, Trend (7)
 
 
+def _typed_tracker_fields(*, trend, buy_trade, sell_trade):
+    """Return the canonical tracker fields, or ``None`` for an invalid row.
+
+    The published trend is the only directional field.  In particular,
+    ``sellTrade`` and ``downside`` are range/metric columns, not bearish
+    signals.  Keeping this validation in the PDF parser prevents malformed
+    rows from becoming executable-looking research events downstream.
+    """
+    normalized_trend = str(trend or "").strip().upper()
+    if normalized_trend not in {"BULLISH", "BEARISH", "NEUTRAL"}:
+        return None
+    try:
+        lrr = float(buy_trade)
+        hrr = float(sell_trade)
+    except (TypeError, ValueError):
+        return None
+    if not (lrr > 0 and hrr > 0 and lrr < hrr):
+        return None
+    return {
+        "trade": normalized_trend,
+        "lrr": lrr,
+        "hrr": hrr,
+        "trackerRange": {"lrr": lrr, "hrr": hrr},
+    }
+
+
 def upload_pdf_to_s3(pdf_path, pdf_date=None):
     """Upload original PDF to S3 for audit trail"""
     print("\n☁️  Uploading PDF to S3...")
@@ -269,12 +295,20 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
                         buy_trade = float(buy_str)
                         sell_trade = float(sell_str)
                         trend = row[4].strip().upper()
+                        typed = _typed_tracker_fields(
+                            trend=trend,
+                            buy_trade=buy_trade,
+                            sell_trade=sell_trade,
+                        )
+                        if typed is None:
+                            continue
 
                         data['cryptos'][symbol] = {
                             'price': price,
                             'buyTrade': buy_trade,
                             'sellTrade': sell_trade,
                             'trend': trend,
+                            **typed,
                             'timestamp': ts,
                             'index': global_index
                         }
@@ -309,6 +343,13 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
                         upside = float(row[4].replace('%', '').strip())
                         downside = float(row[5].replace('%', '').strip())
                         trend = row[6].strip().upper()
+                        typed = _typed_tracker_fields(
+                            trend=trend,
+                            buy_trade=buy_trade,
+                            sell_trade=sell_trade,
+                        )
+                        if typed is None:
+                            continue
 
                         data['stocks'][ticker] = {
                             'price': price,
@@ -317,6 +358,7 @@ def extract_bitcoin_tracker(pdf_path, s3_key=None):
                             'upside': upside,
                             'downside': downside,
                             'trend': trend,
+                            **typed,
                             'timestamp': ts,
                             'index': global_index
                         }
@@ -441,12 +483,19 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=Non
         'snapshotType': 'bitcoin-trend-tracker',
         'cryptoCount': len(data.get('cryptos', {})),
         'stockCount': len(data.get('stocks', {})),
-        'data': {
-            'cryptos': {k: {
+            'data': {
+                'cryptos': {k: {
                 'price': Decimal(str(v['price'])),
                 'buyTrade': Decimal(str(v['buyTrade'])),
                 'sellTrade': Decimal(str(v['sellTrade'])),
                 'trend': v['trend'],
+                'trade': v.get('trade', v['trend']),
+                'lrr': Decimal(str(v.get('lrr', v['buyTrade']))),
+                'hrr': Decimal(str(v.get('hrr', v['sellTrade']))),
+                'trackerRange': {
+                    'lrr': Decimal(str(v.get('lrr', v['buyTrade']))),
+                    'hrr': Decimal(str(v.get('hrr', v['sellTrade']))),
+                },
                 'timestamp': v['timestamp']
             } for k, v in data.get('cryptos', {}).items()},
             'stocks': {k: {
@@ -456,6 +505,13 @@ def save_to_dynamodb(data, pdf_s3_key=None, pdf_date=None, screenshot_s3_key=Non
                 'upside': Decimal(str(v['upside'])),
                 'downside': Decimal(str(v['downside'])),
                 'trend': v['trend'],
+                'trade': v.get('trade', v['trend']),
+                'lrr': Decimal(str(v.get('lrr', v['buyTrade']))),
+                'hrr': Decimal(str(v.get('hrr', v['sellTrade']))),
+                'trackerRange': {
+                    'lrr': Decimal(str(v.get('lrr', v['buyTrade']))),
+                    'hrr': Decimal(str(v.get('hrr', v['sellTrade']))),
+                },
                 'timestamp': v['timestamp']
             } for k, v in data.get('stocks', {}).items()}
         },

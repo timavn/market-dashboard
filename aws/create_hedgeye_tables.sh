@@ -118,6 +118,20 @@ aws dynamodb create-table \
     --region ${REGION} \
     2>/dev/null && info "✓ HedgeyeDailySnapshot created" || warn "Table may already exist"
 
+# Active freshness/changelog routes query the latest products by type. Keep
+# this index migration idempotent so a table created by an older deployment
+# receives the same bounded read path without projecting large research blobs.
+info "Adding snapshotType-date-meta-index GSI to HedgeyeDailySnapshot..."
+aws dynamodb update-table \
+    --table-name HedgeyeDailySnapshot \
+    --attribute-definitions \
+        AttributeName=snapshotType,AttributeType=S \
+        AttributeName=date,AttributeType=S \
+    --global-secondary-index-updates \
+        "[{\"Create\":{\"IndexName\":\"snapshotType-date-meta-index\",\"KeySchema\":[{\"AttributeName\":\"snapshotType\",\"KeyType\":\"HASH\"},{\"AttributeName\":\"date\",\"KeyType\":\"RANGE\"}],\"Projection\":{\"ProjectionType\":\"INCLUDE\",\"NonKeyAttributes\":[\"scrapedAt\",\"publishedAt\",\"riskRangeCount\",\"metricsCount\",\"stockCount\",\"cryptoCount\",\"rankingCount\",\"itemCount\",\"changeCount\"]}}}]" \
+    --region ${REGION} \
+    2>/dev/null && info "✓ snapshotType-date-meta-index added" || warn "snapshotType-date-meta-index may already exist"
+
 echo ""
 info "Waiting for tables to become ACTIVE..."
 sleep 5

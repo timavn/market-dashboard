@@ -2,8 +2,7 @@ import { calculateVolumeMetrics } from '../../../utils/volumeCardUtils';
 
 describe('calculateVolumeMetrics', () => {
   it('returns null metrics for insufficient data', () => {
-    const result = calculateVolumeMetrics([1000000]);
-    expect(result).toEqual({
+    expect(calculateVolumeMetrics([1000000])).toEqual({
       priorDay: null,
       avg1M: null,
       avg3M: null,
@@ -11,34 +10,31 @@ describe('calculateVolumeMetrics', () => {
       pctPriorDay: null,
       pct1M: null,
       pct3M: null,
-      pct1Y: null
+      pct1Y: null,
     });
   });
 
-  it('computes prior day and percentage differences correctly for a simple series', () => {
-    // Newest first: current day, yesterday, then trailing history
-    const volumes = [
-      120, // current
-      100, // prior day
-      100,
-      100,
-      100,
-      100
-    ];
+  it('compares the latest session with complete preceding windows', () => {
+    const result = calculateVolumeMetrics([120, ...Array(250).fill(100)]);
 
-    const result = calculateVolumeMetrics(volumes);
-
-    // Prior day volume is current day's volume
     expect(result.priorDay).toBe(120);
-
-    // Prior-day % vs yesterday: (120 - 100) / 100 = 20%
+    expect(result.avg1M).toBe(100);
+    expect(result.avg3M).toBe(100);
+    expect(result.avg1Y).toBe(100);
     expect(Math.round(result.pctPriorDay)).toBe(20);
+    expect(Math.round(result.pct1M)).toBe(20);
+    expect(Math.round(result.pct3M)).toBe(20);
+    expect(Math.round(result.pct1Y)).toBe(20);
+  });
 
-    // 1M/3M/1Y averages all use the trailing history (all 100s here),
-    // so current vs average should also be ~20%
-    expect(Math.round(result.pct1M || 0)).toBe(20);
-    expect(Math.round(result.pct3M || 0)).toBe(20);
-    expect(Math.round(result.pct1Y || 0)).toBe(20);
+  it('does not label a short series as a monthly or yearly average', () => {
+    const result = calculateVolumeMetrics([120, ...Array(21).fill(100)]);
+
+    expect(Math.round(result.pctPriorDay)).toBe(20);
+    expect(Math.round(result.pct1M)).toBe(20);
+    expect(result.avg3M).toBeNull();
+    expect(result.pct3M).toBeNull();
+    expect(result.avg1Y).toBeNull();
+    expect(result.pct1Y).toBeNull();
   });
 });
-

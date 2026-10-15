@@ -1,3 +1,4 @@
+const { strictQuoteNumber } = require('./quoteObservation.cjs');
 const DEFAULT_STALE_SEC = Number(process.env.IBKR_QUOTE_STALE_SEC || 60);
 
 /**
@@ -5,9 +6,8 @@ const DEFAULT_STALE_SEC = Number(process.env.IBKR_QUOTE_STALE_SEC || 60);
  * @returns {value is number}
  */
 function isValidPositiveNumber(value) {
-  if (value == null) return false;
-  const n = typeof value === 'number' ? value : parseFloat(value);
-  return Number.isFinite(n) && n > 0;
+  const number = strictQuoteNumber(value);
+  return number !== null && number > 0;
 }
 
 /**
@@ -18,7 +18,8 @@ function isStaleTimestamp(timestamp, maxAgeSec = DEFAULT_STALE_SEC) {
   if (!timestamp) return true;
   const t = timestamp instanceof Date ? timestamp.getTime() : new Date(timestamp).getTime();
   if (!Number.isFinite(t)) return true;
-  return Date.now() - t > maxAgeSec * 1000;
+  const age = Date.now() - t;
+  return age < -5000 || age > maxAgeSec * 1000;
 }
 
 /**

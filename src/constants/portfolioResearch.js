@@ -1,0 +1,3 @@
+export const RESEARCH_CURRENT_HISTORY_DAYS = 0;
+export const RESEARCH_HISTORY_DAYS = 5;
+export const RESEARCH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;

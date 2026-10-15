@@ -82,14 +82,14 @@ describe('VolatilityTable controlled state', () => {
     );
 
     const regime = screen.getByLabelText('VIX current volatility regime: green');
-    const blocks = within(regime).getAllByText(/^(29\+|20–29|<20)$/);
+    const blocks = within(regime).getAllByText(/^(>29|20–29|<20)$/);
 
     expect(blocks.map((block) => block.getAttribute('data-regime'))).toEqual([
       'red',
       'yellow',
       'green',
     ]);
-    expect(blocks[0]).toHaveTextContent('29+');
+    expect(blocks[0]).toHaveTextContent('>29');
     expect(blocks[1]).toHaveTextContent('20–29');
     expect(blocks[2]).toHaveTextContent('<20');
     expect(blocks[0]).toHaveAttribute('data-active', 'false');

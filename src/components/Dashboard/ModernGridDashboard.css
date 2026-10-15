@@ -1,0 +1,1040 @@
+/* The approved Modern Grid overview. Keep this presentation isolated from
+   provider logic and the independently mounted workspace surfaces. */
+.dashboard-shell--modern-grid,
+.efr-backdrop-dialog,
+.efr-reference-dialog {
+  --modern-grid-line: #85909c;
+  --modern-grid-rule: #526171;
+  --modern-grid-ink: #2e3640;
+  --modern-grid-muted: #586573;
+  --modern-grid-header: #f5f6f7;
+  --modern-grid-section: #e9ecef;
+}
+
+.dashboard-shell--modern-grid {
+  --modern-grid-canvas: #e9edf0;
+  --modern-grid-surface: #fff;
+  --modern-grid-shadow: 0 1px 3px rgb(46 54 64 / 7%);
+  --modern-summary-title-height: var(--dashboard-table-row-height);
+  --modern-summary-columns-height: var(--dashboard-table-row-height);
+  --modern-performance-label-width: 42%;
+  --modern-performance-price-width: 11%;
+  --modern-workspace-top: 8px;
+  --modern-dock-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  --modern-monitor-bottom: calc(var(--dashboard-navigation-height, 44px) + var(--modern-dock-bottom));
+  --modern-workspace-bottom: calc(var(--modern-monitor-bottom) + 14px);
+  height: 100dvh;
+  min-height: 0;
+  padding: 0 10px var(--modern-workspace-bottom);
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--modern-grid-canvas);
+  color: var(--modern-grid-ink);
+  color-scheme: light;
+}
+
+.dashboard-overview-viewport {
+  height: 100%;
+  min-height: 0;
+  overflow: clip;
+  overscroll-behavior: none;
+}
+
+/* Keep the complete desktop roster together, fitting only the overview.
+   The dock, dialogs and workspace windows retain their own viewport geometry. */
+.dashboard-overview-content {
+  width: 100%;
+  min-width: 1600px;
+  container: dashboard-overview / inline-size;
+  transform-origin: top left;
+}
+
+.dashboard-shell--modern-grid .dashboard-topbar {
+  position: fixed;
+  bottom: var(--modern-dock-bottom);
+  left: 14px;
+  right: 14px;
+  z-index: 1400;
+  display: flex;
+  justify-content: center;
+  margin: 0;
+  pointer-events: none;
+}
+
+.dashboard-shell--modern-grid .exception-first-radar {
+  --efr-bg: var(--modern-grid-canvas);
+  --efr-card: var(--modern-grid-surface);
+  --efr-border: var(--modern-grid-line);
+  --efr-border-soft: var(--modern-grid-line);
+  --efr-ink: var(--modern-grid-ink);
+  --efr-radius: 0px;
+  --efr-gap: 6px;
+  --efr-shadow: var(--modern-grid-shadow);
+  display: block;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+  background: var(--efr-bg);
+}
+
+.dashboard-shell--modern-grid .efr-topbar,
+.dashboard-shell--modern-grid .efr-panel,
+.dashboard-shell--modern-grid .efr-reference {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--modern-grid-surface);
+}
+
+.dashboard-shell--modern-grid .efr-topbar {
+  --dashboard-market-strip-columns: repeat(6, minmax(0, 1fr));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  height: auto;
+  margin-bottom: 6px;
+  border: 1px solid var(--modern-grid-line);
+  box-shadow: none;
+}
+
+.dashboard-shell--modern-grid .efr-trust-strip {
+  border-right: 0;
+  border-top: 1px solid var(--modern-grid-line);
+  border-bottom: 0;
+}
+
+.dashboard-shell--modern-grid .efr-topbar,
+.dashboard-shell--modern-grid .efr-market-pulse {
+  background: var(--modern-grid-surface);
+}
+
+.dashboard-shell--modern-grid .efr-clock,
+.dashboard-shell--modern-grid .global-session-strip {
+  background: var(--modern-grid-section);
+}
+
+.dashboard-shell--modern-grid .global-session-strip__regions {
+  grid-template-columns: var(--dashboard-market-strip-columns);
+}
+
+/* Reuse the clock tracks through the regional wrappers so their borders line
+   up with the six readings below without consuming part of a nested track. */
+.dashboard-shell--modern-grid .global-session-region,
+.dashboard-shell--modern-grid .global-session-region__cities {
+  display: grid;
+  grid-template-columns: subgrid;
+}
+
+.dashboard-shell--modern-grid .global-session-region__cities {
+  grid-column: 1 / -1;
+}
+
+.dashboard-shell--modern-grid .global-session-region + .global-session-region {
+  border-left: 0;
+}
+
+.dashboard-shell--modern-grid .global-session-city + .global-session-city,
+.dashboard-shell--modern-grid .global-session-region + .global-session-region .global-session-city:first-child {
+  border-left: 1px solid var(--modern-grid-line);
+}
+
+.dashboard-shell--modern-grid .efr-market-pulse__metrics {
+  min-height: calc(var(--dashboard-table-row-height) + 64px);
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric + .efr-pulse-metric {
+  border-left: 1px solid var(--modern-grid-line);
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__slide {
+  display: flex;
+  padding: 4px 10px;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__copy {
+  width: 100%;
+  gap: 2px;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__heading {
+  gap: 8px;
+  min-height: var(--dashboard-table-row-height);
+  margin: 0;
+}
+
+.dashboard-shell--modern-grid .efr-clock {
+  min-height: 40px;
+  border-top: 0;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__ticker,
+.dashboard-shell--modern-grid .efr-pulse-metric h2 {
+  margin: 0;
+  color: var(--modern-grid-ink);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: var(--dashboard-table-row-height);
+  text-transform: none;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__ticker {
+  flex: 0 0 auto;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__status {
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__footer {
+  display: grid;
+  grid-template-columns: max-content minmax(64px, 1fr) max-content;
+  gap: 10px;
+  min-height: 18px;
+  margin: 0;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__footer > strong,
+.dashboard-shell--modern-grid .efr-pulse-metric__change {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: var(--dashboard-table-row-height);
+  white-space: nowrap;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__footer > strong {
+  color: var(--modern-grid-ink);
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__periods {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__period {
+  display: grid;
+  grid-template-columns: 24px minmax(48px, max-content);
+  column-gap: 6px;
+  align-items: baseline;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__period dt {
+  color: var(--modern-grid-muted);
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 12px;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-metric__period dd {
+  margin: 0;
+  line-height: 12px;
+  text-align: right;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-sparkline,
+.dashboard-shell--modern-grid .efr-pulse-sparkline__empty {
+  height: 38px;
+  max-width: none;
+  justify-self: stretch;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-sparkline__axes line {
+  stroke: var(--modern-grid-line);
+}
+
+.dashboard-shell--modern-grid .efr-pulse-sparkline__axes text {
+  fill: var(--modern-grid-muted);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-sparkline polyline {
+  stroke: var(--modern-grid-muted);
+  stroke-width: 1;
+}
+
+.dashboard-shell--modern-grid .efr-pulse-sparkline__empty {
+  color: var(--modern-grid-muted);
+  font-size: 11px;
+}
+
+.dashboard-shell--modern-grid .efr-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(540px, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    'exceptions currencies'
+    'correlations correlations'
+    'backdrop backdrop'
+    'reference reference';
+  grid-template-rows: auto;
+  align-items: start;
+  gap: 6px 10px;
+  min-height: 0;
+}
+
+.dashboard-shell--modern-grid .efr-vol-map,
+.dashboard-shell--modern-grid .efr-analytics-stack,
+.dashboard-shell--modern-grid .efr-analytics-card,
+.dashboard-shell--modern-grid .efr-backdrop,
+.dashboard-shell--modern-grid .efr-reference {
+  min-height: 0;
+  height: auto;
+}
+
+.dashboard-shell--modern-grid .efr-vol-map__state {
+  min-height: 180px;
+  font-size: 11px;
+}
+
+.dashboard-shell--modern-grid .efr-analytics-stack,
+.dashboard-shell--modern-grid .efr-analytics-card,
+.dashboard-shell--modern-grid .usd-correlation-panel--radar {
+  --usd-card-section-header-height: var(--dashboard-table-row-height);
+  display: contents;
+  height: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.dashboard-shell--modern-grid .usd-card-section--market-events {
+  width: 100%;
+  max-width: none;
+  min-height: 64px;
+  height: 100%;
+  justify-self: stretch;
+  border: 1px solid var(--modern-grid-line);
+}
+
+.dashboard-shell--modern-grid .usd-card-section--market-events { grid-area: events; }
+.dashboard-shell--modern-grid .usd-card-section--currencies { grid-area: currencies; }
+
+.dashboard-shell--modern-grid .usd-card-correlations {
+  display: grid;
+  grid-area: correlations;
+  grid-template-rows: var(--modern-summary-title-height) minmax(0, 1fr);
+  min-width: 0;
+}
+
+.dashboard-shell--modern-grid .usd-card-correlations__header,
+.dashboard-shell--modern-grid .usd-card-correlations > .usd-corr-body {
+  grid-row: auto;
+}
+
+.dashboard-shell--modern-grid .usd-card-section__header {
+  border-bottom: 1px solid var(--modern-grid-rule);
+  background: var(--modern-grid-section);
+  padding: 0 8px;
+}
+
+.dashboard-shell--modern-grid .usd-card-section__header--dollar,
+.dashboard-shell--modern-grid .usd-card-correlations__header {
+  position: relative;
+  justify-content: center;
+}
+
+.dashboard-shell--modern-grid .usd-card-correlations__status {
+  position: absolute;
+  right: 8px;
+}
+
+.dashboard-shell--modern-grid .usd-card-section__header h3,
+.dashboard-shell--modern-grid .usd-card-section__header--dollar h3 {
+  color: var(--modern-grid-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.dashboard-shell--modern-grid .usd-card-section__body,
+.dashboard-shell--modern-grid .usd-corr-body,
+.dashboard-shell--modern-grid .usd-corr-table-wrap {
+  height: auto;
+  min-height: 0;
+}
+
+.dashboard-shell--modern-grid .usd-currency-spreadsheet,
+.dashboard-shell--modern-grid .usd-corr-table {
+  height: auto;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.dashboard-shell--modern-grid .usd-currency-spreadsheet {
+  --usd-currency-table-font-size: 11px;
+}
+
+.dashboard-shell--modern-grid .usd-currency-spreadsheet th,
+.dashboard-shell--modern-grid .usd-corr-table th {
+  height: var(--dashboard-table-row-height);
+  padding: 0 5px;
+  border: 0;
+  border-bottom: 1px solid var(--modern-grid-line);
+  background: var(--modern-grid-header);
+  color: var(--modern-grid-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .015em;
+}
+
+.dashboard-shell--modern-grid .usd-currency-spreadsheet td,
+.dashboard-shell--modern-grid .usd-corr-table td {
+  height: var(--dashboard-table-row-height);
+  padding: 0 5px;
+  border-right: 0;
+  border-left: 0;
+  border-bottom: 1px solid var(--modern-grid-line);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.dashboard-shell--modern-grid .usd-currency-spreadsheet__ticker-col { width: var(--modern-performance-label-width); }
+.dashboard-shell--modern-grid .usd-currency-spreadsheet__price-col { width: var(--modern-performance-price-width); }
+.dashboard-shell--modern-grid .usd-currency-spreadsheet__return-col { width: auto; }
+
+.dashboard-shell--modern-grid .usd-currency-spreadsheet td {
+  padding-inline: 3px;
+}
+
+.dashboard-shell--modern-grid .usd-card-currencies__body .usd-currency-spreadsheet td:nth-child(n + 3) {
+  padding-inline: 1px;
+  font-family: "Avenir Next Condensed", "Arial Narrow", ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  font-stretch: condensed;
+}
+
+.dashboard-shell--modern-grid .usd-card-currencies__body .usd-currency-spreadsheet th:first-child,
+.dashboard-shell--modern-grid .usd-card-currencies__body .usd-currency-spreadsheet td:first-child {
+  width: var(--modern-performance-label-width);
+  max-width: none;
+}
+
+.dashboard-shell--modern-grid .usd-card-currencies__body .usd-currency-spreadsheet th:nth-child(2),
+.dashboard-shell--modern-grid .usd-card-currencies__body .usd-currency-spreadsheet td:nth-child(2) {
+  width: var(--modern-performance-price-width);
+  max-width: none;
+  text-align: center;
+}
+
+.dashboard-shell--modern-grid .usd-currency-spreadsheet thead th.usd-currency-spreadsheet__header {
+  font-size: 9px;
+  font-weight: 700;
+}
+.dashboard-shell--modern-grid .usd-metric-icon { display: none; }
+.dashboard-shell--modern-grid .usd-corr-metric-symbol { font-weight: 400; }
+
+.dashboard-shell--modern-grid .efr-backdrop {
+  --efr-backdrop-header-bg: #fff;
+  --efr-backdrop-header-text: var(--modern-grid-ink);
+  --efr-backdrop-header-divider: var(--modern-grid-line);
+  --efr-backdrop-header-hover: #f1f3f5;
+  --efr-backdrop-divider: var(--modern-grid-line);
+  --efr-backdrop-border: var(--modern-grid-line);
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop__body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 6px 10px;
+  background: transparent;
+  overflow: visible;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: start;
+  min-width: 0;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group h3 {
+  writing-mode: horizontal-tb;
+  height: var(--dashboard-table-row-height);
+  line-height: 1;
+  border-right: 0;
+  border-bottom: 1px solid var(--modern-grid-line);
+  background: var(--modern-grid-header);
+  color: var(--modern-grid-ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop-group__expand {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  justify-content: center;
+  padding: 0 7px;
+  transform: none;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop-group__expand-icon {
+  position: absolute;
+  right: 7px;
+  color: var(--modern-grid-muted);
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group table {
+  height: auto;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group th {
+  height: var(--dashboard-table-row-height);
+  padding: 0 4px;
+  border-right: 0;
+  border-bottom: 1px solid var(--modern-grid-line);
+  background: var(--modern-grid-header);
+  color: var(--modern-grid-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group td {
+  height: var(--dashboard-table-row-height);
+  padding: 0 4px;
+  border-right: 0;
+  border-bottom: 1px solid var(--modern-grid-line);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.2;
+  background: #fff;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group td:first-child {
+  color: var(--modern-grid-ink);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group :is(th, td):first-child {
+  width: var(--modern-performance-label-width);
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group :is(th, td):nth-child(2) {
+  width: var(--modern-performance-price-width);
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group :is(th, td):nth-child(n + 3) {
+  width: auto;
+  padding-inline: 1px;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop .efr-backdrop-group td:has(> .efr-backdrop-observation) {
+  padding-inline: 0;
+  letter-spacing: -.04em;
+}
+
+.dashboard-shell--modern-grid .efr-backdrop-observation {
+  margin-left: 1px;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet th:first-child {
+  width: 30%;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet :is(th, td):nth-child(n + 2):not(:last-child) {
+  padding-inline: 1px;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet td:nth-child(n + 3):not(:last-child) {
+  letter-spacing: -.025em;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet :is(th, td):last-child {
+  width: 18%;
+}
+
+.dashboard-shell--modern-grid .efr-reference {
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
+}
+
+.dashboard-shell--modern-grid .efr-reference__grid {
+  height: auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dashboard-shell--modern-grid .efr-reference-card {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
+.dashboard-shell--modern-grid .efr-reference-card__header {
+  height: var(--dashboard-table-row-height);
+  min-height: var(--dashboard-table-row-height);
+  padding-block: 0;
+  border-bottom: 1px solid var(--modern-grid-rule);
+  background: var(--modern-grid-section);
+}
+
+.dashboard-shell--modern-grid .efr-reference-card__title {
+  color: var(--modern-grid-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.dashboard-shell--modern-grid .efr-reference-card__body .efr-mini-table th,
+.dashboard-shell--modern-grid .efr-reference-card__body .efr-mini-table td,
+.dashboard-shell--modern-grid .efr-reference-card--volume .region-mw-th,
+.dashboard-shell--modern-grid .efr-reference-card--volume .region-mw-td {
+  height: var(--dashboard-table-row-height);
+  padding: 0 4px;
+  border-right: 0;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.dashboard-shell--modern-grid .efr-reference-card__body thead th,
+.dashboard-shell--modern-grid .efr-reference-card__body .efr-mini-table thead th,
+.dashboard-shell--modern-grid .efr-reference-card--volume .region-mw-th {
+  font-weight: 700;
+  background: var(--modern-grid-header);
+  color: var(--modern-grid-muted);
+  border-bottom-color: var(--modern-grid-line);
+}
+
+.dashboard-shell--modern-grid .efr-reference-card--volume .market-volume-table--mw .region-mw-quotes-table .region-mw-th {
+  font-size: 9px;
+}
+
+.dashboard-shell--modern-grid .global-quads-grid--compact th,
+.dashboard-shell--modern-grid .global-quads-grid--compact td {
+  height: var(--dashboard-table-row-height);
+}
+
+.dashboard-shell--modern-grid .global-quads-grid--compact .global-quads-reading {
+  height: calc(var(--dashboard-table-row-height) - 2px);
+  min-height: 0;
+}
+
+.dashboard-shell--modern-grid .efr-reference-empty { min-height: 50px; }
+.dashboard-shell--modern-grid .efr-reference-overlay { padding: 30px; }
+
+/* White table surfaces lift subtly from the cool pearl canvas without changing density. */
+.dashboard-shell--modern-grid .efr-vol-map--spreadsheet,
+.dashboard-shell--modern-grid .usd-card-section--currencies,
+.dashboard-shell--modern-grid .usd-card-correlations,
+.dashboard-shell--modern-grid .efr-backdrop-group,
+.dashboard-shell--modern-grid .efr-reference-card {
+  border: 1px solid var(--modern-grid-line);
+  background: var(--modern-grid-surface);
+  box-shadow: var(--modern-grid-shadow);
+}
+
+.dashboard-shell--modern-grid .efr-reference-card--liquidity .efr-reference-card--volume {
+  margin-top: 6px;
+  border: 0;
+  border-top: 1px solid var(--modern-grid-line);
+  box-shadow: none;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet__title {
+  justify-content: center;
+  min-height: var(--modern-summary-title-height);
+  padding: 0 8px;
+  border-bottom-color: var(--modern-grid-rule);
+  background: var(--modern-grid-section);
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet__title h2 {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: .035em;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet {
+  height: auto;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet th,
+.dashboard-shell--modern-grid .efr-vol-spreadsheet td {
+  height: var(--dashboard-table-row-height);
+  padding: 0 5px;
+  line-height: 1.2;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet thead th {
+  height: var(--dashboard-table-row-height);
+  padding-block: 0;
+  background: var(--modern-grid-header);
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet__ticker { padding: 0; }
+
+/* Share compact header and row baselines without stretching shorter rosters. */
+.dashboard-shell--modern-grid .efr-vol-map--spreadsheet,
+.dashboard-shell--modern-grid .usd-card-section--currencies,
+.dashboard-shell--modern-grid .usd-card-correlations {
+  display: grid;
+  grid-template-rows: var(--modern-summary-title-height) minmax(0, 1fr);
+  align-self: start;
+  height: auto;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet__wrap,
+.dashboard-shell--modern-grid .usd-card-currencies__body,
+.dashboard-shell--modern-grid .usd-card-correlations .usd-corr-body,
+.dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table-wrap {
+  min-height: 0;
+  height: auto;
+}
+
+.dashboard-shell--modern-grid .usd-correlation-panel--radar > .usd-card-correlations > .usd-corr-body {
+  grid-row: 2;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet,
+.dashboard-shell--modern-grid .usd-card-currencies__body .usd-currency-spreadsheet,
+.dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table {
+  height: auto;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet thead,
+.dashboard-shell--modern-grid .usd-currency-spreadsheet thead,
+.dashboard-shell--modern-grid .usd-corr-table thead {
+  height: var(--modern-summary-columns-height);
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet thead th,
+.dashboard-shell--modern-grid .usd-currency-spreadsheet thead th.usd-currency-spreadsheet__header,
+.dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table thead th {
+  height: var(--modern-summary-columns-height);
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: .025em;
+  color: var(--modern-grid-muted);
+}
+
+.dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table tbody td {
+  height: var(--dashboard-table-row-height) !important;
+  padding-block: 0 !important;
+  padding: 0 5px;
+  line-height: 1.2;
+}
+
+.dashboard-shell--modern-grid .usd-currency-spreadsheet tbody tr:last-child > *,
+.dashboard-shell--modern-grid .usd-corr-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.dashboard-shell--modern-grid .efr-vol-spreadsheet__regime > small:not(.efr-vol-spreadsheet__risk-range) {
+  display: inline;
+  float: right;
+  margin-left: 4px;
+  font-size: 8px;
+  text-align: right;
+}
+
+.dashboard-shell--modern-grid .market-events-quick-reference {
+  grid-template-rows: 25px minmax(0, 1fr);
+}
+
+.dashboard-shell--modern-grid .market-events-quick-reference__header {
+  border-bottom-color: var(--modern-grid-rule);
+  background: var(--modern-grid-section);
+}
+
+.dashboard-shell--modern-grid .market-events-quick-reference__header h3 {
+  color: var(--modern-grid-ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dashboard-shell--modern-grid .market-events-day { padding: 4px 8px; }
+
+/* Crisp cell boundaries across the overview and its expanded reference tables.
+   Keep backgrounds, semantic outlines, and existing row dimensions intact. */
+:is(.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid, .efr-backdrop-dialog, .efr-reference-dialog)
+  table > :is(thead, tbody, tfoot) > tr > :is(th, td) {
+  border-right: 1px solid var(--modern-grid-line);
+  border-bottom: 1px solid var(--modern-grid-line);
+  border-left-color: var(--modern-grid-line);
+  border-top-color: var(--modern-grid-line);
+}
+
+:is(.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid, .efr-backdrop-dialog, .efr-reference-dialog)
+  table > thead > tr > th {
+  border-bottom-color: var(--modern-grid-rule);
+}
+
+:is(.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid, .efr-backdrop-dialog, .efr-reference-dialog)
+  table > :is(thead, tbody, tfoot) > tr > :is(th, td):last-child {
+  border-right: 0;
+}
+
+.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid
+  table > tbody > tr:last-child > :is(th, td) {
+  border-bottom: 0;
+}
+
+/* Separate labels and price/level columns from the comparable numeric periods. */
+:is(.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid, .efr-backdrop-dialog, .efr-reference-dialog)
+  table:not(.volume-mw-table) > :is(thead, tbody, tfoot) > tr > :is(th, td):first-child:not(:last-child),
+:is(.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid, .efr-backdrop-dialog, .efr-reference-dialog)
+  :is(.efr-vol-spreadsheet, .usd-currency-spreadsheet, .efr-backdrop-group table) > :is(thead, tbody) > tr > :is(th, td):nth-child(2),
+:is(.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid, .efr-backdrop-dialog, .efr-reference-dialog)
+  .volume-mw-table :is(.region-mw-th-name, .region-mw-td-name),
+:is(.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid, .efr-backdrop-dialog, .efr-reference-dialog)
+  table > :is(thead, tbody) > tr > :is(th, td):has(+ .efr-vol-spreadsheet__regime, + .usd-corr-sep-left),
+.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid
+  .efr-vol-spreadsheet > thead > tr > th:nth-last-child(2) {
+  border-right-color: var(--modern-grid-rule);
+}
+
+:is(.dashboard-shell--modern-grid .exception-first-radar .efr-primary-grid, .efr-reference-dialog)
+  .global-quads-grid .global-quads-aggregate > * {
+  border-top-color: var(--modern-grid-rule);
+}
+
+@container dashboard-overview (min-width: 1600px) {
+  .dashboard-shell--modern-grid .efr-primary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      'exceptions currencies correlations'
+      'backdrop backdrop backdrop'
+      'reference reference reference';
+  }
+
+  .dashboard-shell--modern-grid .efr-vol-spreadsheet {
+    min-width: 0;
+  }
+
+  .dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table th.usd-corr-th-metric {
+    width: 11%;
+  }
+
+  .dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table th.region-mw-th-metric {
+    width: 9%;
+  }
+
+  .dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table th:nth-last-child(-n + 2) {
+    width: 13%;
+  }
+
+  .dashboard-shell--modern-grid .usd-currency-spreadsheet th,
+  .dashboard-shell--modern-grid .usd-currency-spreadsheet td,
+  .dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table thead th,
+  .dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table tbody td {
+    padding-inline: 4px;
+  }
+
+  .dashboard-shell--modern-grid .usd-card-correlations .usd-corr-table .usd-corr-sep-left {
+    padding-left: 4px !important;
+  }
+}
+
+/* Expanded market and reference tables share the overview's compact density.
+   These dialogs are portaled to body, outside the dashboard shell. */
+.efr-backdrop-dialog .efr-backdrop-group th,
+.efr-backdrop-dialog .efr-backdrop-group td,
+.efr-reference-dialog table th,
+.efr-reference-dialog table td,
+.efr-reference-dialog .volume-mw-table .region-mw-td,
+.efr-reference-dialog .global-quads-grid .global-quads-country {
+  height: var(--dashboard-table-row-height);
+  padding-block: 0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.efr-backdrop-dialog .efr-backdrop-group thead th,
+.efr-reference-dialog table thead th,
+.efr-reference-dialog .global-quads-grid thead .global-quads-country {
+  background: #f5f6f7;
+  color: #586573;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.efr-reference-dialog table caption {
+  height: var(--dashboard-table-row-height);
+  padding-block: 0;
+  background: #e9ecef;
+  font-weight: 700;
+  line-height: 14px;
+}
+
+.efr-reference-dialog .global-quads-grid .global-quads-reading {
+  height: calc(var(--dashboard-table-row-height) - 2px);
+  min-height: 0;
+}
+
+.efr-reference-dialog .global-quads-grid .global-quads-bands th {
+  height: var(--dashboard-table-row-height);
+}
+
+.efr-reference-dialog .cftc-positioning__row-status {
+  display: inline;
+  margin: 0 0 0 4px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+/* Expanded tables use the same square frame and compact title rail as the overview. */
+.dashboard-table-dialog:is(.efr-backdrop-dialog, .efr-reference-dialog) {
+  border: 1px solid var(--modern-grid-line);
+  border-radius: 0;
+  background: #fff;
+  box-shadow: 0 4px 16px rgb(46 54 64 / 12%);
+  color: var(--modern-grid-ink);
+}
+
+.dashboard-table-dialog:is(.efr-backdrop-dialog, .efr-reference-dialog) .dashboard-table-dialog__header {
+  display: block;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--modern-grid-rule);
+  background: var(--modern-grid-section);
+}
+
+.dashboard-table-dialog .dashboard-table-dialog__header h2 {
+  margin: 0;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  line-height: 1;
+}
+
+.dashboard-table-dialog .dashboard-table-dialog__header .dashboard-table-dialog__title {
+  position: static;
+  display: block;
+  width: 100%;
+  height: calc(var(--dashboard-table-row-height, 16px) - 1px);
+  min-height: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: center;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.dashboard-table-dialog .dashboard-table-dialog__header .dashboard-table-dialog__title:hover {
+  background: #dfe4e8;
+  color: var(--modern-grid-ink);
+}
+
+.dashboard-table-dialog .dashboard-table-dialog__header .dashboard-table-dialog__title:focus-visible {
+  outline: 1px solid var(--modern-grid-rule);
+  outline-offset: -2px;
+}
+
+.dashboard-table-dialog:is(.efr-backdrop-dialog, .efr-reference-dialog) > :is(.efr-backdrop-dialog__body, .efr-reference-dialog__body) {
+  min-height: 0;
+  padding: 6px;
+}
+
+.dashboard-table-dialog .efr-reference-dialog__body > * {
+  min-height: 0;
+}
+
+.dashboard-table-dialog .dollar-liquidity-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+.dashboard-table-dialog .dollar-liquidity-panel-header > .dollar-liquidity-title-block {
+  display: none;
+}
+
+.dashboard-table-dialog .dollar-liquidity-panel-header {
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.dashboard-table-dialog :is(.dollar-liquidity-model, .dollar-liquidity-chart, .dollar-liquidity-headlines > div, .dollar-liquidity-components > div) {
+  border-color: var(--modern-grid-line);
+  border-radius: 0;
+  background: #fff;
+}
+
+.dashboard-table-dialog .dollar-liquidity-model {
+  padding: 6px;
+}
+
+.dashboard-table-dialog .dollar-liquidity-model-header {
+  padding: 4px 6px;
+  background: var(--modern-grid-section);
+}
+
+.dashboard-table-dialog .dollar-liquidity-title-block :is(h3, svg) {
+  color: var(--modern-grid-ink);
+}
+
+.dashboard-table-dialog :is(.dollar-liquidity-status, .dollar-liquidity-chip, .dollar-liquidity-empty) {
+  border-radius: 0;
+}
+
+.dashboard-table-dialog :is(.dollar-liquidity-headlines strong, .dollar-liquidity-components strong, .dollar-liquidity-components span, .dollar-liquidity-status) {
+  font-weight: 400;
+}
+
+@container dashboard-overview (max-width: 1199px) {
+  .dashboard-shell--modern-grid .efr-primary-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'exceptions' 'currencies' 'correlations' 'backdrop' 'reference';
+  }
+  .dashboard-shell--modern-grid .efr-backdrop__body,
+  .dashboard-shell--modern-grid .efr-reference__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-shell--modern-grid { padding-inline: 6px; }
+}
+
+@container dashboard-overview (max-width: 640px) {
+  .dashboard-shell--modern-grid .efr-market-pulse__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: calc(var(--dashboard-table-row-height) + 48px);
+  }
+  .dashboard-shell--modern-grid .efr-backdrop__body,
+  .dashboard-shell--modern-grid .efr-reference__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dashboard-shell--modern-grid .efr-pulse-metric__slide {
+    padding-inline: 5px;
+  }
+  .dashboard-shell--modern-grid .usd-card-currencies__body,
+  .dashboard-shell--modern-grid .usd-corr-table-wrap { overflow-x: auto; }
+  .dashboard-shell--modern-grid .usd-currency-spreadsheet { min-width: 580px; }
+  .dashboard-shell--modern-grid .usd-corr-table { min-width: 600px; }
+}

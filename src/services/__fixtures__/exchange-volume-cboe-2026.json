@@ -1,0 +1,1919 @@
+{
+  "fixtureVersion": 1,
+  "testOnly": true,
+  "description": "Immutable source-derived regression observations. Never import into runtime market-data providers or UI.",
+  "provenance": {
+    "provider": "Cboe Exchange, Inc.",
+    "documentationUrl": "https://www.cboe.com/markets/us/equities/market-statistics/historical-market-volume/",
+    "method": "Sum original Total Shares values across every market-participant row for each Day, including all FINRA TRFs. Do not also add tape columns or remove off-exchange participants. Decimal arithmetic used for aggregation; daily totals are serialized as JSON numbers. Original participant field precision is preserved in participantSamples.",
+    "sourceFiles": [
+      {
+        "year": 2025,
+        "url": "https://www.cboe.com/us/equities/market_statistics/historical_market_volume/market_history_2025.csv-dl",
+        "retrievedAt": "2026-09-09T20:27:40Z",
+        "sha256": "3f297d33729dc427e1f08f0ae9c6e05a95334ed9253211c97c2e8d4ce8183578",
+        "byteLength": 833780,
+        "participantRowCount": 4805,
+        "firstDate": "2025-01-02",
+        "lastDate": "2025-12-31"
+      },
+      {
+        "year": 2026,
+        "url": "https://www.cboe.com/us/equities/market_statistics/historical_market_volume/market_history_2026.csv-dl",
+        "retrievedAt": "2026-09-09T20:27:40Z",
+        "sha256": "9e95aea835ac72215667166b5faab983fb75cf91238561ef5d75cedafe3b2e1a",
+        "byteLength": 679076,
+        "participantRowCount": 3462,
+        "firstDate": "2026-01-02",
+        "lastDate": "2026-09-08"
+      }
+    ]
+  },
+  "coverage": {
+    "firstDate": "2025-03-19",
+    "lastDate": "2026-09-08",
+    "sessionCount": 370,
+    "predecessorsOfFirstBenchmark": 250
+  },
+  "dailyTotals": [
+    {
+      "date": "2025-03-19",
+      "consolidatedShares": 13825294832.0
+    },
+    {
+      "date": "2025-03-20",
+      "consolidatedShares": 13246470811.0
+    },
+    {
+      "date": "2025-03-21",
+      "consolidatedShares": 21270493110.0
+    },
+    {
+      "date": "2025-03-24",
+      "consolidatedShares": 13902764890.0
+    },
+    {
+      "date": "2025-03-25",
+      "consolidatedShares": 13267196265.0
+    },
+    {
+      "date": "2025-03-26",
+      "consolidatedShares": 15952157419.0
+    },
+    {
+      "date": "2025-03-27",
+      "consolidatedShares": 14984867368.0
+    },
+    {
+      "date": "2025-03-28",
+      "consolidatedShares": 14710703664.0
+    },
+    {
+      "date": "2025-03-31",
+      "consolidatedShares": 16627260603.0
+    },
+    {
+      "date": "2025-04-01",
+      "consolidatedShares": 15409638075.0
+    },
+    {
+      "date": "2025-04-02",
+      "consolidatedShares": 16805587628.0
+    },
+    {
+      "date": "2025-04-03",
+      "consolidatedShares": 21085620217.0
+    },
+    {
+      "date": "2025-04-04",
+      "consolidatedShares": 26883246873.0
+    },
+    {
+      "date": "2025-04-07",
+      "consolidatedShares": 29364295778.0
+    },
+    {
+      "date": "2025-04-08",
+      "consolidatedShares": 23763555716.0
+    },
+    {
+      "date": "2025-04-09",
+      "consolidatedShares": 30976593073.0
+    },
+    {
+      "date": "2025-04-10",
+      "consolidatedShares": 24229550717.0
+    },
+    {
+      "date": "2025-04-11",
+      "consolidatedShares": 19585160379.0
+    },
+    {
+      "date": "2025-04-14",
+      "consolidatedShares": 18356193983.0
+    },
+    {
+      "date": "2025-04-15",
+      "consolidatedShares": 14980619711.0
+    },
+    {
+      "date": "2025-04-16",
+      "consolidatedShares": 16255571368.0
+    },
+    {
+      "date": "2025-04-17",
+      "consolidatedShares": 14793760142.0
+    },
+    {
+      "date": "2025-04-21",
+      "consolidatedShares": 14117588480.0
+    },
+    {
+      "date": "2025-04-22",
+      "consolidatedShares": 15712526483.0
+    },
+    {
+      "date": "2025-04-23",
+      "consolidatedShares": 17867324319.0
+    },
+    {
+      "date": "2025-04-24",
+      "consolidatedShares": 15295740904.0
+    },
+    {
+      "date": "2025-04-25",
+      "consolidatedShares": 14489336344.0
+    },
+    {
+      "date": "2025-04-28",
+      "consolidatedShares": 17653186181.0
+    },
+    {
+      "date": "2025-04-29",
+      "consolidatedShares": 20543113082.0
+    },
+    {
+      "date": "2025-04-30",
+      "consolidatedShares": 17515220600.0
+    },
+    {
+      "date": "2025-05-01",
+      "consolidatedShares": 16493644092.0
+    },
+    {
+      "date": "2025-05-02",
+      "consolidatedShares": 16305127078.0
+    },
+    {
+      "date": "2025-05-05",
+      "consolidatedShares": 14277099064.0
+    },
+    {
+      "date": "2025-05-06",
+      "consolidatedShares": 14773513941.0
+    },
+    {
+      "date": "2025-05-07",
+      "consolidatedShares": 15900256580.0
+    },
+    {
+      "date": "2025-05-08",
+      "consolidatedShares": 17276937868.0
+    },
+    {
+      "date": "2025-05-09",
+      "consolidatedShares": 16441950928.0
+    },
+    {
+      "date": "2025-05-12",
+      "consolidatedShares": 20595154547.0
+    },
+    {
+      "date": "2025-05-13",
+      "consolidatedShares": 18228587690.0
+    },
+    {
+      "date": "2025-05-14",
+      "consolidatedShares": 20382551306.0
+    },
+    {
+      "date": "2025-05-15",
+      "consolidatedShares": 18457092798.0
+    },
+    {
+      "date": "2025-05-16",
+      "consolidatedShares": 18165900580.0
+    },
+    {
+      "date": "2025-05-19",
+      "consolidatedShares": 20062359286.0
+    },
+    {
+      "date": "2025-05-20",
+      "consolidatedShares": 16662324951.0
+    },
+    {
+      "date": "2025-05-21",
+      "consolidatedShares": 19906033664.0
+    },
+    {
+      "date": "2025-05-22",
+      "consolidatedShares": 16480330464.0
+    },
+    {
+      "date": "2025-05-23",
+      "consolidatedShares": 16777332726.0
+    },
+    {
+      "date": "2025-05-27",
+      "consolidatedShares": 17329088553.0
+    },
+    {
+      "date": "2025-05-28",
+      "consolidatedShares": 16208471239.0
+    },
+    {
+      "date": "2025-05-29",
+      "consolidatedShares": 18721471122.0
+    },
+    {
+      "date": "2025-05-30",
+      "consolidatedShares": 19869652761.0
+    },
+    {
+      "date": "2025-06-02",
+      "consolidatedShares": 16029640187.0
+    },
+    {
+      "date": "2025-06-03",
+      "consolidatedShares": 16133836621.0
+    },
+    {
+      "date": "2025-06-04",
+      "consolidatedShares": 15372262137.0
+    },
+    {
+      "date": "2025-06-05",
+      "consolidatedShares": 17685946265.0
+    },
+    {
+      "date": "2025-06-06",
+      "consolidatedShares": 14789537110.0
+    },
+    {
+      "date": "2025-06-09",
+      "consolidatedShares": 17680165239.0
+    },
+    {
+      "date": "2025-06-10",
+      "consolidatedShares": 19281455206.0
+    },
+    {
+      "date": "2025-06-11",
+      "consolidatedShares": 20971577531.0
+    },
+    {
+      "date": "2025-06-12",
+      "consolidatedShares": 24413806568.0
+    },
+    {
+      "date": "2025-06-13",
+      "consolidatedShares": 18461535528.0
+    },
+    {
+      "date": "2025-06-16",
+      "consolidatedShares": 18342231404.0
+    },
+    {
+      "date": "2025-06-17",
+      "consolidatedShares": 16915528224.0
+    },
+    {
+      "date": "2025-06-18",
+      "consolidatedShares": 16703330550.0
+    },
+    {
+      "date": "2025-06-20",
+      "consolidatedShares": 21208812455.0
+    },
+    {
+      "date": "2025-06-23",
+      "consolidatedShares": 19111544405.0
+    },
+    {
+      "date": "2025-06-24",
+      "consolidatedShares": 17324804871.0
+    },
+    {
+      "date": "2025-06-25",
+      "consolidatedShares": 16444779018.0
+    },
+    {
+      "date": "2025-06-26",
+      "consolidatedShares": 16518022340.0
+    },
+    {
+      "date": "2025-06-27",
+      "consolidatedShares": 24038445620.0
+    },
+    {
+      "date": "2025-06-30",
+      "consolidatedShares": 17481503351.0
+    },
+    {
+      "date": "2025-07-01",
+      "consolidatedShares": 18555310138.0
+    },
+    {
+      "date": "2025-07-02",
+      "consolidatedShares": 17321506451.0
+    },
+    {
+      "date": "2025-07-03",
+      "consolidatedShares": 11577524946.0
+    },
+    {
+      "date": "2025-07-07",
+      "consolidatedShares": 16746316207.0
+    },
+    {
+      "date": "2025-07-08",
+      "consolidatedShares": 17382887726.0
+    },
+    {
+      "date": "2025-07-09",
+      "consolidatedShares": 18478757543.0
+    },
+    {
+      "date": "2025-07-10",
+      "consolidatedShares": 18568065346.0
+    },
+    {
+      "date": "2025-07-11",
+      "consolidatedShares": 15810563018.0
+    },
+    {
+      "date": "2025-07-14",
+      "consolidatedShares": 15678497286.0
+    },
+    {
+      "date": "2025-07-15",
+      "consolidatedShares": 17199222054.0
+    },
+    {
+      "date": "2025-07-16",
+      "consolidatedShares": 18046748906.0
+    },
+    {
+      "date": "2025-07-17",
+      "consolidatedShares": 18625531887.0
+    },
+    {
+      "date": "2025-07-18",
+      "consolidatedShares": 17882583572.0
+    },
+    {
+      "date": "2025-07-21",
+      "consolidatedShares": 20311482245.0
+    },
+    {
+      "date": "2025-07-22",
+      "consolidatedShares": 19657927851.0
+    },
+    {
+      "date": "2025-07-23",
+      "consolidatedShares": 20193940045.0
+    },
+    {
+      "date": "2025-07-24",
+      "consolidatedShares": 21366365793.0
+    },
+    {
+      "date": "2025-07-25",
+      "consolidatedShares": 18256894860.0
+    },
+    {
+      "date": "2025-07-28",
+      "consolidatedShares": 18157716763.0
+    },
+    {
+      "date": "2025-07-29",
+      "consolidatedShares": 18451081138.0
+    },
+    {
+      "date": "2025-07-30",
+      "consolidatedShares": 18287045710.0
+    },
+    {
+      "date": "2025-07-31",
+      "consolidatedShares": 20169012733.0
+    },
+    {
+      "date": "2025-08-01",
+      "consolidatedShares": 19816592029.0
+    },
+    {
+      "date": "2025-08-04",
+      "consolidatedShares": 15418764912.0
+    },
+    {
+      "date": "2025-08-05",
+      "consolidatedShares": 16709266295.0
+    },
+    {
+      "date": "2025-08-06",
+      "consolidatedShares": 17159937516.0
+    },
+    {
+      "date": "2025-08-07",
+      "consolidatedShares": 17748724084.0
+    },
+    {
+      "date": "2025-08-08",
+      "consolidatedShares": 16423371573.0
+    },
+    {
+      "date": "2025-08-11",
+      "consolidatedShares": 16911654831.0
+    },
+    {
+      "date": "2025-08-12",
+      "consolidatedShares": 16822784743.0
+    },
+    {
+      "date": "2025-08-13",
+      "consolidatedShares": 17370360606.0
+    },
+    {
+      "date": "2025-08-14",
+      "consolidatedShares": 16928200278.0
+    },
+    {
+      "date": "2025-08-15",
+      "consolidatedShares": 16841247650.0
+    },
+    {
+      "date": "2025-08-18",
+      "consolidatedShares": 15215889662.0
+    },
+    {
+      "date": "2025-08-19",
+      "consolidatedShares": 16106689303.0
+    },
+    {
+      "date": "2025-08-20",
+      "consolidatedShares": 15819970659.0
+    },
+    {
+      "date": "2025-08-21",
+      "consolidatedShares": 13298126099.0
+    },
+    {
+      "date": "2025-08-22",
+      "consolidatedShares": 18270361291.0
+    },
+    {
+      "date": "2025-08-25",
+      "consolidatedShares": 15181615953.0
+    },
+    {
+      "date": "2025-08-26",
+      "consolidatedShares": 16606308436.0
+    },
+    {
+      "date": "2025-08-27",
+      "consolidatedShares": 15366680363.0
+    },
+    {
+      "date": "2025-08-28",
+      "consolidatedShares": 14796100647.0
+    },
+    {
+      "date": "2025-08-29",
+      "consolidatedShares": 15170187274.0
+    },
+    {
+      "date": "2025-09-02",
+      "consolidatedShares": 16615308762.0
+    },
+    {
+      "date": "2025-09-03",
+      "consolidatedShares": 15287733224.0
+    },
+    {
+      "date": "2025-09-04",
+      "consolidatedShares": 14965313958.0
+    },
+    {
+      "date": "2025-09-05",
+      "consolidatedShares": 17182259647.0
+    },
+    {
+      "date": "2025-09-08",
+      "consolidatedShares": 16795679935.0
+    },
+    {
+      "date": "2025-09-09",
+      "consolidatedShares": 16146541547.0
+    },
+    {
+      "date": "2025-09-10",
+      "consolidatedShares": 17790736816.0
+    },
+    {
+      "date": "2025-09-11",
+      "consolidatedShares": 18768210834.0
+    },
+    {
+      "date": "2025-09-12",
+      "consolidatedShares": 16885743926.0
+    },
+    {
+      "date": "2025-09-15",
+      "consolidatedShares": 18025721669.0
+    },
+    {
+      "date": "2025-09-16",
+      "consolidatedShares": 17517769824.0
+    },
+    {
+      "date": "2025-09-17",
+      "consolidatedShares": 19476088070.0
+    },
+    {
+      "date": "2025-09-18",
+      "consolidatedShares": 19868951483.0
+    },
+    {
+      "date": "2025-09-19",
+      "consolidatedShares": 27929020199.0
+    },
+    {
+      "date": "2025-09-22",
+      "consolidatedShares": 19004911822.0
+    },
+    {
+      "date": "2025-09-23",
+      "consolidatedShares": 19262757580.0
+    },
+    {
+      "date": "2025-09-24",
+      "consolidatedShares": 18624348610.0
+    },
+    {
+      "date": "2025-09-25",
+      "consolidatedShares": 19886824229.0
+    },
+    {
+      "date": "2025-09-26",
+      "consolidatedShares": 17159369714.0
+    },
+    {
+      "date": "2025-09-29",
+      "consolidatedShares": 18417143753.0
+    },
+    {
+      "date": "2025-09-30",
+      "consolidatedShares": 18875589306.0
+    },
+    {
+      "date": "2025-10-01",
+      "consolidatedShares": 20197604554.0
+    },
+    {
+      "date": "2025-10-02",
+      "consolidatedShares": 19164505216.0
+    },
+    {
+      "date": "2025-10-03",
+      "consolidatedShares": 20717292798.0
+    },
+    {
+      "date": "2025-10-06",
+      "consolidatedShares": 20361714076.0
+    },
+    {
+      "date": "2025-10-07",
+      "consolidatedShares": 21686230528.0
+    },
+    {
+      "date": "2025-10-08",
+      "consolidatedShares": 21465631958.0
+    },
+    {
+      "date": "2025-10-09",
+      "consolidatedShares": 20982878174.0
+    },
+    {
+      "date": "2025-10-10",
+      "consolidatedShares": 25210756114.0
+    },
+    {
+      "date": "2025-10-13",
+      "consolidatedShares": 18763306801.0
+    },
+    {
+      "date": "2025-10-14",
+      "consolidatedShares": 20622348423.0
+    },
+    {
+      "date": "2025-10-15",
+      "consolidatedShares": 22174457863.0
+    },
+    {
+      "date": "2025-10-16",
+      "consolidatedShares": 22963731294.0
+    },
+    {
+      "date": "2025-10-17",
+      "consolidatedShares": 20043156417.0
+    },
+    {
+      "date": "2025-10-20",
+      "consolidatedShares": 18058782489.0
+    },
+    {
+      "date": "2025-10-21",
+      "consolidatedShares": 20559868314.0
+    },
+    {
+      "date": "2025-10-22",
+      "consolidatedShares": 25814341576.0
+    },
+    {
+      "date": "2025-10-23",
+      "consolidatedShares": 19816707658.0
+    },
+    {
+      "date": "2025-10-24",
+      "consolidatedShares": 19662627134.0
+    },
+    {
+      "date": "2025-10-27",
+      "consolidatedShares": 20365334271.0
+    },
+    {
+      "date": "2025-10-28",
+      "consolidatedShares": 20854921591.0
+    },
+    {
+      "date": "2025-10-29",
+      "consolidatedShares": 21121905989.0
+    },
+    {
+      "date": "2025-10-30",
+      "consolidatedShares": 21014653319.0
+    },
+    {
+      "date": "2025-10-31",
+      "consolidatedShares": 21284735420.0
+    },
+    {
+      "date": "2025-11-03",
+      "consolidatedShares": 20170986589.0
+    },
+    {
+      "date": "2025-11-04",
+      "consolidatedShares": 20423994179.0
+    },
+    {
+      "date": "2025-11-05",
+      "consolidatedShares": 19961528379.0
+    },
+    {
+      "date": "2025-11-06",
+      "consolidatedShares": 21575398947.0
+    },
+    {
+      "date": "2025-11-07",
+      "consolidatedShares": 20575826355.0
+    },
+    {
+      "date": "2025-11-10",
+      "consolidatedShares": 18403787874.0
+    },
+    {
+      "date": "2025-11-11",
+      "consolidatedShares": 15748216492.0
+    },
+    {
+      "date": "2025-11-12",
+      "consolidatedShares": 17852921295.0
+    },
+    {
+      "date": "2025-11-13",
+      "consolidatedShares": 21478836876.0
+    },
+    {
+      "date": "2025-11-14",
+      "consolidatedShares": 20660600060.0
+    },
+    {
+      "date": "2025-11-17",
+      "consolidatedShares": 19374279330.0
+    },
+    {
+      "date": "2025-11-18",
+      "consolidatedShares": 18936765606.0
+    },
+    {
+      "date": "2025-11-19",
+      "consolidatedShares": 17816283557.0
+    },
+    {
+      "date": "2025-11-20",
+      "consolidatedShares": 21836985247.0
+    },
+    {
+      "date": "2025-11-21",
+      "consolidatedShares": 21219923210.0
+    },
+    {
+      "date": "2025-11-24",
+      "consolidatedShares": 19376561938.0
+    },
+    {
+      "date": "2025-11-25",
+      "consolidatedShares": 17242422498.0
+    },
+    {
+      "date": "2025-11-26",
+      "consolidatedShares": 15176659278.0
+    },
+    {
+      "date": "2025-11-28",
+      "consolidatedShares": 9252636209.0
+    },
+    {
+      "date": "2025-12-01",
+      "consolidatedShares": 16144764900.0
+    },
+    {
+      "date": "2025-12-02",
+      "consolidatedShares": 15741407704.0
+    },
+    {
+      "date": "2025-12-03",
+      "consolidatedShares": 15944865661.0
+    },
+    {
+      "date": "2025-12-04",
+      "consolidatedShares": 15518353416.0
+    },
+    {
+      "date": "2025-12-05",
+      "consolidatedShares": 16536835802.0
+    },
+    {
+      "date": "2025-12-08",
+      "consolidatedShares": 16410549355.0
+    },
+    {
+      "date": "2025-12-09",
+      "consolidatedShares": 14808539009.0
+    },
+    {
+      "date": "2025-12-10",
+      "consolidatedShares": 17346425030.0
+    },
+    {
+      "date": "2025-12-11",
+      "consolidatedShares": 17606263154.0
+    },
+    {
+      "date": "2025-12-12",
+      "consolidatedShares": 18541153289.0
+    },
+    {
+      "date": "2025-12-15",
+      "consolidatedShares": 17708483363.0
+    },
+    {
+      "date": "2025-12-16",
+      "consolidatedShares": 17326861046.0
+    },
+    {
+      "date": "2025-12-17",
+      "consolidatedShares": 18531507132.0
+    },
+    {
+      "date": "2025-12-18",
+      "consolidatedShares": 17601918829.0
+    },
+    {
+      "date": "2025-12-19",
+      "consolidatedShares": 26625694738.0
+    },
+    {
+      "date": "2025-12-22",
+      "consolidatedShares": 15212767715.0
+    },
+    {
+      "date": "2025-12-23",
+      "consolidatedShares": 14472820132.0
+    },
+    {
+      "date": "2025-12-24",
+      "consolidatedShares": 7962188541.0
+    },
+    {
+      "date": "2025-12-26",
+      "consolidatedShares": 10503770779.0
+    },
+    {
+      "date": "2025-12-29",
+      "consolidatedShares": 13487804082.0
+    },
+    {
+      "date": "2025-12-30",
+      "consolidatedShares": 12962137449.0
+    },
+    {
+      "date": "2025-12-31",
+      "consolidatedShares": 12353329142.0
+    },
+    {
+      "date": "2026-01-02",
+      "consolidatedShares": 16254156757.0
+    },
+    {
+      "date": "2026-01-05",
+      "consolidatedShares": 19521071061.0
+    },
+    {
+      "date": "2026-01-06",
+      "consolidatedShares": 19177280230.0
+    },
+    {
+      "date": "2026-01-07",
+      "consolidatedShares": 17761668574.0
+    },
+    {
+      "date": "2026-01-08",
+      "consolidatedShares": 17349373141.0
+    },
+    {
+      "date": "2026-01-09",
+      "consolidatedShares": 17317372620.0
+    },
+    {
+      "date": "2026-01-12",
+      "consolidatedShares": 17671067946.0
+    },
+    {
+      "date": "2026-01-13",
+      "consolidatedShares": 19245460458.0
+    },
+    {
+      "date": "2026-01-14",
+      "consolidatedShares": 23086065288.0
+    },
+    {
+      "date": "2026-01-15",
+      "consolidatedShares": 19518901017.0
+    },
+    {
+      "date": "2026-01-16",
+      "consolidatedShares": 19113348356.0
+    },
+    {
+      "date": "2026-01-20",
+      "consolidatedShares": 20985922509.0
+    },
+    {
+      "date": "2026-01-21",
+      "consolidatedShares": 21057934883.0
+    },
+    {
+      "date": "2026-01-22",
+      "consolidatedShares": 18658332406.0
+    },
+    {
+      "date": "2026-01-23",
+      "consolidatedShares": 17625185806.0
+    },
+    {
+      "date": "2026-01-26",
+      "consolidatedShares": 18696307115.0
+    },
+    {
+      "date": "2026-01-27",
+      "consolidatedShares": 18354184240.0
+    },
+    {
+      "date": "2026-01-28",
+      "consolidatedShares": 19480487042.0
+    },
+    {
+      "date": "2026-01-29",
+      "consolidatedShares": 23655877862.0
+    },
+    {
+      "date": "2026-01-30",
+      "consolidatedShares": 24197843164.0
+    },
+    {
+      "date": "2026-02-02",
+      "consolidatedShares": 20466754734.0
+    },
+    {
+      "date": "2026-02-03",
+      "consolidatedShares": 23978982770.0
+    },
+    {
+      "date": "2026-02-04",
+      "consolidatedShares": 25110878904.0
+    },
+    {
+      "date": "2026-02-05",
+      "consolidatedShares": 24028772670.0
+    },
+    {
+      "date": "2026-02-06",
+      "consolidatedShares": 20488090957.0
+    },
+    {
+      "date": "2026-02-09",
+      "consolidatedShares": 18029913876.0
+    },
+    {
+      "date": "2026-02-10",
+      "consolidatedShares": 18398935827.0
+    },
+    {
+      "date": "2026-02-11",
+      "consolidatedShares": 21300266070.0
+    },
+    {
+      "date": "2026-02-12",
+      "consolidatedShares": 22790264868.0
+    },
+    {
+      "date": "2026-02-13",
+      "consolidatedShares": 18872627985.0
+    },
+    {
+      "date": "2026-02-17",
+      "consolidatedShares": 18250929841.0
+    },
+    {
+      "date": "2026-02-18",
+      "consolidatedShares": 17172928266.0
+    },
+    {
+      "date": "2026-02-19",
+      "consolidatedShares": 16787068691.0
+    },
+    {
+      "date": "2026-02-20",
+      "consolidatedShares": 18618491265.0
+    },
+    {
+      "date": "2026-02-23",
+      "consolidatedShares": 18761747283.7796
+    },
+    {
+      "date": "2026-02-24",
+      "consolidatedShares": 17559332511.924683
+    },
+    {
+      "date": "2026-02-25",
+      "consolidatedShares": 18098125369.063934
+    },
+    {
+      "date": "2026-02-26",
+      "consolidatedShares": 20000419228.990944
+    },
+    {
+      "date": "2026-02-27",
+      "consolidatedShares": 21257008364.75453
+    },
+    {
+      "date": "2026-03-02",
+      "consolidatedShares": 21399236103.97061
+    },
+    {
+      "date": "2026-03-03",
+      "consolidatedShares": 24456571800.03364
+    },
+    {
+      "date": "2026-03-04",
+      "consolidatedShares": 22087844428.095646
+    },
+    {
+      "date": "2026-03-05",
+      "consolidatedShares": 22877680255.17759
+    },
+    {
+      "date": "2026-03-06",
+      "consolidatedShares": 20602169951.57884
+    },
+    {
+      "date": "2026-03-09",
+      "consolidatedShares": 22852912642.348305
+    },
+    {
+      "date": "2026-03-10",
+      "consolidatedShares": 20273384429.68408
+    },
+    {
+      "date": "2026-03-11",
+      "consolidatedShares": 18215807199.145016
+    },
+    {
+      "date": "2026-03-12",
+      "consolidatedShares": 20435606879.86741
+    },
+    {
+      "date": "2026-03-13",
+      "consolidatedShares": 18538183728.856365
+    },
+    {
+      "date": "2026-03-16",
+      "consolidatedShares": 17788052618.238716
+    },
+    {
+      "date": "2026-03-17",
+      "consolidatedShares": 17388801470.805958
+    },
+    {
+      "date": "2026-03-18",
+      "consolidatedShares": 19950172451.03227
+    },
+    {
+      "date": "2026-03-19",
+      "consolidatedShares": 20447830367.23189
+    },
+    {
+      "date": "2026-03-20",
+      "consolidatedShares": 28469818958.364353
+    },
+    {
+      "date": "2026-03-23",
+      "consolidatedShares": 21261030664.70021
+    },
+    {
+      "date": "2026-03-24",
+      "consolidatedShares": 18520796561.161808
+    },
+    {
+      "date": "2026-03-25",
+      "consolidatedShares": 17466602421.061016
+    },
+    {
+      "date": "2026-03-26",
+      "consolidatedShares": 16796051139.018967
+    },
+    {
+      "date": "2026-03-27",
+      "consolidatedShares": 18488709302.746704
+    },
+    {
+      "date": "2026-03-30",
+      "consolidatedShares": 19162803233.411095
+    },
+    {
+      "date": "2026-03-31",
+      "consolidatedShares": 22877163443.54116
+    },
+    {
+      "date": "2026-04-01",
+      "consolidatedShares": 19281481301.95712
+    },
+    {
+      "date": "2026-04-02",
+      "consolidatedShares": 17227206399.02813
+    },
+    {
+      "date": "2026-04-06",
+      "consolidatedShares": 15543895403.416016
+    },
+    {
+      "date": "2026-04-07",
+      "consolidatedShares": 19798518153.4654
+    },
+    {
+      "date": "2026-04-08",
+      "consolidatedShares": 21240288488.15747
+    },
+    {
+      "date": "2026-04-09",
+      "consolidatedShares": 17512822964.63891
+    },
+    {
+      "date": "2026-04-10",
+      "consolidatedShares": 16225888026.181965
+    },
+    {
+      "date": "2026-04-13",
+      "consolidatedShares": 16278314791.759436
+    },
+    {
+      "date": "2026-04-14",
+      "consolidatedShares": 18467903976.363766
+    },
+    {
+      "date": "2026-04-15",
+      "consolidatedShares": 18987747621.612667
+    },
+    {
+      "date": "2026-04-16",
+      "consolidatedShares": 18536511501.34822
+    },
+    {
+      "date": "2026-04-17",
+      "consolidatedShares": 20638536614.917225
+    },
+    {
+      "date": "2026-04-20",
+      "consolidatedShares": 16889137640.706675
+    },
+    {
+      "date": "2026-04-21",
+      "consolidatedShares": 18577713531.28071
+    },
+    {
+      "date": "2026-04-22",
+      "consolidatedShares": 16518896459.781336
+    },
+    {
+      "date": "2026-04-23",
+      "consolidatedShares": 17819668925.53979
+    },
+    {
+      "date": "2026-04-24",
+      "consolidatedShares": 18366704804.214756
+    },
+    {
+      "date": "2026-04-27",
+      "consolidatedShares": 15939723431.49257
+    },
+    {
+      "date": "2026-04-28",
+      "consolidatedShares": 15899362522.05119
+    },
+    {
+      "date": "2026-04-29",
+      "consolidatedShares": 16842073209.943886
+    },
+    {
+      "date": "2026-04-30",
+      "consolidatedShares": 17522226132.67091
+    },
+    {
+      "date": "2026-05-01",
+      "consolidatedShares": 15549581359.98596
+    },
+    {
+      "date": "2026-05-04",
+      "consolidatedShares": 16692752634.0326
+    },
+    {
+      "date": "2026-05-05",
+      "consolidatedShares": 16728240289.54592
+    },
+    {
+      "date": "2026-05-06",
+      "consolidatedShares": 19761126343.957787
+    },
+    {
+      "date": "2026-05-07",
+      "consolidatedShares": 19923537101.735844
+    },
+    {
+      "date": "2026-05-08",
+      "consolidatedShares": 18766330538.594135
+    },
+    {
+      "date": "2026-05-11",
+      "consolidatedShares": 22086231466.37982
+    },
+    {
+      "date": "2026-05-12",
+      "consolidatedShares": 20246423718.985306
+    },
+    {
+      "date": "2026-05-13",
+      "consolidatedShares": 19792854875.800865
+    },
+    {
+      "date": "2026-05-14",
+      "consolidatedShares": 19386618531.541042
+    },
+    {
+      "date": "2026-05-15",
+      "consolidatedShares": 19881216851.95744
+    },
+    {
+      "date": "2026-05-18",
+      "consolidatedShares": 21226493234.379166
+    },
+    {
+      "date": "2026-05-19",
+      "consolidatedShares": 19926241346.643284
+    },
+    {
+      "date": "2026-05-20",
+      "consolidatedShares": 19279671561.20899
+    },
+    {
+      "date": "2026-05-21",
+      "consolidatedShares": 18044854695.37769
+    },
+    {
+      "date": "2026-05-22",
+      "consolidatedShares": 17745891738.62032
+    },
+    {
+      "date": "2026-05-26",
+      "consolidatedShares": 19426988482.829792
+    },
+    {
+      "date": "2026-05-27",
+      "consolidatedShares": 19339742959.24279
+    },
+    {
+      "date": "2026-05-28",
+      "consolidatedShares": 19725900700.26917
+    },
+    {
+      "date": "2026-05-29",
+      "consolidatedShares": 24429751087.89802
+    },
+    {
+      "date": "2026-06-01",
+      "consolidatedShares": 22394791317.19077
+    },
+    {
+      "date": "2026-06-02",
+      "consolidatedShares": 21219510442.60043
+    },
+    {
+      "date": "2026-06-03",
+      "consolidatedShares": 20628686899.906082
+    },
+    {
+      "date": "2026-06-04",
+      "consolidatedShares": 19415246945.765873
+    },
+    {
+      "date": "2026-06-05",
+      "consolidatedShares": 23531090000.432663
+    },
+    {
+      "date": "2026-06-08",
+      "consolidatedShares": 20116234712.11264
+    },
+    {
+      "date": "2026-06-09",
+      "consolidatedShares": 25280906552.187466
+    },
+    {
+      "date": "2026-06-10",
+      "consolidatedShares": 21299717935.34111
+    },
+    {
+      "date": "2026-06-11",
+      "consolidatedShares": 21949264054.305664
+    },
+    {
+      "date": "2026-06-12",
+      "consolidatedShares": 20136429211.88041
+    },
+    {
+      "date": "2026-06-15",
+      "consolidatedShares": 22006644441.997566
+    },
+    {
+      "date": "2026-06-16",
+      "consolidatedShares": 21797271046.552227
+    },
+    {
+      "date": "2026-06-17",
+      "consolidatedShares": 24483053076.462646
+    },
+    {
+      "date": "2026-06-18",
+      "consolidatedShares": 34585710442.33568
+    },
+    {
+      "date": "2026-06-22",
+      "consolidatedShares": 23964020329.865993
+    },
+    {
+      "date": "2026-06-23",
+      "consolidatedShares": 25939922364.891216
+    },
+    {
+      "date": "2026-06-24",
+      "consolidatedShares": 27482765426.145775
+    },
+    {
+      "date": "2026-06-25",
+      "consolidatedShares": 21155646197.76015
+    },
+    {
+      "date": "2026-06-26",
+      "consolidatedShares": 32352054393.89373
+    },
+    {
+      "date": "2026-06-29",
+      "consolidatedShares": 20648424119.060917
+    },
+    {
+      "date": "2026-06-30",
+      "consolidatedShares": 20645545248.29517
+    },
+    {
+      "date": "2026-07-01",
+      "consolidatedShares": 20071896175.978477
+    },
+    {
+      "date": "2026-07-02",
+      "consolidatedShares": 20374126566.14238
+    },
+    {
+      "date": "2026-07-06",
+      "consolidatedShares": 17475678984.23484
+    },
+    {
+      "date": "2026-07-07",
+      "consolidatedShares": 18016214695.255547
+    },
+    {
+      "date": "2026-07-08",
+      "consolidatedShares": 18366979927.568874
+    },
+    {
+      "date": "2026-07-09",
+      "consolidatedShares": 16161419129.230913
+    },
+    {
+      "date": "2026-07-10",
+      "consolidatedShares": 14978520310.34557
+    },
+    {
+      "date": "2026-07-13",
+      "consolidatedShares": 16374184105.962072
+    },
+    {
+      "date": "2026-07-14",
+      "consolidatedShares": 16919973895.820871
+    },
+    {
+      "date": "2026-07-15",
+      "consolidatedShares": 16699313466.666748
+    },
+    {
+      "date": "2026-07-16",
+      "consolidatedShares": 17649788046.05309
+    },
+    {
+      "date": "2026-07-17",
+      "consolidatedShares": 17982906505.1469
+    },
+    {
+      "date": "2026-07-20",
+      "consolidatedShares": 15807936125.597736
+    },
+    {
+      "date": "2026-07-21",
+      "consolidatedShares": 16753664999.691706
+    },
+    {
+      "date": "2026-07-22",
+      "consolidatedShares": 15527765506.606625
+    },
+    {
+      "date": "2026-07-23",
+      "consolidatedShares": 16528202348.504686
+    },
+    {
+      "date": "2026-07-24",
+      "consolidatedShares": 15403805426.004524
+    },
+    {
+      "date": "2026-07-27",
+      "consolidatedShares": 16302338624.296444
+    },
+    {
+      "date": "2026-07-28",
+      "consolidatedShares": 17806342109.536503
+    },
+    {
+      "date": "2026-07-29",
+      "consolidatedShares": 18366514367.4812
+    },
+    {
+      "date": "2026-07-30",
+      "consolidatedShares": 18762641485.12109
+    },
+    {
+      "date": "2026-07-31",
+      "consolidatedShares": 21272982224.718925
+    },
+    {
+      "date": "2026-08-03",
+      "consolidatedShares": 20055634097.84238
+    },
+    {
+      "date": "2026-08-04",
+      "consolidatedShares": 19631502461.25626
+    },
+    {
+      "date": "2026-08-05",
+      "consolidatedShares": 18519055313.57082
+    },
+    {
+      "date": "2026-08-06",
+      "consolidatedShares": 17699247793.594536
+    },
+    {
+      "date": "2026-08-07",
+      "consolidatedShares": 17632077957.002697
+    },
+    {
+      "date": "2026-08-10",
+      "consolidatedShares": 16030174790.211834
+    },
+    {
+      "date": "2026-08-11",
+      "consolidatedShares": 15574931776.36625
+    },
+    {
+      "date": "2026-08-12",
+      "consolidatedShares": 16194170496.657644
+    },
+    {
+      "date": "2026-08-13",
+      "consolidatedShares": 16618156613.824373
+    },
+    {
+      "date": "2026-08-14",
+      "consolidatedShares": 14121464671.804464
+    },
+    {
+      "date": "2026-08-17",
+      "consolidatedShares": 15117008694.412123
+    },
+    {
+      "date": "2026-08-18",
+      "consolidatedShares": 15109012148.156345
+    },
+    {
+      "date": "2026-08-19",
+      "consolidatedShares": 17554007767.403618
+    },
+    {
+      "date": "2026-08-20",
+      "consolidatedShares": 16793289802.932163
+    },
+    {
+      "date": "2026-08-21",
+      "consolidatedShares": 15221781765.601042
+    },
+    {
+      "date": "2026-08-24",
+      "consolidatedShares": 14838511901.341661
+    },
+    {
+      "date": "2026-08-25",
+      "consolidatedShares": 14647938943.958773
+    },
+    {
+      "date": "2026-08-26",
+      "consolidatedShares": 14802908383.59266
+    },
+    {
+      "date": "2026-08-27",
+      "consolidatedShares": 15390997385.64598
+    },
+    {
+      "date": "2026-08-28",
+      "consolidatedShares": 16122065756.038088
+    },
+    {
+      "date": "2026-08-31",
+      "consolidatedShares": 16244959792.43195
+    },
+    {
+      "date": "2026-09-01",
+      "consolidatedShares": 14929368345.729403
+    },
+    {
+      "date": "2026-09-02",
+      "consolidatedShares": 15328844928.40555
+    },
+    {
+      "date": "2026-09-03",
+      "consolidatedShares": 15772981495.60091
+    },
+    {
+      "date": "2026-09-04",
+      "consolidatedShares": 13533071903.164284
+    },
+    {
+      "date": "2026-09-08",
+      "consolidatedShares": 16248928473.710693
+    }
+  ],
+  "participantSamples": {
+    "date": "2026-09-08",
+    "csvHeader": [
+      "Day",
+      "Market Participant",
+      "Tape A Shares",
+      "Tape B Shares",
+      "Tape C Shares",
+      "Total Shares",
+      "Tape A Notional",
+      "Tape B Notional",
+      "Tape C Notional",
+      "Total Notional",
+      "Tape A Trade Count",
+      "Tape B Trade Count",
+      "Tape C Trade Count",
+      "Total Trade Count"
+    ],
+    "rows": [
+      [
+        "2026-09-08",
+        "NYSE American (A)",
+        "7224612.000000",
+        "23160090.000000",
+        "8089643.000000",
+        "38474345.000000",
+        "409500307.165500",
+        "380530782.984600",
+        "583960704.139500",
+        "1373991794.289600",
+        "86747",
+        "101504",
+        "96561",
+        "284812"
+      ],
+      [
+        "2026-09-08",
+        "NASDAQ Texas (B)",
+        "11179107.000000",
+        "10900889.000000",
+        "21440551.000000",
+        "43520547.000000",
+        "830600946.883600",
+        "512387580.017800",
+        "1348037183.653501",
+        "2691025710.554901",
+        "154548",
+        "70806",
+        "213004",
+        "438358"
+      ],
+      [
+        "2026-09-08",
+        "NYSE National (C)",
+        "21437394.000000",
+        "8483883.000000",
+        "22284074.000000",
+        "52205351.000000",
+        "831010241.161100",
+        "415541036.231400",
+        "844486935.685200",
+        "2091038213.077700",
+        "267866",
+        "68722",
+        "245494",
+        "582082"
+      ],
+      [
+        "2026-09-08",
+        "FINRA / Nasdaq TRF Chicago (DB)",
+        "15421892.407419",
+        "14344108.906621",
+        "36786258.737028",
+        "66552260.051068",
+        "962495221.232416",
+        "573912820.108895",
+        "3516476354.212741",
+        "5052884395.554052",
+        "154918",
+        "68971",
+        "339473",
+        "563362"
+      ],
+      [
+        "2026-09-08",
+        "FINRA / NYSE TRF (DN)",
+        "117503251.971383",
+        "77727952.239612",
+        "273665054.280327",
+        "468896258.491322",
+        "6234850937.525356",
+        "3131534302.136986",
+        "12182568700.133036",
+        "21548953939.795378",
+        "883719",
+        "302236",
+        "1501926",
+        "2687881"
+      ],
+      [
+        "2026-09-08",
+        "FINRA / Nasdaq TRF Carteret (DQ)",
+        "2300310549.760326",
+        "1621854642.294564",
+        "3808945539.113414",
+        "7731110731.168304",
+        "136517880796.453445",
+        "87088360092.889391",
+        "226433960494.020827",
+        "450040201383.363663",
+        "23899388",
+        "6929552",
+        "31145190",
+        "61974130"
+      ],
+      [
+        "2026-09-08",
+        "Texas Stock Exchange (F)",
+        "4669498.000000",
+        "2999780.000000",
+        "9692832.000000",
+        "17362110.000000",
+        "161829063.764700",
+        "119585556.478900",
+        "327966522.144500",
+        "609381142.388100",
+        "42703",
+        "16722",
+        "74642",
+        "134067"
+      ],
+      [
+        "2026-09-08",
+        "24X National Exchange (G)",
+        "1070205.000000",
+        "2649540.000000",
+        "3907474.000000",
+        "7627219.000000",
+        "70230356.293100",
+        "94956105.334600",
+        "231981142.490800",
+        "397167604.118500",
+        "13969",
+        "12945",
+        "38262",
+        "65176"
+      ],
+      [
+        "2026-09-08",
+        "MIAX Pearl (H)",
+        "17915737.000000",
+        "32350147.000000",
+        "47112910.000000",
+        "97378794.000000",
+        "785187876.472100",
+        "1236160270.626000",
+        "1802840656.601600",
+        "3824188803.699700",
+        "189049",
+        "166840",
+        "319487",
+        "675376"
+      ],
+      [
+        "2026-09-08",
+        "EDGA Equities (J)",
+        "27989741.000000",
+        "30961487.000000",
+        "62077445.000000",
+        "121028673.000000",
+        "1268427411.436500",
+        "1057859301.465700",
+        "1825931672.995700",
+        "4152218385.897900",
+        "344859",
+        "165754",
+        "479288",
+        "989901"
+      ],
+      [
+        "2026-09-08",
+        "EDGX Equities (K)",
+        "141281311.000000",
+        "152549417.000000",
+        "342706410.000000",
+        "636537138.000000",
+        "7388832476.125697",
+        "7140105419.166798",
+        "19346715164.688487",
+        "33875653059.980982",
+        "1543027",
+        "956981",
+        "2823365",
+        "5323373"
+      ],
+      [
+        "2026-09-08",
+        "LTSE (L)",
+        "505739.000000",
+        "223996.000000",
+        "834678.000000",
+        "1564413.000000",
+        "27559164.173000",
+        "14447054.058900",
+        "30677874.735400",
+        "72684092.967300",
+        "6971",
+        "3868",
+        "21331",
+        "32170"
+      ],
+      [
+        "2026-09-08",
+        "NYSE Texas (M)",
+        "16558539.000000",
+        "18062120.000000",
+        "26674170.000000",
+        "61294829.000000",
+        "1782827959.364500",
+        "1717669923.294500",
+        "3272751474.004900",
+        "6773249356.663900",
+        "66887",
+        "17464",
+        "77283",
+        "161634"
+      ],
+      [
+        "2026-09-08",
+        "NYSE (N)",
+        "1221974432.000000",
+        "57653775.000000",
+        "130745397.000000",
+        "1410373604.000000",
+        "80158192081.141285",
+        "3389946504.736800",
+        "6440311461.504803",
+        "89988450047.382888",
+        "6263383",
+        "370665",
+        "1154761",
+        "7788809"
+      ],
+      [
+        "2026-09-08",
+        "NYSE Arca (P)",
+        "257834995.000000",
+        "510718611.000000",
+        "758825100.000000",
+        "1527378706.000000",
+        "14340066013.419106",
+        "31563313341.414687",
+        "38365241440.728083",
+        "84268620795.561876",
+        "3252161",
+        "2646557",
+        "7093237",
+        "12991955"
+      ],
+      [
+        "2026-09-08",
+        "NASDAQ (Q)",
+        "403609232.000000",
+        "238843538.000000",
+        "1654085898.000000",
+        "2296538668.000000",
+        "23837160164.929909",
+        "17849756139.654710",
+        "132429811221.760425",
+        "174116727526.345044",
+        "5676049",
+        "1720420",
+        "11973107",
+        "19369576"
+      ],
+      [
+        "2026-09-08",
+        "Members Exchange (U)",
+        "49846939.000000",
+        "76644832.000000",
+        "148563906.000000",
+        "275055677.000000",
+        "2787359039.326900",
+        "2813087464.443800",
+        "6493743423.510098",
+        "12094189927.280798",
+        "605048",
+        "379028",
+        "1059389",
+        "2043465"
+      ],
+      [
+        "2026-09-08",
+        "Investors Exchange (V)",
+        "277814134.000000",
+        "118319133.000000",
+        "293980753.000000",
+        "690114020.000000",
+        "14750042542.629700",
+        "6667190206.805100",
+        "17629980708.634198",
+        "39047213458.068998",
+        "3198572",
+        "548309",
+        "3125993",
+        "6872874"
+      ],
+      [
+        "2026-09-08",
+        "NASDAQ PSX (X)",
+        "5170461.000000",
+        "4250122.000000",
+        "8078205.000000",
+        "17498788.000000",
+        "346712077.916600",
+        "364310109.101200",
+        "556114975.141700",
+        "1267137162.159500",
+        "70806",
+        "27155",
+        "93734",
+        "191695"
+      ],
+      [
+        "2026-09-08",
+        "BYX Equities (Y)",
+        "38535978.000000",
+        "27412458.000000",
+        "51242606.000000",
+        "117191042.000000",
+        "1829405040.855200",
+        "1308233301.749800",
+        "2519873275.254899",
+        "5657511617.859899",
+        "509330",
+        "199125",
+        "615605",
+        "1324060"
+      ],
+      [
+        "2026-09-08",
+        "BZX Equities (Z)",
+        "184210063.000000",
+        "152646502.000000",
+        "234368735.000000",
+        "571225300.000000",
+        "11506976095.753203",
+        "9442332508.416501",
+        "18729010230.230601",
+        "39678318834.400305",
+        "2721420",
+        "1014834",
+        "2963194",
+        "6699448"
+      ]
+    ],
+    "expectedConsolidatedShares": 16248928473.710693,
+    "description": "All original participant rows for this session, in source-file order. Each field is preserved as its CSV text, including fractional shares and notional fields."
+  },
+  "benchmarks": [
+    {
+      "date": "2026-03-18",
+      "priorDay": 15,
+      "oneMonth": 1,
+      "threeMonth": 4,
+      "oneYear": 8,
+      "source": {
+        "kind": "repository-benchmark",
+        "path": "data/hedgeye/market_share_volume_benchmarks.csv",
+        "sha256": "d8ac31b32ffa6ed538a0eb93cc5f8c408ef3ebf0ff19cb86af41b12dd9bb4440"
+      }
+    },
+    {
+      "date": "2026-09-04",
+      "priorDay": -14,
+      "oneMonth": -14,
+      "threeMonth": -27,
+      "oneYear": -29,
+      "source": {
+        "kind": "user-supplied-macro-show-slide",
+        "showDate": "2026-09-08",
+        "image": "codex-clipboard-334f5455-979e-40b9-a535-c342627622e8.png",
+        "row": "Total Exchange Volume"
+      }
+    },
+    {
+      "date": "2026-09-08",
+      "priorDay": 20,
+      "oneMonth": 4,
+      "threeMonth": -12,
+      "oneYear": -15,
+      "source": {
+        "kind": "user-supplied-macro-show-slide",
+        "showDate": "2026-09-09",
+        "image": "codex-clipboard-b6d30ab5-07a3-43ef-9cfb-da8a3e613ac5.png",
+        "row": "Total Exchange Volume"
+      }
+    }
+  ]
+}

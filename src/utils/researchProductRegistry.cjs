@@ -3,15 +3,31 @@ const entityCatalogDocument = require('../../infra/lambdas/gmail_ingestor/resear
 const { isMarketDay } = require('./analyticsDailyBrief.cjs');
 
 const MARKET_TIME_ZONE = registryDocument.marketTimeZone || 'America/New_York';
+const newYorkFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: MARKET_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
 const REQUIRED_STAGES = Object.freeze(
   Array.isArray(registryDocument.stages)
     ? [...registryDocument.stages]
     : ['received', 'parsed', 'validated', 'indexed'],
 );
+const STRUCTURED_ONLY_TICKERS = Object.freeze(
+  (entityCatalogDocument.structuredOnlyTickers || [])
+    .map((value) => String(value || '').trim().toUpperCase())
+    .filter((value, index, values) => value && values.indexOf(value) === index),
+);
+const STRUCTURED_ONLY_TICKER_SET = new Set(STRUCTURED_ONLY_TICKERS);
 
 const RESEARCH_PRODUCTS = Object.freeze(
   (registryDocument.products || []).map((product) => Object.freeze({
     ...product,
+    dashboardConsumer: Object.freeze({ ...(product.dashboardConsumer || registryDocument.defaultDashboardConsumer || {}) }),
     snapshotTypes: Object.freeze([
       product.id,
       ...(Array.isArray(product.snapshotTypes) ? product.snapshotTypes : []),
@@ -136,15 +152,7 @@ function getSecurityExposureTags(symbol) {
 }
 
 function newYorkParts(value = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: MARKET_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(value instanceof Date ? value : new Date(value));
+  const parts = newYorkFormatter.formatToParts(value instanceof Date ? value : new Date(value));
   const values = {};
   parts.forEach((part) => {
     if (part.type !== 'literal') values[part.type] = part.value;
@@ -174,6 +182,25 @@ function latestResearchMarketDate(now = new Date()) {
   return cursor.toISOString().slice(0, 10);
 }
 
+// The publication time and its grace are configured once in the product registry.
+// Existing environment overrides specify the final deadline, including grace.
+function getResearchProductDeadline(productOrId) {
+  const product = typeof productOrId === 'string'
+    ? RESEARCH_PRODUCT_BY_ID[productOrId]
+    : productOrId;
+  const hour = Number(product?.deadlineHourET ?? (product?.cadence === 'weekly' ? 16 : 8));
+  const minute = Number(product?.deadlineMinuteET ?? 0);
+  const total = hour * 60 + minute + Math.max(0, Number(product?.graceMinutes) || 0);
+  const deadline = { hour: Math.floor(total / 60), minute: total % 60 };
+  if (product?.id === 'risk-ranges') {
+    for (const [key, variable] of [['hour', 'RISK_RANGE_DEADLINE_HOUR_ET'], ['minute', 'RISK_RANGE_DEADLINE_MINUTE_ET']]) {
+      const raw = process.env[variable];
+      if (raw !== undefined && raw !== '' && Number.isFinite(Number(raw))) deadline[key] = Number(raw);
+    }
+  }
+  return deadline;
+}
+
 /**
  * Product due policy used by SYS and research response coverage.
  *
@@ -199,8 +226,7 @@ function isResearchProductDue(productOrId, {
   if (product.cadence === 'market_day_0800') {
     if (targetDate < ny.date) return true;
     if (targetDate > ny.date) return false;
-    const deadlineHour = Number(product.deadlineHourET ?? 8);
-    const deadlineMinute = Number(product.deadlineMinuteET ?? 0);
+    const { hour: deadlineHour, minute: deadlineMinute } = getResearchProductDeadline(product);
     return ny.hour > deadlineHour || (ny.hour === deadlineHour && ny.minute >= deadlineMinute);
   }
 
@@ -208,8 +234,7 @@ function isResearchProductDue(productOrId, {
     if (target.getUTCDay() !== 5) return false;
     if (targetDate < ny.date) return true;
     if (targetDate > ny.date) return false;
-    const deadlineHour = Number(product.deadlineHourET ?? 16);
-    const deadlineMinute = Number(product.deadlineMinuteET ?? 0);
+    const { hour: deadlineHour, minute: deadlineMinute } = getResearchProductDeadline(product);
     return ny.hour > deadlineHour || (ny.hour === deadlineHour && ny.minute >= deadlineMinute);
   }
 
@@ -223,6 +248,10 @@ function getResearchProduct(value) {
   return RESEARCH_PRODUCTS.find((product) => product.snapshotTypes.includes(normalized)) || null;
 }
 
+function isStructuredOnlyTicker(value) {
+  return STRUCTURED_ONLY_TICKER_SET.has(String(value || '').trim().toUpperCase());
+}
+
 module.exports = {
   CONTROLLED_EXPOSURES,
   CONTROLLED_EXPOSURE_TYPES,
@@ -231,10 +260,13 @@ module.exports = {
   REQUIRED_STAGES,
   RESEARCH_PRODUCTS,
   RESEARCH_PRODUCT_BY_ID,
+  STRUCTURED_ONLY_TICKERS,
   getControlledExposure,
   getResearchProduct,
+  getResearchProductDeadline,
   getSecurityExposureTags,
   isResearchProductDue,
+  isStructuredOnlyTicker,
   latestResearchMarketDate,
   newYorkParts,
 };

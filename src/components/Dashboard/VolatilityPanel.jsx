@@ -1,65 +1,39 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Text, Badge, Flex } from '@tremor/react';
 import PopoverSelect from '../common/PopoverSelect';
 import { LineChart, Line, Bar, ComposedChart, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { MarketDataService } from '../../services/api/marketDataService';
 import LoadingIndicator from '../common/LoadingIndicator';
+import { useSessionResource } from '../../hooks/useSessionResource';
+import { useSurfaceActivity } from '../common/PersistentSurface';
+import { verifiedHistoricalRecords } from '../../utils/legacyMarketDisplay';
 
-const VolatilityPanel = () => {
-  const [selectedVolatility, setSelectedVolatility] = useState('VIX');
-  const [selectedTimeframe, setSelectedTimeframe] = useState('1M');
-  const [vixData, setVixData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [chartData, setChartData] = useState([]);
-  const [metrics, setMetrics] = useState({
-    closing: 0.00,
-    current: 0.00,
-    lrr: 0.00,
-    trr: 0.00,
-    dayOverDay: { percent: 0.00, bps: 0 },
-    weekOverWeek: { percent: 0.00, bps: 0 },
-    monthOverMonth: { percent: 0.00, bps: 0 },
-    threeMonthOverMonth: { percent: 0.00, bps: 0 },
-    sixMonthOverMonth: { percent: 0.00, bps: 0 },
-    yearOverYear: { percent: 0.00, bps: 0 },
-    si: 0.00, // Short Interest
-    hhhl: '--', // Higher High / Higher Low
-    lhll: '--', // Lower High / Lower Low
-    vol: 0.00, // Volatility indicator value
-    volTicker: 'VIX' // Volatility ticker name
-  });
+const HISTORY_SYMBOLS = { VIX: '^VIX', VVIX: '^VVIX', RVX: '^RVX', GVZ: '^GVZ', MOVE: '^MOVE', REALIZED_VOL: '^GSPC' };
+const TIMEFRAME_DAYS = { '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365 };
+const EMPTY_SERIES = [];
+const validateHistory = (records) => Array.isArray(records) && records.length > 0 ? records : null;
+const historyDate = (records) => records?.at(-1)?.date;
 
-  const volatilityOptions = [
-    { value: 'VIX', label: 'VIX' },
-    { value: 'VVIX', label: 'VVIX' },
-    { value: 'MOVE', label: 'MOVE' },
-    { value: 'GVZ', label: 'GVZ' },
-    { value: 'EVZ', label: 'EVZ' },
-    { value: 'RVX', label: 'RVX' },
-    { value: 'TYVIX', label: 'TYVIX' },
-    { value: 'REALIZED_VOL', label: 'Realized Vol (1M vs 3M)' }
-  ];
-
-  const timeframeOptions = [
-    { value: '1D', label: '1D' },
-    { value: '1W', label: '1W' },
-    { value: '1M', label: '1M' },
-    { value: '3M', label: '3M' },
-    { value: '6M', label: '6M' },
-    { value: '1Y', label: '1Y' }
-  ];
-
-  // Update volTicker when selectedVolatility changes
-  useEffect(() => {
-    setMetrics(prev => ({
-      ...prev,
-      volTicker: selectedVolatility
-    }));
-  }, [selectedVolatility]);
+export function calculateVolatilityMetrics(data, volTicker) {
+  const current = data.at(-1)?.value ?? null;
+  const previous = data.at(-2)?.value ?? null;
+  const latestDate = Date.parse(data.at(-1)?.date || '');
+  const change = (prior) => ({ percent: current != null && prior != null && prior > 0
+    ? ((current - prior) / prior) * 100 : null });
+  const period = (days) => {
+    const cutoff = latestDate - days * 86400000;
+    const prior = [...data].reverse().find((row) => Date.parse(row.date) <= cutoff);
+    return change(prior?.value);
+  };
+  return { current, closing: previous, vol: current, volTicker,
+    lrr: null, trr: null, si: null, hhhl: '—', lhll: '—',
+    dayOverDay: change(previous), weekOverWeek: period(7), monthOverMonth: period(30),
+    threeMonthOverMonth: period(90), sixMonthOverMonth: period(180), yearOverYear: period(365) };
+}
 
   // Calculate realized volatility
-  const calculateRealizedVolatility = (historicalData) => {
-    if (!historicalData || historicalData.length < 65) return [];
+export const calculateRealizedVolatility = (historicalData) => {
+    if (!historicalData || historicalData.length < 22) return [];
 
     // Sort by date ascending if needed
     const sortedData = [...historicalData].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -105,7 +79,7 @@ const VolatilityPanel = () => {
           date: returns[i].date,
           value: parseFloat(vol1M.toFixed(2)), // Add value field for compatibility with metrics calculation
           vol1M: parseFloat(vol1M.toFixed(2)),
-          vol3M: vol3M ? parseFloat(vol3M.toFixed(2)) : null,
+          vol3M: vol3M != null ? parseFloat(vol3M.toFixed(2)) : null,
           dailyChange: parseFloat(returns[i].percentChange.toFixed(2))
         });
       }
@@ -114,290 +88,70 @@ const VolatilityPanel = () => {
     return result;
   };
 
-  // Generate mock realized volatility data for fallback
-  const generateMockRealizedVolData = (days) => {
-    const data = [];
-    let vol1M = 15;
-    let vol3M = 14;
-    
-    for (let i = days; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      
-      vol1M += (Math.random() - 0.5) * 2;
-      vol3M += (Math.random() - 0.5) * 1.5;
-      const dailyChange = (Math.random() - 0.5) * 3;
-      
-      data.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        value: Math.max(5, parseFloat(vol1M.toFixed(2))), // Add value field for compatibility
-        vol1M: Math.max(5, parseFloat(vol1M.toFixed(2))),
-        vol3M: Math.max(5, parseFloat(vol3M.toFixed(2))),
-        dailyChange: parseFloat(dailyChange.toFixed(2))
-      });
-    }
-    return data;
-  };
 
-  // Fetch VIX data and generate chart data
-  useEffect(() => {
-    const fetchData = async () => {
-      if (selectedVolatility === 'REALIZED_VOL') {
-        setLoading(true);
-        try {
-          // Fetch 1 year of SPX data to calculate realized vol
-          // We need extra history for the moving windows
-          // Use ^GSPC for Yahoo Finance compatibility
-          const response = await MarketDataService.getHistoricalData('^GSPC', 400);
-          
-          if (response && response.data && response.data.length > 0) {
-            const calculatedData = calculateRealizedVolatility(response.data);
-            
-            // Filter based on selected timeframe
-            const timeframeMap = {
-              '1D': 1,
-              '1W': 7,
-              '1M': 30,
-              '3M': 90,
-              '6M': 180,
-              '1Y': 365
-            };
-            const days = timeframeMap[selectedTimeframe] || 30;
-            const cutoffDate = new Date();
-            cutoffDate.setDate(cutoffDate.getDate() - days);
-            
-            const filteredData = calculatedData.filter(d => new Date(d.date) >= cutoffDate);
-            
-            setChartData(filteredData);
-            calculateMetrics(filteredData);
-            
-            // Update ticker label specifically for this view
-            setMetrics(prev => ({
-              ...prev,
-              volTicker: '1M Realized'
-            }));
-          } else {
-             // If data is missing or empty, throw error to trigger fallback
-             throw new Error('No data returned from API');
-          }
-        } catch (error) {
-          console.error('Error fetching SPX data for realized volatility:', error);
-          // Fallback to mock data if API fails
-          const mockData = generateMockRealizedVolData(30);
-          setChartData(mockData);
-          // Also update metrics with mock data
-          calculateMetrics(mockData);
-           setMetrics(prev => ({
-              ...prev,
-              volTicker: '1M Realized'
-            }));
-        } finally {
-          setLoading(false);
-        }
-      } else if (['VIX', 'VVIX', 'RVX'].includes(selectedVolatility)) {
-        setLoading(true);
-        try {
-          const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-          const response = await fetch(`${backendUrl}/api/indicators/volatility/${selectedVolatility.toLowerCase()}`);
-          const data = await response.json();
-          setVixData(data);
+const VolatilityPanel = () => {
+  const [selectedVolatility, setSelectedVolatility] = useState('VIX');
+  const [selectedTimeframe, setSelectedTimeframe] = useState('1M');
+  const active = useSurfaceActivity();
+  const symbol = HISTORY_SYMBOLS[selectedVolatility];
+  const fetcher = useCallback(async () => {
+    if (!symbol) throw new Error('Verified history is not configured for this index.');
+    const payload = await MarketDataService.getHistoricalData(symbol, 400);
+    const records = verifiedHistoricalRecords(payload, symbol);
+    if (!records.length) throw new Error('Verified historical observations unavailable.');
+    return records;
+  }, [symbol]);
+  const resource = useSessionResource({ resourceKey: `legacy-volatility-history:${selectedVolatility}`,
+    kind: 'reference', displayRole: 'reference', fetcher, validate: validateHistory,
+    getObservedAt: historyDate, active, pollIntervalMs: 900000 });
+  const history = resource.error ? EMPTY_SERIES : resource.data || EMPTY_SERIES;
+  const loading = resource.initialLoading;
+  const fullSeries = useMemo(() => selectedVolatility === 'REALIZED_VOL'
+    ? calculateRealizedVolatility(history) : history.map((row) => ({ date: row.date, value: row.close })),
+  [history, selectedVolatility]);
+  const chartData = useMemo(() => {
+    const cutoff = Date.now() - TIMEFRAME_DAYS[selectedTimeframe] * 86400000;
+    return fullSeries.filter((row) => Date.parse(row.date) >= cutoff);
+  }, [fullSeries, selectedTimeframe]);
+  const metrics = useMemo(() => calculateVolatilityMetrics(fullSeries,
+    selectedVolatility === 'REALIZED_VOL' ? '1M Realized' : selectedVolatility), [fullSeries, selectedVolatility]);
+  const asOf = fullSeries.at(-1)?.date;
+  const formatMetricValue = (_value, percent) => percent == null ? '—' : `${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%`;
+  const getChangeColor = (percent) => percent == null ? 'gray' : percent >= 0 ? 'emerald' : 'rose';
+  const getVolatilityColor = (value) => value == null ? '#6b7280' : value <= 19 ? '#059669' : value <= 29 ? '#f59e0b' : '#dc2626';
 
-          const timeframeMap = {
-            '1D': 1,
-            '1W': 7,
-            '1M': 30,
-            '3M': 90,
-            '6M': 180,
-            '1Y': 365
-          };
-          const days = timeframeMap[selectedTimeframe] || 30;
-          const fallback = selectedVolatility === 'VVIX' ? 90 : selectedVolatility === 'RVX' ? 22 : 18;
-          const mockData = generateMockChartData(days, parseFloat(data.current || fallback));
-          setChartData(mockData);
-          calculateMetrics(mockData);
-        } catch (error) {
-          console.error(`Error fetching ${selectedVolatility} data:`, error);
-          const timeframeMap = { '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365 };
-          const days = timeframeMap[selectedTimeframe] || 30;
-          const fallback = selectedVolatility === 'VVIX' ? 90 : selectedVolatility === 'RVX' ? 22 : 18;
-          const mockData = generateMockChartData(days, fallback);
-          setChartData(mockData);
-          calculateMetrics(mockData);
-        } finally {
-          setLoading(false);
-        }
-      } else {
-        // MOVE, GVZ, EVZ, TYVIX, etc. – mock data
-        const timeframeMap = {
-          '1D': 1,
-          '1W': 7,
-          '1M': 30,
-          '3M': 90,
-          '6M': 180,
-          '1Y': 365
-        };
-        const days = timeframeMap[selectedTimeframe] || 30;
-        const mockData = generateMockChartData(days, 18);
-        setChartData(mockData);
-        calculateMetrics(mockData);
-      }
-    };
+  const volatilityOptions = [
+    { value: 'VIX', label: 'VIX' },
+    { value: 'VVIX', label: 'VVIX' },
+    { value: 'MOVE', label: 'MOVE' },
+    { value: 'GVZ', label: 'GVZ' },
+    { value: 'EVZ', label: 'EVZ' },
+    { value: 'RVX', label: 'RVX' },
+    { value: 'TYVIX', label: 'TYVIX' },
+    { value: 'REALIZED_VOL', label: 'Realized Vol (1M vs 3M)' }
+  ];
 
-    fetchData();
-  }, [selectedVolatility, selectedTimeframe]);
-
-  // Generate mock chart data
-  const generateMockChartData = (days, baseValue) => {
-    const data = [];
-    let currentValue = baseValue || 18;
-    
-    for (let i = days; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      
-      // Simulate volatility movement
-      const change = (Math.random() - 0.5) * 2;
-      currentValue += change;
-      currentValue = Math.max(10, Math.min(40, currentValue)); // Keep in reasonable VIX range
-      
-      data.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        value: parseFloat(currentValue.toFixed(2))
-      });
-    }
-    
-    return data;
-  };
-
-  // Calculate metrics from chart data
-  const calculateMetrics = (data) => {
-    if (!data || data.length === 0) return;
-
-    const latest = data[data.length - 1];
-    const previous = data.length > 1 ? data[data.length - 2] : latest;
-    const weekAgo = data.length >= 7 ? data[Math.max(0, data.length - 7)] : latest;
-    const monthAgo = data.length >= 30 ? data[Math.max(0, data.length - 30)] : latest;
-    const threeMonthAgo = data.length >= 90 ? data[Math.max(0, data.length - 90)] : latest;
-    const sixMonthAgo = data.length >= 180 ? data[Math.max(0, data.length - 180)] : latest;
-    const yearAgo = data.length >= 365 ? data[Math.max(0, data.length - 365)] : latest;
-
-    const current = latest.value;
-    const closing = previous.value;
-
-    // Calculate percentage changes
-    const calculateChange = (current, previous) => {
-      if (!previous || previous === 0) return { percent: 0.00, bps: 0 };
-      const percent = ((current - previous) / previous) * 100;
-      const bps = percent * 100;
-      return { percent: parseFloat(percent.toFixed(2)), bps: Math.round(bps) };
-    };
-
-    const dayOverDay = calculateChange(current, closing);
-    const weekOverWeek = calculateChange(current, weekAgo.value);
-    const monthOverMonth = calculateChange(current, monthAgo.value);
-    const threeMonthOverMonth = calculateChange(current, threeMonthAgo.value);
-    const sixMonthOverMonth = calculateChange(current, sixMonthAgo.value);
-    const yearOverYear = calculateChange(current, yearAgo.value);
-
-    setMetrics(prev => ({
-      ...prev,
-      closing: parseFloat(closing.toFixed(2)),
-      current: parseFloat(current.toFixed(2)),
-      lrr: 0.00, // Placeholder - lower risk range
-      trr: 0.00, // Placeholder - higher risk range
-      dayOverDay,
-      weekOverWeek,
-      monthOverMonth,
-      threeMonthOverMonth,
-      sixMonthOverMonth,
-      yearOverYear,
-      vol: parseFloat(current.toFixed(2)), // Current volatility value
-      volTicker: selectedVolatility // Current volatility ticker
-    }));
-  };
-
-  const formatMetricValue = (value, percent, bps) => {
-    const sign = percent >= 0 ? '+' : '';
-    return `${sign}${percent.toFixed(2)}%`;
-  };
-
-  const getChangeColor = (percent) => {
-    return percent >= 0 ? 'emerald' : 'rose';
-  };
-
-  // Determine line color based on volatility level
-  const getVolatilityColor = (value) => {
-    const num = parseFloat(value);
-    if (num <= 19) return '#059669'; // Green for low volatility
-    if (num <= 29) return '#f59e0b'; // Amber for medium volatility
-    return '#dc2626'; // Red for high volatility
-  };
-
-  // Lightweight Popover component (no external deps)
-  const Popover = ({ trigger, children }) => {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
-
-    useEffect(() => {
-      const handleClickOutside = (e) => {
-        if (ref.current && !ref.current.contains(e.target)) {
-          setOpen(false);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside, true);
-      return () => document.removeEventListener('mousedown', handleClickOutside, true);
-    }, []);
-
-    return (
-      <div ref={ref} className="relative inline-block">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="px-2 py-1 text-sm border rounded bg-white dark:bg-gray-700 dark:text-white border-gray-300 dark:border-gray-600 shadow-sm"
-        >
-          {trigger}
-        </button>
-        {open && (
-          <div
-            className="absolute z-[9999] mt-2 w-36 max-h-64 overflow-auto rounded border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-lg"
-          >
-            {children({ close: () => setOpen(false) })}
-          </div>
-        )}
-      </div>
-    );
-  };
+  const timeframeOptions = [
+    { value: '1D', label: '1D' },
+    { value: '1W', label: '1W' },
+    { value: '1M', label: '1M' },
+    { value: '3M', label: '3M' },
+    { value: '6M', label: '6M' },
+    { value: '1Y', label: '1Y' }
+  ];
 
   return (
     <div className="p-3 h-full" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Top Controls Row */}
       <Flex className="mb-2 gap-2" justifyContent="between" alignItems="center">
         <div className="flex items-center gap-2">
-          {/* Volatility Popover (left) */}
-          <Popover trigger={<span>{selectedVolatility}</span>}>
-          {({ close }) => (
-            <div className="py-1">
-              {volatilityOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                    selectedVolatility === opt.value ? 'font-semibold' : ''
-                  }`}
-                  onClick={() => {
-                    setSelectedVolatility(opt.value);
-                    close();
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </Popover>
+          <PopoverSelect ariaLabel="Volatility index" value={selectedVolatility}
+            options={volatilityOptions} onChange={setSelectedVolatility} />
         </div>
         {/* Timeframe Popover moved to right side (top-right) */}
         <div>
           <PopoverSelect
+            ariaLabel="Volatility timeframe"
             value={selectedTimeframe}
             options={timeframeOptions}
             onChange={setSelectedTimeframe}
@@ -406,6 +160,9 @@ const VolatilityPanel = () => {
         </div>
       </Flex>
 
+      <Text className="mb-2 text-xs text-gray-500" role="status">
+        {asOf ? `Historical reference · As of ${new Date(asOf).toLocaleDateString()}` : 'Verified historical observations unavailable'}
+      </Text>
       {/* Time Period Metrics Above Chart */}
       <Flex className="flex-wrap gap-2 mb-1 text-xs dark:text-white">
         <div className="flex items-center gap-1">
@@ -556,7 +313,7 @@ const VolatilityPanel = () => {
                 <Line 
                   type="monotone" 
                   dataKey="value" 
-                  stroke={getVolatilityColor(metrics.current || 18)}
+                  stroke={getVolatilityColor(metrics.current)}
                   strokeWidth={2}
                   dot={false}
                   name={selectedVolatility}
@@ -566,7 +323,7 @@ const VolatilityPanel = () => {
           </ResponsiveContainer>
         ) : (
           <div className="flex items-center justify-center h-full">
-            <Text className="text-gray-500 dark:text-gray-400">No chart data available</Text>
+            <Text className="text-gray-500 dark:text-gray-400">No verified chart data available</Text>
           </div>
         )}
       </div>
@@ -575,23 +332,23 @@ const VolatilityPanel = () => {
       <Flex className="flex-wrap gap-2 text-xs dark:text-white">
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">Closing:</Text>
-          <Text className="dark:text-gray-300">{metrics.closing.toFixed(2)}</Text>
+          <Text className="dark:text-gray-300">{metrics.closing?.toFixed(2) ?? '—'}</Text>
         </div>
         <div className="flex items-center gap-1">
-          <Text className="font-semibold dark:text-white">Current:</Text>
-          <Text className="dark:text-gray-300">{metrics.current.toFixed(2)}</Text>
+          <Text className="font-semibold dark:text-white">Latest:</Text>
+          <Text className="dark:text-gray-300">{metrics.current?.toFixed(2) ?? '—'}</Text>
         </div>
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">LRR:</Text>
-          <Text className="dark:text-gray-300">{metrics.lrr.toFixed(2)}</Text>
+          <Text className="dark:text-gray-300">{metrics.lrr?.toFixed(2) ?? '—'}</Text>
         </div>
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">HRR:</Text>
-          <Text className="dark:text-gray-300">{metrics.trr.toFixed(2)}</Text>
+          <Text className="dark:text-gray-300">{metrics.trr?.toFixed(2) ?? '—'}</Text>
         </div>
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">SI:</Text>
-          <Text className="dark:text-gray-300">{typeof metrics.si === 'number' ? metrics.si.toFixed(2) : metrics.si}</Text>
+          <Text className="dark:text-gray-300">{metrics.si?.toFixed(2) ?? '—'}</Text>
         </div>
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">HH/HL:</Text>
@@ -604,7 +361,7 @@ const VolatilityPanel = () => {
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">Vol={metrics.volTicker}:</Text>
           <Text className="dark:text-gray-300">
-            {typeof metrics.vol === 'number' ? metrics.vol.toFixed(2) : '--'}
+            {metrics.vol?.toFixed(2) ?? '—'}
           </Text>
         </div>
       </Flex>

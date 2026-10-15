@@ -3,6 +3,7 @@ const router = express.Router();
 const compositeMarket = require('../services/providers/compositeMarketDataProvider');
 const ibkrMarket = require('../services/providers/ibkr/ibkrMarketDataProvider');
 const ibkrPortfolio = require('../services/providers/ibkr/ibkrPortfolioDataProvider');
+const { buildIbkrAccountCoverage } = require('../utils/ibkrAccountCoverage.cjs');
 
 const PROVIDER_STATUS_TIMEOUT_MS = Number(process.env.PROVIDER_STATUS_TIMEOUT_MS || 3500);
 
@@ -73,13 +74,30 @@ router.get('/status', async (req, res) => {
       warnings.push(`Portfolio provider status unavailable: ${portfolioResult.reason?.message}`);
     }
 
+    const timestamp = new Date().toISOString();
+    const accountCoverage = buildIbkrAccountCoverage(marketStatus, portfolioStatus, timestamp);
+    const ibkrStatus = marketStatus.ibkr || portfolioStatus.ibkr;
+    const portfolioIbkrStatus = portfolioStatus.ibkr;
     const payload = {
       ...marketStatus,
-      ibkr: marketStatus.ibkr || portfolioStatus.ibkr,
-      portfolio: portfolioStatus,
+      ibkr: ibkrStatus ? {
+        ...ibkrStatus,
+        accountCoverage,
+        accountCoverageStatus: accountCoverage.status,
+      } : ibkrStatus,
+      portfolio: {
+        ...portfolioStatus,
+        ...(portfolioIbkrStatus ? {
+          ibkr: {
+            ...portfolioIbkrStatus,
+            accountCoverage,
+            accountCoverageStatus: accountCoverage.status,
+          },
+        } : {}),
+      },
       providerStatusWarnings: warnings,
       statusRefreshDelayed: warnings.some((warning) => /timed out/i.test(warning)),
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
 
     res.json({

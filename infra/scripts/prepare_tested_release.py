@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, urlparse
 
 import boto3
 import yaml
+from aws_profile_contract import AwsProfileContractError, verified_session
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -76,40 +77,11 @@ DEFAULT_RELEASES_DIR = (
     / "tested-releases"
 )
 
-VERIFICATION_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("npm-clean-install", ("npm", "ci")),
-    ("node-operations", ("npm", "run", "test:ops")),
-    (
-        "jest-readiness-ui",
-        ("npm", "test", "--", "--watchAll=false", "--runInBand"),
-    ),
-    (
-        "generated-contract",
-        ("python3", "infra/scripts/render_hermes_contract.py", "--check"),
-    ),
-    (
-        "python-infrastructure",
-        (
-            "python3",
-            "-m",
-            "unittest",
-            "discover",
-            "-s",
-            "infra/tests",
-            "-p",
-            "test_*.py",
-        ),
-    ),
-    (
-        "sam-validation",
-        (
-            "sam",
-            "validate",
-            "--lint",
-            "--template-file",
-            "infra/template.yaml",
-        ),
-    ),
+# CI and release receipts share one exact, repository-owned verification list.
+VERIFICATION_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
+    (check["id"], tuple(check["command"]))
+    for check in json.loads((Path(__file__).resolve().parents[2] / "ops" / "verification.json").read_text())["checks"]
+    if "release" in check["groups"]
 )
 
 
@@ -924,6 +896,14 @@ def prepare_release(
             "RELEASE_ARTIFACT_BUCKET_MISMATCH",
             f"Release packaging requires {EXPECTED_BUCKET}.",
         )
+    try:
+        session = verified_session(
+            admin_profile,
+            purpose="admin",
+            region=EXPECTED_REGION,
+        )
+    except AwsProfileContractError as error:
+        raise ReleaseReceiptError(error.error_code, error.detail) from None
     metadata = exact_commit_metadata(repo_root, release_commit)
     output_dir = output_dir.expanduser().resolve(strict=False)
     try:
@@ -1014,10 +994,6 @@ def prepare_release(
         environment=environment,
     )
 
-    session = boto3.Session(
-        profile_name=admin_profile,
-        region_name=EXPECTED_REGION,
-    )
     identity = session.client("sts").get_caller_identity()
     arn = str(identity.get("Arn") or "")
     if (
@@ -1196,7 +1172,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     prepare.add_argument(
         "--admin-profile",
-        default=EXPECTED_ADMIN_PROFILE,
+        required=True,
+        help=f"Required administrator SSO profile (must be {EXPECTED_ADMIN_PROFILE}).",
     )
     prepare.add_argument(
         "--artifact-bucket",

@@ -1,0 +1,17 @@
+.morning-tldr-overlay-dialog {
+  /* Keep TL;DR on the same centered Process template. */
+  width: min(1000px, 100%);
+  height: min(94vh, 1040px);
+}
+
+.morning-tldr-overlay-dialog .morning-tldr-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 760px) {
+  .morning-tldr-overlay-dialog {
+    width: 100%;
+    height: calc(100vh - 16px);
+  }
+}

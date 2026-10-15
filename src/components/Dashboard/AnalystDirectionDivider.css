@@ -1,0 +1,26 @@
+.analyst-direction-divider.is-long,
+.analyst-direction-divider.is-bullish {
+  --analyst-direction-divider-color: var(--dashboard-positive, #059669);
+}
+
+.analyst-direction-divider.is-short,
+.analyst-direction-divider.is-bearish {
+  --analyst-direction-divider-color: var(--dashboard-negative, #dc2626);
+}
+
+.analyst-direction-divider.is-neutral {
+  --analyst-direction-divider-color: var(--dashboard-muted-text, #667085);
+}
+
+.analyst-direction-divider > th[scope="rowgroup"][colspan] {
+  text-align: center;
+  color: var(--analyst-direction-divider-color);
+  outline: 1px solid var(--analyst-direction-divider-color);
+  outline-offset: -1px;
+}
+
+.analyst-direction-divider > th[scope="rowgroup"][colspan] > span {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}

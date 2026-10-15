@@ -1,0 +1,117 @@
+.portfolio-brief,
+.analyst-panel-v2 .analyst-markdown {
+  font-family: var(--font-ui, 'DM Sans', sans-serif);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.portfolio-brief {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+:is(.portfolio-brief, .analyst-markdown) .analyst-process--positive { color: var(--dashboard-positive, #059669); }
+:is(.portfolio-brief, .analyst-markdown) .analyst-process--negative { color: var(--dashboard-negative, #dc2626); }
+:is(.portfolio-brief, .analyst-markdown) .analyst-process--caution { color: var(--analyst-caution, #925b0a); }
+:is(.portfolio-brief, .analyst-markdown) .analyst-process--muted { color: var(--dashboard-muted-text, #667085); }
+:is(.portfolio-brief, .analyst-markdown) .analyst-process--quad-1 { color: var(--dashboard-quad-1); }
+:is(.portfolio-brief, .analyst-markdown) .analyst-process--quad-2 { color: var(--dashboard-quad-2); }
+:is(.portfolio-brief, .analyst-markdown) .analyst-process--quad-3 { color: var(--dashboard-quad-3); }
+:is(.portfolio-brief, .analyst-markdown) .analyst-process--quad-4 { color: var(--dashboard-quad-4); }
+.analyst-process--ticker, .analyst-process--title, .analyst-process--key, .analyst-portfolio-title { color: var(--portfolio-review-blue, #2563eb); }
+
+.analyst-panel-v2 .analyst-markdown .analyst-table-frame :is(table, th, td) {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.analyst-panel-v2 .analyst-markdown .analyst-table-frame :is(th, td),
+.analyst-panel-v2 .analyst-markdown .analyst-table-frame :is(th, td) :is(strong, b) { font-weight: 400; }
+.analyst-panel-v2 .analyst-markdown .analyst-company-name {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+}
+.analyst-panel-v2 .analyst-portfolio-markdown .analyst-markdown .analyst-portfolio-company {
+  color: var(--portfolio-review-blue, #2563eb);
+  font-weight: 400;
+}
+.analyst-panel-v2 .analyst-portfolio-markdown .analyst-markdown h3.analyst-portfolio-topic {
+  margin: 10px 0 2px;
+  color: var(--portfolio-review-blue, #2563eb);
+  font-size: inherit;
+  font-weight: 400;
+  line-height: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.analyst-panel-v2 .analyst-markdown .analyst-table-frame td .analyst-company-name {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.analyst-panel-v2 .analyst-markdown .is-realignment-check table { width: 100%; table-layout: fixed; }
+.analyst-panel-v2 .analyst-markdown .is-realignment-check :is(th, td) { padding: 4px 6px; vertical-align: top; }
+.analyst-panel-v2 .analyst-markdown .is-realignment-check :is(th, td):nth-child(1) { width: 8%; }
+.analyst-panel-v2 .analyst-markdown .is-realignment-check :is(th, td):nth-child(2) { width: 30%; }
+.analyst-panel-v2 .analyst-markdown .is-realignment-check :is(th, td):nth-child(3) { width: 11%; white-space: nowrap; }
+.analyst-panel-v2 .analyst-markdown .is-realignment-check :is(th, td):nth-child(4) { width: 14%; }
+.analyst-panel-v2 .analyst-markdown .is-realignment-check :is(th, td):nth-child(5) { width: 37%; }
+.analyst-panel-v2 .analyst-markdown .is-realignment-check td .analyst-company-name { max-width: 100%; font-weight: 400; }
+.analyst-panel-v2 .analyst-markdown .analyst-action-source { text-align: left; }
+
+.analyst-panel-v2 .analyst-message--assistant:has(.is-holdings-check, .is-holdings-contracts, .is-realignment-check) {
+  max-width: 760px;
+  margin-inline: auto;
+}
+.analyst-panel-v2 .analyst-markdown .analyst-table-frame:is(.is-holdings-check, .is-holdings-contracts, .is-realignment-check) {
+  width: 100%;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.analyst-panel-v2 .analyst-markdown .analyst-table-frame:is(.is-holdings-check, .is-holdings-contracts) table {
+  width: 100%;
+  table-layout: fixed;
+}
+/* Fixed widths must cover every captured column; an unallocated date column
+   otherwise collapses and wraps character by character, stretching all rows.
+   Other column counts use equal shares from the fixed table layout. */
+.analyst-panel-v2 .analyst-markdown .analyst-table-frame:is(.is-holdings-check, .is-holdings-contracts) :is(th, td) {
+  padding: 4px 6px;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(1) { width: 8%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(2) { width: 26%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(3) { width: 8%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(4) { width: 32%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(5) { width: 26%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(6):last-child) :is(th, td):nth-child(1) { width: 8%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(6):last-child) :is(th, td):nth-child(2) { width: 23%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(6):last-child) :is(th, td):nth-child(3) { width: 8%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(6):last-child) :is(th, td):nth-child(4) { width: 20%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(6):last-child) :is(th, td):nth-child(5) { width: 23%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check:has(thead > tr > :nth-child(6):last-child) :is(th, td):nth-child(6) { width: 18%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check :is(th, td):nth-child(3) { white-space: nowrap; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-check td .analyst-company-name { max-width: 100%; font-weight: 400; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(1) { width: 12%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(2) { width: 20%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(3) { width: 30%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(4) { width: 18%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(5):last-child) :is(th, td):nth-child(5) { width: 20%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(7):last-child) :is(th, td):nth-child(1) { width: 22%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(7):last-child) :is(th, td):nth-child(2) { width: 6%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(7):last-child) :is(th, td):nth-child(3) { width: 9%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(7):last-child) :is(th, td):nth-child(4) { width: 12%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(7):last-child) :is(th, td):nth-child(5) { width: 9%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(7):last-child) :is(th, td):nth-child(6) { width: 18%; }
+.analyst-panel-v2 .analyst-markdown .is-holdings-contracts:has(thead > tr > :nth-child(7):last-child) :is(th, td):nth-child(7) { width: 24%; }
+
+@media (max-width: 480px) {
+  .analyst-panel-v2 .analyst-markdown { font-size: 11px; }
+}

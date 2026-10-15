@@ -418,6 +418,11 @@
   opacity: 0.8;
 }
 
+.securities-data-row.research-attention {
+  background: #fef2f2 !important;
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.12);
+}
+
 .securities-data-row.last-row {
   border-bottom: none;
 }
@@ -575,6 +580,13 @@
 /* Signal Cell */
 .data-signal-cell {
   justify-content: center;
+}
+
+.data-bias-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
 }
 
 .data-signal {

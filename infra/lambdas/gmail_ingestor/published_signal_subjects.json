@@ -1,0 +1,670 @@
+[
+  {
+    "sourceTicker": "SPX",
+    "subject": "^GSPC"
+  },
+  {
+    "sourceTicker": "SPX",
+    "subject": "S&P 500"
+  },
+  {
+    "sourceTicker": "SPX",
+    "subject": "S&P 500 Index"
+  },
+  {
+    "sourceTicker": "RSP",
+    "subject": "Invesco S&P 500 Equal Weight ETF"
+  },
+  {
+    "sourceTicker": "MID",
+    "subject": "^MID"
+  },
+  {
+    "sourceTicker": "MID",
+    "subject": "S&P MidCap 400"
+  },
+  {
+    "sourceTicker": "MID",
+    "subject": "S&P MidCap 400 Index"
+  },
+  {
+    "sourceTicker": "RUT",
+    "subject": "^RUT"
+  },
+  {
+    "sourceTicker": "RUT",
+    "subject": "Russell 2000"
+  },
+  {
+    "sourceTicker": "RUT",
+    "subject": "Russell 2000 Index"
+  },
+  {
+    "sourceTicker": "NDX",
+    "subject": "^NDX"
+  },
+  {
+    "sourceTicker": "NDX",
+    "subject": "Nasdaq 100"
+  },
+  {
+    "sourceTicker": "NDX",
+    "subject": "Nasdaq 100 Index"
+  },
+  {
+    "sourceTicker": "NDX",
+    "subject": "Nasdaq-100 Index"
+  },
+  {
+    "sourceTicker": "DJI",
+    "subject": "^DJI"
+  },
+  {
+    "sourceTicker": "DJI",
+    "subject": "Dow Jones Industrial Average"
+  },
+  {
+    "sourceTicker": "DJI",
+    "subject": "Dow 30"
+  },
+  {
+    "sourceTicker": "IXIC",
+    "subject": "^IXIC"
+  },
+  {
+    "sourceTicker": "IXIC",
+    "subject": "NASDAQ Composite"
+  },
+  {
+    "sourceTicker": "IXIC",
+    "subject": "NASDAQ Composite Index"
+  },
+  {
+    "sourceTicker": "QQQ",
+    "subject": "Invesco QQQ Trust"
+  },
+  {
+    "sourceTicker": "QQQ",
+    "subject": "Invesco QQQ Trust Series 1"
+  },
+  {
+    "sourceTicker": "SMH",
+    "subject": "VanEck Semiconductor ETF"
+  },
+  {
+    "sourceTicker": "XLF",
+    "subject": "Financial Select Sector SPDR Fund"
+  },
+  {
+    "sourceTicker": "VNQ",
+    "subject": "Vanguard Real Estate ETF"
+  },
+  {
+    "sourceTicker": "STOXX600",
+    "subject": "^STOXX"
+  },
+  {
+    "sourceTicker": "STOXX600",
+    "subject": "STOXX Europe 600"
+  },
+  {
+    "sourceTicker": "STOXX600",
+    "subject": "STOXX Europe 600 Index"
+  },
+  {
+    "sourceTicker": "SX5E",
+    "subject": "^STOXX50E"
+  },
+  {
+    "sourceTicker": "SX5E",
+    "subject": "Euro STOXX 50"
+  },
+  {
+    "sourceTicker": "SX5E",
+    "subject": "Euro STOXX 50 Index"
+  },
+  {
+    "sourceTicker": "FTSE",
+    "subject": "^FTSE"
+  },
+  {
+    "sourceTicker": "FTSE",
+    "subject": "FTSE 100"
+  },
+  {
+    "sourceTicker": "FTSE",
+    "subject": "FTSE 100 Index"
+  },
+  {
+    "sourceTicker": "DAX",
+    "subject": "^GDAXI"
+  },
+  {
+    "sourceTicker": "DAX",
+    "subject": "DAX Index"
+  },
+  {
+    "sourceTicker": "DAX",
+    "subject": "German DAX Composite"
+  },
+  {
+    "sourceTicker": "CAC",
+    "subject": "^FCHI"
+  },
+  {
+    "sourceTicker": "CAC",
+    "subject": "CAC 40"
+  },
+  {
+    "sourceTicker": "CAC",
+    "subject": "CAC 40 Index"
+  },
+  {
+    "sourceTicker": "FTSEMIB",
+    "subject": "FTSE MIB"
+  },
+  {
+    "sourceTicker": "FTSEMIB",
+    "subject": "FTSE MIB Index"
+  },
+  {
+    "sourceTicker": "IBEX",
+    "subject": "^IBEX"
+  },
+  {
+    "sourceTicker": "IBEX",
+    "subject": "IBEX 35"
+  },
+  {
+    "sourceTicker": "IBEX",
+    "subject": "IBEX 35 Index"
+  },
+  {
+    "sourceTicker": "SMI",
+    "subject": "^SSMI"
+  },
+  {
+    "sourceTicker": "SMI",
+    "subject": "Swiss Market Index"
+  },
+  {
+    "sourceTicker": "N100",
+    "subject": "^N100"
+  },
+  {
+    "sourceTicker": "N100",
+    "subject": "Euronext 100"
+  },
+  {
+    "sourceTicker": "N100",
+    "subject": "Euronext 100 Index"
+  },
+  {
+    "sourceTicker": "N225",
+    "subject": "^N225"
+  },
+  {
+    "sourceTicker": "N225",
+    "subject": "Nikkei 225"
+  },
+  {
+    "sourceTicker": "N225",
+    "subject": "Nikkei 225 Index"
+  },
+  {
+    "sourceTicker": "HSI",
+    "subject": "^HSI"
+  },
+  {
+    "sourceTicker": "HSI",
+    "subject": "Hang Seng"
+  },
+  {
+    "sourceTicker": "HSI",
+    "subject": "Hang Seng Index"
+  },
+  {
+    "sourceTicker": "CSI300",
+    "subject": "CSI 300"
+  },
+  {
+    "sourceTicker": "CSI300",
+    "subject": "CSI 300 Index"
+  },
+  {
+    "sourceTicker": "SSEC",
+    "subject": "Shanghai Composite"
+  },
+  {
+    "sourceTicker": "SSEC",
+    "subject": "Shanghai Composite Index"
+  },
+  {
+    "sourceTicker": "NIFTY50",
+    "subject": "^NSEI"
+  },
+  {
+    "sourceTicker": "NIFTY50",
+    "subject": "Nifty 50"
+  },
+  {
+    "sourceTicker": "NIFTY50",
+    "subject": "Nifty 50 Index"
+  },
+  {
+    "sourceTicker": "KOSPI",
+    "subject": "^KS11"
+  },
+  {
+    "sourceTicker": "KOSPI",
+    "subject": "KOSPI Index"
+  },
+  {
+    "sourceTicker": "TAIEX",
+    "subject": "^TWII"
+  },
+  {
+    "sourceTicker": "TAIEX",
+    "subject": "Taiwan Weighted Index"
+  },
+  {
+    "sourceTicker": "AXJO",
+    "subject": "^AXJO"
+  },
+  {
+    "sourceTicker": "AXJO",
+    "subject": "ASX 200"
+  },
+  {
+    "sourceTicker": "AXJO",
+    "subject": "S&P/ASX 200"
+  },
+  {
+    "sourceTicker": "JKSE",
+    "subject": "^JKSE"
+  },
+  {
+    "sourceTicker": "JKSE",
+    "subject": "Jakarta Composite"
+  },
+  {
+    "sourceTicker": "JKSE",
+    "subject": "Jakarta Composite Index"
+  },
+  {
+    "sourceTicker": "KLSE",
+    "subject": "^KLSE"
+  },
+  {
+    "sourceTicker": "KLSE",
+    "subject": "Malaysia KLCI"
+  },
+  {
+    "sourceTicker": "KLSE",
+    "subject": "FTSE Bursa Malaysia KLCI"
+  },
+  {
+    "sourceTicker": "CRB",
+    "subject": "^TRCCRB"
+  },
+  {
+    "sourceTicker": "CRB",
+    "subject": "CRB Index"
+  },
+  {
+    "sourceTicker": "CRB",
+    "subject": "Thomson Reuters/CoreCommodity CRB Index"
+  },
+  {
+    "sourceTicker": "CL",
+    "subject": "Light Crude Oil Continuous Contract"
+  },
+  {
+    "sourceTicker": "CL",
+    "subject": "WTI Crude Oil Continuous Contract"
+  },
+  {
+    "sourceTicker": "CL",
+    "subject": "WTI Crude Oil Futures"
+  },
+  {
+    "sourceTicker": "BZ",
+    "subject": "Brent Crude Oil Continuous Contract"
+  },
+  {
+    "sourceTicker": "BZ",
+    "subject": "Brent Crude Oil Futures"
+  },
+  {
+    "sourceTicker": "NG",
+    "subject": "Natural Gas Continuous Contract"
+  },
+  {
+    "sourceTicker": "NG",
+    "subject": "Natural Gas Futures"
+  },
+  {
+    "sourceTicker": "RB",
+    "subject": "RBOB Gasoline Futures"
+  },
+  {
+    "sourceTicker": "RB",
+    "subject": "RBOB Gasoline Continuous Contract"
+  },
+  {
+    "sourceTicker": "GC",
+    "subject": "Gold Futures"
+  },
+  {
+    "sourceTicker": "GC",
+    "subject": "Gold Continuous Contract"
+  },
+  {
+    "sourceTicker": "HG",
+    "subject": "Copper Futures"
+  },
+  {
+    "sourceTicker": "HG",
+    "subject": "Copper Continuous Contract"
+  },
+  {
+    "sourceTicker": "SI",
+    "subject": "Silver Futures"
+  },
+  {
+    "sourceTicker": "SI",
+    "subject": "Silver Continuous Contract"
+  },
+  {
+    "sourceTicker": "PL",
+    "subject": "Platinum Futures"
+  },
+  {
+    "sourceTicker": "PL",
+    "subject": "Platinum Continuous Contract"
+  },
+  {
+    "sourceTicker": "PA",
+    "subject": "Palladium Futures"
+  },
+  {
+    "sourceTicker": "PA",
+    "subject": "Palladium Continuous Contract"
+  },
+  {
+    "sourceTicker": "ZC",
+    "subject": "Corn Futures"
+  },
+  {
+    "sourceTicker": "ZC",
+    "subject": "Corn Continuous Contract"
+  },
+  {
+    "sourceTicker": "ZW",
+    "subject": "Wheat Futures"
+  },
+  {
+    "sourceTicker": "ZW",
+    "subject": "Wheat Continuous Contract"
+  },
+  {
+    "sourceTicker": "ZS",
+    "subject": "Soybean Futures"
+  },
+  {
+    "sourceTicker": "ZS",
+    "subject": "Soybeans Futures"
+  },
+  {
+    "sourceTicker": "ZS",
+    "subject": "Soybeans Continuous Contract"
+  },
+  {
+    "sourceTicker": "UST2Y",
+    "subject": "2-Year U.S. Treasury Yield"
+  },
+  {
+    "sourceTicker": "UST5Y",
+    "subject": "5-Year U.S. Treasury Yield"
+  },
+  {
+    "sourceTicker": "UST10Y",
+    "subject": "^TNX"
+  },
+  {
+    "sourceTicker": "UST10Y",
+    "subject": "10-Year U.S. Treasury Yield"
+  },
+  {
+    "sourceTicker": "UST30Y",
+    "subject": "30-Year U.S. Treasury Yield"
+  },
+  {
+    "sourceTicker": "BUND10Y",
+    "subject": "10-Year German Bund Yield"
+  },
+  {
+    "sourceTicker": "JGB10Y",
+    "subject": "10-Year Japanese Government Bond Yield"
+  },
+  {
+    "sourceTicker": "GILT10Y",
+    "subject": "10-Year U.K. Gilt Yield"
+  },
+  {
+    "sourceTicker": "CURVE_2s10s",
+    "subject": "2s10s Treasury Yield Spread"
+  },
+  {
+    "sourceTicker": "OAT10Y",
+    "subject": "10-Year French Government Bond Yield"
+  },
+  {
+    "sourceTicker": "BTP10Y",
+    "subject": "10-Year Italian Government Bond Yield"
+  },
+  {
+    "sourceTicker": "ACGB10Y",
+    "subject": "10-Year Australian Government Bond Yield"
+  },
+  {
+    "sourceTicker": "CAN10Y",
+    "subject": "10-Year Canadian Government Bond Yield"
+  },
+  {
+    "sourceTicker": "KTB10Y",
+    "subject": "10-Year Korean Government Bond Yield"
+  },
+  {
+    "sourceTicker": "IG_OAS",
+    "subject": "Investment Grade Option-Adjusted Spread"
+  },
+  {
+    "sourceTicker": "HY_OAS",
+    "subject": "High Yield Option-Adjusted Spread"
+  },
+  {
+    "sourceTicker": "BTC",
+    "subject": "Bitcoin Spot Price"
+  },
+  {
+    "sourceTicker": "ETH",
+    "subject": "Ethereum Spot Price"
+  },
+  {
+    "sourceTicker": "USD",
+    "subject": "U.S. Dollar Index"
+  },
+  {
+    "sourceTicker": "USD",
+    "subject": "US Dollar Index"
+  },
+  {
+    "sourceTicker": "USD",
+    "subject": "Dollar Index"
+  },
+  {
+    "sourceTicker": "USD",
+    "subject": "USD Index"
+  },
+  {
+    "sourceTicker": "UUP",
+    "subject": "Invesco DB US Dollar Index Bullish Fund"
+  },
+  {
+    "sourceTicker": "USDEUR",
+    "subject": "U.S. Dollar to Euro"
+  },
+  {
+    "sourceTicker": "USDJPY",
+    "subject": "U.S. Dollar to Japanese Yen"
+  },
+  {
+    "sourceTicker": "USDGBP",
+    "subject": "U.S. Dollar to British Pound"
+  },
+  {
+    "sourceTicker": "USDCHF",
+    "subject": "U.S. Dollar to Swiss Franc"
+  },
+  {
+    "sourceTicker": "USDCAD",
+    "subject": "U.S. Dollar to Canadian Dollar"
+  },
+  {
+    "sourceTicker": "USDCNY",
+    "subject": "U.S. Dollar to Chinese Yuan"
+  },
+  {
+    "sourceTicker": "USDAUD",
+    "subject": "U.S. Dollar to Australian Dollar"
+  },
+  {
+    "sourceTicker": "EURUSD",
+    "subject": "Euro to U.S. Dollar"
+  },
+  {
+    "sourceTicker": "GBPUSD",
+    "subject": "British Pound to U.S. Dollar"
+  },
+  {
+    "sourceTicker": "AUDUSD",
+    "subject": "Australian Dollar to U.S. Dollar"
+  },
+  {
+    "sourceTicker": "USDMXN",
+    "subject": "U.S. Dollar to Mexican Peso"
+  },
+  {
+    "sourceTicker": "NZDUSD",
+    "subject": "New Zealand Dollar to U.S. Dollar"
+  },
+  {
+    "sourceTicker": "EURGBP",
+    "subject": "Euro to British Pound"
+  },
+  {
+    "sourceTicker": "VIX",
+    "subject": "^VIX"
+  },
+  {
+    "sourceTicker": "VIX",
+    "subject": "Volatility Index"
+  },
+  {
+    "sourceTicker": "VIX",
+    "subject": "Cboe Volatility Index"
+  },
+  {
+    "sourceTicker": "VVIX",
+    "subject": "^VVIX"
+  },
+  {
+    "sourceTicker": "VVIX",
+    "subject": "Cboe VIX Volatility Index"
+  },
+  {
+    "sourceTicker": "RVX",
+    "subject": "^RVX"
+  },
+  {
+    "sourceTicker": "RVX",
+    "subject": "Cboe Russell 2000 Volatility Index"
+  },
+  {
+    "sourceTicker": "VXN",
+    "subject": "^VXN"
+  },
+  {
+    "sourceTicker": "VXN",
+    "subject": "Cboe Nasdaq-100 Volatility Index"
+  },
+  {
+    "sourceTicker": "VXEEM",
+    "subject": "^VXEEM"
+  },
+  {
+    "sourceTicker": "VXEEM",
+    "subject": "Cboe Emerging Markets ETF Volatility Index"
+  },
+  {
+    "sourceTicker": "GVZ",
+    "subject": "^GVZ"
+  },
+  {
+    "sourceTicker": "GVZ",
+    "subject": "Cboe Gold ETF Volatility Index"
+  },
+  {
+    "sourceTicker": "OVX",
+    "subject": "^OVX"
+  },
+  {
+    "sourceTicker": "OVX",
+    "subject": "Cboe Crude Oil ETF Volatility Index"
+  },
+  {
+    "sourceTicker": "BITVX",
+    "subject": "^BITVX"
+  },
+  {
+    "sourceTicker": "BITVX",
+    "subject": "Cboe Bitcoin ETF Volatility Index"
+  },
+  {
+    "sourceTicker": "MOVE",
+    "subject": "^MOVE"
+  },
+  {
+    "sourceTicker": "MOVE",
+    "subject": "ICE BofA MOVE Index"
+  },
+  {
+    "sourceTicker": "G5RV",
+    "subject": "G5 FX Realized Volatility"
+  },
+  {
+    "sourceTicker": "XLE",
+    "subject": "Energy Select Sector SPDR Fund"
+  },
+  {
+    "sourceTicker": "XLV",
+    "subject": "Health Care Select Sector SPDR Fund"
+  },
+  {
+    "sourceTicker": "CRB",
+    "sourceInstrument": "CRB Commodities Index",
+    "subjectPattern": "CRB (?:Commodities )?Index",
+    "currentStatementPattern": "(?:is (?:back to )?(?:signaling )?|remains |(?:is )?back to signaling )",
+    "performancePrefixPattern": "(?:(?:corrected|reflated|inflated|was (?:up|down)) (?:another )?[+\u2212-]?\\d+(?:\\.\\d+)?% (?:last|this) (?:week|month) and )?"
+  },
+  {
+    "sourceTicker": "CORN",
+    "sourceInstrument": "Corn (underlying commodity)",
+    "subjectPattern": "Corn",
+    "currentStatementPattern": "(?:is (?:back to )?(?:signaling )?|remains |(?:is )?back to signaling )",
+    "performancePrefixPattern": "(?:(?:corrected|reflated|inflated|was (?:up|down)) (?:another )?[+\u2212-]?\\d+(?:\\.\\d+)?% (?:last|this) (?:week|month) and )?",
+    "basisLabel": "underlying",
+    "basisRelationship": "Published Corn commodity Trend; dashboard price is Corn futures."
+  }
+]

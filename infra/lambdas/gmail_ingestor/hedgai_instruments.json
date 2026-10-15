@@ -1,0 +1,324 @@
+{
+  "schemaVersion": 1,
+  "source": "Reviewed HedgAI Signals September 28, 2026 publisher tables and September 29\u2013October 6, 2026 explicit email action headings",
+  "instruments": [
+    {
+      "instrumentId": "hedgai:QQQ",
+      "ticker": "QQQ",
+      "sourceLabel": "NASDAQ 100",
+      "aliases": [
+        "Nasdaq"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:NVDA",
+      "ticker": "NVDA",
+      "sourceLabel": "NVIDIA",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:TSLA",
+      "ticker": "TSLA",
+      "sourceLabel": "Tesla",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:META",
+      "ticker": "META",
+      "sourceLabel": "Meta Platforms",
+      "aliases": [
+        "Meta"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:NFLX",
+      "ticker": "NFLX",
+      "sourceLabel": "Netflix",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:XLB",
+      "ticker": "XLB",
+      "sourceLabel": "Materials $XLB",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:XLE",
+      "ticker": "XLE",
+      "sourceLabel": "Energy $XLE",
+      "aliases": [
+        "Energy XLE"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:XLP",
+      "ticker": "XLP",
+      "sourceLabel": "Consumer Staples $XLP",
+      "aliases": [
+        "Staples XLP"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:XRT",
+      "ticker": "XRT",
+      "sourceLabel": "Retail $XRT",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:USO",
+      "ticker": "USO",
+      "sourceLabel": "WTI Crude Oil",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:SLX",
+      "ticker": "SLX",
+      "sourceLabel": "Steel",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:GLD",
+      "ticker": "GLD",
+      "sourceLabel": "Gold",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:URA",
+      "ticker": "URA",
+      "sourceLabel": "Uranium $URA",
+      "aliases": [
+        "Uranium URA"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:CANE",
+      "ticker": "CANE",
+      "sourceLabel": "Sugar",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:YCS",
+      "ticker": "YCS",
+      "sourceLabel": "US Dollar To Yen Cross",
+      "aliases": [
+        "USD To Yen"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:FXC",
+      "ticker": "FXC",
+      "sourceLabel": "Canadian Dollar To US Dollar Cross",
+      "aliases": [
+        "CAD To USD"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:PFIX",
+      "ticker": "PFIX",
+      "sourceLabel": "UST 30yr Yield",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:UJB",
+      "ticker": "UJB",
+      "sourceLabel": "High Yield Corp Bond $HYG",
+      "aliases": [
+        "High Yield HYG"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:SPY",
+      "ticker": "SPY",
+      "sourceLabel": "S&P 500",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:IWM",
+      "ticker": "IWM",
+      "sourceLabel": "Russell 2000",
+      "aliases": [
+        "Russell"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:AAPL",
+      "ticker": "AAPL",
+      "sourceLabel": "Apple",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:MSFT",
+      "ticker": "MSFT",
+      "sourceLabel": "Microsoft",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:GOOGL",
+      "ticker": "GOOGL",
+      "sourceLabel": "Google",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:AMZN",
+      "ticker": "AMZN",
+      "sourceLabel": "Amazon",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:XLF",
+      "ticker": "XLF",
+      "sourceLabel": "Financials $XLF",
+      "aliases": [
+        "Financials XLF"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:XLI",
+      "ticker": "XLI",
+      "sourceLabel": "Industrials $XLI",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:XLK",
+      "ticker": "XLK",
+      "sourceLabel": "Technology $XLK",
+      "aliases": [
+        "Technology XLK"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:XLU",
+      "ticker": "XLU",
+      "sourceLabel": "Utilities $XLU",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:XLV",
+      "ticker": "XLV",
+      "sourceLabel": "Health Care $XLV",
+      "aliases": [
+        "Healthcare XLV"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:XLY",
+      "ticker": "XLY",
+      "sourceLabel": "Consumer Discretionary $XLY",
+      "aliases": [
+        "Consumer Discretionary XLY"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:CNYA",
+      "ticker": "CNYA",
+      "sourceLabel": "China (Shanghai Composite)",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:IBIT",
+      "ticker": "IBIT",
+      "sourceLabel": "Bitcoin",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:BNO",
+      "ticker": "BNO",
+      "sourceLabel": "Brent Crude Oil",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:UNG",
+      "ticker": "UNG",
+      "sourceLabel": "Natural Gas Futures",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:CPER",
+      "ticker": "CPER",
+      "sourceLabel": "Copper Futures",
+      "aliases": [
+        "Copper"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:LIT",
+      "ticker": "LIT",
+      "sourceLabel": "Lithium $LIT",
+      "aliases": [
+        "Lithium LIT"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:PALL",
+      "ticker": "PALL",
+      "sourceLabel": "Palladium",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:PPLT",
+      "ticker": "PPLT",
+      "sourceLabel": "Platinum",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:SLV",
+      "ticker": "SLV",
+      "sourceLabel": "Silver",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:CORN",
+      "ticker": "CORN",
+      "sourceLabel": "Corn Futures",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:SOYB",
+      "ticker": "SOYB",
+      "sourceLabel": "Soybean Futures",
+      "aliases": [
+        "Soybean"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:WEAT",
+      "ticker": "WEAT",
+      "sourceLabel": "Wheat",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:UUP",
+      "ticker": "UUP",
+      "sourceLabel": "US Dollar",
+      "aliases": [
+        "USD"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:ULE",
+      "ticker": "ULE",
+      "sourceLabel": "Euro To US Dollar Cross",
+      "aliases": [
+        "Euro To US Dollar"
+      ]
+    },
+    {
+      "instrumentId": "hedgai:FXB",
+      "ticker": "FXB",
+      "sourceLabel": "British Pound To US Dollar Cross",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:SHY",
+      "ticker": "SHY",
+      "sourceLabel": "UST 2yr Yield",
+      "aliases": []
+    },
+    {
+      "instrumentId": "hedgai:UST",
+      "ticker": "UST",
+      "sourceLabel": "UST 10yr Yield",
+      "aliases": []
+    }
+  ]
+}

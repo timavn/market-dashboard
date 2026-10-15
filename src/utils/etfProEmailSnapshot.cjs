@@ -1,3 +1,5 @@
+const { formatMarketDate } = require('./marketDateFormat.cjs');
+
 function stripHtmlToText(value = '') {
   return String(value)
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -44,7 +46,7 @@ function getItemDate(item = {}) {
   const raw = getItemTimestamp(item);
   const d = raw ? new Date(raw) : null;
   if (!d || Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  return formatMarketDate(d);
 }
 
 function getSourceMeta(item = {}) {

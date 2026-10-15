@@ -3,6 +3,7 @@ import json
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from pathlib import Path
@@ -58,6 +59,7 @@ class FakeBroker:
         self._accounts = list(accounts or ["U1"])
         self._gateway_time = gateway_time
         self.current_time_requests = 0
+        self.position_requests = 0
         self.history_requests = []
         self.active_history_requests = 0
         self.max_active_history_requests = 0
@@ -85,6 +87,7 @@ class FakeBroker:
         return self._positions
 
     async def reqPositionsAsync(self):
+        self.position_requests += 1
         await asyncio.sleep(0)
         return self._positions
 
@@ -126,6 +129,28 @@ class FreshOnlyBroker(FakeBroker):
         )
 
 
+class ReconnectingPositionsBroker(FreshOnlyBroker):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.connect_calls = 0
+        self.disconnect_calls = 0
+        self.position_requests = 0
+
+    async def connectAsync(self, *args, **kwargs):
+        self.connect_calls += 1
+        return await super().connectAsync(*args, **kwargs)
+
+    def disconnect(self):
+        self.disconnect_calls += 1
+        super().disconnect()
+
+    async def reqPositionsAsync(self):
+        self.position_requests += 1
+        if self.position_requests == 1:
+            await asyncio.Event().wait()
+        return self._positions
+
+
 class FakeStreamManager:
     def __init__(self, primary, live_marks=None):
         self.primary = primary
@@ -152,7 +177,9 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
             "ib": app.ib,
             "reference_marks_ib": app.reference_marks_ib,
             "positions_ib": app.positions_ib,
+            "positions_snapshot_client_id": app.positions_snapshot_client_id,
             "positions_snapshot_task": app.positions_snapshot_task,
+            "live_positions_state": dict(app.live_positions_state),
             "create_positions_snapshot_session": app.create_positions_snapshot_session,
             "stream_manager": app.stream_manager,
             "schedule_reference_marks_warm": app.schedule_reference_marks_warm,
@@ -170,6 +197,7 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         app.reference_marks_active_account = None
         app.positions_snapshot_task = None
         app.reset_primary_socket_heartbeat()
+        app.gateway_governor.reset()
         app.REFERENCE_MARKS_REQUEST_GAP_SEC = 0
         app.REFERENCE_MARKS_RETRY_DELAY_SEC = 0
         app.REFERENCE_MARKS_MAX_ATTEMPTS = 3
@@ -202,8 +230,10 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         app.reference_marks_worker_task = None
         app.reference_marks_active_account = None
         app.reset_primary_socket_heartbeat()
+        app.gateway_governor.reset()
 
     def install_brokers(self, primary, reference=None, *, ephemeral=None):
+        app.gateway_governor.reset()
         app.positions_snapshot_task = None
         app.ib = primary
         app.reference_marks_ib = reference or primary
@@ -327,7 +357,15 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         timeout_payload = json.loads(timeout_response.body)
         self.assertEqual(timeout_response.status_code, 503)
         self.assertEqual(timeout_payload["status"], "positions_request_timeout")
+        self.assertEqual(timeout_payload["error_code"], "IBKR_POSITIONS_REQUEST_TIMEOUT")
         self.assertEqual(timeout_payload["source"], "unavailable")
+
+        portfolio_status = await app.portfolio_status()
+        portfolio_status_payload = json.loads(portfolio_status.body)
+        self.assertEqual(
+            portfolio_status_payload["portfolio_error_code"],
+            "IBKR_POSITIONS_REQUEST_TIMEOUT",
+        )
 
         mismatched = FreshOnlyBroker(
             accounts=["U1"],
@@ -383,6 +421,48 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(second.status_code, 200)
             self.assertTrue(second_payload["ok"])
             self.assertEqual(second_payload["positions"][0]["symbol"], "SPY")
+        finally:
+            app.LIVE_POSITIONS_REQUEST_TIMEOUT_SEC = original_timeout
+            app.POSITIONS_CANCEL_GRACE_SEC = original_grace
+
+    async def test_live_positions_reconnects_after_persistent_positions_timeout(self):
+        primary = FreshOnlyBroker(gateway_time=datetime.now(timezone.utc))
+        positions_broker = ReconnectingPositionsBroker(
+            positions=[stock_position("U1", 101, "SPY", quantity=1)],
+            gateway_time=datetime.now(timezone.utc),
+        )
+        self.install_brokers(primary, ephemeral=positions_broker)
+        original_timeout = app.LIVE_POSITIONS_REQUEST_TIMEOUT_SEC
+        original_grace = app.POSITIONS_CANCEL_GRACE_SEC
+        app.LIVE_POSITIONS_REQUEST_TIMEOUT_SEC = 0.05
+        app.POSITIONS_CANCEL_GRACE_SEC = 0.01
+        try:
+            first = await app.portfolio_live_positions()
+            first_payload = json.loads(first.body)
+            self.assertEqual(first.status_code, 503)
+            self.assertEqual(first_payload["status"], "positions_request_timeout")
+            self.assertGreaterEqual(positions_broker.disconnect_calls, 1)
+            self.assertFalse(positions_broker.connected)
+
+            second = await app.portfolio_live_positions()
+            second_payload = json.loads(second.body)
+            self.assertEqual(second.status_code, 503)
+            self.assertFalse(second_payload["ok"])
+            self.assertGreater(second_payload["retry_after_ms"], 0)
+            self.assertEqual(positions_broker.position_requests, 1)
+            self.assertEqual(positions_broker.connect_calls, 0)
+
+            with patch.object(
+                app.gateway_governor, "_monotonic",
+                return_value=time.monotonic() + second_payload["retry_after_ms"] / 1000 + 1,
+            ):
+                third = await app.portfolio_live_positions()
+            third_payload = json.loads(third.body)
+            self.assertEqual(third.status_code, 200)
+            self.assertTrue(third_payload["ok"])
+            self.assertEqual(third_payload["positions"][0]["symbol"], "SPY")
+            self.assertEqual(positions_broker.position_requests, 2)
+            self.assertEqual(positions_broker.connect_calls, 1)
         finally:
             app.LIVE_POSITIONS_REQUEST_TIMEOUT_SEC = original_timeout
             app.POSITIONS_CANCEL_GRACE_SEC = original_grace
@@ -497,6 +577,7 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["completedCount"], 49)
         self.assertEqual(state["pendingCount"], 0)
         self.assertEqual(reference.max_active_history_requests, 1)
+        self.assertEqual(reference.position_requests, 0)
         self.assertEqual(len(reference.history_requests), 49)
         self.assertEqual(
             {con_id for con_id, _kwargs in reference.history_requests},
@@ -505,6 +586,33 @@ class ReferenceMarksAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(1, observed_completed_counts)
         self.assertIn(25, observed_completed_counts)
         self.assertIn(49, observed_completed_counts)
+
+    async def test_positions_timeout_does_not_invalidate_reference_session(self):
+        position = stock_position("U1", 101, "SPY")
+        primary = FakeBroker(positions=[position])
+        reference = FakeBroker(
+            positions=[position],
+            history={101: [completed_bars()]},
+        )
+        positions = FakeBroker(positions=[position])
+
+        async def timeout_positions():
+            raise asyncio.TimeoutError
+
+        positions.reqPositionsAsync = timeout_positions
+        self.install_brokers(primary, reference, ephemeral=positions)
+
+        await app.warm_reference_marks_account("U1")
+
+        state = app.reference_marks_warm_states["U1"]
+        self.assertEqual(state["state"], "waiting")
+        self.assertEqual(
+            state["lastErrorCode"],
+            "REFERENCE_MARKS_POSITIONS_TIMEOUT",
+        )
+        self.assertTrue(reference.isConnected())
+        self.assertFalse(positions.isConnected())
+        self.assertEqual(reference.history_requests, [])
 
     async def test_retry_is_pushed_behind_other_contracts_then_succeeds(self):
         positions = [stock_position("U1", con_id) for con_id in (1, 2, 3)]
@@ -673,6 +781,48 @@ class DirectLiveMarkAsyncTests(unittest.IsolatedAsyncioTestCase):
         manager.connected = True
         manager._connection_generation = 7
         return manager
+
+    async def test_live_last_read_rejects_boolean_or_float_market_data_type(self):
+        manager = self.make_manager()
+        manager._live_last_ticks[101] = {
+            "price": 101.25,
+            "observedAt": datetime.now(timezone.utc),
+            "connectionGeneration": manager._connection_generation,
+        }
+        for value in (True, 1.0, "1", [], {}):
+            manager._tickers[101] = SimpleNamespace(marketDataType=value)
+            self.assertEqual(manager.get_fresh_direct_live_marks([101], max_age_seconds=60), {})
+        manager._tickers[101] = SimpleNamespace(marketDataType=1)
+        self.assertEqual(manager.get_fresh_direct_live_marks([101], max_age_seconds=60)[101]["liveMark"], 101.25)
+
+    async def test_dated_future_does_not_use_symbol_only_quote_cache(self):
+        manager = self.make_manager()
+        cached = {"symbol": "WTI", "last": 84.08}
+        manager._quote_cache[202] = cached
+
+        exact_future = SimpleNamespace(
+            conId=None,
+            symbol="WTI",
+            secType="FUT",
+            exchange="IPE",
+            currency="USD",
+            lastTradeDateOrContractMonth="202609",
+            tradingClass="WTI",
+            multiplier=None,
+        )
+        default_stock = SimpleNamespace(
+            conId=None,
+            symbol="WTI",
+            secType="STK",
+            exchange="SMART",
+            currency="USD",
+            lastTradeDateOrContractMonth=None,
+            tradingClass=None,
+            multiplier=None,
+        )
+
+        self.assertIsNone(manager.get_cached_quote_for_instrument(exact_future))
+        self.assertIs(manager.get_cached_quote_for_instrument(default_stock), cached)
 
     async def emit(self, manager, ticker):
         manager._on_pending_tickers([ticker])

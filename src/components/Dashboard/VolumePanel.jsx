@@ -4,6 +4,8 @@ import PopoverSelect from '../common/PopoverSelect';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import { canonicalProductState, getCanonicalRiskRange } from '../../utils/securityIntelligenceV2';
 import LoadingIndicator from '../common/LoadingIndicator';
 
 // Map tickers to their volatility indicators
@@ -73,6 +75,9 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
   const [chartData, setChartData] = useState([]); // Data currently displayed in chart
   const [loading, setLoading] = useState(false);
   const [riskRanges, setRiskRanges] = useState({ lrr: null, hrr: null });
+  const [riskRangeStatus, setRiskRangeStatus] = useState('loading');
+  const [researchHealth, setResearchHealth] = useState(null);
+  const [historyStatus, setHistoryStatus] = useState('idle');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -205,8 +210,29 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
   useEffect(() => {
     const fetchRiskRanges = async () => {
       if (!selectedTicker) return;
-      
+
+      setRiskRangeStatus('loading');
+      setResearchHealth(null);
       try {
+        if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+          const payload = await MarketDataService.getSecurityIntelligenceV2({
+            symbols: [selectedTicker],
+            historyDays: 0,
+          });
+          if (payload?.schemaVersion !== 2) {
+            throw new Error('Canonical security intelligence returned an unsupported schema.');
+          }
+          const entry = payload.bySymbol?.[selectedTicker.toUpperCase()] || null;
+          const product = entry?.products?.['risk-ranges'] || null;
+          const range = getCanonicalRiskRange(entry, { primaryOnly: true });
+          setRiskRanges({
+            lrr: range?.lrr ?? null,
+            hrr: range?.hrr ?? null,
+          });
+          setRiskRangeStatus(canonicalProductState(product));
+          setResearchHealth(entry?.health?.status || 'unavailable');
+          return;
+        }
         const riskData = await MarketDataService.getRiskRanges([selectedTicker]);
         const tickerUpper = selectedTicker.toUpperCase();
         const tickerRiskData = riskData[tickerUpper];
@@ -222,12 +248,16 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
             lrr: lrr,
             hrr: hrr
           });
+          setRiskRangeStatus('available');
         } else {
           setRiskRanges({ lrr: null, hrr: null });
+          setRiskRangeStatus('not_listed');
         }
       } catch (error) {
         console.error('Error fetching risk ranges:', error);
         setRiskRanges({ lrr: null, hrr: null });
+        setRiskRangeStatus('unavailable');
+        setResearchHealth(SECURITY_INTELLIGENCE_V2_ENABLED ? 'unavailable' : null);
       }
     };
 
@@ -240,6 +270,9 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
       if (!selectedTicker) return;
       
       setLoading(true);
+      setHistoryStatus('loading');
+      setFullHistory([]);
+      setChartData([]);
       try {
         // Always fetch 365 days of data for complete metrics calculation (Y/Y needs full year)
         // The selected timeframe will only affect chart display, not data fetching
@@ -298,29 +331,15 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
           });
           
           setFullHistory(transformedData);
+          setHistoryStatus('available');
           calculateMetrics(transformedData, riskRanges); // Calculate metrics on full history
         } else {
-          console.warn(`[SecuritiesPanel] No historical data available for ${selectedTicker}, using mock data`);
-          // Fallback to mock data if no historical data available
-          const mockData = generateMockChartData(365);
-          // Add dateObj for compatibility
-          const processedMockData = mockData.map(d => ({
-            ...d,
-            dateObj: d.dateValue || new Date(d.date)
-          }));
-          setFullHistory(processedMockData);
-          calculateMetrics(processedMockData, riskRanges);
+          console.warn(`[SecuritiesPanel] No verified historical data available for ${selectedTicker}`);
+          setHistoryStatus('unavailable');
         }
       } catch (error) {
         console.error(`[SecuritiesPanel] Error fetching historical data for ${selectedTicker}:`, error);
-        // Fallback to mock data on error
-        const mockData = generateMockChartData(365);
-        const processedMockData = mockData.map(d => ({
-            ...d,
-            dateObj: d.dateValue || new Date(d.date)
-        }));
-        setFullHistory(processedMockData);
-        calculateMetrics(processedMockData, riskRanges);
+        setHistoryStatus('unavailable');
       } finally {
         setLoading(false);
       }
@@ -397,51 +416,6 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
       calculateMetrics(fullHistory.map(item => ({...item, dateValue: item.dateObj})), riskRanges);
     }
   }, [memoizedChartData, fullHistory, riskRanges]);
-
-  // Generate mock chart data
-  const generateMockChartData = (days) => {
-    const data = [];
-    let basePrice = 450;
-    let baseVolume = 50000000;
-    
-    // Find max volume for normalization
-    const volumes = [];
-    for (let i = days; i >= 0; i--) {
-      const volumeVariation = 0.7 + Math.random() * 0.6;
-      volumes.push(baseVolume * volumeVariation);
-    }
-    const maxVolume = Math.max(...volumes);
-    
-    // Normalize volume to 0-100 range to overlay on price scale (which is ~400-500)
-    // Then scale to match price range visually
-    const priceRange = 100; // Approximate price range
-    const volumeScaleFactor = priceRange / maxVolume;
-    
-    for (let i = days; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      
-      // Simulate price movement
-      const priceChange = (Math.random() - 0.5) * 2;
-      basePrice += priceChange;
-      
-      // Simulate volume variation
-      const volumeVariation = 0.7 + Math.random() * 0.6;
-      const rawVolume = baseVolume * volumeVariation;
-      const normalizedVolume = rawVolume * volumeScaleFactor;
-      
-      data.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        dateValue: date, // Keep original date for filtering
-        price: parseFloat(basePrice.toFixed(2)),
-        volume: parseFloat(normalizedVolume.toFixed(2)), // Normalized volume to overlay on price axis
-        lrr: riskRanges.lrr,
-        hrr: riskRanges.hrr
-      });
-    }
-    
-    return data;
-  };
 
   // Calculate metrics from chart data
   const calculateMetrics = (data, riskRangesData = riskRanges) => {
@@ -595,8 +569,8 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
       ...prev,
       closing: parseFloat(closing.toFixed(2)),
       current: parseFloat(current.toFixed(2)),
-      lrr: riskRangesData.lrr || 0.00,
-      trr: riskRangesData.hrr || 0.00, // Legacy field name; displayed as canonical HRR.
+      lrr: riskRangesData.lrr ?? null,
+      trr: riskRangesData.hrr ?? null, // Legacy field name; displayed as canonical HRR.
       dayOverDay,
       fiveDayChange,
       weekOverWeek,
@@ -609,7 +583,6 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
       fiftyTwoWeekHigh,
       fiftyTwoWeekLow,
       vsFiftyTwoWeekHigh,
-      vsFiftyTwoWeekLow,
       vsFiftyTwoWeekLow,
       zScore: zScore !== null ? parseFloat(zScore.toFixed(2)) : 0.00
     }));
@@ -628,8 +601,10 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
   ];
 
   const formatMetricValue = (value, percent, bps) => {
+    if (historyStatus === 'loading' || historyStatus === 'idle') return '…';
+    if (historyStatus === 'unavailable') return 'UNAVAILABLE';
     if (percent === null || percent === undefined) {
-      return '--';
+      return 'N/A';
     }
     const sign = percent >= 0 ? '+' : '';
     return `${sign}${percent.toFixed(2)}%`;
@@ -642,8 +617,38 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
     return percent >= 0 ? 'emerald' : 'rose';
   };
 
+  const formatCanonicalRiskRangeMetric = (value) => {
+    if (riskRangeStatus === 'loading') return '…';
+    if (riskRangeStatus === 'unavailable' || riskRangeStatus === 'conflict') {
+      return riskRangeStatus === 'conflict' ? 'CONFLICT' : 'UNAVAILABLE';
+    }
+    if (riskRangeStatus === 'not_listed' || riskRangeStatus === 'not_due') return 'N/A';
+    return Number.isFinite(Number(value)) ? Number(value).toFixed(2) : 'N/A';
+  };
+  const researchNeedsAttention = SECURITY_INTELLIGENCE_V2_ENABLED
+    && historyStatus !== 'loading'
+    && riskRangeStatus !== 'loading'
+    && researchHealth
+    && researchHealth !== 'ready';
+  const formatHistoryMetric = (value) => (
+    historyStatus === 'loading' || historyStatus === 'idle'
+      ? '…'
+      : historyStatus === 'unavailable'
+        ? 'UNAVAILABLE'
+        : Number.isFinite(Number(value)) ? Number(value).toFixed(2) : 'N/A'
+  );
+
   return (
-    <div className="p-3 h-full" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      className={`p-3 h-full ${researchNeedsAttention ? 'research-attention' : ''}`}
+      data-research-health={researchHealth || undefined}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        backgroundColor: researchNeedsAttention ? '#fef2f2' : undefined,
+      }}
+    >
       {/* Top Controls Row */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
@@ -957,7 +962,9 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
           </ResponsiveContainer>
         ) : (
           <div className="flex items-center justify-center h-full">
-            <Text className="text-gray-500 dark:text-gray-400">No chart data available</Text>
+            <Text className="text-gray-500 dark:text-gray-400">
+              {historyStatus === 'unavailable' ? 'UNAVAILABLE — verified price history is unavailable' : 'N/A'}
+            </Text>
           </div>
         )}
       </div>
@@ -966,22 +973,22 @@ const SecuritiesPanel = ({ selectedTicker: propSelectedTicker }) => {
       <Flex className="flex-wrap gap-2 text-xs dark:text-white">
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">Closing:</Text>
-          <Text className="dark:text-gray-300">{metrics.closing.toFixed(2)}</Text>
+          <Text className="dark:text-gray-300">{formatHistoryMetric(metrics.closing)}</Text>
         </div>
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">Current:</Text>
-          <Text className="dark:text-gray-300">{metrics.current.toFixed(2)}</Text>
+          <Text className="dark:text-gray-300">{formatHistoryMetric(metrics.current)}</Text>
         </div>
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">LRR:</Text>
           <Text className="dark:text-gray-300">
-            {metrics.lrr && metrics.lrr > 0 ? metrics.lrr.toFixed(2) : '--'}
+            {formatCanonicalRiskRangeMetric(metrics.lrr)}
           </Text>
         </div>
         <div className="flex items-center gap-1">
           <Text className="font-semibold dark:text-white">HRR:</Text>
           <Text className="dark:text-gray-300">
-            {metrics.trr && metrics.trr > 0 ? metrics.trr.toFixed(2) : '--'}
+            {formatCanonicalRiskRangeMetric(metrics.trr)}
           </Text>
         </div>
         <div className="flex items-center gap-1">

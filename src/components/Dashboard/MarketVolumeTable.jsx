@@ -1,33 +1,43 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
 import {
   calculateVolumeMetrics,
-  getVolumeCardHeaderDate
+  getVolumeCardHeaderDate,
+  getVerifiedVolumeMarkets,
 } from '../../utils/volumeCardUtils';
-import { getMarketDayFreshness } from '../../utils/timeUtils';
+import {
+  emptyVolumeMetrics,
+  EXCHANGE_VOLUME_WINDOWS,
+  EXCHANGE_VOLUME_SOURCE,
+} from '../../utils/exchangeVolume.cjs';
+import { EX_US_VOLUME_PROXY } from '../../constants/volumeMarkets.cjs';
+import { useSurfaceActivity } from '../common/PersistentSurface';
 import './MarketVolumeTable.css';
 
 export { calculateVolumeMetrics, getVolumeCardHeaderDate };
 
-const EMPTY_VOLUME_METRICS = {
-  priorDay: null,
-  avg1M: null,
-  avg3M: null,
-  avg1Y: null,
-  pctPriorDay: null,
-  pct1M: null,
-  pct3M: null,
-  pct1Y: null
-};
-
 const HEAT_CAP_PCT = 50;
+const MARKET_VOLUME_REFRESH_MS = 15 * 60 * 1000;
+const EMPTY_VOLUME_METRICS = emptyVolumeMetrics();
+const getVolumeSourceTimestamp = (response) => {
+  const { us, exUs } = getVerifiedVolumeMarkets(response);
+  return us?.asOf || exUs?.asOf || null;
+};
+const validateVolumeResponse = (response) => getVolumeSourceTimestamp(response) ? response : null;
+const VOLUME_COLUMNS = [
+  { label: 'PRIOR DAY', key: 'pctPriorDay' },
+  { label: '1M AVG', key: 'pct1M' },
+  { label: '3M AVG', key: 'pct3M' },
+  { label: '1Y AVG', key: 'pct1Y' },
+];
 
-const pctHeatProps = (val) => {
-  if (val == null || Number.isNaN(val)) return { className: 'region-mw-heat--na', style: {} };
-  const numeric = Number(val);
-  if (!Number.isFinite(numeric)) return { className: 'region-mw-heat--na', style: {} };
-  const sign = numeric >= 0 ? 'pos' : 'neg';
-  const intensity = Math.min(Math.abs(numeric) / HEAT_CAP_PCT, 1);
+const pctHeatProps = (value) => {
+  if (!Number.isFinite(value) || value === 0) {
+    return { className: 'region-mw-heat--na', style: {} };
+  }
+  const sign = value > 0 ? 'pos' : 'neg';
+  const intensity = Math.min(Math.abs(value) / HEAT_CAP_PCT, 1);
   return { className: `region-mw-heat--${sign}`, style: { '--heat': intensity } };
 };
 
@@ -36,355 +46,116 @@ const MarketVolumeTable = ({
   onSourcesChange,
   onHeaderNoteChange,
   onMetadataChange,
+  showDetails = false,
+  showAsOf = true,
 }) => {
-  const onLastUpdatedRef = useRef(onLastUpdatedChange);
-  const onSourcesRef = useRef(onSourcesChange);
-  const onHeaderNoteRef = useRef(onHeaderNoteChange);
-  const onMetadataRef = useRef(onMetadataChange);
-  onLastUpdatedRef.current = onLastUpdatedChange;
-  onSourcesRef.current = onSourcesChange;
-  onHeaderNoteRef.current = onHeaderNoteChange;
-  onMetadataRef.current = onMetadataChange;
-
-  const [loading, setLoading] = useState(true);
-  const [metrics, setMetrics] = useState({
-    date: '',
-    totalMarket: EMPTY_VOLUME_METRICS,
-    exchange: EMPTY_VOLUME_METRICS
-  });
-  const [datasetMeta, setDatasetMeta] = useState({
-    methodologyVersion: null,
-    sourceBreakdown: [],
-    status: 'missing',
-    asOfTradingDate: null,
-    fetchedAt: null,
-    calibration: null,
-    footnotes: []
-  });
-  const [errorMessage, setErrorMessage] = useState('');
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const daysToFetch = 365; // Need 1 year of data
-        const response = await MarketDataService.getMarketShareVolume(daysToFetch);
-        const totalMarketSeries = Array.isArray(response.totalMarket) ? [...response.totalMarket] : [];
-        const totalExchangeSeries = Array.isArray(response.totalExchange)
-          ? [...response.totalExchange]
-          : [];
-        const slideMetrics = response.metrics || null;
-        const responseMeta = response.meta || {};
-        const asOf = response.asOf || responseMeta.asOfTradingDate || null;
-        const effectiveTimestamp =
-          responseMeta.uploadDate ||
-          responseMeta.slideDate ||
-          responseMeta.fetchedAt ||
-          responseMeta.generatedAt ||
-          asOf ||
-          new Date().toISOString();
-        const sourceBreakdown = Array.isArray(responseMeta.sourceBreakdown)
-          ? responseMeta.sourceBreakdown
-          : [];
-
-        const nextDatasetMeta = {
-          methodologyVersion: responseMeta.methodologyVersion || null,
-          sourceBreakdown,
-          status: responseMeta.status || 'missing',
-          asOfTradingDate: responseMeta.asOfTradingDate || asOf || null,
-          fetchedAt: responseMeta.fetchedAt || null,
-          calibration: responseMeta.calibration || null,
-          footnotes: Array.isArray(responseMeta.footnotes) ? responseMeta.footnotes : []
-        };
-        setDatasetMeta(nextDatasetMeta);
-        if (onMetadataRef.current) {
-          onMetadataRef.current(nextDatasetMeta);
-        }
-        setErrorMessage('');
-
-        if (slideMetrics?.totalMarket && slideMetrics?.exchange) {
-          const nextMetrics = {
-            date: getVolumeCardHeaderDate({
-              asOf,
-              totalMarket: totalMarketSeries,
-              totalExchange: totalExchangeSeries
-            }),
-            totalMarket: slideMetrics.totalMarket,
-            exchange: slideMetrics.exchange
-          };
-          setMetrics(nextMetrics);
-
-          if (onHeaderNoteRef.current) {
-            onHeaderNoteRef.current(nextMetrics.date || '');
-          }
-
-          if (onLastUpdatedRef.current) {
-            onLastUpdatedRef.current(effectiveTimestamp);
-          }
-          if (onSourcesRef.current) {
-            onSourcesRef.current([
-              {
-                id: 'hedgeyeVolumeSlide',
-                label: 'Hedgeye Volume Slide',
-                updatedAt: effectiveTimestamp,
-                status: getMarketDayFreshness(effectiveTimestamp)
-              }
-            ]);
-          }
-
-          setLoading(false);
-          return;
-        }
-
-        const hasMarket = totalMarketSeries.length > 0;
-        const hasExchange = totalExchangeSeries.length > 0;
-        const hasEnoughHistory = totalMarketSeries.length >= 2 && totalExchangeSeries.length >= 2;
-        if (!hasEnoughHistory) {
-          const unavailableSources = sourceBreakdown.length > 0
-            ? sourceBreakdown.map((source) => ({
-                id: source.id,
-                label: source.label,
-                updatedAt: effectiveTimestamp,
-                status: 'defective'
-              }))
-            : [
-                {
-                  id: 'marketStructureDaily',
-                  label: 'Market Structure Daily',
-                  updatedAt: effectiveTimestamp,
-                  status: 'defective'
-                }
-              ];
-
-          if (onLastUpdatedRef.current) {
-            onLastUpdatedRef.current(effectiveTimestamp);
-          }
-          if (onSourcesRef.current) {
-            onSourcesRef.current(unavailableSources);
-          }
-
-          setMetrics({
-            date: getVolumeCardHeaderDate(response),
-            totalMarket: EMPTY_VOLUME_METRICS,
-            exchange: EMPTY_VOLUME_METRICS
-          });
-          setErrorMessage(
-            responseMeta.status === 'stale'
-              ? 'Market structure data is stale and waiting for the latest completed trading-day record.'
-              : 'Market structure data is not available yet for this card.'
-          );
-          setLoading(false);
-          return;
-        }
-
-        if (hasMarket) totalMarketSeries.sort((a, b) => new Date(b.date) - new Date(a.date));
-        if (hasExchange) totalExchangeSeries.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-        const responseForDate = {
-          asOf,
-          totalMarket: totalMarketSeries,
-          totalExchange: totalExchangeSeries
-        };
-        const formattedDate = getVolumeCardHeaderDate(responseForDate);
-
-        const totalMarketVolumes = totalMarketSeries.map((d) => d.volume || 0);
-        const totalExchangeVolumes = totalExchangeSeries.map((d) => d.volume || 0);
-
-        const totalMarketMetrics =
-          totalMarketVolumes.length >= 2
-            ? calculateVolumeMetrics(totalMarketVolumes)
-            : EMPTY_VOLUME_METRICS;
-        const exchangeMetrics =
-          totalExchangeVolumes.length >= 2
-            ? calculateVolumeMetrics(totalExchangeVolumes)
-            : EMPTY_VOLUME_METRICS;
-
-        setMetrics({
-          date: formattedDate,
-          totalMarket: totalMarketMetrics,
-          exchange: exchangeMetrics
-        });
-
-        if (onHeaderNoteRef.current) {
-          onHeaderNoteRef.current(formattedDate || '');
-        }
-
-        if (onLastUpdatedRef.current) {
-          onLastUpdatedRef.current(effectiveTimestamp);
-        }
-        if (onSourcesRef.current) {
-          const sources =
-            sourceBreakdown.length > 0
-              ? sourceBreakdown.map((source) => ({
-                  id: source.id,
-                  label: source.label,
-                  updatedAt: effectiveTimestamp,
-                  status: getMarketDayFreshness(effectiveTimestamp)
-                }))
-              : [];
-
-          if (hasMarket && sources.length === 0) {
-            sources.push({
-              id: 'totalMarketVolume',
-              label: 'Total Market Volume',
-              updatedAt: effectiveTimestamp,
-              status: getMarketDayFreshness(effectiveTimestamp)
-            });
-          }
-          if (hasExchange && sources.length < 2) {
-            sources.push({
-              id: 'totalExchangeVolume',
-              label: 'Total Exchange Volume',
-              updatedAt: effectiveTimestamp,
-              status: getMarketDayFreshness(effectiveTimestamp)
-            });
-          }
-          onSourcesRef.current(sources);
-        }
-
-        setLoading(false);
-      } catch (error) {
-        console.error('Failed to fetch volume data', error);
-        setErrorMessage('Failed to load the market structure dataset for this card.');
-        setMetrics({
-          date: '',
-          totalMarket: EMPTY_VOLUME_METRICS,
-          exchange: EMPTY_VOLUME_METRICS
-        });
-        setDatasetMeta((current) => ({
-          ...current,
-          status: 'missing'
-        }));
-        if (onMetadataRef.current) {
-          onMetadataRef.current({
-            methodologyVersion: null,
-            sourceBreakdown: [],
-            status: 'missing',
-            asOfTradingDate: null,
-            fetchedAt: null,
-            calibration: null,
-            footnotes: []
-          });
-        }
-        if (onSourcesRef.current) {
-          onSourcesRef.current([
-            {
-              id: 'marketStructureDaily',
-              label: 'Market Structure Daily',
-              updatedAt: new Date().toISOString(),
-              status: 'defective'
-            }
-          ]);
-        }
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
-
-  const formatPct = (val) => {
-    if (val === null || Number.isNaN(val)) return '--';
-    const num = Math.round(val);
-    return `${num}%`;
+  const surfaceActive = useSurfaceActivity();
+  const callbacksRef = useRef({});
+  callbacksRef.current = {
+    onLastUpdatedChange, onSourcesChange, onHeaderNoteChange, onMetadataChange,
   };
+  const fetchVolume = useCallback(
+    () => MarketDataService.getMarketShareVolume(365),
+    [],
+  );
+  const volumeResource = useDashboardResource('market-volume', {}, {
+    fetcher: fetchVolume,
+    validate: validateVolumeResponse,
+    getObservedAt: getVolumeSourceTimestamp,
+    pollIntervalMs: MARKET_VOLUME_REFRESH_MS,
+    active: surfaceActive,
+    // The preview and full detail share this key and the same verified response.
+    refreshOnActivate: false,
+  });
+  const loading = Boolean(volumeResource.initialLoading || (
+    !volumeResource.data && !volumeResource.error && volumeResource.availability === 'idle'
+  ));
+  const { us, exUs } = getVerifiedVolumeMarkets(
+    !volumeResource.error && !volumeResource.hydratedFromStorage ? volumeResource.data : null,
+  );
+  const rows = useMemo(() => [
+    { id: 'us', label: 'US', source: EXCHANGE_VOLUME_SOURCE, response: us },
+    { id: EX_US_VOLUME_PROXY.id, label: EX_US_VOLUME_PROXY.label, source: {
+      id: EX_US_VOLUME_PROXY.id, label: `IBKR · ${EX_US_VOLUME_PROXY.symbol}`,
+    }, response: exUs },
+  ], [us, exUs]);
+  const availableCount = rows.filter((row) => row.response).length;
+  const available = availableCount > 0;
+  const asOf = us?.asOf || exUs?.asOf || null;
+  const date = getVolumeCardHeaderDate({ asOf });
+
+  useLayoutEffect(() => {
+    const callbacks = callbacksRef.current;
+    const metadata = {
+      status: loading ? 'loading' : availableCount === rows.length ? 'current' : available ? 'partial' : 'unavailable',
+      verified: available,
+      asOfTradingDate: asOf,
+      sourceBreakdown: rows.flatMap((row) => row.response?.meta.sourceBreakdown || []),
+    };
+    callbacks.onMetadataChange?.(metadata);
+    callbacks.onHeaderNoteChange?.(date);
+    callbacks.onLastUpdatedChange?.(asOf);
+    callbacks.onSourcesChange?.(loading ? [] : rows.map((row) => ({
+      id: row.source.id,
+      label: row.source.label,
+      updatedAt: row.response?.asOf || null,
+      status: row.response ? 'current' : 'defective',
+    })));
+  }, [rows, loading, date, asOf, available, availableCount]);
 
   if (loading) {
-    return (
-      <div className="text-xs text-center p-4 dark:text-gray-400">
-        Loading Volume...
-      </div>
-    );
+    return <div className="text-xs text-center p-4 text-gray-500">Loading Volume...</div>;
   }
-
-  const totalMarketFootnote =
-    datasetMeta.footnotes[0] ||
-    datasetMeta.sourceBreakdown.find((source) =>
-      source.id === 'totalMarketVolume' || source.id === 'hedgeyeVolumeSlide'
-    )?.description ||
-    'Total Market Volume = consolidated U.S. market share volume from the market-structure dataset.';
-  const totalExchangeFootnote =
-    datasetMeta.footnotes[1] ||
-    datasetMeta.sourceBreakdown.find((source) => source.id === 'totalExchangeVolume')
-      ?.description ||
-    (datasetMeta.methodologyVersion === 'hedgeye-volume-slide-direct-v1'
-      ? 'Tape A+B+C volume = total US exchange volume.'
-      : 'Total Exchange Volume = listed U.S. exchange share volume from the market-structure dataset.');
-  const calibrationNote =
-    datasetMeta.status === 'provisional'
-      ? 'Methodology calibration is still in progress against the Hedgeye benchmark history.'
-      : null;
-
-  const getPctClass = (val) => {
-    if (val == null || Number.isNaN(val)) return 'volume-value';
-    if (val > 0) return 'volume-value positive';
-    if (val < 0) return 'volume-value negative';
-    return 'volume-value';
-  };
 
   return (
     <div className="market-volume-table market-volume-table--mw">
-      {errorMessage ? <div className="volume-error-state">{errorMessage}</div> : null}
-
+      {showAsOf || !available ? (
+        <div className="text-xs text-gray-500 px-2 py-1">
+          {asOf ? <>AS OF <time dateTime={asOf}>{date}</time></> : 'UNAVAILABLE'}
+        </div>
+      ) : null}
       <div className="region-mw-body">
         <div className="region-mw-table-wrap">
-          <table className="region-mw-quotes-table volume-mw-table">
+          <table className="region-mw-quotes-table volume-mw-table" aria-label="Exchange volume comparisons">
             <thead>
               <tr>
                 <th className="region-mw-th region-mw-th-trend" aria-hidden="true" />
-                <th className="region-mw-th region-mw-th-name" scope="col">
-                  METRIC
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  PRIOR DAY
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1M AVG
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  3M AVG
-                </th>
-                <th className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
-                  1Y AVG
-                </th>
+                <th className="region-mw-th region-mw-th-name" scope="col">METRIC</th>
+                {VOLUME_COLUMNS.map(({ label }) => (
+                  <th key={label} className="region-mw-th region-mw-th-num region-mw-th-metric" scope="col">
+                    {label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {[
-                { key: 'totalMarket', label: 'Total Market Volume*', values: metrics.totalMarket },
-                { key: 'exchange', label: 'Total Exchange Volume**', values: metrics.exchange }
-              ].map((row) => {
-                const a = row.values;
-                const cols = [
-                  { v: a.pctPriorDay },
-                  { v: a.pct1M },
-                  { v: a.pct3M },
-                  { v: a.pct1Y }
-                ];
-                const trendValue = cols.find((c) => c.v != null && !Number.isNaN(c.v))?.v;
-                const isPos = trendValue == null ? null : trendValue >= 0;
+              {rows.map((row) => {
+                const metrics = row.response?.metrics.exchange || EMPTY_VOLUME_METRICS;
+                const trendValue = metrics.pctPriorDay;
+                const hasDirection = Number.isFinite(trendValue) && trendValue !== 0;
                 return (
-                  <tr key={row.key} className="region-mw-tr">
+                  <tr key={row.id} className="region-mw-tr" aria-label={`${row.label} volume${row.response ? '' : ' unavailable'}`}>
                     <td className="region-mw-td region-mw-td-trend" aria-hidden="true">
-                      {isPos != null ? (
-                        <span className={isPos ? 'mw-trend-up' : 'mw-trend-down'}>{isPos ? '▲' : '▼'}</span>
+                      {hasDirection ? (
+                        <span className={trendValue > 0 ? 'mw-trend-up' : 'mw-trend-down'}>
+                          {trendValue > 0 ? '▲' : '▼'}
+                        </span>
                       ) : null}
                     </td>
                     <td className="region-mw-td region-mw-td-name">{row.label}</td>
-                    {cols.map((c, idx) => {
-                      const heat = pctHeatProps(c.v);
-                      const pctClass = getPctClass(c.v);
-                      const toneClass = pctClass.includes('positive')
-                        ? 'positive'
-                        : pctClass.includes('negative')
-                        ? 'negative'
+                    {VOLUME_COLUMNS.map(({ label, key }) => {
+                      const value = metrics[key];
+                      const heat = pctHeatProps(value);
+                      const tone = Number.isFinite(value) && value !== 0
+                        ? value > 0 ? 'positive' : 'negative'
                         : '';
                       return (
                         <td
-                          key={idx}
-                          className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${toneClass}`}
+                          key={label}
+                          className={`region-mw-td region-mw-td-num region-mw-td-heat ${heat.className} ${tone}`}
                           style={heat.style}
                         >
-                          {formatPct(c.v)}
+                          {Number.isFinite(value) ? `${Math.round(value)}%` : '—'}
                         </td>
                       );
                     })}
@@ -395,12 +166,24 @@ const MarketVolumeTable = ({
           </table>
         </div>
       </div>
-
-      <div className="volume-footnotes">
-        <p>*{totalMarketFootnote}</p>
-        <p>**{totalExchangeFootnote}</p>
-        {calibrationNote ? <p className="volume-footnote-status">{calibrationNote}</p> : null}
-      </div>
+      {showDetails ? (
+        <div className="volume-footnotes">
+          <p><strong>US:</strong> {EXCHANGE_VOLUME_SOURCE.label} consolidated Tape A+B+C share volume, including FINRA-reported trades in listed stocks.</p>
+          <p>
+            <strong>ex-US:</strong> {EX_US_VOLUME_PROXY.symbol} regular-session ETF volume from IBKR. The{' '}
+            <a href={EX_US_VOLUME_PROXY.issuerUrl} target="_blank" rel="noreferrer">{EX_US_VOLUME_PROXY.name}</a>{' '}
+            covers {EX_US_VOLUME_PROXY.coverage}{' '}
+            This is trading in the U.S.-listed fund, not total overseas-exchange volume; it also forms part of the US total.
+            IBKR filters out some trade types, so this series can differ from consolidated ETF volume.
+          </p>
+          <p>
+            Previous New York trading date versus the prior session and the preceding{' '}
+            {EXCHANGE_VOLUME_WINDOWS.avg1M}, {EXCHANGE_VOLUME_WINDOWS.avg3M} and{' '}
+            {EXCHANGE_VOLUME_WINDOWS.avg1Y} trading-session averages, excluding the displayed session.
+          </p>
+          <p>Each row is compared with its own history. Positive means more activity; negative means less. Read alongside price and Trade/Trend, not as a standalone bullish or bearish signal. Dashes mean verified data is unavailable.</p>
+        </div>
+      ) : null}
     </div>
   );
 };

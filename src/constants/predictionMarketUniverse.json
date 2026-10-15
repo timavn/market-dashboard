@@ -1,0 +1,841 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "Kalshi public trade-api v2 series/events, 2026-10-10",
+  "excluded": [
+    {
+      "series": "KXAAAGASD*",
+      "label": "State gas prices (Indiana, Connecticut, …)",
+      "reason": "No Hedgeye product covers retail state gas prices."
+    },
+    {
+      "series": "KX5YRDIRHM / KX5YRDIRLM",
+      "label": "5Y Treasury yield",
+      "reason": "No Hedgeye Risk Range, Trend, or Tick covers the 5Y yield."
+    }
+  ],
+  "markets": [
+    {
+      "id": "gold",
+      "label": "Gold",
+      "group": "metals",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXGOLDD",
+        "title": "Gold Daily",
+        "settlementSources": [
+          {
+            "name": "Pyth - Gold",
+            "url": "https://app.pyth.com/explore/Metal.Index.1OZGOLD%2FUSD?returnUrl=%2Fexplore%2Fall%3Fsearch%3D3712%26state%3Dstable"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXGOLDD-26OCT1217",
+        "exampleRule": "If the close price of the 1-minute candlestick for gold on October 12, 2026 at 5:00 PM EDT is above 3989 USD/t.oz, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "next 5:00 PM ET event",
+        "underlying": "Gold spot USD/t.oz (Pyth 1-minute close at 5:00 PM ET)",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "GLD",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "GLD",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "GLD"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "GLD",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "notes": "Hedgeye's Risk Range ticker GLD is labelled Gold Spot Price (not the ETF).",
+      "price": {
+        "symbol": "GC=F",
+        "fit": "proxy",
+        "label": "Gold futures (front month)"
+      },
+      "volatility": {
+        "symbol": "GVZ",
+        "source": "volatility-snapshot",
+        "key": "GVZ",
+        "label": "Cboe Gold ETF Volatility",
+        "regimeKey": "GVZ"
+      },
+      "usdCorrelationKey": "GOLD"
+    },
+    {
+      "id": "silver",
+      "label": "Silver",
+      "group": "metals",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXSILVERD",
+        "title": "Silver daily",
+        "settlementSources": [
+          {
+            "name": "Pyth - Silver",
+            "url": "https://app.pyth.com/explore/Metal.Index.SILVER%2FUSD?returnUrl=%2Fexplore%3Fstate%3Dstable"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXSILVERD-26OCT1217",
+        "exampleRule": "If the close price of the 1-minute candlestick for silver on October 12, 2026 at 5:00 PM EDT is above 55 USD/t.oz, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "next 5:00 PM ET event",
+        "underlying": "Silver spot USD/t.oz (Pyth 1-minute close at 5:00 PM ET)",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "SILVER",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "SILVER",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "SILVER"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "SLV",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "notes": "Replaces the weekly KXSILVERW series the current monitor uses.",
+      "price": {
+        "symbol": "SI=F",
+        "fit": "proxy",
+        "label": "Silver futures (front month)"
+      },
+      "volatility": {
+        "symbol": "VXSLV",
+        "source": "volatility-snapshot",
+        "key": "VXSLV",
+        "label": "Cboe Silver ETF Volatility",
+        "cboeSymbol": "VXSLV"
+      },
+      "usdCorrelationKey": "SILVER"
+    },
+    {
+      "id": "copper",
+      "label": "Copper",
+      "group": "metals",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXCOPPERD",
+        "title": "Daily Copper",
+        "settlementSources": [
+          {
+            "name": "Pyth - Copper",
+            "url": "https://app.pyth.com/explore/Commodities.Index.CU%2FUSD?returnUrl=%2Fexplore%3Fsearch%3Dcopper%26state%3Dstable"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXCOPPERD-26OCT1217",
+        "exampleRule": "If the close price of the 1-minute candlestick for copper on October 12, 2026 at 5:00 PM EDT is above 6.60 USD/Lbs, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "next 5:00 PM ET event",
+        "underlying": "Copper spot USD/lb (Pyth 1-minute close at 5:00 PM ET)",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "COPPER",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "COPPER",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "COPPER"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "CPER",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "notes": "New market; not in the current monitor.",
+      "price": {
+        "symbol": "HG=F",
+        "fit": "proxy",
+        "label": "Copper futures (front month)"
+      },
+      "usdCorrelationKey": "COPPER"
+    },
+    {
+      "id": "wti",
+      "label": "WTI",
+      "group": "oil",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXWTI",
+        "title": "WTI oil on day",
+        "settlementSources": [
+          {
+            "name": "ICE",
+            "url": "https://www.theice.com/products/213/WTI-Crude-Futures"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXWTI-26OCT1314",
+        "exampleRule": "If the daily settlement price for WTI crude oil(November 2026 contract) on October 13, 2026 is above 83.49 USD/Bbl, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "next daily event (ignore one-off Election Day event)",
+        "underlying": "ICE WTI front-month daily settlement (rolls 2 business days before last trade)",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "WTIC",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "WTIC",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "WTIC"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "USO",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "notes": "WTIC is the continuous front-month contract, matching Kalshi's front-month settlement.",
+      "price": {
+        "symbol": "CL=F",
+        "fit": "exact",
+        "label": "WTI futures (front month)"
+      },
+      "volatility": {
+        "symbol": "OVX",
+        "source": "volatility-snapshot",
+        "key": "OVX",
+        "label": "Cboe Crude Oil Volatility",
+        "regimeKey": "OVX"
+      },
+      "usdCorrelationKey": "WTI"
+    },
+    {
+      "id": "bitcoin",
+      "label": "Bitcoin",
+      "group": "crypto",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXBTCD",
+        "title": "Bitcoin price Above/below",
+        "settlementSources": [
+          {
+            "name": "CF Benchmarks",
+            "url": "https://www.cfbenchmarks.com/data/indices/BRTI?ref=blog.cfbenchmarks.com"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/BTC.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXBTCD-26OCT1017",
+        "exampleRule": "If the simple average of the sixty seconds of CF Benchmarks' Bitcoin Real-Time Index (BRTI) before 5 PM EDT is above 72499.99 at 5 PM EDT on Oct 10, 2026, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "today's 5 PM ET event",
+        "underlying": "CF Benchmarks BRTI, 60-second average before 5 PM ET",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "BITCOIN",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "BITCOIN",
+          "fit": "exact"
+        },
+        "rangeCrossCheck": {
+          "product": "crypto-quant",
+          "ticker": "BTC",
+          "fields": [
+            "buyTrade",
+            "sellTrade",
+            "trend"
+          ]
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "BTC"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "IBIT",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "notes": "Crypto Quant Buy/Sell Trade levels matched the Risk Range on Oct 9.",
+      "price": {
+        "symbol": "BTC-USD",
+        "fit": "close",
+        "label": "BTC-USD"
+      },
+      "volatility": {
+        "symbol": "BITVX",
+        "source": "volatility-snapshot",
+        "key": "BITVX",
+        "label": "Bitcoin Volatility Index"
+      },
+      "usdCorrelationKey": "BTC"
+    },
+    {
+      "id": "ethereum",
+      "label": "Ethereum",
+      "group": "crypto",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXETHD",
+        "title": "Ethereum price Above/below",
+        "settlementSources": [
+          {
+            "name": "CF Benchmarks",
+            "url": "https://www.cfbenchmarks.com/data/indices/ETHUSD_RTI"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/ETH.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXETHD-26OCT1017",
+        "exampleRule": "If the simple average of the sixty seconds of CF Benchmarks' Ethereum Real-Time Index (ERTI) before 5 PM EDT is above 1699.99 at 5 PM EDT on Oct 10, 2026, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "today's 5 PM ET event",
+        "underlying": "CF Benchmarks ERTI, 60-second average before 5 PM ET",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "crypto-quant",
+          "ticker": "ETH",
+          "fields": [
+            "buyTrade",
+            "sellTrade"
+          ],
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "crypto-quant",
+          "ticker": "ETH",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "ETH"
+        },
+        "tick": null
+      },
+      "gaps": [
+        "No HedgAI Tick for ETH; never borrow the Bitcoin (IBIT) reading."
+      ],
+      "price": {
+        "symbol": "ETH-USD",
+        "fit": "close",
+        "label": "ETH-USD"
+      },
+      "usdCorrelationKey": "ETH"
+    },
+    {
+      "id": "sp500",
+      "label": "S&P 500",
+      "group": "indices",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXINXU",
+        "title": "S&P 500 above/below",
+        "settlementSources": [
+          {
+            "name": "For example, Google Finance",
+            "url": "https://www.google.com/finance/quote/.INX:INDEXSP?hl=en"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/INX.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXINXU-26OCT12H1600",
+        "exampleRule": "If the S&P 500 index value on Oct 12, 2026 at 4pm EDT is above 7599.9999, then the market resolves to Yes.",
+        "strikeType": "greater_or_equal",
+        "eventSelection": "4 PM ET (H1600) event only — the daily close line",
+        "underlying": "S&P 500 index value at 4 PM ET",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "SPX",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "SPX",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "SPX"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "SPY",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "notes": "Ignore the 10am–3pm hourly events in the same series.",
+      "price": {
+        "symbol": "^GSPC",
+        "fit": "exact",
+        "label": "S&P 500 index"
+      },
+      "volatility": {
+        "symbol": "VIX",
+        "source": "volatility-snapshot",
+        "key": "VIX",
+        "label": "Cboe Volatility Index",
+        "riskRangeTicker": "VIX",
+        "regimeKey": "VIX"
+      },
+      "usdCorrelationKey": "SPX"
+    },
+    {
+      "id": "nasdaq100",
+      "label": "Nasdaq-100",
+      "group": "indices",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXNASDAQ100U",
+        "title": "Nasdaq above/below",
+        "settlementSources": [
+          {
+            "name": "For example, Google Finance",
+            "url": "https://www.google.com/finance/quote/NDX:INDEXNASDAQ?hl=en"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/NASDAQ100.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXNASDAQ100U-26OCT12H1600",
+        "exampleRule": "If the Nasdaq 100 index value on Oct 12, 2026 at 4pm EDT is above 28699.99, then the market resolves to Yes.",
+        "strikeType": "greater_or_equal",
+        "eventSelection": "4 PM ET (H1600) event only — the daily close line",
+        "underlying": "Nasdaq-100 index value at 4 PM ET",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "COMPQ",
+          "fit": "related-only",
+          "priceSymbol": "^IXIC",
+          "priceLabel": "Nasdaq Composite"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "COMPQ",
+          "fit": "related-only"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "NDX"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "QQQ",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "gaps": [
+        "Hedgeye publishes a Nasdaq Composite (COMPQ) range, not Nasdaq-100; the levels are not comparable to NDX strikes."
+      ],
+      "price": {
+        "symbol": "^NDX",
+        "fit": "exact",
+        "label": "Nasdaq-100 index"
+      },
+      "volatility": {
+        "symbol": "VXN",
+        "source": "volatility-snapshot",
+        "key": "NazVol",
+        "label": "Cboe Nasdaq-100 Volatility",
+        "regimeKey": "NazVol"
+      },
+      "usdCorrelationKey": "NDX"
+    },
+    {
+      "id": "cpi",
+      "label": "CPI YoY",
+      "group": "inflation",
+      "cadence": "monthly",
+      "kalshi": {
+        "series": "KXCPIYOY",
+        "title": "Inflation",
+        "settlementSources": [
+          {
+            "name": "Bureau of Labor Statistics",
+            "url": "https://www.bls.gov/cpi/"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/YOYCPI.pdf",
+        "feeType": "quadratic_with_maker_fees",
+        "exampleEvent": "KXCPIYOY-26SEP",
+        "exampleRule": "If the Consumer Price Index (CPI) increases by more than 3.0% in the twelve months ending September 2026 (as represented by the one-decimal place value reported by the Bureau of Labor Statistics), then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "next release month",
+        "underlying": "BLS headline CPI YoY, one decimal",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "forecast": {
+          "product": "inflation-nowcast",
+          "fields": [
+            "lower",
+            "base",
+            "upper"
+          ]
+        },
+        "riskRange": null,
+        "trend": null,
+        "trade": null,
+        "tick": null
+      },
+      "notes": "No price range applies; the bias is the Hedgeye nowcast versus each strike."
+    },
+    {
+      "id": "ust2y",
+      "label": "UST 2Y",
+      "group": "rates",
+      "cadence": "monthly",
+      "kalshi": {
+        "series": [
+          "KX2YRDIRHM",
+          "KX2YRDIRLM"
+        ],
+        "high": {
+          "series": "KX2YRDIRHM",
+          "title": "2Y how high monthly",
+          "settlementSources": [
+            {
+              "name": "U.S. Department of the Treasury",
+              "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2024"
+            }
+          ],
+          "contractTermsUrl": "https://assets.kalshi.com/contract_terms/2YRDIR.pdf",
+          "feeType": "quadratic",
+          "exampleEvent": "KX2YRDIRHM-26OCT30H",
+          "exampleRule": "If the daily published par yield for the 2-year U.S. Treasury is above 4.92% on any business day between Oct 1, 2026 and Oct 30, 2026, then the market resolves to Yes.",
+          "strikeType": "greater"
+        },
+        "low": {
+          "series": "KX2YRDIRLM",
+          "title": "2Y how low monthly",
+          "settlementSources": [
+            {
+              "name": "U.S. Department of the Treasury",
+              "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2024"
+            }
+          ],
+          "contractTermsUrl": "https://assets.kalshi.com/contract_terms/2YRDIR.pdf",
+          "feeType": "quadratic",
+          "exampleEvent": "KX2YRDIRLM-26OCT30L",
+          "exampleRule": "If the daily published par yield for the 2-year U.S. Treasury is below 4.92% on any business day between Oct 1, 2026 and Oct 30, 2026, then the market resolves to Yes.",
+          "strikeType": "less"
+        },
+        "eventSelection": "current calendar-month event of each series",
+        "underlying": "Treasury daily par yield curve, 2Y tenor (end-of-day, intraday ignored)",
+        "comparator": "one-touch: > on any business day (high) / < on any business day (low)"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "UST2Y",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "UST2Y",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "UST2Y"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "SHY",
+          "fit": "proxy",
+          "inverse": true
+        }
+      },
+      "gaps": [
+        "These are one-touch (max/min this month) contracts, not month-end close contracts; Kalshi lists no open month-end close series.",
+        "HedgAI's SHY is a Treasury price ETF, so its Buy is read as yields down (inverse)."
+      ],
+      "price": {
+        "symbol": "UST2Y",
+        "fit": "exact",
+        "label": "2Y Treasury yield"
+      },
+      "volatility": {
+        "symbol": "MOVE",
+        "source": "volatility-snapshot",
+        "key": "MOVE",
+        "label": "ICE BofA MOVE Index",
+        "regimeKey": "MOVE"
+      },
+      "usdCorrelationKey": "UST2Y"
+    },
+    {
+      "id": "ust10y",
+      "label": "UST 10Y",
+      "group": "rates",
+      "cadence": "monthly",
+      "kalshi": {
+        "series": [
+          "KX10YRDIRHM",
+          "KX10YRDIRLM"
+        ],
+        "high": {
+          "series": "KX10YRDIRHM",
+          "title": "10Y how high monthly",
+          "settlementSources": [
+            {
+              "name": "U.S. Department of the Treasury",
+              "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2024"
+            }
+          ],
+          "contractTermsUrl": "https://assets.kalshi.com/contract_terms/10YRDIR.pdf",
+          "feeType": "quadratic",
+          "exampleEvent": "KX10YRDIRHM-26OCT30H",
+          "exampleRule": "If the daily published par yield for the 10-year U.S. Treasury is above 5.29% on any business day between Oct 1, 2026 and Oct 30, 2026, then the market resolves to Yes.",
+          "strikeType": "greater"
+        },
+        "low": {
+          "series": "KX10YRDIRLM",
+          "title": "10Y how low monthly",
+          "settlementSources": [
+            {
+              "name": "U.S. Department of the Treasury",
+              "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2024"
+            }
+          ],
+          "contractTermsUrl": "https://assets.kalshi.com/contract_terms/10YRDIR.pdf",
+          "feeType": "quadratic",
+          "exampleEvent": "KX10YRDIRLM-26OCT30L",
+          "exampleRule": "If the daily published par yield for the 10-year U.S. Treasury is below 5.29% on any business day between Oct 1, 2026 and Oct 30, 2026, then the market resolves to Yes.",
+          "strikeType": "less"
+        },
+        "eventSelection": "current calendar-month event of each series",
+        "underlying": "Treasury daily par yield curve, 10Y tenor (end-of-day, intraday ignored)",
+        "comparator": "one-touch: > on any business day (high) / < on any business day (low)"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "UST10Y",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "UST10Y",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "UST10Y"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "UST",
+          "fit": "proxy",
+          "inverse": true
+        }
+      },
+      "gaps": [
+        "These are one-touch (max/min this month) contracts, not month-end close contracts; Kalshi lists no open month-end close series.",
+        "HedgAI's UST is a Treasury price ETF, so its Buy is read as yields down (inverse)."
+      ],
+      "price": {
+        "symbol": "UST10Y",
+        "fit": "close",
+        "label": "10Y Treasury yield"
+      },
+      "volatility": {
+        "symbol": "MOVE",
+        "source": "volatility-snapshot",
+        "key": "MOVE",
+        "label": "ICE BofA MOVE Index",
+        "regimeKey": "MOVE"
+      },
+      "usdCorrelationKey": "UST10Y"
+    },
+    {
+      "id": "ust30y",
+      "label": "UST 30Y",
+      "group": "rates",
+      "cadence": "monthly",
+      "kalshi": {
+        "series": [
+          "KX30YRDIRHM",
+          "KX30YRDIRLM"
+        ],
+        "high": {
+          "series": "KX30YRDIRHM",
+          "title": "30Y how high monthly",
+          "settlementSources": [
+            {
+              "name": "U.S. Department of the Treasury",
+              "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2024"
+            }
+          ],
+          "contractTermsUrl": "https://assets.kalshi.com/contract_terms/30YRDIR.pdf",
+          "feeType": "quadratic",
+          "exampleEvent": "KX30YRDIRHM-26OCT30H",
+          "exampleRule": "If the daily published par yield for the 30-year U.S. Treasury is above 5.64% on any business day between Oct 1, 2026 and Oct 30, 2026, then the market resolves to Yes.",
+          "strikeType": "greater"
+        },
+        "low": {
+          "series": "KX30YRDIRLM",
+          "title": "30Y how low monthly",
+          "settlementSources": [
+            {
+              "name": "U.S. Department of the Treasury",
+              "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2024"
+            }
+          ],
+          "contractTermsUrl": "https://assets.kalshi.com/contract_terms/30YRDIR.pdf",
+          "feeType": "quadratic",
+          "exampleEvent": "KX30YRDIRLM-26OCT30L",
+          "exampleRule": "If the daily published par yield for the 30-year U.S. Treasury is below 5.64% on any business day between Oct 1, 2026 and Oct 30, 2026, then the market resolves to Yes.",
+          "strikeType": "less"
+        },
+        "eventSelection": "current calendar-month event of each series",
+        "underlying": "Treasury daily par yield curve, 30Y tenor (end-of-day, intraday ignored)",
+        "comparator": "one-touch: > on any business day (high) / < on any business day (low)"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "UST30Y",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "UST30Y",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "UST30Y"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "PFIX",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "gaps": [
+        "These are one-touch (max/min this month) contracts, not month-end close contracts; Kalshi lists no open month-end close series."
+      ],
+      "price": {
+        "symbol": "UST30Y",
+        "fit": "close",
+        "label": "30Y Treasury yield"
+      },
+      "volatility": {
+        "symbol": "MOVE",
+        "source": "volatility-snapshot",
+        "key": "MOVE",
+        "label": "ICE BofA MOVE Index",
+        "regimeKey": "MOVE"
+      },
+      "usdCorrelationKey": "UST30Y"
+    }
+  ],
+  "setupRule": {
+    "long": "Trend and Tick both Bullish, price in the bottom third of the Risk Range, and no published Bearish Trade.",
+    "short": "Trend and Tick both Bearish, price in the top third of the Risk Range, and no published Bullish Trade.",
+    "bottomThird": 0.3333,
+    "topThird": 0.6667,
+    "outsideRange": "no setup"
+  },
+  "sizing": {
+    "status": "pending-line-bracketing",
+    "perMarketPct": 4,
+    "ladderPct": [
+      2,
+      1,
+      0.5
+    ],
+    "totalCapPct": null,
+    "note": "Each successive line gets half the previous allocation. Line selection is not implemented yet."
+  },
+  "sections": [
+    {
+      "id": "metals",
+      "label": "Metals"
+    },
+    {
+      "id": "crypto",
+      "label": "Crypto"
+    },
+    {
+      "id": "oil",
+      "label": "Oil"
+    },
+    {
+      "id": "indices",
+      "label": "Indices"
+    },
+    {
+      "id": "rates",
+      "label": "Rates"
+    },
+    {
+      "id": "inflation",
+      "label": "CPI"
+    }
+  ],
+  "volatilityGaps": "No volatility index is available in the dashboard feeds for copper or Ethereum.",
+  "priceSymbolNote": "Use explicit provider symbols (GC=F, BTC-USD, …). Bare symbols such as SI, HG, CL, BTC and ETH resolve to unrelated US stocks/ETFs when IBKR is connected.",
+  "usd": {
+    "symbol": "DX-Y.NYB",
+    "label": "US Dollar Index",
+    "riskRangeTicker": "DXY",
+    "tradeTicker": "DXY",
+    "tickTicker": "UUP"
+  }
+}

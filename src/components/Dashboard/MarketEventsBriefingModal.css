@@ -1,0 +1,96 @@
+.market-events-briefing-host { z-index: 1700; }
+
+.market-events-briefing-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1000px, 100%);
+  height: min(88vh, 940px);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.market-events-briefing-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 26px 14px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.market-events-briefing-modal__header span,
+.market-event-briefing h4,
+.market-event-briefing dt {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.market-events-briefing-modal h2 { margin: 4px 0 0; font-size: 21px; font-weight: 700; }
+.market-events-briefing-modal button { cursor: pointer; font: inherit; }
+.market-events-briefing-modal button:focus-visible,
+.market-events-briefing-modal a:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.market-events-briefing-modal__header > button {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 28px;
+  line-height: 1;
+  padding: 5px 8px;
+}
+.market-events-briefing-modal__days { display: flex; gap: 20px; padding: 0 26px; border-bottom: 1px solid #e2e8f0; }
+.market-events-briefing-modal__days button {
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+}
+.market-events-briefing-modal__days button[aria-pressed='true'] { color: #2563eb; border-bottom-color: #2563eb; }
+.market-events-briefing-modal__body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 26px; }
+.market-events-briefing-modal__note { margin-bottom: 20px; color: #64748b; font-size: 12px; }
+.market-events-briefing-modal__note strong { color: #334155; }
+.market-events-briefing-modal__note p { margin: 5px 0 0; }
+.market-event-briefing { padding: 20px 0; border-top: 1px solid #e2e8f0; }
+.market-event-briefing header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.market-event-briefing__country { color: #2563eb; font-size: 11px; font-weight: 800; }
+.market-event-briefing h3 { flex: 1; margin: 0; font-size: 16px; font-weight: 750; }
+.market-event-briefing time { color: #475569; font-size: 12px; font-variant-numeric: tabular-nums; }
+.market-event-briefing__facts { display: grid; grid-template-columns: 2fr 2fr 1fr 1fr; gap: 12px; margin: 14px 0; padding: 12px; background: #f8fafc; }
+.market-event-briefing dd { margin: 3px 0 0; font-weight: 650; }
+.market-event-briefing__summary { margin: 10px 0; }
+.market-event-briefing__context { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.market-event-briefing h4 { margin: 4px 0; }
+.market-event-briefing__context p { margin: 0 0 12px; }
+.market-event-briefing > a,
+.market-events-briefing-modal__footer a { color: #2563eb; text-decoration: none; font-size: 11px; }
+.market-events-briefing-modal a:hover { text-decoration: underline; }
+.market-events-briefing-modal__footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 12px 26px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 11px; }
+.market-events-briefing-modal__empty { padding: 45px 12px; text-align: center; color: #64748b; }
+.market-events-briefing-modal__empty h3 { color: inherit; font-size: 17px; }
+.dark .market-event-briefing__facts { background: #172033; }
+.dark .market-event-briefing,
+.dark .market-events-briefing-modal__header,
+.dark .market-events-briefing-modal__days,
+.dark .market-events-briefing-modal__footer { border-color: #334155; }
+.dark .market-events-briefing-modal__note strong,
+.dark .market-event-briefing time { color: #cbd5e1; }
+.dark .market-events-briefing-modal__note,
+.dark .market-events-briefing-modal__header span,
+.dark .market-events-briefing-modal__footer,
+.dark .market-events-briefing-modal__empty,
+.dark .market-events-briefing-modal__days button,
+.dark .market-event-briefing dt,
+.dark .market-event-briefing h4 { color: #94a3b8; }
+@media (max-width: 650px) {
+  .market-events-briefing-host { padding: 8px; }
+  .market-events-briefing-modal { height: calc(100dvh - 16px); }
+  .market-events-briefing-modal__header,
+  .market-events-briefing-modal__body { padding: 16px; }
+  .market-events-briefing-modal h2 { font-size: 17px; }
+  .market-event-briefing h3 { flex-basis: 70%; }
+  .market-event-briefing__facts { grid-template-columns: 1fr 1fr; }
+  .market-event-briefing__context { grid-template-columns: 1fr; gap: 0; }
+}

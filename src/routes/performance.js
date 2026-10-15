@@ -1,7 +1,8 @@
 
 const express = require('express');
 const router = express.Router();
-const DynamoDB = require('aws-sdk/clients/dynamodb');
+const { DynamoDB } = require('../services/aws/clients.cjs');
+const { readAllDynamoItems } = require('../services/data/dynamoPagination.cjs');
 const dynamodb = new DynamoDB.DocumentClient();
 
 const PERFORMANCE_TABLE = 'PerformanceHistory';
@@ -16,7 +17,7 @@ async function getPerformanceHistory(startDateStr) {
         ExpressionAttributeNames: { '#date': 'date' },
         ExpressionAttributeValues: { ':startDate': startDateStr }
     };
-    const data = await dynamodb.scan(scanParams).promise();
+    const data = await readAllDynamoItems(dynamodb, 'scan', scanParams);
     return data.Items.sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -177,10 +178,8 @@ router.get('/metrics', async (req, res) => {
                 '1m': rets.slice(-21).reduce((a, b) => a + b, 0) * 100, // approx
                 'ytd': ((parseFloat(filtered[filtered.length - 1].totalValue || filtered[filtered.length - 1].summary?.totalValue || 0) - parseFloat(filtered[0].totalValue || filtered[0].summary?.totalValue || 0)) / parseFloat(filtered[0].totalValue || filtered[0].summary?.totalValue || 1)) * 100
             },
-            vsBenchmark: {
-                'SPY': { return: 10.5, alpha: 2.3, beta: 1.1 }, // Mock for now
-                'QQQ': { return: 15.2, alpha: -1.5, beta: 1.3 }
-            }
+            vsBenchmark: {},
+            benchmarkStatus: 'unavailable'
         });
     } catch (err) {
         console.error(err);
@@ -189,27 +188,12 @@ router.get('/metrics', async (req, res) => {
 });
 
 // GET /api/performance/benchmark
-router.get('/benchmark', async (req, res) => {
-    // Mock benchmark comparison
-    // Real implementation requires fetching SPY/QQQ history match dates
-    const items = await getPerformanceHistory('2000-01-01');
-    const dates = items.map(x => x.date);
-
-    // Mock SPY/QQQ
-    const benchmarks = { 'SPY': [], 'QQQ': [] };
-    let spyVal = 100;
-    let qqqVal = 100;
-
-    dates.forEach(d => {
-        spyVal *= (1 + (Math.random() - 0.45) * 0.02);
-        qqqVal *= (1 + (Math.random() - 0.45) * 0.03);
-        benchmarks['SPY'].push({ date: d, return: (spyVal - 100) });
-        benchmarks['QQQ'].push({ date: d, return: (qqqVal - 100) });
-    });
-
-    res.json({
-        portfolio: items.map(x => ({ date: x.date, return: 0 })), // Should calc cumulative return
-        benchmarks: benchmarks
+router.get('/benchmark', (_req, res) => {
+    res.status(503).json({
+        status: 'unavailable',
+        reason: 'verified_benchmark_history_unavailable',
+        portfolio: [],
+        benchmarks: {},
     });
 });
 
@@ -244,7 +228,7 @@ router.get('/statement/:date', async (req, res) => {
             ExpressionAttributeNames: { '#date': 'date' },
             ExpressionAttributeValues: { ':d': date }
         };
-        const data = await dynamodb.scan(scanParams).promise();
+        const data = await readAllDynamoItems(dynamodb, 'scan', scanParams);
         const item = data.Items[0];
 
         if (!item) return res.status(404).json({ error: "Statement not found" });
@@ -264,7 +248,7 @@ router.get('/statement/:date', async (req, res) => {
             ExpressionAttributeNames: { '#date': 'date' },
             ExpressionAttributeValues: { ':d': date }
         };
-        const posData = await dynamodb.scan(posParams).promise();
+        const posData = await readAllDynamoItems(dynamodb, 'scan', posParams);
 
         res.json({
             ...item,

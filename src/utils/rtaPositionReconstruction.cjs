@@ -132,6 +132,8 @@ function seedBaselinePositions(positionMap, baseline = {}, onInvalid = null) {
 function normalizeAction(rawAction) {
   const action = String(rawAction || '').trim().toUpperCase().replace(/[\s_]+/g, '-');
   if (action === 'COVER-SOME') return 'COVER';
+  // "Book-SOME" takes partial profits on a long, the same exit as Sell-SOME.
+  if (action === 'BOOK-SOME') return 'SELL-SOME';
   return action;
 }
 
@@ -141,7 +143,17 @@ function signalTextCandidates(alert) {
     .filter(Boolean);
 }
 
+// Since August 2026 alerts read "<Analyst> Sell Signal (<quip>): Company (TICKER)"
+// or "Cover-SOME Signal (<quip>): TICKER". The quip is commentary: words such as
+// "buying" in it must never override the signal's own verb.
+const QUIPPED_SIGNAL_PATTERN = /\b(BUY|SELL|COVER(?:-SOME)?|SELL-SOME|BOOK-SOME)\s+SIGNAL\b\s*\([^)]*\)\s*:\s*(?:[^():]*?\(\s*([A-Z][A-Z0-9./-]{0,9})\s*\)|([A-Z][A-Z0-9./-]{0,9})\b)/i;
+
 function signalDetailsFromText(text) {
+  const quipped = text.match(QUIPPED_SIGNAL_PATTERN);
+  if (quipped) {
+    const ticker = normalizeTicker(quipped[2] || quipped[3]);
+    if (ticker) return { ticker, action: normalizeAction(quipped[1]), intent: null, side: null };
+  }
   const explicitModifierMatch = text.match(
     /\b(BUY|SELL|COVER(?:-SOME)?|SELL-SOME)\s+SIGNAL\b\s*(?:[-:\u2013\u2014]\s*)?(SHORTING|COVERING|BUYING|SELLING)\b(?:\s+(?:SHORT|LONG))?[\s:-]+([A-Z][A-Z0-9./-]{0,9})\b/i,
   );
@@ -153,7 +165,7 @@ function signalDetailsFromText(text) {
 
   if (!explicitModifierMatch && !directSignalMatch) return null;
 
-  const rawAction = (explicitModifierMatch?.[1] || directSignalMatch?.[1]).toUpperCase();
+  const rawAction = String(explicitModifierMatch?.[1] || directSignalMatch?.[1] || '').toUpperCase();
   const modifier = (explicitModifierMatch?.[2] || '').toUpperCase();
   const ticker = normalizeTicker(explicitModifierMatch?.[3] || directSignalMatch?.[2]);
   if (!ticker) return null;
@@ -261,12 +273,33 @@ function buildReplayEvents(snapshots) {
   });
 }
 
-function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline = null } = {}) {
+function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline = null, resolutions = [] } = {}) {
   const positionMap = new Map();
   const invalidEvents = [];
   const warnings = [];
+  const unresolvedEvents = [];
   const recordInvalid = (issue) => {
     invalidEvents.push(issue);
+    if (issue.message && !warnings.includes(issue.message)) warnings.push(issue.message);
+  };
+  // An alert that contradicts the replayed book (a cover of a long, an exit with
+  // nothing open) leaves that ticker's position uncertain. Withhold just that
+  // ticker and keep the rest of the book, flagged, rather than discarding it.
+  // A user-confirmed resolution of that exact alert (for example "KR is
+  // gone") settles it: the ticker stays out of the book without a warning.
+  const resolvedEvents = [];
+  const recordUnresolved = (issue, positions) => {
+    if (issue.ticker) positions.delete(issue.ticker);
+    const resolution = (Array.isArray(resolutions) ? resolutions : []).find((item) => (
+      item?.position === 'flat'
+      && item.ticker === issue.ticker
+      && item.sourceMessageId === issue.sourceMessageId
+    ));
+    if (resolution) {
+      resolvedEvents.push({ ...issue, resolution });
+      return;
+    }
+    unresolvedEvents.push(issue);
     if (issue.message && !warnings.includes(issue.message)) warnings.push(issue.message);
   };
 
@@ -376,17 +409,17 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline 
 
     if (event.action === 'COVER') {
       if (!existing) {
-        recordInvalid({
+        recordUnresolved({
           ...diagnosticBase,
           code: 'unmatched-cover',
           message: `RTA cover for ${event.ticker} does not match an active short.`,
-        });
+        }, positionMap);
       } else if (existing.side !== 'short') {
-        recordInvalid({
+        recordUnresolved({
           ...diagnosticBase,
           code: 'side-mismatch',
           message: `RTA cover for ${event.ticker} conflicts with its active long side.`,
-        });
+        }, positionMap);
       } else {
         positionMap.delete(event.ticker);
       }
@@ -395,17 +428,17 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline 
 
     if (event.action === 'SELL-SOME') {
       if (!existing) {
-        recordInvalid({
+        recordUnresolved({
           ...diagnosticBase,
           code: 'unmatched-sell-some',
           message: `RTA sell-some for ${event.ticker} does not match an active long.`,
-        });
+        }, positionMap);
       } else if (existing.side !== 'long') {
-        recordInvalid({
+        recordUnresolved({
           ...diagnosticBase,
           code: 'side-mismatch',
           message: `RTA sell-some for ${event.ticker} conflicts with its active short side.`,
-        });
+        }, positionMap);
       } else {
         positionMap.delete(event.ticker);
       }
@@ -415,11 +448,11 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline 
     if (event.action === 'ADD') {
       const side = event.side || 'long';
       if (existing && existing.side !== side) {
-        recordInvalid({
+        recordUnresolved({
           ...diagnosticBase,
           code: 'side-mismatch',
           message: `RTA add for ${event.ticker} as ${side} conflicts with its active ${existing.side} side.`,
-        });
+        }, positionMap);
       } else {
         openPosition(positionMap, event.ticker, side, event.alert, event.eventTime);
       }
@@ -427,17 +460,17 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline 
     }
 
     if (!existing) {
-      recordInvalid({
+      recordUnresolved({
         ...diagnosticBase,
         code: 'unmatched-remove',
         message: `RTA remove for ${event.ticker} does not match an active position.`,
-      });
+      }, positionMap);
     } else if (event.side && existing.side !== event.side) {
-      recordInvalid({
+      recordUnresolved({
         ...diagnosticBase,
         code: 'side-mismatch',
         message: `RTA remove for ${event.ticker} as ${event.side} conflicts with its active ${existing.side} side.`,
-      });
+      }, positionMap);
     } else {
       positionMap.delete(event.ticker);
     }
@@ -452,6 +485,7 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline 
   const hasInput = Boolean(baseline) || orderedEvents.length > 0;
   const valid = invalidEvents.length === 0;
   const available = hasInput && valid;
+  const unresolved = unresolvedEvents.length > 0;
   const longCount = available ? reconstructedLongCount : null;
   const shortCount = available ? reconstructedShortCount : null;
 
@@ -460,7 +494,7 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline 
     lastUpdated,
     windowDays,
     positionSource: 'alert-reconstruction',
-    positionSourceConfidence: available ? 'high' : 'low',
+    positionSourceConfidence: available ? (unresolved ? 'medium' : 'high') : 'low',
     baseline: baseline
       ? {
           id: baseline.id || null,
@@ -469,9 +503,11 @@ function summarizeRealTimeAlertPositions(snapshots, { windowDays = 90, baseline 
         }
       : null,
     dataQuality: {
-      status: !hasInput ? 'unavailable' : valid ? 'ok' : 'error',
+      status: !hasInput ? 'unavailable' : !valid ? 'error' : unresolved ? 'warn' : 'ok',
       warnings,
       invalidEvents,
+      unresolvedEvents,
+      resolvedEvents,
       processedEventCount,
       deduplicatedEventCount,
     },

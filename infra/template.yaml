@@ -13,6 +13,11 @@ Parameters:
     Default: DISABLED
     AllowedValues: [ENABLED, DISABLED]
     Description: Kept disabled until production OAuth is promoted and the canary is ready.
+  CftcScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Enable the official daily CFTC verification only through staged activation.
   QuantAnalystScheduleState:
     Type: String
     Default: DISABLED
@@ -74,6 +79,22 @@ Parameters:
 
 Conditions:
   OperationalAlarmsEnabled: !Equals [!Ref OperationalAlarmsState, ENABLED]
+  QuantAnalystScheduleEnabled: !Equals [!Ref QuantAnalystScheduleState, ENABLED]
+  QuantDeveloperScheduleEnabled: !Equals [!Ref QuantDeveloperScheduleState, ENABLED]
+  SecurityScheduleEnabled: !Equals [!Ref SecurityScheduleState, ENABLED]
+  AnalystHeartbeatAlarmEnabled: !And
+    - !Condition OperationalAlarmsEnabled
+    - !Condition QuantAnalystScheduleEnabled
+  DeveloperHeartbeatAlarmEnabled: !And
+    - !Condition OperationalAlarmsEnabled
+    - !Condition QuantDeveloperScheduleEnabled
+  SecurityHeartbeatAlarmEnabled: !And
+    - !Condition OperationalAlarmsEnabled
+    - !Condition SecurityScheduleEnabled
+  AllHermesWorkerSchedulesDisabled: !And
+    - !Not [!Condition QuantAnalystScheduleEnabled]
+    - !Not [!Condition QuantDeveloperScheduleEnabled]
+    - !Not [!Condition SecurityScheduleEnabled]
   ReservedConcurrencyEnabled: !Equals [!Ref ReservedConcurrencyState, ENABLED]
 
 Globals:
@@ -273,9 +294,53 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: market-dashboard-operations-v2
-      Subscription:
-        - Protocol: email
-          Endpoint: !Ref AlertEmail
+
+  CftcIngestorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: market-dashboard-cftc-ingestor-v1
+      CodeUri: lambdas/cftc_ingestor/
+      Handler: cftc_ingestor.lambda_handler
+      Description: Validates and publishes official Combined CFTC positioning without fallback data.
+      Architectures: [arm64]
+      MemorySize: 512
+      Timeout: 120
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          HEDGEYE_DAILY_SNAPSHOT_TABLE: !Ref HedgeyeDailySnapshotTableName
+          SERVICE_HEARTBEAT_TABLE: !Ref ServiceHeartbeatTable
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 900
+        MaximumRetryAttempts: 0
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt RuntimeFailureQueue.Arn
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ReadAndPublishExactCftcSnapshot
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HedgeyeDailySnapshotTableName}
+            - Sid: WriteCftcReadinessHeartbeat
+              Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt ServiceHeartbeatTable.Arn
+            - Sid: WriteCftcReadinessMetrics
+              Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: MarketDashboard/Readiness
+            - Sid: SendCftcFailureToOperationsQueue
+              Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt RuntimeFailureQueue.Arn
 
   GmailIngestorFunction:
     Type: AWS::Serverless::Function
@@ -290,6 +355,8 @@ Resources:
       ReservedConcurrentExecutions: !If [ReservedConcurrencyEnabled, 1, !Ref AWS::NoValue]
       Environment:
         Variables:
+          ANALYST_FAST_POLLING_ENABLED: "1"
+          ANALYST_CHANGE_JOURNAL_ENABLED: "1"
           GMAIL_OAUTH_SECRET_NAME: !Ref GmailOAuthSecretName
           HERMES_GMAIL_ACCOUNT: !Ref AlertEmail
           HERMES_GMAIL_QUERY: label:Hedgeye newer_than:365d
@@ -302,6 +369,8 @@ Resources:
           RISK_RANGE_MANIFEST_TABLE: !Ref RiskRangePublicationManifestsV2
           HEDGEYE_RISK_RANGES_TABLE: !Ref HedgeyeRiskRangesTableName
           RISK_RANGE_HISTORY_TABLE: !Ref RiskRangeHistoryTableName
+          GLOBAL_QUADS_INGEST_ENABLED: "0"
+          GLOBAL_QUADS_PUBLISH_ENABLED: "0"
           PDF_PROCESSOR_FUNCTION_NAME: !Ref HedgeyePdfProcessorFunction
       EventInvokeConfig:
         MaximumEventAgeInSeconds: 900
@@ -313,6 +382,18 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow
+              Action: cloudwatch:GetMetricStatistics
+              Resource: '*'
+            - Effect: Allow
+              Action: [scheduler:GetSchedule, scheduler:UpdateSchedule]
+              Resource: !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/market-dashboard-gmail-v2-every-15m
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/market-dashboard-scheduler-invoke-v2
+              Condition:
+                StringEquals:
+                  iam:PassedToService: scheduler.amazonaws.com
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GmailOAuthSecretName}*
@@ -350,6 +431,11 @@ Resources:
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt HedgeyePdfProcessorFunction.Arn
+            - Effect: Allow
+              Action:
+                - textract:AnalyzeDocument
+                - textract:DetectDocumentText
+              Resource: '*'
 
   HedgeyePdfProcessorFunction:
     Type: AWS::Serverless::Function
@@ -366,6 +452,10 @@ Resources:
       ReservedConcurrentExecutions: !If [ReservedConcurrencyEnabled, 2, !Ref AWS::NoValue]
       Environment:
         Variables:
+          GLOBAL_QUADS_INGEST_ENABLED: "0"
+          GLOBAL_QUADS_PUBLISH_ENABLED: "0"
+          ANALYST_CHANGE_JOURNAL_ENABLED: "1"
+          RESEARCH_EVENT_LEDGER_TABLE: !Ref ResearchEventLedgerV2
           HERMES_LEDGER_TABLE: !Ref GmailLedgerTableName
           HEDGEYE_DAILY_SNAPSHOT_TABLE: !Ref HedgeyeDailySnapshotTableName
           RESEARCH_ENTITY_EVENTS_TABLE: !Ref ResearchEntityEventsV1
@@ -386,11 +476,17 @@ Resources:
               Resource: !Sub arn:${AWS::Partition}:s3:::${RawArtifactBucketName}/hedgeye-uploads/*
             - Effect: Allow
               Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub arn:${AWS::Partition}:s3:::${RawArtifactBucketName}/hedgeye-email/assets/global-quads/*
+            - Effect: Allow
+              Action:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
               Resource:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GmailLedgerTableName}
+                - !GetAtt ResearchEventLedgerV2.Arn
                 - !GetAtt ResearchEntityEventsV1.Arn
                 - !GetAtt ResearchProductManifestsV1.Arn
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${HedgeyeDailySnapshotTableName}
@@ -398,7 +494,9 @@ Resources:
               Action: sqs:SendMessage
               Resource: !GetAtt RuntimeFailureQueue.Arn
             - Effect: Allow
-              Action: textract:AnalyzeDocument
+              Action:
+                - textract:AnalyzeDocument
+                - textract:DetectDocumentText
               Resource: '*'
 
   HermesWorkerFunction:
@@ -407,7 +505,7 @@ Resources:
       FunctionName: market-dashboard-hermes-worker-v2
       CodeUri: lambdas/hermes_worker/
       Handler: hermes_worker.lambda_handler
-      Description: Consolidated Hermes monitoring workers consuming verified outbound snapshots.
+      Description: Retained legacy readiness workers; no-write when all worker schedules are retired.
       Architectures: [arm64]
       MemorySize: 256
       Timeout: 60
@@ -420,6 +518,7 @@ Resources:
           HERMES_OPERATIONS_TOPIC_ARN: !Ref OperationsTopic
           HERMES_BRIDGE_HOST_ID: !Ref BridgeHostId
           HERMES_MAX_SNAPSHOT_AGE_SECONDS: 180
+          HERMES_WORKER_MODE: !If [AllHermesWorkerSchedulesDisabled, retired, active]
       EventInvokeConfig:
         MaximumEventAgeInSeconds: 900
         MaximumRetryAttempts: 0
@@ -582,6 +681,25 @@ Resources:
                   - !GetAtt GmailIngestorFunction.Arn
                   - !GetAtt HermesWorkerFunction.Arn
 
+  CftcSchedulerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-official-cftc-ingestor
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt CftcIngestorFunction.Arn
+
   HermesCloudWatchdogRule:
     Type: AWS::Events::Rule
     Properties:
@@ -609,7 +727,7 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: market-dashboard-gmail-v2-every-15m
-      Description: Gmail history poll; deliberately disabled until production OAuth promotion.
+      Description: Gmail history poll; one-minute activation requires Analyst cost projection below 15 USD/month.
       State: !Ref GmailScheduleState
       ScheduleExpression: rate(15 minutes)
       FlexibleTimeWindow:
@@ -618,6 +736,27 @@ Resources:
         Arn: !GetAtt GmailIngestorFunction.Arn
         RoleArn: !GetAtt SchedulerInvokeRole.Arn
         Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-gmail-v2-every-15m","poll":"incremental"}'
+        RetryPolicy:
+          MaximumEventAgeInSeconds: 900
+          MaximumRetryAttempts: 0
+
+  CftcWeekdaySchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: market-dashboard-cftc-weekday-v1
+      Description: Verify the official CFTC feed daily at 15:31 Eastern, one minute after the normal release; staged disabled by default.
+      State: !Ref CftcScheduleState
+      ScheduleExpression: cron(31 15 * * ? *)
+      ScheduleExpressionTimezone: America/New_York
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Target:
+        Arn: !GetAtt CftcIngestorFunction.Arn
+        RoleArn: !GetAtt CftcSchedulerInvokeRole.Arn
+        Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-cftc-weekday-v1","mode":"current"}'
+        RetryPolicy:
+          MaximumEventAgeInSeconds: 900
+          MaximumRetryAttempts: 0
 
   QuantAnalystSchedule:
     Type: AWS::Scheduler::Schedule
@@ -633,6 +772,9 @@ Resources:
         Arn: !GetAtt HermesWorkerFunction.Arn
         RoleArn: !GetAtt SchedulerInvokeRole.Arn
         Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-hermes-quant-analyst-v2","jobType":"quant-analyst"}'
+        RetryPolicy:
+          MaximumEventAgeInSeconds: 900
+          MaximumRetryAttempts: 0
 
   QuantDeveloperSchedule:
     Type: AWS::Scheduler::Schedule
@@ -648,6 +790,9 @@ Resources:
         Arn: !GetAtt HermesWorkerFunction.Arn
         RoleArn: !GetAtt SchedulerInvokeRole.Arn
         Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-hermes-quant-developer-v2","jobType":"quant-developer"}'
+        RetryPolicy:
+          MaximumEventAgeInSeconds: 900
+          MaximumRetryAttempts: 0
 
   SecuritySchedule:
     Type: AWS::Scheduler::Schedule
@@ -663,13 +808,16 @@ Resources:
         Arn: !GetAtt HermesWorkerFunction.Arn
         RoleArn: !GetAtt SchedulerInvokeRole.Arn
         Input: '{"source":"aws-scheduler","scheduleId":"market-dashboard-hermes-security-v2","jobType":"security"}'
+        RetryPolicy:
+          MaximumEventAgeInSeconds: 900
+          MaximumRetryAttempts: 0
 
   RuntimeFailureQueueAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-runtime-failure-queue-v2
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
-      AlarmDescription: Unexpected Lambda failures reached the no-retry operations queue.
+      ActionsEnabled: false
+      AlarmDescription: Audit-only backlog view; arrival notifications are emitted by the companion arrival alarm.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -681,8 +829,25 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+
+  RuntimeFailureArrivalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: market-dashboard-runtime-failure-arrival-v2
+      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      AlarmDescription: A new Lambda failure entered the no-retry operations queue in the last five minutes.
+      Namespace: AWS/SQS
+      MetricName: NumberOfMessagesSent
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RuntimeFailureQueue.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   GmailHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -701,13 +866,12 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   GmailUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-gmail-unhealthy-v2
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -719,14 +883,12 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   AnalystHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-analyst-heartbeat-missing-v2
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: !If [AnalystHeartbeatAlarmEnabled, true, false]
       Namespace: MarketDashboard/Readiness
       MetricName: Heartbeat
       Dimensions:
@@ -737,16 +899,15 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 1
       ComparisonOperator: LessThanThreshold
-      TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
+      TreatMissingData: !If [AnalystHeartbeatAlarmEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   AnalystUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-analyst-unhealthy-v2
       AlarmDescription: Analyst ran on schedule but rejected its input or reported an unhealthy result.
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -758,14 +919,12 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   DeveloperHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-developer-heartbeat-missing-v2
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: !If [DeveloperHeartbeatAlarmEnabled, true, false]
       Namespace: MarketDashboard/Readiness
       MetricName: Heartbeat
       Dimensions:
@@ -776,16 +935,15 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 1
       ComparisonOperator: LessThanThreshold
-      TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
+      TreatMissingData: !If [DeveloperHeartbeatAlarmEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   DeveloperUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-developer-unhealthy-v2
       AlarmDescription: Developer ran on schedule but rejected its input or reported an unhealthy result.
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -797,14 +955,12 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   SecurityHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-security-heartbeat-missing-v2
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: !If [SecurityHeartbeatAlarmEnabled, true, false]
       Namespace: MarketDashboard/Readiness
       MetricName: Heartbeat
       Dimensions:
@@ -815,16 +971,15 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 1
       ComparisonOperator: LessThanThreshold
-      TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
+      TreatMissingData: !If [SecurityHeartbeatAlarmEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   SecurityUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-security-unhealthy-v2
       AlarmDescription: Security ran on schedule but rejected its input or reported an unhealthy result.
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -836,8 +991,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   CloudWatchdogHeartbeatMissingAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -857,14 +1010,13 @@ Resources:
       ComparisonOperator: LessThanThreshold
       TreatMissingData: !If [OperationalAlarmsEnabled, breaching, notBreaching]
       AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
   CloudWatchdogUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: market-dashboard-hermes-cloud-watchdog-unhealthy-v2
       AlarmDescription: The independent cloud watchdog detected a cloud reliability root cause.
-      ActionsEnabled: !If [OperationalAlarmsEnabled, true, false]
+      ActionsEnabled: false
       Namespace: MarketDashboard/Readiness
       MetricName: Healthy
       Dimensions:
@@ -876,8 +1028,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref OperationsTopic]
-      OKActions: [!Ref OperationsTopic]
 
 Outputs:
   ServiceHeartbeatTableName:
@@ -886,6 +1036,10 @@ Outputs:
     Value: !Ref HermesInputSnapshotTable
   GmailFunctionName:
     Value: !Ref GmailIngestorFunction
+  CftcIngestorFunctionName:
+    Value: !Ref CftcIngestorFunction
+  CftcWeekdayScheduleName:
+    Value: !Ref CftcWeekdaySchedule
   HedgeyePdfProcessorFunctionName:
     Value: !Ref HedgeyePdfProcessorFunction
   ResearchEntityEventsTableName:

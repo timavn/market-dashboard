@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 IAM_SCRIPT = ROOT / "infra" / "scripts" / "install_local_principal_policies.sh"
 EXPORT_SCRIPT = ROOT / "infra" / "scripts" / "export_deployed_state.sh"
 API_POLICY = ROOT / "infra" / "iam" / "local-readiness-catalog-policy.json"
+ANALYST_POLICY = ROOT / "infra" / "iam" / "local-analyst-pdf-intake-policy.json"
 BRIDGE_POLICY = ROOT / "infra" / "iam" / "local-bridge-policy.json"
 
 
@@ -347,7 +348,10 @@ class ScriptHarness:
                         file=sys.stderr,
                     )
                     raise SystemExit(254)
-                policy_path = os.environ["FAKE_BRIDGE_POLICY_PATH"]
+                if policy_name == "MarketDashboardAnalystPdfIntake":
+                    policy_path = os.environ["FAKE_ANALYST_POLICY_PATH"]
+                else:
+                    policy_path = os.environ["FAKE_BRIDGE_POLICY_PATH"]
                 with open(policy_path, encoding="utf-8") as handle:
                     policy_document = json.load(handle)
                 if scenario == "iam-policy-drift":
@@ -725,6 +729,7 @@ class ScriptHarness:
                                 "ResearchEntityEventsV1",
                                 "ResearchProductManifestsV1",
                                 "PredictionMarketCatalogV2",
+                                "PredictionMarketPerformanceLedger",
                                 "RiskRangePublicationManifestsV2",
                             ])
                         )
@@ -837,6 +842,7 @@ class ScriptHarness:
                 "FAKE_AWS_LOG": str(self.log_path),
                 "FAKE_AWS_ENV_LOG": str(self.env_log_path),
                 "FAKE_API_POLICY_PATH": str(API_POLICY),
+                "FAKE_ANALYST_POLICY_PATH": str(ANALYST_POLICY),
                 "FAKE_BRIDGE_POLICY_PATH": str(BRIDGE_POLICY),
                 "FAKE_MANAGED_POLICY_STATE": str(
                     self.managed_policy_state_path
@@ -893,7 +899,7 @@ class LocalPrincipalInstallerScriptTests(unittest.TestCase):
             text=True,
         )
 
-    def assert_simulates_complete_policy(self, policy_path):
+    def assert_simulates_complete_policy(self, *policy_paths):
         calls = self.harness.calls()
         simulations = [
             call
@@ -907,10 +913,13 @@ class LocalPrincipalInstallerScriptTests(unittest.TestCase):
             )
             for call in simulations
         }
-        self.assertEqual(observed, set(policy_action_resource_pairs(policy_path)))
+        expected = set().union(
+            *(set(policy_action_resource_pairs(path)) for path in policy_paths)
+        )
+        self.assertEqual(observed, expected)
         self.assertGreaterEqual(
             len(simulations),
-            len(policy_action_resource_pairs(policy_path)),
+            len(expected),
         )
 
     def assert_bridge_simulation_contexts_match_policy(self):
@@ -980,7 +989,7 @@ class LocalPrincipalInstallerScriptTests(unittest.TestCase):
                 fragment,
             )
 
-    def test_api_scope_applies_and_simulates_only_the_complete_api_policy(self):
+    def test_api_scope_applies_and_simulates_the_complete_api_policies(self):
         result = self.run_installer(
             "--apply",
             "--scope",
@@ -993,10 +1002,12 @@ class LocalPrincipalInstallerScriptTests(unittest.TestCase):
         rendered_calls = "\n".join(" ".join(call) for call in calls)
         self.assertIn("MarketDashboardLocalReadinessCatalog", rendered_calls)
         self.assertIn(f"file://{API_POLICY}", rendered_calls)
+        self.assertIn("MarketDashboardAnalystPdfIntake", rendered_calls)
+        self.assertIn(f"file://{ANALYST_POLICY}", rendered_calls)
         self.assertIn("market-dashboard-local", rendered_calls)
         self.assertIn("iam create-policy", rendered_calls)
         self.assertIn("iam attach-user-policy", rendered_calls)
-        self.assertNotIn("iam put-user-policy", rendered_calls)
+        self.assertIn("iam put-user-policy", rendered_calls)
         self.assertIn("market-dashboard:owner", rendered_calls)
         self.assertIn("market-dashboard:purpose", rendered_calls)
         self.assertNotIn("market-dashboard-bridge", rendered_calls)
@@ -1013,7 +1024,7 @@ class LocalPrincipalInstallerScriptTests(unittest.TestCase):
                     call[call.index("--policy-arn") + 1],
                     expected_policy_arn,
                 )
-        self.assert_simulates_complete_policy(API_POLICY)
+        self.assert_simulates_complete_policy(API_POLICY, ANALYST_POLICY)
 
     def test_managed_policy_metadata_failures_precede_mutation_and_simulation(self):
         scenarios = (
@@ -1141,6 +1152,21 @@ class LocalPrincipalInstallerScriptTests(unittest.TestCase):
                 ),
             }.issubset(simulations)
         )
+        staging_list_call = next(
+            call
+            for call in self.harness.calls()
+            if (
+                "simulate-principal-policy" in call
+                and call[call.index("--action-names") + 1] == "s3:ListBucket"
+                and call[call.index("--resource-arns") + 1]
+                == "arn:aws:s3:::market-dashboard-csv-data"
+            )
+        )
+        self.assertIn(
+            "ContextKeyName=s3:prefix,ContextKeyValues=analyst-staging/,"
+            "ContextKeyType=string",
+            staging_list_call,
+        )
 
     def test_bridge_scope_neither_requires_nor_mutates_the_api_principal(self):
         result = self.run_installer("--apply", "--scope", "bridge")
@@ -1167,6 +1193,7 @@ class LocalPrincipalInstallerScriptTests(unittest.TestCase):
         self.assertEqual(
             rendered_calls.count("iam simulate-principal-policy"),
             2 * len(policy_action_resource_pairs(API_POLICY))
+            + 2 * len(policy_action_resource_pairs(ANALYST_POLICY))
             + len(policy_action_resource_pairs(BRIDGE_POLICY)),
         )
 
@@ -1378,7 +1405,7 @@ class LocalPrincipalInstallerScriptTests(unittest.TestCase):
             "Matched and attached MarketDashboardLocalReadinessCatalog",
             result.stdout,
         )
-        self.assert_simulates_complete_policy(API_POLICY)
+        self.assert_simulates_complete_policy(API_POLICY, ANALYST_POLICY)
 
     def test_verify_rejects_policy_drift_before_simulation(self):
         result = self.run_installer(
@@ -1457,6 +1484,18 @@ class RollbackExportScriptTests(unittest.TestCase):
             0o600,
         )
         self.assertTrue((output_dir / "SHA256SUMS").is_file())
+        local_settings_path = output_dir / "local-settings" / "settings.json"
+        local_settings = json.loads(local_settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            local_settings["classification"],
+            "rollback-local-settings",
+        )
+        self.assertIn("supervisor", local_settings)
+        self.assertIn("readinessController", local_settings)
+        self.assertIn(
+            "./local-settings/settings.json",
+            (output_dir / "SHA256SUMS").read_text(encoding="utf-8"),
+        )
         self.assertEqual(
             json.loads(
                 (
@@ -1606,6 +1645,7 @@ class RollbackExportScriptTests(unittest.TestCase):
             "ResearchEntityEventsV1",
             "ResearchProductManifestsV1",
             "PredictionMarketCatalogV2",
+            "PredictionMarketPerformanceLedger",
             "RiskRangePublicationManifestsV2",
         }
         self.assertEqual(

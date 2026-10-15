@@ -248,12 +248,13 @@ const UsModelPanel = ({ model }) => {
   );
 };
 
-const DollarLiquidityModels = () => {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+const DollarLiquidityModels = ({ resourceState = null }) => {
+  const [localData, setData] = useState(null);
+  const [localLoading, setLoading] = useState(true);
+  const [localError, setError] = useState(null);
 
   useEffect(() => {
+    if (resourceState) return undefined;
     let active = true;
 
     const fetchModels = async () => {
@@ -273,9 +274,13 @@ const DollarLiquidityModels = () => {
     return () => {
       active = false;
     };
-  }, []);
+  }, [resourceState]);
 
-  if (loading) {
+  const data = resourceState ? resourceState.data : localData;
+  const loading = resourceState ? resourceState.loading : localLoading;
+  const error = resourceState ? resourceState.error : localError;
+
+  if (loading && !data) {
     return (
       <section className="dashboard-card-chrome dollar-liquidity-panel">
         <div className="dollar-liquidity-panel-header">
@@ -292,7 +297,7 @@ const DollarLiquidityModels = () => {
     );
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <section className="dashboard-card-chrome dollar-liquidity-panel">
         <div className="dollar-liquidity-panel-header">

@@ -1,4 +1,13 @@
 const MARKET_TIME_ZONE = 'America/New_York';
+const newYorkFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: MARKET_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
 
 const SOURCE_DEFINITIONS = [
   { id: 'real-time-alert', label: 'Real-Time Alerts', cadence: 'event_driven' },
@@ -28,15 +37,7 @@ function asArray(value) {
 
 function nyParts(value = Date.now()) {
   const date = value instanceof Date ? value : new Date(value);
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: MARKET_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
+  const parts = newYorkFormatter.formatToParts(date);
   const map = parts.reduce((acc, part) => {
     acc[part.type] = part.value;
     return acc;

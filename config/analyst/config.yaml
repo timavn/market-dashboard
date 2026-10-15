@@ -1,0 +1,121 @@
+_config_version: 39
+timezone: America/Los_Angeles
+
+model:
+  default: gpt-6.1-sol
+  provider: openai-codex
+  base_url: https://chatgpt.com/backend-api/codex
+  api_mode: codex_responses
+
+# Use Tim's Codex subscription for the primary model. Preserve the existing
+# separately billed OpenAI API Luna fallback and its isolated credential.
+fallback_providers:
+  - provider: openai-api
+    model: gpt-5.6-luna
+
+agent:
+  gateway_timeout: 1800
+  api_max_retries: 3
+  # Reviews synthesize server-verified facts; reserve maximum-effort reasoning
+  # for an explicitly requested deep investigation rather than every tool turn.
+  reasoning_effort: high
+  service_tier: fast
+  tool_use_enforcement: auto
+  task_completion_guidance: false
+  parallel_tool_call_guidance: false
+  environment_probe: false
+  coding_context: 'off'
+  verify_on_stop: false
+  disabled_toolsets:
+    - terminal
+    - file
+    - browser
+    - web
+    - memory
+    - delegation
+    - cron
+    - code_execution
+    - computer
+    - image
+    - vision
+
+# The Analyst has a deliberately small, fixed market tool surface, plus two
+# read-only skill readers. Eager schemas avoid the discovery bridge and let the
+# Express gateway validate every lifecycle event against the exact MCP tool
+# allowlist.
+tools:
+  tool_search:
+    enabled: off
+
+platform_toolsets:
+  cli:
+    - market-dashboard-analyst
+    - analyst-skill-reader
+  cron:
+    - market-dashboard-analyst
+    - analyst-skill-reader
+
+plugins:
+  enabled:
+    - analyst-skill-reader
+
+skills:
+  inline_shell: false
+
+mcp_servers:
+  market-dashboard-analyst:
+    url: http://127.0.0.1:6951/mcp
+    headers:
+      Authorization: Bearer ${ANALYST_SERVICE_TOKEN}
+    enabled: true
+    connect_timeout: 20
+    timeout: 120
+    supports_parallel_tool_calls: true
+    tools:
+      resources: false
+      prompts: false
+      include:
+        - get_research_coverage
+        - get_briefing_packet
+        - get_market_situation_context
+        - search_research
+        - get_research_source
+        - get_research_page_image
+        - get_dashboard_context
+        - get_process_context
+        - get_portfolio_context
+        - get_portfolio_verification_page
+        - get_balance_context
+        - get_live_market_snapshot
+        - get_prediction_market_snapshot
+        - get_market_history
+        - get_company_fundamentals
+        - get_macro_series
+
+display:
+  tool_progress: 'off'
+  memory_notifications: 'off'
+
+compression:
+  enabled: true
+  threshold: 0.55
+  target_ratio: 0.25
+  protect_last_n: 20
+
+# Dashboard conversation names are explicit UI state. Hermes must never derive
+# or upgrade them from the opening prompt.
+auxiliary:
+  title_generation:
+    enabled: false
+
+checkpoints:
+  enabled: false
+
+kanban:
+  dispatch_in_gateway: false
+
+mcp_discovery_timeout: 20
+tool_output:
+  max_bytes: 250000
+  max_lines: 5000
+  max_line_length: 2000

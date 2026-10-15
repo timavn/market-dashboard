@@ -84,12 +84,25 @@ def build_contract(manifest: Dict[str, Any]) -> Dict[str, Any]:
                 f"{service_id}.scheduleWindow.timeZone must match aws.scheduleTimeZone"
             )
 
-    capability_ids = sorted(
+    declared_capabilities = {
         _required_string(item.get("id"), "capabilities[].id")
         for item in manifest.get("capabilities") or []
+    }
+    capability_ids = sorted(
+        _required_string(item, "legacyHermesCapabilityIds[]")
+        for item in (
+            manifest.get("legacyHermesCapabilityIds")
+            or sorted(declared_capabilities)
+        )
     )
     if len(capability_ids) != len(set(capability_ids)):
         raise ValueError("capability IDs must be unique")
+    unknown_capabilities = sorted(set(capability_ids) - declared_capabilities)
+    if unknown_capabilities:
+        raise ValueError(
+            "legacyHermesCapabilityIds contains unknown capabilities: "
+            + ", ".join(unknown_capabilities)
+        )
 
     return {
         "version": 1,

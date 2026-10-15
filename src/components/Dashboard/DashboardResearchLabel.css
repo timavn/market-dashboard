@@ -1,0 +1,62 @@
+.dashboard-research-label {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  min-width: 0;
+  gap: 3px;
+  vertical-align: middle;
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.dashboard-research-label__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
+}
+
+.dashboard-research-label__annotation {
+  display: inline-flex;
+  align-items: baseline;
+  flex: 0 0 auto;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.dashboard-research-label__trend,
+.dashboard-research-label__tick,
+.dashboard-research-label__trade {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.dashboard-research-label .is-positive {
+  color: #009b70;
+}
+
+.dashboard-research-label .dashboard-research-label__trend.is-neutral {
+  color: #111;
+}
+
+.dashboard-research-label .is-negative {
+  color: #e00000;
+}
+
+.dashboard-research-label__trade.is-neutral,
+.dashboard-research-label__tick.is-neutral {
+  color: #64748b;
+}
+
+.dashboard-research-label__range {
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.dashboard-research-label__unavailable {
+  color: #64748b;
+}

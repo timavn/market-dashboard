@@ -1,3 +1,4 @@
+const { readAllDynamoItems } = require('../data/dynamoPagination.cjs');
 const { normalizeUploadedHolding } = require('./normalize/normalizePosition');
 
 /**
@@ -5,7 +6,7 @@ const { normalizeUploadedHolding } = require('./normalize/normalizePosition');
  */
 function createUploadedStatementPortfolioProvider(dynamodb) {
   async function getLatestSnapshot() {
-    const snapshotResult = await dynamodb.scan({ TableName: 'PortfolioSnapshots' }).promise();
+    const snapshotResult = await readAllDynamoItems(dynamodb, 'scan', { TableName: 'PortfolioSnapshots' });
     const sorted = (snapshotResult.Items || []).sort(
       (a, b) => new Date(b.timestamp) - new Date(a.timestamp),
     );
@@ -13,13 +14,11 @@ function createUploadedStatementPortfolioProvider(dynamodb) {
   }
 
   async function getHoldingsForSnapshot(snapshotId) {
-    const holdingsResult = await dynamodb
-      .scan({
+    const holdingsResult = await readAllDynamoItems(dynamodb, 'scan', {
         TableName: 'Holdings',
         FilterExpression: 'snapshotId = :snapshotId',
         ExpressionAttributeValues: { ':snapshotId': snapshotId },
-      })
-      .promise();
+      });
     return holdingsResult.Items || [];
   }
 

@@ -497,8 +497,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--admin-profile",
-        default=DEFAULT_ADMIN_PROFILE,
-        help=f"IAM Identity Center profile (default: {DEFAULT_ADMIN_PROFILE}).",
+        required=True,
+        help=f"Required IAM Identity Center profile (must be {DEFAULT_ADMIN_PROFILE}).",
     )
     return parser.parse_args(argv)
 

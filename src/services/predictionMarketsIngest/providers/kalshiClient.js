@@ -43,9 +43,16 @@ function parseUrl(baseUrl, endpointPath, query = {}) {
     signPath = urlPath;
   }
 
-  const qs = new URLSearchParams(
-    Object.entries(query).filter(([, v]) => v != null && v !== '')
-  ).toString();
+  const searchParams = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value == null || value === '') return;
+    if (Array.isArray(value)) {
+      value.filter((item) => item != null && item !== '').forEach((item) => searchParams.append(key, String(item)));
+      return;
+    }
+    searchParams.append(key, String(value));
+  });
+  const qs = searchParams.toString();
   const url = `${base}${urlPath}${qs ? `?${qs}` : ''}`;
   return { url, signPath };
 }
@@ -99,4 +106,4 @@ async function paginateKalshi(endpointPath, query = {}, itemsKey = 'markets', ma
   return all;
 }
 
-module.exports = { kalshiFetch, paginateKalshi, loadPrivateKey, signRequest };
+module.exports = { kalshiFetch, paginateKalshi, loadPrivateKey, parseUrl, signRequest };

@@ -70,6 +70,26 @@ const variedReturns = Array.from({ length: 420 }, (_, index) => (
 ));
 
 describe('security historical risk metrics', () => {
+  test('the bounded sizing view keeps beta/ATR identical without claiming all-time records', () => {
+    const histories = historiesFromReturns(variedReturns);
+    const full = buildSecurityRiskMetrics({ symbol: 'IGV', ...histories });
+    const sizing = buildSecurityRiskMetrics({ symbol: 'IGV', securityBars: histories.securityBars.slice(-300), benchmarkBars: histories.benchmarkBars.slice(-300), sizingOnly: true });
+    expect(sizing.beta).toEqual(full.beta);
+    expect(sizing.atr14).toEqual(full.atr14);
+    expect(sizing.referencePrice).toEqual(full.referencePrice);
+    expect(sizing.records).toBeUndefined();
+    expect(sizing.priceStructure).toBeUndefined();
+    expect(sizing.realizedVolatility).toBeUndefined();
+    expect(sizing).toMatchObject({ sizingOnly: true, historicalOnly: true, executable: false });
+  });
+  test('closing sizing price uses the same adjusted series as ATR and keeps instrument identity', () => {
+    const histories = historiesFromReturns(variedReturns);
+    histories.securityBars.at(-1).close = 9999;
+    const result = buildSecurityRiskMetrics({ symbol: 'IGV', ...histories, instrumentType: 'ETF' });
+    expect(result.instrumentType).toBe('ETF');
+    expect(result.referencePrice).toMatchObject({ status: 'available', value: histories.securityBars.at(-1).adjustedClose,
+      asOf: result.atr14.asOf, observations: 1, historicalOnly: true, executable: false });
+  });
   test('calculates aligned beta from the 252 most recent adjusted-close returns', () => {
     const { benchmarkBars, securityBars } = historiesFromReturns(
       variedReturns,

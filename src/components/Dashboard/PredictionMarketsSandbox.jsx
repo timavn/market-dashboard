@@ -9,6 +9,10 @@ import {
 import Pmv2CardChrome from './Pmv2CardChrome';
 import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import {
+  getCanonicalRiskRange,
+} from '../../utils/securityIntelligenceV2';
 import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
 import {
   classifySpxThreshold,
@@ -132,7 +136,9 @@ function resolvePriceStructureReference(source, data) {
     read: `High ${formatSignedPoints(highScore)} (${structure.highLeg.event}) · Low ${formatSignedPoints(lowScore)} (${structure.lowLeg.event}) · Net ${formatSignedPoints(score)}`,
     points: `REF ${formatSignedPoints(score)}`,
     asOf: structure.asOf,
-    status: historical && sameSession
+    status: source?.refreshDelayed
+      ? { label: 'REFRESH DELAYED · REFERENCE', tone: 'neutral' }
+      : historical && sameSession
       ? { label: 'POST-CLOSE · NOT RETRO-SCORED', tone: 'neutral' }
       : historical
         ? { label: 'PRIOR-CLOSE · NOT RETRO-SCORED', tone: 'neutral' }
@@ -140,34 +146,20 @@ function resolvePriceStructureReference(source, data) {
   };
 }
 
-function isIbkrConnected(status) {
-  return Boolean(
-    status?.ibkr?.connected === true ||
-    status?.ibkr?.status === 'connected' ||
-    status?.portfolio?.ibkr?.connected === true ||
-    status?.portfolio?.ibkr?.status === 'connected'
-  );
-}
-
 export function resolveVerifiedLiveSpxQuote(quotes, providerStatus, now = Date.now()) {
-  const providerTimestampMs = Date.parse(providerStatus?.timestamp || '');
-  const providerAgeMs = now - providerTimestampMs;
-  const providerStatusCurrent = Boolean(
-    !providerStatus?.statusRefreshDelayed &&
-    !providerStatus?.ibkr?.statusRefreshDelayed &&
-    Number.isFinite(providerTimestampMs) &&
-    providerAgeMs >= 0 &&
-    providerAgeMs <= LIVE_SPX_MAX_AGE_MS
+  const providerExplicitlyOffline = Boolean(
+    providerStatus
+      && !providerStatus?.statusRefreshDelayed
+      && !providerStatus?.ibkr?.statusRefreshDelayed
+      && providerStatus?.ibkr?.connected === false
   );
 
-  if (!isIbkrConnected(providerStatus) || !providerStatusCurrent) {
+  if (providerExplicitlyOffline) {
     return {
       status: 'unavailable',
       price: null,
       timestamp: null,
-      message: isIbkrConnected(providerStatus)
-        ? 'IBKR provider status is not current; the live SPX marker is unavailable.'
-        : 'IBKR is disconnected; the live SPX marker is unavailable.',
+      message: 'IBKR is disconnected; the live SPX marker is unavailable.',
     };
   }
 
@@ -211,11 +203,22 @@ export function resolveVerifiedLiveSpxQuote(quotes, providerStatus, now = Date.n
 }
 
 async function loadVerifiedLiveSpxQuote() {
+  let providerStatus = null;
+  let statusError = null;
   try {
-    const providerStatus = await MarketDataService.getProviderStatus();
-    if (!isIbkrConnected(providerStatus)) {
-      return resolveVerifiedLiveSpxQuote({}, providerStatus);
-    }
+    providerStatus = await MarketDataService.getProviderStatus();
+  } catch (error) {
+    statusError = error;
+  }
+  if (
+    providerStatus
+    && !providerStatus?.statusRefreshDelayed
+    && !providerStatus?.ibkr?.statusRefreshDelayed
+    && providerStatus?.ibkr?.connected === false
+  ) {
+    return resolveVerifiedLiveSpxQuote({}, providerStatus);
+  }
+  try {
     const quotes = await MarketDataService.getQuotes(['SPX']);
     return resolveVerifiedLiveSpxQuote(quotes, providerStatus);
   } catch (error) {
@@ -223,7 +226,8 @@ async function loadVerifiedLiveSpxQuote() {
       status: 'unavailable',
       price: null,
       timestamp: null,
-      message: error?.message || 'The verified live cash-SPX quote is unavailable.',
+      refreshFailed: true,
+      message: error?.message || statusError?.message || 'The verified live cash-SPX quote is unavailable.',
     };
   }
 }
@@ -754,13 +758,14 @@ function ConfluenceLedger({
   const correlationType = Number.isFinite(usd?.r30)
     ? (usd.r30 < 0 ? 'inverse' : usd.r30 > 0 ? 'direct' : 'flat')
     : 'unavailable';
-  const structureCurrent = Boolean(confluence.structure.exactDate);
+  const structureCurrent = Boolean(confluence.structure.currentForSession);
   const visibleStructure = structureCurrent ? structure : null;
-  const gammaDetails = confluence.gamma.inputAvailable ? [
-    formatGamma(visibleStructure?.gammaExposure),
+  const gammaDetails = [
+    visibleStructure?.gammaExposure ? formatGamma(visibleStructure.gammaExposure) : null,
     Number.isFinite(visibleStructure?.gammaThrottle) ? `throttle ${formatSignedPoints(visibleStructure.gammaThrottle)}` : null,
     Number.isFinite(visibleStructure?.realizedVol10d) ? `10D rVol ${visibleStructure.realizedVol10d.toFixed(2)}` : null,
-  ].filter(Boolean).join(' · ') : 'Same-session gamma input unavailable';
+    visibleStructure?.gammaThrottleDate ? `metrics ${formatSourceDate(visibleStructure.gammaThrottleDate)}` : null,
+  ].filter(Boolean).join(' · ') || 'Same-session gamma input unavailable';
   const systematicStatus = structureReadStatus(visibleStructure?.systematicFlow, 'flow', confluence.direction);
   const pvStatus = structureReadStatus(visibleStructure?.pvBand, 'pv', confluence.direction);
   const allocationStatus = structureReadStatus(visibleStructure?.strategicAllocation, 'allocation', confluence.direction);
@@ -868,7 +873,7 @@ function ConfluenceLedger({
               rule="Positive γ for ≥50% RR support · negative γ for extension"
               points={confluence.gamma.available ? confluence.gamma.points : null}
               maximum={1}
-              asOf={confluence.gamma.inputAvailable ? visibleStructure?.date : null}
+              asOf={confluence.gamma.inputAvailable ? visibleStructure?.date : visibleStructure?.gammaThrottleDate}
               status={gammaStatus}
             />
             <ConfluenceFactorRow
@@ -1326,6 +1331,8 @@ export default function PredictionMarketsSandbox({
   const requestRef = useRef(0);
   const priceStructureRequestRef = useRef(0);
   const sharedPositionsRef = useRef(sharedPositionsState);
+  const dataRef = useRef(null);
+  const workbenchInFlightRef = useRef(new Map());
 
   useEffect(() => {
     sharedPositionsRef.current = sharedPositionsState;
@@ -1334,7 +1341,6 @@ export default function PredictionMarketsSandbox({
   const loadPriceStructure = useCallback(async () => {
     const requestId = priceStructureRequestRef.current + 1;
     priceStructureRequestRef.current = requestId;
-    setPriceStructureSource(EMPTY_PRICE_STRUCTURE_SOURCE);
     try {
       const payload = await MarketDataService.getSecurityRiskMetrics(
         ['SPX'],
@@ -1356,11 +1362,17 @@ export default function PredictionMarketsSandbox({
   }, []);
 
   const loadWorkbench = useCallback(async ({ manual = false } = {}) => {
+    const requestKey = portfolioData?.accountId || 'all-managed-accounts';
+    const existing = workbenchInFlightRef.current.get(requestKey);
+    if (existing) return existing;
     const requestId = requestRef.current + 1;
     requestRef.current = requestId;
     if (manual) setRefreshing(true);
-    setLiveSpx(EMPTY_LIVE_SPX);
-    try {
+    const request = (async () => {
+      const canonicalSpxPromise = SECURITY_INTELLIGENCE_V2_ENABLED
+        ? MarketDataService.getSecurityIntelligenceV2({ symbols: ['SPX'], historyDays: 0 })
+        : null;
+      try {
       const [
         liveResult,
         rangesResult,
@@ -1377,7 +1389,10 @@ export default function PredictionMarketsSandbox({
         predictionMarketsIngestService.getSpxCloseWorkbench()
           .then((value) => ({ value, error: null }))
           .catch((loadError) => ({ value: null, error: loadError })),
-        MarketDataService.getRiskRanges(['SPX'])
+        (SECURITY_INTELLIGENCE_V2_ENABLED
+          ? canonicalSpxPromise
+            .then((payload) => getCanonicalRiskRange(payload?.bySymbol?.SPX, { primaryOnly: true }))
+          : MarketDataService.getRiskRanges(['SPX']))
           .then((value) => ({ value, error: null }))
           .catch((loadError) => ({ value: null, error: loadError })),
         MarketDataService.getRiskRangeHistory('SPX', 30)
@@ -1406,7 +1421,9 @@ export default function PredictionMarketsSandbox({
             meta: { source: 'ibkr_live_unavailable', message: positionError.message },
             positions: [],
           })),
-        MarketDataService.getHedgeyeSnapshot('momo-tracker')
+        (SECURITY_INTELLIGENCE_V2_ENABLED
+          ? canonicalSpxPromise
+          : MarketDataService.getHedgeyeSnapshot('momo-tracker'))
           .then((value) => ({ value, error: null }))
           .catch((loadError) => ({ value: null, error: loadError })),
         MarketDataService.getUsdCorrelations()
@@ -1421,13 +1438,12 @@ export default function PredictionMarketsSandbox({
         loadVerifiedLiveSpxQuote(),
       ]);
       if (!mountedRef.current || requestId !== requestRef.current) return;
-
       const marketData = liveResult.value;
       setLiveSpx(liveSpxResult);
       const nextRiskRange = rangesResult.value?.SPX;
       const history = Array.isArray(historyResult.value) ? historyResult.value : [];
-      setRiskRangeHistory(history);
-      setRecentSettled(recentResult.value);
+      if (!historyResult.error) setRiskRangeHistory(history);
+      if (!recentResult.error) setRecentSettled(recentResult.value);
       const nextConfluenceSources = {
         tradeSnapshot: tradeResult.value,
         usdSnapshot: usdResult.value,
@@ -1453,12 +1469,18 @@ export default function PredictionMarketsSandbox({
           ? (positionResult.positions || []).filter((position) => isSpxClosePosition(position, marketData.event.ticker))
           : [];
 
+        dataRef.current = marketData;
         setData(marketData);
         setRiskRange(nextRiskRange);
         setPositions(exactPositions);
         setPositionsLive(livePositions);
         setPositionsMessage(livePositions ? null : (positionResult?.meta?.message || 'Live IBKR position data is unavailable.'));
-        setConfluenceSources(nextConfluenceSources);
+        setConfluenceSources({
+          tradeSnapshot: tradeResult.error ? null : nextConfluenceSources.tradeSnapshot,
+          usdSnapshot: usdResult.error ? null : nextConfluenceSources.usdSnapshot,
+          volatilitySnapshot: volatilityResult.error ? null : nextConfluenceSources.volatilitySnapshot,
+          marketStructureSnapshot: structureResult.error ? null : nextConfluenceSources.marketStructureSnapshot,
+        });
         setSelectedTicker((current) => relevant.some((market) => market.ticker === current) ? current : defaultMarket.ticker);
         setError(null);
         return;
@@ -1485,16 +1507,23 @@ export default function PredictionMarketsSandbox({
         Math.abs(Number(right.threshold) - historicalMidpoint)
       ))[0];
 
+      dataRef.current = historicalData;
       setData(historicalData);
       setRiskRange(historicalRiskRange);
       setPositions([]);
       setPositionsLive(false);
       setPositionsMessage(null);
-      setConfluenceSources(nextConfluenceSources);
+      setConfluenceSources({
+        tradeSnapshot: tradeResult.error ? null : nextConfluenceSources.tradeSnapshot,
+        usdSnapshot: usdResult.error ? null : nextConfluenceSources.usdSnapshot,
+        volatilitySnapshot: volatilityResult.error ? null : nextConfluenceSources.volatilitySnapshot,
+        marketStructureSnapshot: structureResult.error ? null : nextConfluenceSources.marketStructureSnapshot,
+      });
       setSelectedTicker((current) => relevantHistory.some((market) => market.ticker === current) ? current : defaultHistoryMarket.ticker);
       setError(null);
     } catch (loadError) {
       if (!mountedRef.current || requestId !== requestRef.current) return;
+      dataRef.current = null;
       setData(null);
       setRiskRange(null);
       setPositions([]);
@@ -1507,6 +1536,15 @@ export default function PredictionMarketsSandbox({
       if (mountedRef.current && requestId === requestRef.current) {
         setLoading(false);
         setRefreshing(false);
+      }
+    }
+    })();
+    workbenchInFlightRef.current.set(requestKey, request);
+    try {
+      return await request;
+    } finally {
+      if (workbenchInFlightRef.current.get(requestKey) === request) {
+        workbenchInFlightRef.current.delete(requestKey);
       }
     }
   }, [portfolioData?.accountId]);
@@ -1564,8 +1602,10 @@ export default function PredictionMarketsSandbox({
     trade: extractSpxTradeSignal(confluenceSources.tradeSnapshot, riskRange),
     usd: normalizeUsdCorrelationSnapshot(confluenceSources.usdSnapshot),
     vix: normalizeVixSnapshot(confluenceSources.volatilitySnapshot),
-    marketStructure: normalizeMarketStructureSnapshot(confluenceSources.marketStructureSnapshot),
-  }), [confluenceSources, riskRange]);
+    marketStructure: normalizeMarketStructureSnapshot(
+      confluenceSources.marketStructureSnapshot, dateKeyInTimeZone(data?.event?.closeTime),
+    ),
+  }), [confluenceSources, riskRange, data?.event?.closeTime]);
   const sessionConfluenceSources = useMemo(() => {
     if (!data?.historicalOnly) return normalizedConfluenceSources;
     return {
@@ -1590,72 +1630,74 @@ export default function PredictionMarketsSandbox({
   }, [data, riskRange, selectedMarket, sessionConfluenceSources]);
 
   return (
-    <div className="pmv2-wrap pmv2-redesign spx-close-workbench" data-testid="spx-close-workbench">
-      <div className="cpi-workbench-shell spx-close-workbench-shell">
-        {data && riskRange ? (
-          <>
-            <SpxDailyHeader
-              data={data}
-              riskRange={riskRange}
-              sessions={dailySessions}
-              refreshing={refreshing}
-              onRefresh={refreshWorkbench}
-              onClose={embedded ? null : onClose}
-            />
-            <main className="cpi-workbench-grid spx-close-analysis-grid">
-              <ContractsCard
+    <div id="spx-detail-workbench" data-testid="spx-detail-workbench" className="pmv2-wrap pmv2-redesign spx-close-workbench">
+      <div data-testid="spx-close-workbench">
+        <div className="cpi-workbench-shell spx-close-workbench-shell">
+          {data && riskRange ? (
+            <>
+              <SpxDailyHeader
                 data={data}
-                markets={relevantMarkets}
                 riskRange={riskRange}
-                liveSpx={liveSpx}
-                selectedTicker={selectedMarket?.ticker}
-                onSelect={setSelectedTicker}
-              />
-              {data.historicalOnly ? (
-                <HistoricalPaydayCard
-                  data={data}
-                  riskRange={riskRange}
-                  selectedMarket={selectedMarket}
-                  dailySessions={dailySessions}
-                  confluence={confluence}
-                  confluenceSources={sessionConfluenceSources}
-                  priceStructureSource={priceStructureSource}
-                />
-              ) : (
-                <LivePaydayCard
-                  data={data}
-                  riskRange={riskRange}
-                  selectedMarket={selectedMarket}
-                  positions={positions}
-                  positionsLive={positionsLive}
-                  positionsMessage={positionsMessage}
-                  confluence={confluence}
-                  confluenceSources={sessionConfluenceSources}
-                  priceStructureSource={priceStructureSource}
-                />
-              )}
-            </main>
-          </>
-        ) : (
-          <>
-            <EmptyHeader
-              sessions={dailySessions}
-              loading={loading}
-              refreshing={refreshing}
-              onRefresh={refreshWorkbench}
-              onClose={embedded ? null : onClose}
-            />
-            <main className="cpi-workbench-grid spx-close-analysis-grid">
-              <UnavailableContractsCard
-                loading={loading}
-                error={error}
+                sessions={dailySessions}
                 refreshing={refreshing}
                 onRefresh={refreshWorkbench}
+                onClose={embedded ? null : onClose}
               />
-              <UnavailablePaydayCard loading={loading} />
-            </main>
-          </>
-        )}
+              <main className="cpi-workbench-grid spx-close-analysis-grid">
+                <ContractsCard
+                  data={data}
+                  markets={relevantMarkets}
+                  riskRange={riskRange}
+                  liveSpx={liveSpx}
+                  selectedTicker={selectedMarket?.ticker}
+                  onSelect={setSelectedTicker}
+                />
+                {data.historicalOnly ? (
+                  <HistoricalPaydayCard
+                    data={data}
+                    riskRange={riskRange}
+                    selectedMarket={selectedMarket}
+                    dailySessions={dailySessions}
+                    confluence={confluence}
+                    confluenceSources={sessionConfluenceSources}
+                    priceStructureSource={priceStructureSource}
+                  />
+                ) : (
+                  <LivePaydayCard
+                    data={data}
+                    riskRange={riskRange}
+                    selectedMarket={selectedMarket}
+                    positions={positions}
+                    positionsLive={positionsLive}
+                    positionsMessage={positionsMessage}
+                    confluence={confluence}
+                    confluenceSources={sessionConfluenceSources}
+                    priceStructureSource={priceStructureSource}
+                  />
+                )}
+              </main>
+            </>
+          ) : (
+            <>
+              <EmptyHeader
+                sessions={dailySessions}
+                loading={loading}
+                refreshing={refreshing}
+                onRefresh={refreshWorkbench}
+                onClose={embedded ? null : onClose}
+              />
+              <main className="cpi-workbench-grid spx-close-analysis-grid">
+                <UnavailableContractsCard
+                  loading={loading}
+                  error={error}
+                  refreshing={refreshing}
+                  onRefresh={refreshWorkbench}
+                />
+                <UnavailablePaydayCard loading={loading} />
+              </main>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

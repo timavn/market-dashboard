@@ -293,6 +293,11 @@ function createSystemReadinessRepairService({
       file: process.execPath,
       args: [path.join(repoRoot, 'scripts/dev-stack/delayed_restart.js')],
     }],
+    ['dev-stack-sidecar-restart', {
+      kind: 'process',
+      file: process.execPath,
+      args: [path.join(repoRoot, 'scripts/dev-stack/cli.js'), 'restart-sidecar'],
+    }],
     ['sidecar-runtime-rebuild', {
       kind: 'process',
       file: process.execPath,

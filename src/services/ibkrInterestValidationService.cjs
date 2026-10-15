@@ -9,6 +9,16 @@ const {
   createIbkrFlexInterestService,
 } = require('./ibkrFlexInterestService.cjs');
 const {
+  coveredMonthFromDescription,
+  deriveDailyStockBorrowFees,
+  deriveMonthlyPaid,
+  deriveStockBorrowFeePayments,
+  isStockBorrowFeeTransaction,
+} = require('../utils/ibkrFlexInterest.cjs');
+const {
+  fetchOfficialUsdProMarginSchedule,
+} = require('./ibkrPublishedMarginRateService.cjs');
+const {
   DEFAULT_DATA_DIR,
   createInterestValidationStore,
 } = require('./ibkrInterestValidationStore.cjs');
@@ -24,6 +34,19 @@ const DEFAULT_POLL_MS = 60_000;
 const MAX_RATE_AGE_DAYS = 7;
 const OBSERVATION_MAX_AGE_MS = 45_000;
 const OBSERVATION_FUTURE_TOLERANCE_MS = 5_000;
+const ACCOUNT_VALUE_TOLERANCE = 0.01;
+const EVENT_CONTRACT_POSITION_SCOPE = 'stocks_and_event_contracts';
+const LEGACY_EVENT_CONTRACT_POSITION_SCOPE = 'stocks_and_kalshi';
+const EVENT_CONTRACT_VENUES = new Set(['KALSHI', 'FORECASTX']);
+const FORECAST_KINDS = new Set([
+  'completed_session_window',
+  'closed_day_remaining_window',
+]);
+const FLEX_SYNC_SLOTS = Object.freeze([
+  { id: '06:30', minuteOfDay: (6 * 60) + 30 },
+  { id: '09:35', minuteOfDay: (9 * 60) + 35 },
+  { id: '12:05', minuteOfDay: (12 * 60) + 5 },
+]);
 const VALID_GUARD_MODES = new Set(['off', 'observe', 'graduated']);
 
 function isoDate(value) {
@@ -71,6 +94,14 @@ function afterMinute(parts, minuteOfDay) {
   return (parts.hour * 60) + parts.minute >= minuteOfDay;
 }
 
+function forecastAttemptWindowOpen(parts, force = false) {
+  return (
+    force
+    || ['Sat', 'Sun'].includes(parts.weekday)
+    || afterMinute(parts, (16 * 60) + 30)
+  );
+}
+
 function maskAccountId(accountId) {
   const value = String(accountId || '').trim();
   return value ? `••••${value.slice(-4)}` : null;
@@ -84,6 +115,20 @@ function finite(value) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizedVenueList(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map(
+    (venue) => String(venue || '').trim().toUpperCase(),
+  ).filter(Boolean))).sort();
+}
+
+function canonicalPositionScope(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === LEGACY_EVENT_CONTRACT_POSITION_SCOPE
+    ? EVENT_CONTRACT_POSITION_SCOPE
+    : normalized;
 }
 
 function normalizeDateKey(value) {
@@ -123,6 +168,25 @@ function exactLadderBalance(value, date) {
   return Object.prototype.hasOwnProperty.call(ladder, date)
     ? ladder[date]
     : null;
+}
+
+function terminalLadderBalance(value) {
+  const ladder = parseCashLadder(value);
+  const terminalDate = Object.keys(ladder).sort().at(-1);
+  return terminalDate
+    ? { date: terminalDate, balance: ladder[terminalDate] }
+    : null;
+}
+
+function flexReportingRange(parts, lookbackDays = LOOKBACK_DAYS) {
+  let toDate = addUtcDays(parts.date, -1);
+  while ([0, 6].includes(new Date(`${toDate}T00:00:00Z`).getUTCDay())) {
+    toDate = addUtcDays(toDate, -1);
+  }
+  return {
+    fromDate: addUtcDays(toDate, -(lookbackDays - 1)),
+    toDate,
+  };
 }
 
 function normalizeGuardMode(value) {
@@ -176,6 +240,23 @@ function isFreshObservationTimestamp(value, currentTimeMs) {
   );
 }
 
+function freshestLiveAccruedObservation(observations, currentTimeMs) {
+  const latest = (Array.isArray(observations) ? observations : [])
+    .filter((row) => (
+      row?.verified === true
+      && finite(row?.liveAccruedCash) !== null
+      && Number.isFinite(Date.parse(String(row?.observedAt || '')))
+    ))
+    .sort((left, right) => (
+      String(left.observedAt).localeCompare(String(right.observedAt))
+      || Number(left.sequence || 0) - Number(right.sequence || 0)
+    ))
+    .at(-1) || null;
+  return latest && isFreshObservationTimestamp(latest.observedAt, currentTimeMs)
+    ? latest
+    : null;
+}
+
 function requireLiveObservation(
   response,
   expectedAccountId,
@@ -184,6 +265,9 @@ function requireLiveObservation(
   const forecast = response?.forecast || {};
   const marketCalendar = response?.market_calendar || {};
   const executionEvidence = response?.execution_evidence;
+  const positionScope = response?.position_scope || {};
+  const eventAccounting = response?.event_accounting;
+  const eventPositions = response?.event_position_evidence;
   const summary = response?.summary || {};
   const account = String(response?.account || '').trim();
   const currentTimeMs = currentTime instanceof Date
@@ -191,6 +275,11 @@ function requireLiveObservation(
     : Date.parse(String(currentTime || ''));
   const sessionDate = isoDate(forecast.sessionDate);
   const nextSessionDate = isoDate(forecast.nextSessionDate);
+  const basisSessionDate = isoDate(forecast.basisSessionDate);
+  const cashAnchorDate = isoDate(forecast.cashAnchorDate);
+  const forecastKind = String(
+    forecast.forecastKind || forecast.kind || '',
+  ).trim().toLowerCase();
   const priorCompletedSessionDate = isoDate(
     forecast.priorCompletedSessionDate,
   );
@@ -198,32 +287,42 @@ function requireLiveObservation(
     String(forecast.currentSessionCloseAt || ''),
   );
   const accrualDays = finite(forecast.accrualDays);
+  const securitiesLadder = summary['SettledCashByDate-S']
+    ?? response?.settlement_ladders?.securities;
+  const commoditiesLadder = summary['SettledCashByDate-C']
+    ?? response?.settlement_ladders?.commodities;
+  const ibuklLadder = summary['SettledCashByDate-Z']
+    ?? response?.settlement_ladders?.z;
   const securitiesCash = exactLadderBalance(
-    summary['SettledCashByDate-S']
-      ?? response?.settlement_ladders?.securities,
-    sessionDate,
+    securitiesLadder,
+    cashAnchorDate,
   );
   const commoditiesCash = exactLadderBalance(
-    summary['SettledCashByDate-C']
-      ?? response?.settlement_ladders?.commodities,
-    sessionDate,
+    commoditiesLadder,
+    cashAnchorDate,
   );
-  let ibuklCash = exactLadderBalance(
-    summary['SettledCashByDate-Z']
-      ?? response?.settlement_ladders?.z,
-    sessionDate,
-  );
+  const securitiesTerminalCash = terminalLadderBalance(securitiesLadder);
+  const commoditiesTerminalCash = terminalLadderBalance(commoditiesLadder);
+  const ibuklTerminalCash = terminalLadderBalance(ibuklLadder);
+  const securitiesTotalCash = finite(summary['TotalCashValue-S']);
+  const commoditiesTotalCash = finite(summary['TotalCashValue-C']);
+  const ibuklCash = exactLadderBalance(ibuklLadder, cashAnchorDate);
   const ibuklTotalCash = finite(summary['TotalCashValue-Z']);
   const fxCashBalance = finite(summary.FxCashBalance);
-  if (
-    ibuklCash === null
-    && summary['SettledCashByDate-Z'] == null
-    && summary['TotalCashValue-Z'] == null
-    && fxCashBalance === 0
-  ) {
-    ibuklCash = 0;
-  }
   const commodityMaintenanceMargin = finite(summary['MaintMarginReq-C']);
+  const rawPositionScopeMode = String(positionScope.mode || '').trim().toLowerCase();
+  const positionScopeMode = canonicalPositionScope(rawPositionScopeMode);
+  const eventPositionCount = Number(positionScope.eventPositionCount);
+  const stockPositionCount = Number(positionScope.stockPositionCount);
+  const eventMarketValue = finite(eventAccounting?.marketValue);
+  const eventAvailableFunds = finite(eventAccounting?.availableFunds);
+  const eventVenues = normalizedVenueList(
+    Array.isArray(eventAccounting?.venues)
+      ? eventAccounting.venues
+      : eventAccounting?.venue
+        ? [eventAccounting.venue]
+        : [],
+  );
   const liveAccruedCash = finite(summary['AccruedCash-S']);
   const shortPositions = response?.short_positions;
   const reasons = [];
@@ -263,6 +362,10 @@ function requireLiveObservation(
     forecast.eligible !== true
     || !sessionDate
     || !nextSessionDate
+    || !basisSessionDate
+    || !cashAnchorDate
+    || ![sessionDate, basisSessionDate].includes(cashAnchorDate)
+    || !FORECAST_KINDS.has(forecastKind)
     || accrualDays === null
     || !Number.isInteger(accrualDays)
     || accrualDays <= 0
@@ -270,34 +373,86 @@ function requireLiveObservation(
   ) {
     reasons.push('interest_observation_forecast_ineligible');
   }
-  if (
+  const sharedCalendarInvalid = (
     marketCalendar.verifiedNyDate !== sessionDate
-    || marketCalendar.currentSessionScheduled !== true
-    || marketCalendar.currentSessionComplete !== true
-    || marketCalendar.latestCompletedSessionDate !== sessionDate
+    || isoDate(marketCalendar.sessionDate) !== sessionDate
+    || finite(marketCalendar.accrualDays) !== accrualDays
     || marketCalendar.nextSessionDate !== nextSessionDate
+    || isoDate(marketCalendar.basisSessionDate) !== basisSessionDate
+    || isoDate(marketCalendar.cashAnchorDate) !== cashAnchorDate
+    || String(
+      marketCalendar.forecastKind || marketCalendar.kind || '',
+    ).trim().toLowerCase() !== forecastKind
     || marketCalendar.source
       !== 'ibkr_contract_details_and_historical_schedule'
     || typeof marketCalendar.liquidHours !== 'string'
     || !marketCalendar.liquidHours.trim()
-    || forecast.currentSessionComplete !== true
-    || forecast.latestCompletedSessionDate !== sessionDate
     || forecast.nextSessionDate !== marketCalendar.nextSessionDate
     || forecast.currentSessionCloseAt
       !== marketCalendar.currentSessionCloseAt
     || forecast.priorCompletedSessionDate
       !== marketCalendar.priorCompletedSessionDate
-    || !priorCompletedSessionDate
-    || priorCompletedSessionDate >= sessionDate
     || forecast.verification !== 'ibkr_liquid_hours_and_broker_time'
-    || !Number.isFinite(sessionCloseAtMs)
-    || !String(forecast.currentSessionCloseAt || '').startsWith(sessionDate)
-    || sessionCloseAtMs > currentTimeMs + OBSERVATION_FUTURE_TOLERANCE_MS
+  );
+  const completedSessionCalendarInvalid = (
+    forecastKind === 'completed_session_window'
+    && (
+      basisSessionDate !== sessionDate
+      || cashAnchorDate !== sessionDate
+      || marketCalendar.currentSessionScheduled !== true
+      || marketCalendar.currentSessionComplete !== true
+      || marketCalendar.latestCompletedSessionDate !== sessionDate
+      || forecast.currentSessionScheduled !== true
+      || forecast.currentSessionComplete !== true
+      || forecast.latestCompletedSessionDate !== sessionDate
+      || !priorCompletedSessionDate
+      || priorCompletedSessionDate >= sessionDate
+      || !Number.isFinite(sessionCloseAtMs)
+      || !String(forecast.currentSessionCloseAt || '').startsWith(sessionDate)
+      || sessionCloseAtMs > currentTimeMs + OBSERVATION_FUTURE_TOLERANCE_MS
+    )
+  );
+  const closedDayCalendarInvalid = (
+    forecastKind === 'closed_day_remaining_window'
+    && (
+      basisSessionDate >= sessionDate
+      || cashAnchorDate !== sessionDate
+      || priorCompletedSessionDate !== basisSessionDate
+      || marketCalendar.latestCompletedSessionDate !== basisSessionDate
+      || forecast.latestCompletedSessionDate !== basisSessionDate
+      || marketCalendar.currentSessionScheduled !== false
+      || marketCalendar.currentSessionComplete !== false
+      || forecast.currentSessionScheduled !== false
+      || forecast.currentSessionComplete !== false
+      || forecast.currentSessionCloseAt != null
+      || marketCalendar.currentSessionCloseAt != null
+    )
+  );
+  if (
+    sharedCalendarInvalid
+    || completedSessionCalendarInvalid
+    || closedDayCalendarInvalid
   ) {
     reasons.push('interest_observation_calendar_unverified');
   }
   if (securitiesCash === null || commoditiesCash === null) {
     reasons.push('interest_observation_cash_ladder_incomplete');
+  }
+  if (
+    securitiesTerminalCash === null
+    || commoditiesTerminalCash === null
+    || ibuklTerminalCash === null
+    || securitiesTotalCash === null
+    || commoditiesTotalCash === null
+    || ibuklTotalCash === null
+    || Math.abs(securitiesTerminalCash.balance - securitiesTotalCash)
+      > ACCOUNT_VALUE_TOLERANCE
+    || Math.abs(commoditiesTerminalCash.balance - commoditiesTotalCash)
+      > ACCOUNT_VALUE_TOLERANCE
+    || Math.abs(ibuklTerminalCash.balance - ibuklTotalCash)
+      > ACCOUNT_VALUE_TOLERANCE
+  ) {
+    reasons.push('interest_observation_cash_ladder_unreconciled');
   }
   if (
     ibuklCash === null
@@ -309,6 +464,156 @@ function requireLiveObservation(
   }
   if (commodityMaintenanceMargin === null || commodityMaintenanceMargin < 0) {
     reasons.push('interest_observation_commodity_margin_incomplete');
+  }
+  if (
+    !['stocks_only', EVENT_CONTRACT_POSITION_SCOPE].includes(positionScopeMode)
+    || positionScope.allSupportedForBalance !== true
+    || !Number.isInteger(stockPositionCount)
+    || stockPositionCount < 0
+    || !Number.isInteger(eventPositionCount)
+    || eventPositionCount < 0
+    || !Array.isArray(eventPositions)
+    || eventPositions.length !== eventPositionCount
+  ) {
+    reasons.push('interest_observation_position_scope_unverified');
+  } else if (positionScopeMode === 'stocks_only') {
+    if (
+      eventPositionCount !== 0
+      || eventAccounting != null
+      || normalizedVenueList(positionScope.eventVenues).length !== 0
+    ) {
+      reasons.push('interest_observation_position_scope_unverified');
+    }
+  } else {
+    const eventConIds = new Set();
+    const eventPositionVenues = normalizedVenueList(
+      eventPositions.map((position) => position?.exchange),
+    );
+    const accountingVenues = eventVenues;
+    const scopeVenues = normalizedVenueList(
+      Array.isArray(positionScope.eventVenues)
+        ? positionScope.eventVenues
+        : accountingVenues,
+    );
+    const venueListsMatch = (left, right) => (
+      left.length === right.length
+      && left.every((venue, index) => venue === right[index])
+    );
+    const legacyKalshiEvidence = (
+      rawPositionScopeMode === LEGACY_EVENT_CONTRACT_POSITION_SCOPE
+      && eventAccounting?.verification
+        === 'ibkr_kalshi_commodity_segment_reconciled'
+      && accountingVenues.length === 1
+      && accountingVenues[0] === 'KALSHI'
+    );
+    const accountValues = eventAccounting?.accountValues || {};
+    const commodityCash = finite(accountValues['TotalCashValue-C']);
+    const netLiquidation = finite(accountValues['NetLiquidation-C']);
+    const initialMargin = finite(accountValues['InitMarginReq-C']);
+    const maintenanceMargin = finite(accountValues['MaintMarginReq-C']);
+    const availableFunds = finite(accountValues['AvailableFunds-C']);
+    const equityWithLoanValue = finite(
+      accountValues['EquityWithLoanValue-C'],
+    );
+    const theoreticalAvailableFunds = (
+      netLiquidation === null || initialMargin === null
+        ? null
+        : netLiquidation - initialMargin
+    );
+    const availableFundsHoldback = finite(
+      eventAccounting?.availableFundsHoldback,
+    );
+    const withinCent = (left, right) => (
+      left !== null
+      && right !== null
+      && Math.abs(left - right) <= ACCOUNT_VALUE_TOLERANCE
+    );
+    if (
+      eventPositionCount <= 0
+      || accountingVenues.length === 0
+      || accountingVenues.some((venue) => !EVENT_CONTRACT_VENUES.has(venue))
+      || !venueListsMatch(accountingVenues, scopeVenues)
+      || !venueListsMatch(accountingVenues, eventPositionVenues)
+      || eventAccounting?.positionCount !== eventPositionCount
+      || (
+        eventAccounting?.verification
+          !== 'ibkr_event_contract_commodity_segment_reconciled'
+        && !legacyKalshiEvidence
+      )
+      || finite(eventAccounting?.capacityContribution) !== 0
+      || eventMarketValue === null
+      || eventMarketValue < 0
+      || eventAvailableFunds === null
+      || eventAvailableFunds < 0
+      || commodityCash === null
+      || netLiquidation === null
+      || initialMargin === null
+      || maintenanceMargin === null
+      || availableFunds === null
+      || equityWithLoanValue === null
+      || !withinCent(
+        finite(eventAccounting?.maintenanceMargin),
+        commodityMaintenanceMargin,
+      )
+      || !withinCent(finite(eventAccounting?.initialMargin), initialMargin)
+      || !withinCent(
+        finite(eventAccounting?.equityWithLoanValue),
+        equityWithLoanValue,
+      )
+      || !withinCent(
+        finite(eventAccounting?.theoreticalAvailableFunds),
+        theoreticalAvailableFunds,
+      )
+      || !withinCent(
+        finite(accountValues['GrossPositionValue-C']),
+        eventMarketValue,
+      )
+      || !withinCent(commodityCash, commoditiesTotalCash)
+      || !withinCent(maintenanceMargin, commodityMaintenanceMargin)
+      || !withinCent(netLiquidation, commodityCash + eventMarketValue)
+      || !withinCent(initialMargin, eventMarketValue)
+      || !withinCent(maintenanceMargin, eventMarketValue)
+      || !withinCent(
+        equityWithLoanValue,
+        commodityCash + eventMarketValue - maintenanceMargin,
+      )
+      || !withinCent(availableFunds, eventAvailableFunds)
+      || theoreticalAvailableFunds === null
+      || availableFunds
+        > theoreticalAvailableFunds + ACCOUNT_VALUE_TOLERANCE
+      || availableFundsHoldback === null
+      || !withinCent(
+        availableFundsHoldback,
+        Math.max(0, theoreticalAvailableFunds - availableFunds),
+      )
+      || eventPositions.some((position) => {
+        const conId = Number(position?.conId);
+        const quantity = finite(position?.quantity);
+        const exchange = String(
+          position?.exchange || '',
+        ).trim().toUpperCase();
+        const secType = String(
+          position?.secType || '',
+        ).trim().toUpperCase();
+        const supportedContractType = (
+          secType === 'OPT'
+          || (exchange === 'FORECASTX' && secType === 'FOP')
+        );
+        const invalid = !Number.isInteger(conId)
+          || conId <= 0
+          || eventConIds.has(conId)
+          || quantity === null
+          || quantity <= 0
+          || !EVENT_CONTRACT_VENUES.has(exchange)
+          || !supportedContractType
+          || position?.currency !== 'USD'
+          || finite(position?.multiplier) !== 1;
+        eventConIds.add(conId);
+        return invalid;
+      })
+    ) {
+      reasons.push('interest_observation_event_accounting_unverified');
+    }
   }
   if (liveAccruedCash === null) {
     reasons.push('interest_observation_accrued_cash_incomplete');
@@ -385,17 +690,37 @@ function requireLiveObservation(
   return {
     account,
     sessionDate,
+    basisSessionDate,
+    cashAnchorDate,
     nextSessionDate,
+    forecastKind,
     accrualDays,
     observedAt: response.observed_at,
     socketVerifiedAt: response.socket_verified_at,
     accountValuesObservedAt: response.account_values_observed_at,
     evidenceHash: response.evidence_hash,
     currency: String(summary.baseCurrency || summary.currency || '').toUpperCase(),
+    positionScope: positionScopeMode,
+    eventVenues: positionScopeMode === EVENT_CONTRACT_POSITION_SCOPE
+      ? eventVenues
+      : [],
     securitiesCash,
     commoditiesCash,
     ibuklCash,
     commodityMaintenanceMargin,
+    eventMarketValue: positionScopeMode === EVENT_CONTRACT_POSITION_SCOPE
+      ? eventMarketValue
+      : 0,
+    // Backward-compatible alias for consumers of legacy stored observations.
+    kalshiMarketValue: positionScopeMode === EVENT_CONTRACT_POSITION_SCOPE
+      ? eventMarketValue
+      : 0,
+    commodityAvailableFunds: positionScopeMode === EVENT_CONTRACT_POSITION_SCOPE
+      ? eventAvailableFunds
+      : null,
+    eventAccountingVerified: positionScopeMode === EVENT_CONTRACT_POSITION_SCOPE
+      ? !reasons.includes('interest_observation_event_accounting_unverified')
+      : true,
     liveAccruedCash,
     shortPositions: shortPositions.map((position) => ({
       conId: position.conId ?? position.conid ?? null,
@@ -404,6 +729,60 @@ function requireLiveObservation(
       quantity: finite(position.quantity),
       priorClose: finite(position.priorClose),
     })),
+  };
+}
+
+function requireLiveBalanceInterestObservation(
+  snapshot,
+  expectedAccountId,
+  {
+    now: currentTime = new Date(),
+    timeZone = TIME_ZONE,
+  } = {},
+) {
+  const account = String(snapshot?.accountId || snapshot?.account || '').trim();
+  const observedAt = String(snapshot?.observedAt || '');
+  const socketVerifiedAt = String(snapshot?.socketVerifiedAt || '');
+  const currentTimeMs = currentTime instanceof Date
+    ? currentTime.getTime()
+    : Date.parse(String(currentTime || ''));
+  const liveAccruedCash = finite(snapshot?.cash?.netAccruedInterest);
+  const reasons = [];
+
+  if (
+    snapshot?.available !== true
+    || snapshot?.status !== 'live'
+    || snapshot?.source !== 'ibkr_live_session'
+    || snapshot?.fromCache !== false
+  ) {
+    reasons.push('interest_balance_observation_unverified');
+  }
+  if (
+    !Number.isFinite(currentTimeMs)
+    || !isFreshObservationTimestamp(observedAt, currentTimeMs)
+    || !isFreshObservationTimestamp(socketVerifiedAt, currentTimeMs)
+  ) {
+    reasons.push('interest_balance_observation_timestamp_unverified');
+  }
+  if (!expectedAccountId || account !== expectedAccountId) {
+    reasons.push('interest_balance_observation_account_mismatch');
+  }
+  if (liveAccruedCash === null) {
+    reasons.push('interest_balance_observation_accrued_cash_incomplete');
+  }
+  if (reasons.length) {
+    const error = new Error(reasons[0]);
+    error.code = reasons[0];
+    error.reasons = reasons;
+    throw error;
+  }
+
+  return {
+    account,
+    sessionDate: nyParts(new Date(observedAt), timeZone).date,
+    observedAt,
+    socketVerifiedAt,
+    liveAccruedCash: Object.is(liveAccruedCash, -0) ? 0 : liveAccruedCash,
   };
 }
 
@@ -434,7 +813,11 @@ function tierPrincipal(row) {
   return components.reduce((total, value) => total + Math.abs(value), 0);
 }
 
-function latestVerifiedTierSchedule(snapshots, sessionDate) {
+function latestVerifiedTierSchedule(
+  snapshots,
+  sessionDate,
+  { maxAgeDays = MAX_RATE_AGE_DAYS } = {},
+) {
   for (const snapshot of snapshots) {
     const rows = (snapshot?.tierDetails || [])
       .filter((row) => (
@@ -448,7 +831,11 @@ function latestVerifiedTierSchedule(snapshots, sessionDate) {
       .map((row) => row.valueDate || row.reportDate || row.toDate || row.fromDate)
       .sort()
       .at(-1);
-    if (daysBetween(rateDate, sessionDate) > MAX_RATE_AGE_DAYS) continue;
+    const rateAgeDays = daysBetween(rateDate, sessionDate);
+    if (
+      Number.isFinite(maxAgeDays)
+      && rateAgeDays > maxAgeDays
+    ) continue;
     const datedRows = rows
       .filter((row) => (
         (row.valueDate || row.reportDate || row.toDate || row.fromDate) === rateDate
@@ -480,9 +867,95 @@ function latestVerifiedTierSchedule(snapshots, sessionDate) {
       rateDate,
       observedPrincipalCoverage: cumulative,
       reportHash: snapshot.reportHash,
+      revisionHash: snapshot.revisionHash,
+      fetchedAt: snapshot.fetchedAt,
+      rateAgeDays,
+      source: 'ibkr_flex_interest_tier_detail',
+      provisional: false,
     };
   }
   return null;
+}
+
+function corroborateIbkrProSchedule(accountSchedule, publishedSchedule) {
+  const accountRate = finite(accountSchedule?.tiers?.[0]?.annualRate);
+  const proRate = finite(publishedSchedule?.tiers?.[0]?.annualRate);
+  const liteRate = finite(publishedSchedule?.liteAnnualRate);
+  if (
+    accountRate === null
+    || proRate === null
+    || liteRate === null
+    || publishedSchedule?.plan !== 'IBKR Pro'
+    || publishedSchedule?.currency !== 'USD'
+  ) return false;
+  const proDistance = Math.abs(accountRate - proRate);
+  const liteDistance = Math.abs(accountRate - liteRate);
+  return proDistance <= 0.0025 && proDistance < liteDistance;
+}
+
+async function resolveDebitRateEvidence({
+  snapshots,
+  sessionDate,
+  fetchOfficialSchedule,
+}) {
+  const fresh = latestVerifiedTierSchedule(snapshots, sessionDate);
+  if (fresh) {
+    return {
+      ...fresh,
+      rateEvidence: {
+        source: fresh.source,
+        rateDate: fresh.rateDate,
+        fetchedAt: fresh.fetchedAt,
+        reportHash: fresh.reportHash,
+        revisionHash: fresh.revisionHash,
+        provisional: false,
+      },
+    };
+  }
+
+  const accountSchedule = latestVerifiedTierSchedule(
+    snapshots,
+    sessionDate,
+    { maxAgeDays: Number.POSITIVE_INFINITY },
+  );
+  if (!accountSchedule) {
+    const error = new Error('No account-specific Flex debit tiers are available to verify the pricing plan.');
+    error.code = 'interest_rate_account_plan_unverified';
+    throw error;
+  }
+  const published = await fetchOfficialSchedule();
+  if (!corroborateIbkrProSchedule(accountSchedule, published)) {
+    const error = new Error('The latest account-specific Flex tier does not corroborate the official IBKR Pro schedule.');
+    error.code = 'interest_rate_account_plan_unverified';
+    throw error;
+  }
+  return {
+    tiers: published.tiers,
+    rateDate: accountSchedule.rateDate,
+    observedPrincipalCoverage: Number.POSITIVE_INFINITY,
+    reportHash: accountSchedule.reportHash,
+    revisionHash: accountSchedule.revisionHash,
+    fetchedAt: published.fetchedAt,
+    rateAgeDays: accountSchedule.rateAgeDays,
+    source: published.source,
+    provisional: true,
+    rateEvidence: {
+      source: published.source,
+      url: published.url,
+      fetchedAt: published.fetchedAt,
+      scheduleHash: published.scheduleHash,
+      plan: published.plan,
+      currency: published.currency,
+      provisional: true,
+      corroboratedBy: {
+        source: accountSchedule.source,
+        rateDate: accountSchedule.rateDate,
+        reportHash: accountSchedule.reportHash,
+        revisionHash: accountSchedule.revisionHash,
+        firstTierAnnualRate: accountSchedule.tiers[0].annualRate,
+      },
+    },
+  };
 }
 
 function latestByDate(actuals) {
@@ -500,19 +973,47 @@ function latestByDate(actuals) {
 }
 
 function coveredValueDates(prediction) {
-  if (
-    Array.isArray(prediction?.coveredValueDates)
-    && prediction.coveredValueDates.length === prediction.accrualDays
-  ) {
-    return prediction.coveredValueDates;
-  }
   if (!isoDate(prediction?.valueDate) || !Number.isInteger(prediction?.accrualDays)) {
     return [];
   }
-  return Array.from(
+  if (prediction.accrualDays <= 0) return [];
+  const generatedDates = Array.from(
     { length: prediction.accrualDays },
     (_value, index) => addUtcDays(prediction.valueDate, index),
   );
+  if (
+    Array.isArray(prediction?.coveredValueDates)
+    && prediction.coveredValueDates.length === prediction.accrualDays
+    && prediction.coveredValueDates.every(
+      (date, index) => isoDate(date) === generatedDates[index],
+    )
+  ) {
+    return generatedDates;
+  }
+  return prediction?.coveredValueDates == null ? generatedDates : [];
+}
+
+function verifiedPredictionCoveringDate(predictions, date) {
+  return [...predictions]
+    .filter((prediction) => (
+      prediction?.prospective === true
+      && prediction?.verified === true
+      && coveredValueDates(prediction).includes(date)
+    ))
+    .sort((left, right) => (
+      String(left.issuedAt || '').localeCompare(String(right.issuedAt || ''))
+      || String(left.valueDate || '').localeCompare(String(right.valueDate || ''))
+    ))
+    .at(-1) || null;
+}
+
+function predictionCoverageOverlaps(prediction, existingPredictions) {
+  const dates = new Set(coveredValueDates(prediction));
+  return dates.size > 0 && existingPredictions.some((existing) => (
+    existing?.prospective === true
+    && existing?.verified === true
+    && coveredValueDates(existing).some((date) => dates.has(date))
+  ));
 }
 
 function matchedActualForPrediction(prediction, actualByDate) {
@@ -551,6 +1052,104 @@ function matchedActualForPrediction(prediction, actualByDate) {
   };
 }
 
+function forecastBand(prediction) {
+  const point = finite(prediction?.point);
+  const storedUpper = finite(prediction?.upper);
+  const storedCushion = finite(prediction?.cushion);
+  if (point === null || point < 0) {
+    return { lower: null, point: null, upper: null };
+  }
+  const cushion = storedCushion !== null && storedCushion >= 0
+    ? storedCushion
+    : storedUpper !== null && storedUpper >= point
+      ? storedUpper - point
+      : 0;
+  return {
+    lower: Number(Math.max(0, point - cushion).toFixed(2)),
+    point: Number(point.toFixed(2)),
+    upper: Number(Math.max(point, storedUpper ?? point).toFixed(2)),
+  };
+}
+
+function verifiedForecastComparison(prediction, actual) {
+  if (!prediction || !actual) return null;
+  const band = forecastBand(prediction);
+  const actualInterest = finite(actual.debitAmount);
+  if (
+    band.lower === null
+    || band.upper === null
+    || actualInterest === null
+    || actual.verified !== true
+  ) return null;
+  const withinBand = (
+    actualInterest >= band.lower - 0.001
+    && actualInterest <= band.upper + 0.001
+  );
+  return {
+    status: 'verified',
+    outcome: withinBand ? 'within_band' : 'miss',
+    valueDate: prediction.valueDate || null,
+    forecastLower: band.lower,
+    forecastPoint: band.point,
+    forecastUpper: band.upper,
+    actual: Number(actualInterest.toFixed(2)),
+    residual: Number((actualInterest - band.point).toFixed(2)),
+    issuedAt: prediction.issuedAt || null,
+    verifiedAt: actual.fetchedAt || null,
+  };
+}
+
+function actualWasObservedAfterPrediction(prediction, actual) {
+  const issuedAtMs = Date.parse(String(prediction?.issuedAt || ''));
+  const components = Array.isArray(actual?.componentActuals)
+    ? actual.componentActuals
+    : [actual];
+  return (
+    Number.isFinite(issuedAtMs)
+    && components.length > 0
+    && components.every((component) => {
+      const fetchedAtMs = Date.parse(String(component?.fetchedAt || ''));
+      return Number.isFinite(fetchedAtMs) && fetchedAtMs > issuedAtMs;
+    })
+  );
+}
+
+function latestVerifiedForecastComparison(predictions, actualByDate) {
+  return [...predictions]
+    .filter((prediction) => (
+      prediction?.prospective === true
+      && prediction?.verified === true
+    ))
+    .sort((left, right) => (
+      String(left.valueDate || '').localeCompare(String(right.valueDate || ''))
+      || String(left.issuedAt || '').localeCompare(String(right.issuedAt || ''))
+    ))
+    .flatMap((prediction) => {
+      const actual = matchedActualForPrediction(prediction, actualByDate);
+      if (!actualWasObservedAfterPrediction(prediction, actual)) return [];
+      const comparison = verifiedForecastComparison(prediction, actual);
+      return comparison ? [comparison] : [];
+    })
+    .at(-1) || null;
+}
+
+function pendingForecastComparison(prediction, lastVerified = null) {
+  const band = forecastBand(prediction);
+  return {
+    status: 'awaiting',
+    outcome: 'pending',
+    valueDate: prediction?.valueDate || null,
+    forecastLower: band.lower,
+    forecastPoint: band.point,
+    forecastUpper: band.upper,
+    actual: null,
+    residual: null,
+    issuedAt: prediction?.issuedAt || null,
+    verifiedAt: null,
+    lastVerified,
+  };
+}
+
 function buildMatches(predictions, actuals) {
   const actualByDate = latestByDate(actuals);
   return predictions
@@ -559,18 +1158,7 @@ function buildMatches(predictions, actuals) {
     .flatMap((prediction) => {
       const actual = matchedActualForPrediction(prediction, actualByDate);
       if (!actual) return [];
-      const issuedAtMs = Date.parse(String(prediction.issuedAt || ''));
-      const actualComponents = Array.isArray(actual.componentActuals)
-        ? actual.componentActuals
-        : [actual];
-      const actualWasProspective = (
-        Number.isFinite(issuedAtMs)
-        && actualComponents.every((component) => {
-          const fetchedAtMs = Date.parse(String(component?.fetchedAt || ''));
-          return Number.isFinite(fetchedAtMs) && fetchedAtMs > issuedAtMs;
-        })
-      );
-      if (!actualWasProspective) return [];
+      if (!actualWasObservedAfterPrediction(prediction, actual)) return [];
       return [{
         id: prediction.identity,
         matched: true,
@@ -584,9 +1172,20 @@ function buildMatches(predictions, actuals) {
     });
 }
 
+function monthlyPaidForSnapshot(snapshot) {
+  const hasCashEvidence = Array.isArray(snapshot?.cashTransactions)
+    && (
+      snapshot.cashTransactions.length > 0
+      || snapshot.cashTransactionSectionPresent === true
+    );
+  return hasCashEvidence
+    ? deriveMonthlyPaid(snapshot.cashTransactions)
+    : (snapshot?.derived?.monthlyPaid || []);
+}
+
 function hasMonthlyReconciliation(snapshots) {
   return snapshots.some((snapshot) => {
-    const paidRows = (snapshot?.derived?.monthlyPaid || [])
+    const paidRows = monthlyPaidForSnapshot(snapshot)
       .filter((row) => (
         row.currency === 'USD'
         && finite(row.paid) > 0
@@ -596,22 +1195,48 @@ function hasMonthlyReconciliation(snapshots) {
     const paidNet = Number(
       paidRows.reduce((total, row) => total + finite(row.net), 0).toFixed(2),
     );
+    const borrowTotal = deriveStockBorrowFeePayments(
+      Array.isArray(snapshot?.cashTransactions)
+        ? snapshot.cashTransactions
+        : [],
+    )
+      .filter((row) => row.currency === 'USD' && finite(row.amount) !== null)
+      .reduce((total, row) => total + finite(row.amount), 0);
     return (snapshot?.cashReports || []).some((row) => {
       const reported = finite(row.brokerInterest);
       return (
         row.currency === 'USD'
         && reported !== null
-        && Math.abs(reported - paidNet) <= 0.01
+        && (
+          Math.abs(reported - paidNet) <= 0.01
+          || Math.abs((reported + borrowTotal) - paidNet) <= 0.01
+        )
       );
     });
   });
 }
 
 function ingestFlexSnapshots(store, snapshots) {
+  // Validate the append-only journal once, then avoid asking appendRecord to
+  // rescan and rehash the full file for every Flex row already materialized.
+  // A cold startup commonly revisits hundreds of immutable rows; performing
+  // the same fail-closed verification for each duplicate can starve Express.
+  const knownActualIdentities = new Set(
+    store.readRecords('actuals')
+      .map((row) => row.identity || row.recordHash)
+      .filter(Boolean),
+  );
+  const appendActual = (record) => {
+    if (knownActualIdentities.has(record.identity)) return;
+    const outcome = store.appendRecord('actuals', record);
+    const storedIdentity = outcome?.record?.identity || record.identity;
+    if (storedIdentity) knownActualIdentities.add(storedIdentity);
+  };
+
   for (const snapshot of snapshots) {
     for (const row of snapshot?.derived?.dailyDebitActuals || []) {
       if (row.currency !== 'USD' || !isoDate(row.date)) continue;
-      store.appendRecord('actuals', {
+      appendActual({
         identity: `daily|${row.date}|${snapshot.reportHash}`,
         kind: 'daily',
         valueDate: row.date,
@@ -631,11 +1256,13 @@ function ingestFlexSnapshots(store, snapshots) {
         provisional: true,
       });
     }
-    for (const row of snapshot?.derived?.monthlyPaid || []) {
+    const monthlyPaid = monthlyPaidForSnapshot(snapshot);
+    for (const row of monthlyPaid) {
       if (row.currency !== 'USD' || !/^\d{4}-\d{2}$/.test(String(row.month || ''))) continue;
-      store.appendRecord('actuals', {
-        identity: `monthly|${row.month}|${snapshot.reportHash}`,
+      appendActual({
+        identity: `monthly-margin-only|${row.month}|${snapshot.reportHash}`,
         kind: 'monthly',
+        classification: 'margin_debit_and_credit_interest_only',
         month: row.month,
         currency: 'USD',
         paid: row.paid,
@@ -689,13 +1316,324 @@ function remainingPredictionUpper(prediction, actualByDate) {
   ) / 100;
 }
 
+function latestVerifiedMtdFlexCoverage(
+  snapshots,
+  currentMonth,
+  expectedAccountFingerprint,
+) {
+  const startOfMonth = monthStart(currentMonth);
+  if (!startOfMonth) return null;
+  return [...snapshots]
+    .flatMap((snapshot) => {
+      if (
+        snapshot?.source !== 'ibkr_flex_interest_web_service'
+        || !/^[a-f0-9]{64}$/.test(String(snapshot.reportHash || ''))
+        || !/^[a-f0-9]{64}$/.test(String(snapshot.revisionHash || ''))
+        || !isoDate(snapshot.fromDate)
+        || !isoDate(snapshot.toDate)
+        || (
+          snapshot.expectedAccountFingerprint
+          && snapshot.expectedAccountFingerprint !== expectedAccountFingerprint
+        )
+        || !Array.isArray(snapshot?.derived?.dailyDebitActuals)
+      ) {
+        return [];
+      }
+      const currentMonthRows = snapshot.derived.dailyDebitActuals.filter((row) => {
+        const rowDate = isoDate(row?.date);
+        const rowFromDate = isoDate(row?.fromDate || row?.date);
+        const rowToDate = isoDate(row?.toDate || row?.date);
+        const debitAmount = finite(row?.debitAmount);
+        return (
+          row?.currency === 'USD'
+          && rowDate?.startsWith(currentMonth)
+          && rowFromDate
+          && rowToDate
+          && rowFromDate <= rowToDate
+          && rowFromDate >= snapshot.fromDate
+          && rowToDate <= snapshot.toDate
+          && debitAmount !== null
+          && debitAmount >= 0
+          && Number.isInteger(row?.rowCount)
+          && row.rowCount > 0
+        );
+      });
+      if (!currentMonthRows.length) return [];
+      return [{
+        ...snapshot,
+        mtdRows: currentMonthRows,
+        mtdThroughDate: currentMonthRows
+          .map((row) => row.toDate || row.date)
+          .sort()
+          .at(-1),
+      }];
+    })
+    .sort((left, right) => (
+      left.mtdThroughDate.localeCompare(right.mtdThroughDate)
+      || String(left.fetchedAt || '').localeCompare(String(right.fetchedAt || ''))
+    ))
+    .at(-1) || null;
+}
+
+function emptyStockBorrowFees(status = 'unavailable', reason = null) {
+  return {
+    status,
+    daily: {
+      status,
+      valueDate: null,
+      amount: null,
+      positionCount: 0,
+      rowCount: 0,
+      currency: 'USD',
+      source: 'ibkr_flex_securities_borrowed_lent_fee_details',
+      reason,
+    },
+    aggregate: {
+      status,
+      total: null,
+      currency: 'USD',
+      periodFrom: null,
+      periodTo: null,
+      throughDate: null,
+      latestMonth: null,
+      months: [],
+      source: 'ibkr_flex_cash_transactions',
+      reason,
+    },
+    evidence: null,
+  };
+}
+
+function latestVerifiedBorrowFlexSnapshot(snapshots, expectedAccountFingerprint) {
+  return [...snapshots]
+    .filter((snapshot) => (
+      snapshot?.source === 'ibkr_flex_interest_web_service'
+      && /^[a-f0-9]{64}$/.test(String(snapshot.reportHash || ''))
+      && /^[a-f0-9]{64}$/.test(String(snapshot.revisionHash || ''))
+      && isoDate(snapshot.fromDate)
+      && isoDate(snapshot.toDate)
+      && (
+        !snapshot.expectedAccountFingerprint
+        || snapshot.expectedAccountFingerprint === expectedAccountFingerprint
+      )
+    ))
+    .sort((left, right) => (
+      String(left.fetchedAt || '').localeCompare(String(right.fetchedAt || ''))
+      || String(left.revisionHash || '').localeCompare(String(right.revisionHash || ''))
+    ))
+    .at(-1) || null;
+}
+
+function buildFlexCapabilities(snapshots, expectedAccountFingerprint) {
+  const snapshot = latestVerifiedBorrowFlexSnapshot(
+    snapshots,
+    expectedAccountFingerprint,
+  );
+  const requiredSections = {
+    tierInterestDetails: Boolean(
+      snapshot?.tierDetailSectionPresent === true
+      || (snapshot?.tierDetails?.length || 0) > 0,
+    ),
+    interestAccruals: Boolean(
+      snapshot?.accrualSectionPresent === true
+      || (snapshot?.accruals?.length || 0) > 0,
+    ),
+    cashTransactions: Boolean(
+      snapshot?.cashTransactionSectionPresent === true
+      || (snapshot?.cashTransactions?.length || 0) > 0,
+    ),
+    cashReport: Boolean(
+      snapshot?.cashReportSectionPresent === true
+      || (snapshot?.cashReports?.length || 0) > 0,
+    ),
+  };
+  const missingSections = Object.entries(requiredSections)
+    .filter(([, present]) => present !== true)
+    .map(([section]) => section);
+  const ready = Boolean(snapshot) && missingSections.length === 0;
+  return {
+    ready,
+    status: !snapshot ? 'awaiting' : ready ? 'ready' : 'incomplete',
+    requiredSections,
+    optionalSections: {
+      stockBorrowFeeDetails: Boolean(
+        snapshot?.borrowFeeDetailsSectionPresent === true
+        || (snapshot?.borrowFeeDetails?.length || 0) > 0,
+      ),
+    },
+    missingSections,
+    evidence: snapshot
+      ? {
+          fetchedAt: snapshot.fetchedAt || null,
+          fromDate: snapshot.fromDate || null,
+          toDate: snapshot.toDate || null,
+          reportHash: snapshot.reportHash || null,
+          revisionHash: snapshot.revisionHash || null,
+        }
+      : null,
+  };
+}
+
+function buildStockBorrowFeeSummary({
+  flexSnapshots = [],
+  expectedAccountFingerprint,
+  currentNyDate,
+  error = null,
+}) {
+  const snapshot = latestVerifiedBorrowFlexSnapshot(
+    flexSnapshots,
+    expectedAccountFingerprint,
+  );
+  if (!snapshot) {
+    return emptyStockBorrowFees(
+      error ? 'unavailable' : 'awaiting',
+      error?.code || (error ? 'interest_flex_unavailable' : 'interest_flex_not_synced'),
+    );
+  }
+
+  const cashTransactions = Array.isArray(snapshot.cashTransactions)
+    ? snapshot.cashTransactions
+    : [];
+  const paymentRows = Array.isArray(snapshot?.derived?.stockBorrowFeePayments)
+    ? snapshot.derived.stockBorrowFeePayments
+    : deriveStockBorrowFeePayments(cashTransactions);
+  const borrowCashRows = cashTransactions.filter(isStockBorrowFeeTransaction);
+  const unaccountedBorrowRows = borrowCashRows.some(
+    (row) => !coveredMonthFromDescription(row.description),
+  );
+  const monthlyRows = paymentRows.filter((row) => (
+    row?.currency === 'USD'
+    && /^\d{4}-\d{2}$/.test(String(row.month || ''))
+    && finite(row.amount) !== null
+    && finite(row.amount) >= 0
+  ));
+  const aggregateStatus = unaccountedBorrowRows
+    ? 'unavailable'
+    : monthlyRows.length
+      || cashTransactions.length
+      || snapshot.cashTransactionSectionPresent === true
+      ? 'verified'
+      : 'awaiting';
+  const aggregateTotal = monthlyRows.reduce(
+    (total, row) => total + finite(row.amount),
+    0,
+  );
+  const aggregateMonths = monthlyRows
+    .sort((left, right) => left.month.localeCompare(right.month))
+    .map((row) => ({
+      month: row.month,
+      amount: Number(row.amount.toFixed(2)),
+      postedAt: row.postedDates?.at(-1) || null,
+      transactionCount: row.transactionCount,
+    }));
+  const latestMonth = aggregateMonths.at(-1) || null;
+
+  const detailRows = Array.isArray(snapshot.borrowFeeDetails)
+    ? snapshot.borrowFeeDetails
+    : [];
+  const dailyRows = Array.isArray(snapshot?.derived?.dailyStockBorrowFees)
+    ? snapshot.derived.dailyStockBorrowFees
+    : deriveDailyStockBorrowFees(detailRows);
+  const validDetailRows = detailRows.filter((row) => (
+    row?.currency === 'USD'
+    && isoDate(row.valueDate)
+    && finite(row.totalCharges) !== null
+    && finite(row.totalCharges) >= 0
+  ));
+  const invalidDetailRows = detailRows.length !== validDetailRows.length;
+  const feeDetailSectionPresent = snapshot.borrowFeeDetailsSectionPresent === true
+    || detailRows.length > 0;
+  const datedDailyRows = dailyRows
+    .filter((row) => (
+      isoDate(row?.date)
+      && (!currentNyDate || row.date <= currentNyDate)
+      && finite(row?.amount) !== null
+      && finite(row.amount) >= 0
+    ))
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const latestDaily = datedDailyRows.at(-1) || null;
+  let daily;
+  if (invalidDetailRows) {
+    daily = {
+      ...emptyStockBorrowFees('unavailable', 'interest_borrow_fee_detail_unverified').daily,
+    };
+  } else if (latestDaily) {
+    daily = {
+      status: 'verified',
+      valueDate: latestDaily.date,
+      amount: Number(latestDaily.amount.toFixed(2)),
+      positionCount: Number(latestDaily.positionCount) || 0,
+      rowCount: Number(latestDaily.rowCount) || 0,
+      currency: 'USD',
+      source: 'ibkr_flex_securities_borrowed_lent_fee_details',
+      reason: null,
+    };
+  } else if (feeDetailSectionPresent) {
+    daily = {
+      status: 'verified',
+      valueDate: null,
+      amount: 0,
+      positionCount: 0,
+      rowCount: 0,
+      currency: 'USD',
+      source: 'ibkr_flex_securities_borrowed_lent_fee_details',
+      reason: 'no_fee_detail_rows_in_report',
+    };
+  } else {
+    daily = {
+      ...emptyStockBorrowFees(
+        error ? 'unavailable' : 'awaiting',
+        error?.code || 'flex_query_borrow_fee_details_not_configured',
+      ).daily,
+    };
+  }
+
+  const status = aggregateStatus === 'verified' || daily.status === 'verified'
+    ? 'verified'
+    : aggregateStatus === 'unavailable' || daily.status === 'unavailable'
+      ? 'unavailable'
+      : 'awaiting';
+  return {
+    status,
+    daily,
+    aggregate: {
+      status: aggregateStatus,
+      total: aggregateStatus === 'verified'
+        ? Number(aggregateTotal.toFixed(2))
+        : null,
+      currency: 'USD',
+      periodFrom: snapshot.fromDate,
+      periodTo: snapshot.toDate,
+      throughDate: snapshot.toDate,
+      latestMonth,
+      months: aggregateMonths,
+      source: 'ibkr_flex_cash_transactions',
+      reason: unaccountedBorrowRows
+        ? 'interest_borrow_fee_payment_unattributed'
+        : null,
+    },
+    evidence: {
+      source: 'ibkr_flex_interest_web_service',
+      reportHash: snapshot.reportHash,
+      revisionHash: snapshot.revisionHash,
+      fetchedAt: snapshot.fetchedAt,
+      fromDate: snapshot.fromDate,
+      toDate: snapshot.toDate,
+      feeDetailSectionPresent,
+    },
+  };
+}
+
 function buildDerivedSummary({
   config,
   store,
   flexSnapshots,
   generatedAt,
+  latestLiveObservation = null,
   lastRun,
   lastError,
+  mtdError = null,
+  forecastError = null,
 }) {
   const predictions = store.readRecords('predictions');
   const actuals = store.readRecords('actuals');
@@ -707,27 +1645,54 @@ function buildDerivedSummary({
     chronologicalOrderVerified: true,
   });
   const actualByDate = latestByDate(actuals);
-  const latestPrediction = [...predictions]
-    .sort((left, right) => left.valueDate.localeCompare(right.valueDate))
+  const eligiblePredictions = predictions
+    .filter((prediction) => (
+      prediction?.prospective === true
+      && prediction?.verified === true
+    ))
+    .sort((left, right) => (
+      String(left.valueDate || '').localeCompare(String(right.valueDate || ''))
+      || String(left.issuedAt || '').localeCompare(String(right.issuedAt || ''))
+    ));
+  const latestPrediction = eligiblePredictions
     .at(-1) || null;
-  const latestActual = latestPrediction
+  const latestMatchedActual = latestPrediction
     ? matchedActualForPrediction(latestPrediction, actualByDate)
     : [...actualByDate.values()]
       .sort((left, right) => left.valueDate.localeCompare(right.valueDate))
       .at(-1) || null;
   const currentNyDate = nyParts(new Date(generatedAt), config.timeZone).date;
+  const flexCapabilities = buildFlexCapabilities(
+    flexSnapshots,
+    config.accountFingerprint,
+  );
+  const stockBorrowFees = buildStockBorrowFeeSummary({
+    flexSnapshots,
+    expectedAccountFingerprint: config.accountFingerprint,
+    currentNyDate,
+    error: mtdError,
+  });
   const currentMonth = currentNyDate.slice(0, 7);
-  const currentActuals = [...actualByDate.values()]
-    .filter((row) => row.valueDate.startsWith(currentMonth));
+  const mtdCoverage = latestVerifiedMtdFlexCoverage(
+    flexSnapshots,
+    currentMonth,
+    config.accountFingerprint,
+  );
+  const currentActuals = (mtdCoverage?.mtdRows || []).map((row) => ({
+    ...row,
+    valueDate: row.date,
+    debitAmount: finite(row.debitAmount),
+    verified: true,
+  }));
   const priorMonth = previousMonth(currentMonth);
   const priorMonthDebit = [...actualByDate.values()]
     .filter((row) => row.valueDate.startsWith(priorMonth))
     .reduce((total, row) => total + row.debitAmount, 0);
-  const currentMonthPaid = actuals
+  const currentMonthPaid = flexSnapshots
+    .flatMap((snapshot) => monthlyPaidForSnapshot(snapshot))
     .filter((row) => (
-      row.kind === 'monthly'
-      && row.month === currentMonth
-      && row.verified === true
+      row.month === currentMonth
+      && row.currency === 'USD'
       && finite(row.paid) > 0
     ))
     .reduce((largest, row) => Math.max(largest, finite(row.paid)), 0);
@@ -764,26 +1729,38 @@ function buildDerivedSummary({
     0,
   );
   const modelOutstandingUpper = verifiedUnpaidDebit + unreportedUpper;
-  const latestObservation = observations.at(-1) || null;
-  const latestObservationFresh = (
-    latestObservation?.verified === true
-    && isFreshObservationTimestamp(
-      latestObservation.observedAt,
-      Date.parse(generatedAt),
-    )
+  const latestObservation = freshestLiveAccruedObservation(
+    [...observations, latestLiveObservation].filter(Boolean),
+    Date.parse(generatedAt),
   );
+  const latestObservationFresh = Boolean(latestObservation);
   const sampleCount = calibration.available ? calibration.sampleCount : 0;
-  const modelStatus = sampleCount === 0
+  const latestVerifiedComparison = latestVerifiedForecastComparison(
+    eligiblePredictions,
+    actualByDate,
+  );
+  const sampleModelStatus = sampleCount === 0
     ? 'provisional'
     : sampleCount >= 30 && monthlyReconciled
       ? 'validated'
       : 'learning';
+  const modelStatus = latestVerifiedComparison?.outcome === 'miss'
+    ? 'provisional'
+    : sampleModelStatus;
+  const modelStatusReason = latestVerifiedComparison?.outcome === 'miss'
+    ? 'latest_verified_forecast_miss'
+    : sampleModelStatus === 'provisional'
+      ? 'no_verified_forecast_matches'
+      : sampleModelStatus === 'learning'
+        ? 'calibration_in_progress'
+        : null;
   const evidenceAvailable = Boolean(
     latestPrediction
     || currentActuals.length
-    || unpaidActuals.length,
+    || unpaidActuals.length
+    || mtdCoverage
   );
-  const available = evidenceAvailable && !lastError;
+  const available = evidenceAvailable;
   const modelGuardDecision = calculateInterestGuardReserve({
     liveAccruedCash: 0,
     liveAccruedVerified: true,
@@ -816,11 +1793,15 @@ function buildDerivedSummary({
     accountFingerprint: config.accountFingerprint,
     accountMasked: config.accountMasked,
     available,
+    actionable: false,
     status: available ? modelStatus : 'unavailable',
     modelStatus,
+    modelStatusReason,
+    capabilities: flexCapabilities,
     monthlyReconciled,
     mtd: {
-      verifiedDebit: available
+      status: mtdCoverage ? 'verified' : (mtdError ? 'unavailable' : 'awaiting'),
+      verifiedDebit: mtdCoverage
         ? Number(
           currentActuals
             .reduce((total, row) => total + row.debitAmount, 0)
@@ -831,18 +1812,96 @@ function buildDerivedSummary({
         && latestObservationFresh
         ? latestObservation.liveAccruedCash
         : null,
-      actualDayCount: currentActuals.length,
+      liveNetAccruedStatus: available && latestObservationFresh
+        ? 'live'
+        : 'unavailable',
+      liveNetAccruedObservedAt: available && latestObservationFresh
+        ? latestObservation.observedAt
+        : null,
+      liveNetAccruedSource: available && latestObservationFresh
+        ? latestObservation.source || 'ibkr_live_interest_observation'
+        : null,
+      actualDayCount: currentActuals.reduce(
+        (total, row) => total + Math.max(1, Number(row.accrualDays) || 1),
+        0,
+      ),
+      throughDate: mtdCoverage?.mtdThroughDate || null,
     },
-    latest: available && (latestPrediction || latestActual)
+    forecast: (() => {
+      const prediction = verifiedPredictionCoveringDate(
+        predictions,
+        currentNyDate,
+      );
+      const coverage = prediction ? coveredValueDates(prediction) : [];
+      return prediction
+        ? {
+            status: 'issued',
+            valueDate: prediction.valueDate,
+            activeForDate: currentNyDate,
+            coveredValueDates: coverage,
+            coverageFrom: coverage[0] || null,
+            coverageThrough: coverage.at(-1) || null,
+            basisSessionDate: prediction.basisSessionDate
+              || prediction.valueDate,
+            cashAnchorDate: prediction.cashAnchorDate
+              || prediction.basisSessionDate
+              || prediction.valueDate,
+            nextSessionDate: prediction.nextSessionDate || null,
+            kind: prediction.kind || prediction.forecastKind
+              || 'completed_session_window',
+            principal: prediction.principal ?? null,
+            lower: forecastBand(prediction).lower,
+            point: prediction.point ?? null,
+            upper: prediction.upper ?? null,
+            accrualDays: prediction.accrualDays ?? null,
+            effectiveAnnualRate: prediction.effectiveAnnualRate ?? null,
+            issuedAt: prediction.issuedAt || null,
+            rateEvidence: prediction.rateEvidence || null,
+          }
+        : {
+            status: forecastError ? 'unavailable' : 'awaiting',
+            valueDate: currentNyDate,
+            activeForDate: currentNyDate,
+            coveredValueDates: [],
+            coverageFrom: null,
+            coverageThrough: null,
+            basisSessionDate: null,
+            cashAnchorDate: null,
+            nextSessionDate: null,
+            kind: null,
+            principal: null,
+            lower: null,
+            point: null,
+            upper: null,
+            accrualDays: null,
+            effectiveAnnualRate: null,
+            issuedAt: null,
+            rateEvidence: null,
+          };
+    })(),
+    comparison: (() => {
+      const prediction = latestPrediction;
+      const actual = prediction
+        ? matchedActualForPrediction(prediction, actualByDate)
+        : null;
+      const verified = actualWasObservedAfterPrediction(prediction, actual)
+        ? verifiedForecastComparison(prediction, actual)
+        : null;
+      if (verified) return { ...verified, lastVerified: verified };
+      return pendingForecastComparison(prediction, latestVerifiedComparison);
+    })(),
+    stockBorrowFees,
+    latest: available && (latestPrediction || latestMatchedActual)
       ? {
-          valueDate: latestPrediction?.valueDate || latestActual?.valueDate || null,
+          valueDate: latestPrediction?.valueDate || latestMatchedActual?.valueDate || null,
           issuedAt: latestPrediction?.issuedAt || null,
           raw: latestPrediction?.raw ?? null,
+          lower: latestPrediction ? forecastBand(latestPrediction).lower : null,
           point: latestPrediction?.point ?? null,
           upper: latestPrediction?.upper ?? null,
-          actual: latestActual?.debitAmount ?? null,
-          residual: latestPrediction && latestActual
-            ? Number((latestActual.debitAmount - latestPrediction.point).toFixed(2))
+          actual: latestMatchedActual?.debitAmount ?? null,
+          residual: latestPrediction && latestMatchedActual
+            ? Number((latestMatchedActual.debitAmount - latestPrediction.point).toFixed(2))
             : null,
           accrualDays: latestPrediction?.accrualDays ?? null,
         }
@@ -880,6 +1939,11 @@ function buildDerivedSummary({
     },
     lastRun,
     lastError,
+    channelErrors: {
+      mtd: mtdError,
+      forecast: forecastError,
+      stockBorrowFees: mtdError,
+    },
   };
 }
 
@@ -891,6 +1955,9 @@ function createIbkrInterestValidationService({
   sidecarRequestImpl = sidecarRequest,
   store: injectedStore = null,
   flexService: injectedFlexService = null,
+  officialRateFetchImpl = global.fetch,
+  fetchOfficialScheduleImpl = fetchOfficialUsdProMarginSchedule,
+  evidenceReader: injectedEvidenceReader = null,
   logger = console,
 } = {}) {
   const config = getConfig(env);
@@ -911,21 +1978,96 @@ function createIbkrInterestValidationService({
     started: false,
     timer: null,
     inFlight: null,
-    lastFlexSyncDate: null,
+    flexSyncSlotsByDate: new Map(),
     lastForecastAttemptAtMs: null,
-    lastForecastIneligibleDate: null,
     lastRun: null,
     lastError: null,
+    mtdError: null,
+    forecastError: null,
+    latestBalanceObservation: null,
   };
+  let evidenceReader = injectedEvidenceReader;
+
+  function reader() {
+    if (!evidenceReader) {
+      const { createIbkrInterestEvidenceWorkerService } = require('./ibkrInterestEvidenceWorkerService.cjs');
+      evidenceReader = createIbkrInterestEvidenceWorkerService({ env });
+    }
+    return evidenceReader;
+  }
 
   function flexSnapshots() {
     return flexService.history({ limit: 50 });
   }
 
-  function persistSummary() {
+  function recordBalanceObservation(snapshot) {
+    if (!config.enabled || !config.expectedAccountId) {
+      return {
+        appended: false,
+        reason: 'interest_validation_disabled',
+      };
+    }
+    const reportedAccount = String(
+      snapshot?.accountId || snapshot?.account || '',
+    ).trim();
+    if (reportedAccount !== config.expectedAccountId) {
+      return {
+        appended: false,
+        reason: 'interest_balance_observation_account_mismatch',
+      };
+    }
+    const observation = requireLiveBalanceInterestObservation(
+      snapshot,
+      config.expectedAccountId,
+      { now: now(), timeZone: config.timeZone },
+    );
+    const normalizedValue = Number(observation.liveAccruedCash.toFixed(8));
+    state.latestBalanceObservation = {
+      modelVersion: MODEL_VERSION,
+      source: 'ibkr_live_portfolio_balance',
+      sessionDate: observation.sessionDate,
+      observedAt: observation.observedAt,
+      socketVerifiedAt: observation.socketVerifiedAt,
+      accountFingerprint: config.accountFingerprint,
+      liveAccruedCash: normalizedValue,
+      verified: true,
+    };
+    const alreadyRecorded = store.readRecords('observations').some((row) => {
+      const storedValue = finite(row?.liveAccruedCash);
+      return (
+        row?.verified === true
+        && row?.sessionDate === observation.sessionDate
+        && storedValue !== null
+        && Number(storedValue.toFixed(8)) === normalizedValue
+      );
+    });
+    if (alreadyRecorded) {
+      return {
+        appended: false,
+        reason: 'interest_balance_observation_unchanged',
+      };
+    }
+    return store.appendRecord('observations', {
+      identity: [
+        'balance',
+        observation.sessionDate,
+        normalizedValue.toFixed(8),
+      ].join('|'),
+      modelVersion: MODEL_VERSION,
+      source: 'ibkr_live_portfolio_balance',
+      sessionDate: observation.sessionDate,
+      observedAt: observation.observedAt,
+      socketVerifiedAt: observation.socketVerifiedAt,
+      accountFingerprint: config.accountFingerprint,
+      liveAccruedCash: normalizedValue,
+      verified: true,
+    });
+  }
+
+  function persistSummary(readSnapshots = flexSnapshots) {
     let snapshots = [];
     try {
-      snapshots = flexSnapshots();
+      snapshots = readSnapshots();
     } catch (error) {
       state.lastError = safePublicError(error);
     }
@@ -934,8 +2076,11 @@ function createIbkrInterestValidationService({
       store,
       flexSnapshots: snapshots,
       generatedAt: now().toISOString(),
+      latestLiveObservation: state.latestBalanceObservation,
       lastRun: state.lastRun,
       lastError: state.lastError,
+      mtdError: state.mtdError,
+      forecastError: state.forecastError,
     });
     store.writeSummary(summary);
     return summary;
@@ -944,29 +2089,39 @@ function createIbkrInterestValidationService({
   async function syncFlexIfDue(parts, { force = false } = {}) {
     const status = flexService.status();
     if (!status.enabled || !status.configured) return null;
-    const due = force || (
-      afterMinute(parts, (6 * 60) + 30)
-      && state.lastFlexSyncDate !== parts.date
-    );
-    if (!due) return null;
-    const snapshot = await flexService.sync({
-      fromDate: addUtcDays(parts.date, -(LOOKBACK_DAYS - 1)),
-      toDate: parts.date,
-    });
-    state.lastFlexSyncDate = parts.date;
+    const completedSlots = state.flexSyncSlotsByDate.get(parts.date) || new Set();
+    const slot = force
+      ? { id: `force:${now().toISOString()}`, minuteOfDay: 0 }
+      : FLEX_SYNC_SLOTS
+        .filter((candidate) => afterMinute(parts, candidate.minuteOfDay))
+        .at(-1);
+    if (!slot || completedSlots.has(slot.id)) return null;
+    if (!force && slot !== FLEX_SYNC_SLOTS[0] && completedSlots.size > 0) {
+      const actualByDate = latestByDate(store.readRecords('actuals'));
+      const hasOutstandingForecast = store.readRecords('predictions').some(
+        (prediction) => (
+          prediction.prospective === true
+          && prediction.verified === true
+          && !matchedActualForPrediction(prediction, actualByDate)
+        ),
+      );
+      if (!hasOutstandingForecast) {
+        completedSlots.add(slot.id);
+        state.flexSyncSlotsByDate.set(parts.date, completedSlots);
+        return null;
+      }
+    }
+    const snapshot = await flexService.sync(flexReportingRange(parts));
+    completedSlots.add(slot.id);
+    state.flexSyncSlotsByDate.set(parts.date, completedSlots);
     ingestFlexSnapshots(store, [snapshot]);
     return snapshot;
   }
 
-  async function issueForecastIfDue(parts, { force = false } = {}) {
-    if (!force && !afterMinute(parts, (16 * 60) + 30)) return null;
-    if (
-      !force
-      && !['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(parts.weekday)
-    ) {
-      return null;
-    }
-    if (!force && state.lastForecastIneligibleDate === parts.date) {
+  async function issueForecastIfDue(parts, { force = false, readSnapshots = flexSnapshots } = {}) {
+    if (!forecastAttemptWindowOpen(parts, force)) return null;
+    const existingPredictions = store.readRecords('predictions');
+    if (verifiedPredictionCoveringDate(existingPredictions, parts.date)) {
       return null;
     }
     const attemptAt = now().getTime();
@@ -977,9 +2132,6 @@ function createIbkrInterestValidationService({
     ) {
       return null;
     }
-    const existing = store.readRecords('predictions')
-      .some((prediction) => prediction.valueDate === parts.date);
-    if (existing) return null;
     state.lastForecastAttemptAtMs = attemptAt;
 
     const response = await sidecarRequestImpl(
@@ -996,23 +2148,45 @@ function createIbkrInterestValidationService({
       error.code = 'interest_observation_session_mismatch';
       throw error;
     }
-    const snapshots = flexSnapshots();
-    const tierEvidence = latestVerifiedTierSchedule(
-      snapshots,
-      observation.sessionDate,
-    );
-    if (!tierEvidence) {
-      const error = new Error('No recent verified account-specific debit-interest tiers are available.');
-      error.code = 'interest_rate_evidence_unavailable';
-      throw error;
+    const observationCoverage = {
+      valueDate: observation.sessionDate,
+      accrualDays: observation.accrualDays,
+      coveredValueDates: Array.from(
+        { length: observation.accrualDays },
+        (_value, index) => addUtcDays(observation.sessionDate, index),
+      ),
+    };
+    if (predictionCoverageOverlaps(observationCoverage, existingPredictions)) {
+      return null;
     }
+    store.appendRecord('observations', {
+      identity: `${observation.sessionDate}|${observation.evidenceHash}`,
+      modelVersion: MODEL_VERSION,
+      source: 'ibkr_live_interest_observation',
+      sessionDate: observation.sessionDate,
+      observedAt: observation.observedAt,
+      socketVerifiedAt: observation.socketVerifiedAt,
+      evidenceHash: observation.evidenceHash,
+      accountFingerprint: config.accountFingerprint,
+      liveAccruedCash: observation.liveAccruedCash,
+      verified: true,
+    });
+    const snapshots = readSnapshots();
+    const tierEvidence = await resolveDebitRateEvidence({
+      snapshots,
+      sessionDate: observation.sessionDate,
+      fetchOfficialSchedule: () => fetchOfficialScheduleImpl({
+        fetchImpl: officialRateFetchImpl,
+        now,
+      }),
+    });
     const predictions = store.readRecords('predictions');
     const actuals = store.readRecords('actuals');
     const matches = buildMatches(predictions, actuals);
     const monthlyReconciled = hasMonthlyReconciliation(snapshots);
     const forecast = forecastIbkrDebitInterest({
       currency: observation.currency,
-      positionScope: 'stocks_only',
+      positionScope: observation.positionScope,
       accountInputsVerified: true,
       providerStatus: 'live',
       fromCache: false,
@@ -1026,6 +2200,14 @@ function createIbkrInterestValidationService({
         securitiesCash: observation.securitiesCash,
         ibuklCash: observation.ibuklCash,
         commoditiesCash: observation.commoditiesCash,
+        eventMarketValue: observation.eventMarketValue,
+        eventAccountingVerified: observation.eventAccountingVerified,
+        ...(observation.commodityAvailableFunds === null
+          ? {}
+          : {
+              commodityAvailableFunds:
+                observation.commodityAvailableFunds,
+            }),
         commodityMaintenanceMargin: observation.commodityMaintenanceMargin,
         shortPositions: observation.shortPositions,
         providerStatus: 'live',
@@ -1043,42 +2225,42 @@ function createIbkrInterestValidationService({
       throw error;
     }
     if (
-      forecast.principal > tierEvidence.observedPrincipalCoverage + 0.01
+      Number.isFinite(tierEvidence.observedPrincipalCoverage)
+      && forecast.principal > tierEvidence.observedPrincipalCoverage + 0.01
     ) {
       const error = new Error('Forecast principal exceeded the verified Flex tier coverage.');
       error.code = 'interest_tier_coverage_exceeded';
       throw error;
     }
 
-    store.appendRecord('observations', {
-      identity: `${observation.sessionDate}|${observation.evidenceHash}`,
-      modelVersion: MODEL_VERSION,
-      sessionDate: observation.sessionDate,
-      observedAt: observation.observedAt,
-      socketVerifiedAt: observation.socketVerifiedAt,
-      evidenceHash: observation.evidenceHash,
-      accountFingerprint: config.accountFingerprint,
-      liveAccruedCash: observation.liveAccruedCash,
-      verified: true,
-    });
+    const principalDays = forecast.segmentDetails.reduce(
+      (total, period) => total + (period.principal * period.accrualDays),
+      0,
+    );
+    const effectiveAnnualRate = principalDays > 0
+      ? (forecast.raw * 360) / principalDays
+      : tierEvidence.tiers[0]?.annualRate ?? null;
     return store.appendRecord('predictions', {
       identity: observation.sessionDate,
       modelVersion: MODEL_VERSION,
       valueDate: observation.sessionDate,
+      basisSessionDate: observation.basisSessionDate,
+      cashAnchorDate: observation.cashAnchorDate,
       nextSessionDate: observation.nextSessionDate,
-      coveredValueDates: Array.from(
-        { length: observation.accrualDays },
-        (_value, index) => addUtcDays(observation.sessionDate, index),
-      ),
+      kind: observation.forecastKind,
+      coveredValueDates: observationCoverage.coveredValueDates,
       issuedAt: now().toISOString(),
       prospective: true,
       verified: true,
       evidenceHash: observation.evidenceHash,
       rateEvidenceDate: tierEvidence.rateDate,
       rateReportHash: tierEvidence.reportHash,
+      rateEvidence: tierEvidence.rateEvidence,
+      effectiveAnnualRate,
       accrualDays: forecast.accrualDays,
       currency: forecast.currency,
       raw: forecast.raw,
+      lower: Number(Math.max(0, forecast.point - forecast.cushion).toFixed(2)),
       point: forecast.point,
       upper: forecast.upper,
       cushion: forecast.cushion,
@@ -1089,6 +2271,7 @@ function createIbkrInterestValidationService({
       biasPerDay: forecast.biasPerDay,
       q95UnderpredictionPerDay: forecast.q95UnderpredictionPerDay,
       segmentDetails: forecast.segmentDetails,
+      positionScope: forecast.positionScope,
     }).record;
   }
 
@@ -1113,26 +2296,43 @@ function createIbkrInterestValidationService({
     state.inFlight = (async () => {
       const startedAt = now();
       const parts = nyParts(startedAt, config.timeZone);
+      if (state.forecastError?.date && state.forecastError.date !== parts.date) {
+        state.forecastError = null;
+      }
       let flexSynced = false;
       let forecastIssued = false;
       const errors = [];
+      let snapshots;
+      let snapshotsError;
+      let snapshotsRead = false;
+      // Capture one freshly validated accounting history after this run's
+      // optional Flex sync. Ingest, forecast and summary use exactly that
+      // evidence; the next run revalidates the files independently.
+      const readSnapshots = () => {
+        if (!snapshotsRead) {
+          snapshotsRead = true;
+          try { snapshots = flexSnapshots(); }
+          catch (error) { snapshotsError = error; }
+        }
+        if (snapshotsError) throw snapshotsError;
+        return snapshots;
+      };
       try {
         try {
           flexSynced = Boolean(await syncFlexIfDue(parts, { force }));
+          if (flexSynced) state.mtdError = null;
         } catch (error) {
-          errors.push(safePublicError(error));
+          state.mtdError = safePublicError(error);
+          errors.push(state.mtdError);
         }
-        ingestFlexSnapshots(store, flexSnapshots());
+        ingestFlexSnapshots(store, readSnapshots());
         try {
-          forecastIssued = Boolean(await issueForecastIfDue(parts, { force }));
+          forecastIssued = Boolean(await issueForecastIfDue(parts, { force, readSnapshots }));
+          if (forecastIssued) state.forecastError = null;
         } catch (error) {
-          if (error.code === 'interest_observation_forecast_ineligible') {
-            state.lastForecastIneligibleDate = parts.date;
-          }
           if (
             error.code !== 'interest_observation_forecast_ineligible'
-            && afterMinute(parts, (16 * 60) + 30)
-            && ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(parts.weekday)
+            && forecastAttemptWindowOpen(parts, force)
           ) {
             store.appendRecord('misses', {
               identity: `${parts.date}|${error.code || 'unavailable'}`,
@@ -1141,7 +2341,11 @@ function createIbkrInterestValidationService({
               reason: error.code || 'interest_forecast_unavailable',
             });
           }
-          errors.push(safePublicError(error));
+          state.forecastError = {
+            ...safePublicError(error),
+            date: parts.date,
+          };
+          errors.push(state.forecastError);
         }
         state.lastRun = {
           trigger,
@@ -1156,7 +2360,7 @@ function createIbkrInterestValidationService({
         } else if (flexSynced || forecastIssued) {
           state.lastError = null;
         }
-        return persistSummary();
+        return persistSummary(readSnapshots);
       } catch (error) {
         state.lastError = safePublicError(error);
         state.lastRun = {
@@ -1167,7 +2371,7 @@ function createIbkrInterestValidationService({
           forecastIssued,
           status: 'failed',
         };
-        return persistSummary();
+        return persistSummary(readSnapshots);
       }
     })();
     try {
@@ -1178,19 +2382,38 @@ function createIbkrInterestValidationService({
     }
   }
 
-  function getStatus({ account = null } = {}) {
+  function readStatusEvidence({ account = null } = {}) {
+    const requestedAccount = String(account || config.expectedAccountId || '').trim();
+    const flexStatus = flexService.status();
+    let summary = null;
+    let summaryError = null;
+    let storedLatestObservation = null;
+    let observationError = null;
+    try { summary = store.readSummary(); }
+    catch (error) { summaryError = safePublicError(error); }
+    if (summary && summary.source === SOURCE
+      && summary.accountFingerprint === config.accountFingerprint
+      && config.enabled && requestedAccount === config.expectedAccountId
+      && flexStatus.configured === true && flexStatus.status !== 'storage_error') {
+      try { storedLatestObservation = store.readRecords('observations').at(-1) || null; }
+      catch (error) { observationError = safePublicError(error); }
+    }
+    return { flexStatus, summary, summaryError, storedLatestObservation, observationError };
+  }
+
+  function getStatus({ account = null } = {}, evidence = readStatusEvidence({ account }),
+    { transientEvidence = false, preferCurrentLiveObservation = false } = {}) {
     const requestedAccount = String(account || config.expectedAccountId || '').trim();
     const accountMatched = Boolean(
       requestedAccount
       && config.expectedAccountId
       && requestedAccount === config.expectedAccountId
     );
-    const flexStatus = flexService.status();
-    let summary = null;
-    try {
-      summary = store.readSummary();
-    } catch (error) {
-      state.lastError = safePublicError(error);
+    const { flexStatus, summary } = evidence;
+    let statusError = state.lastError;
+    if (evidence.summaryError) {
+      statusError = evidence.summaryError;
+      if (!transientEvidence) state.lastError = statusError;
     }
     const base = {
       source: SOURCE,
@@ -1201,17 +2424,78 @@ function createIbkrInterestValidationService({
       accountMatched,
       accountMasked: config.accountMasked,
       available: false,
+      actionable: false,
       status: !config.enabled
         ? 'disabled'
         : !accountMatched
           ? 'unavailable'
           : 'unavailable',
       modelStatus: 'provisional',
+      modelStatusReason: 'interest_validation_unavailable',
+      capabilities: {
+        ready: false,
+        status: 'unavailable',
+        requiredSections: {
+          tierInterestDetails: false,
+          interestAccruals: false,
+          cashTransactions: false,
+          cashReport: false,
+        },
+        optionalSections: {
+          stockBorrowFeeDetails: false,
+        },
+        missingSections: [
+          'tierInterestDetails',
+          'interestAccruals',
+          'cashTransactions',
+          'cashReport',
+        ],
+        evidence: null,
+      },
       mtd: {
+        status: 'unavailable',
         verifiedDebit: null,
         liveNetAccrued: null,
+        liveNetAccruedStatus: 'unavailable',
+        liveNetAccruedObservedAt: null,
+        liveNetAccruedSource: null,
         actualDayCount: 0,
+        throughDate: null,
       },
+      forecast: {
+        status: 'unavailable',
+        valueDate: null,
+        activeForDate: null,
+        coveredValueDates: [],
+        coverageFrom: null,
+        coverageThrough: null,
+        basisSessionDate: null,
+        cashAnchorDate: null,
+        nextSessionDate: null,
+        kind: null,
+        principal: null,
+        lower: null,
+        point: null,
+        upper: null,
+        accrualDays: null,
+        effectiveAnnualRate: null,
+        issuedAt: null,
+        rateEvidence: null,
+      },
+      comparison: {
+        status: 'awaiting',
+        outcome: 'pending',
+        valueDate: null,
+        forecastLower: null,
+        forecastPoint: null,
+        forecastUpper: null,
+        actual: null,
+        residual: null,
+        issuedAt: null,
+        verifiedAt: null,
+        lastVerified: null,
+      },
+      stockBorrowFees: emptyStockBorrowFees('unavailable', 'interest_validation_unavailable'),
       latest: null,
       calibration: {
         sampleCount: 0,
@@ -1237,7 +2521,7 @@ function createIbkrInterestValidationService({
         started: state.started,
         last: state.lastRun,
       },
-      error: state.lastError,
+      error: statusError,
     };
     if (
       !summary
@@ -1254,9 +2538,59 @@ function createIbkrInterestValidationService({
       accountFingerprint: _accountFingerprint,
       ...publicSummary
     } = summary;
+    const { storedLatestObservation } = evidence;
+    if (evidence.observationError) {
+      statusError = evidence.observationError;
+      if (!transientEvidence) state.lastError = statusError;
+    }
+    const currentObservation = state.latestBalanceObservation;
+    const observations = preferCurrentLiveObservation && currentObservation
+      && Date.parse(currentObservation.observedAt) === Date.parse(storedLatestObservation?.observedAt)
+      ? [currentObservation]
+      : [storedLatestObservation, currentObservation];
+    const liveObservation = freshestLiveAccruedObservation(
+      observations.filter(Boolean),
+      now().getTime(),
+    );
+    const liveAvailable = publicSummary.available === true && Boolean(liveObservation);
+    const liveGuard = liveAvailable
+      ? calculateInterestGuardReserve({
+          liveAccruedCash: liveObservation.liveAccruedCash,
+          liveAccruedVerified: true,
+          verifiedUnpaidDebit: publicSummary.guard?.verifiedUnpaidDebit,
+          unpaidDebitVerified: publicSummary.available === true,
+          unreportedUpper: publicSummary.guard?.unreportedUpper,
+          unreportedUpperVerified: publicSummary.available === true,
+        })
+      : null;
+    const currentSummary = {
+      ...publicSummary,
+      mtd: {
+        ...publicSummary.mtd,
+        liveNetAccrued: liveAvailable
+          ? liveObservation.liveAccruedCash
+          : null,
+        liveNetAccruedStatus: liveAvailable ? 'live' : 'unavailable',
+        liveNetAccruedObservedAt: liveAvailable
+          ? liveObservation.observedAt
+          : null,
+        liveNetAccruedSource: liveAvailable
+          ? liveObservation.source || 'ibkr_live_interest_observation'
+          : null,
+      },
+      guard: {
+        ...publicSummary.guard,
+        liveNegativeAccrued: liveGuard?.available === true
+          ? liveGuard.liveNegativeAccrued
+          : null,
+        combinedReserve: liveGuard?.available === true
+          ? liveGuard.reserve
+          : null,
+      },
+    };
     return {
       ...base,
-      ...publicSummary,
+      ...currentSummary,
       accountMatched: true,
       flex: flexStatus,
       run: {
@@ -1264,19 +2598,52 @@ function createIbkrInterestValidationService({
         started: state.started,
         last: state.lastRun || summary.lastRun || null,
       },
-      error: state.lastError || summary.lastError || null,
+      error: statusError || summary.lastError || null,
     };
   }
 
   function history({ limit = 90 } = {}) {
     const normalizedLimit = Math.max(1, Math.min(366, Number(limit) || 90));
     const stored = store.history({ limit: normalizedLimit });
+    const seenObservationValues = new Set();
     return {
       source: SOURCE,
       modelVersion: MODEL_VERSION,
       generatedAt: now().toISOString(),
+      observations: stored.observations
+        .filter((row) => (
+          row?.verified === true
+          && isoDate(row.sessionDate)
+          && Number.isFinite(finite(row.liveAccruedCash))
+          && Number.isFinite(Date.parse(String(row.observedAt || '')))
+        ))
+        .sort((left, right) => (
+          String(left.observedAt).localeCompare(String(right.observedAt))
+          || Number(left.sequence || 0) - Number(right.sequence || 0)
+        ))
+        .filter((row) => {
+          const value = finite(row.liveAccruedCash);
+          const identity = `${row.sessionDate}|${Number(value.toFixed(8)).toFixed(8)}`;
+          if (seenObservationValues.has(identity)) return false;
+          seenObservationValues.add(identity);
+          return true;
+        })
+        .map((row) => ({
+          sessionDate: row.sessionDate,
+          observedAt: row.observedAt,
+          liveNetAccrued: finite(row.liveAccruedCash),
+          source: row.source || 'ibkr_live_interest_observation',
+        })),
       predictions: stored.predictions.map((row) => ({
         valueDate: row.valueDate,
+        coveredValueDates: coveredValueDates(row),
+        basisSessionDate: row.basisSessionDate || row.valueDate || null,
+        cashAnchorDate: row.cashAnchorDate
+          || row.basisSessionDate
+          || row.valueDate
+          || null,
+        nextSessionDate: row.nextSessionDate || null,
+        kind: row.kind || row.forecastKind || 'completed_session_window',
         issuedAt: row.issuedAt,
         status: row.status,
         raw: row.raw,
@@ -1300,6 +2667,28 @@ function createIbkrInterestValidationService({
         reason: row.reason,
       })),
     };
+  }
+
+  async function getStatusAsync(options = {}) {
+    const observationBeforeRead = state.latestBalanceObservation;
+    const evidence = await reader().readStatus({ ...options, now: now().toISOString() });
+    // The worker verifies disk evidence; current live observation and run state
+    // belong to this process and are evaluated only after that fresh read.
+    evidence.flexStatus.syncInProgress = flexService.status({ includeStored: false }).syncInProgress;
+    return getStatus(options, evidence, { transientEvidence: true,
+      preferCurrentLiveObservation: state.latestBalanceObservation !== observationBeforeRead });
+  }
+
+  function historyAsync(options = {}) {
+    return reader().readHistory({ ...options, now: now().toISOString() });
+  }
+
+  function readLedgerAsync(options = {}) {
+    return reader().readLedger({ ...options, now: now().toISOString() });
+  }
+
+  async function closeEvidenceReader() {
+    await evidenceReader?.close();
   }
 
   async function poll() {
@@ -1329,8 +2718,14 @@ function createIbkrInterestValidationService({
   return {
     getConfig: () => ({ ...config }),
     getStatus,
+    getStatusAsync,
+    readStatusEvidence,
     history,
+    historyAsync,
+    readLedgerAsync,
+    closeEvidenceReader,
     poll,
+    recordBalanceObservation,
     run,
     start,
     stop,
@@ -1341,19 +2736,32 @@ const singleton = createIbkrInterestValidationService();
 
 module.exports = {
   LOOKBACK_DAYS,
+  FLEX_SYNC_SLOTS,
   MODEL_VERSION,
   SOURCE,
   buildDerivedSummary,
   buildMatches,
+  buildStockBorrowFeeSummary,
   createIbkrInterestValidationService,
+  flexReportingRange,
   getConfig,
   hasMonthlyReconciliation,
   latestVerifiedTierSchedule,
+  corroborateIbkrProSchedule,
+  resolveDebitRateEvidence,
   nyParts,
   remainingPredictionUpper,
+  requireLiveBalanceInterestObservation,
   requireLiveObservation,
   getIbkrInterestValidationStatus: (options) => singleton.getStatus(options),
+  getIbkrInterestValidationStatusAsync: (options) => singleton.getStatusAsync(options),
   getIbkrInterestValidationHistory: (options) => singleton.history(options),
+  getIbkrInterestValidationHistoryAsync: (options) => singleton.historyAsync(options),
+  readPrivateInterestLedgerAsync: (options) => singleton.readLedgerAsync(options),
+  closeIbkrInterestEvidenceWorker: () => singleton.closeEvidenceReader(),
+  recordIbkrInterestBalanceObservation: (snapshot) => (
+    singleton.recordBalanceObservation(snapshot)
+  ),
   runIbkrInterestValidation: (options) => singleton.run(options),
   startIbkrInterestValidation: () => singleton.start(),
   stopIbkrInterestValidation: () => singleton.stop(),

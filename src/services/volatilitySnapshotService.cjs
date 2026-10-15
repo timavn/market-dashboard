@@ -1,16 +1,53 @@
 const { zonedTimeToUtc } = require('date-fns-tz');
+const fs = require('fs');
+const path = require('path');
+const VOLATILITY_FRESHNESS = require('../constants/volatilityFreshness.json');
+const {
+  addCalendarDays,
+  isTradingDateKey,
+  previousTradingDateKey,
+} = require('../utils/usEquityMarketCalendar.cjs');
 
 const NEW_YORK_TIME_ZONE = 'America/New_York';
+const NEW_YORK_PARTS_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: NEW_YORK_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
 const CBOE_HISTORY_CACHE_TTL_MS = 15 * 60 * 1000;
-const CBOE_MAX_QUOTE_AGE_MS = 30 * 60 * 1000;
+// Cboe's index dashboards publish quotes and daily history on cdn-api.
+// The legacy cdn hostname still returns HTTP 200 with frozen observations.
+const CBOE_API_BASE_URL = 'https://cdn-api.cboe.com';
+const CBOE_MAX_QUOTE_AGE_MS = Number(VOLATILITY_FRESHNESS.maxAgeMs);
+const PROVIDER_REQUEST_ATTEMPTS = 2;
+const REFERENCE_FILE_PATH = path.join(__dirname, '../../data/volatility-reference/last-verified-v1.json');
+const REJECTED_EVIDENCE_FLAGS = ['mock', 'isMock', 'seed', 'seeded', 'isSeed', 'isSeeded',
+  'synthetic', 'inferred', 'cacheOnly', 'fromCache', 'stale', 'isStale', 'offline', 'disconnected'];
+
+function hasRejectedEvidence(value) {
+  return Boolean(value && (
+    REJECTED_EVIDENCE_FLAGS.some((flag) => value[flag] === true)
+    || value.connected === false
+    || ['source', 'providerStatus', 'dataType', 'cacheStatus'].some((key) => (
+      /(?:^|[\s_-])(mock|seed(?:ed)?|synthetic|inferred|cache(?:d)?|offline|disconnected|error)(?:$|[\s_-])/i
+        .test(String(value[key] || ''))
+    ))
+  ));
+}
 
 const CBOE_SERIES = [
   { name: 'VIX', symbol: 'VIX' },
   { name: 'VVIX', symbol: 'VVIX' },
   { name: 'RVX', symbol: 'RVX' },
   { name: 'NazVol', symbol: 'VXN' },
+  { name: 'VXEEM', symbol: 'VXEEM' },
   { name: 'GVZ', symbol: 'GVZ' },
   { name: 'OVX', symbol: 'OVX' },
+  { name: 'BITVX', symbol: 'BITVX' },
 ];
 
 const NUMERIC_FIELDS = [
@@ -41,6 +78,32 @@ function sameProviderPrice(left, right) {
   const rightPrice = finitePositive(right);
   if (leftPrice == null || rightPrice == null) return false;
   return Math.abs(leftPrice - rightPrice) <= Math.max(0.0001, rightPrice * 0.000001);
+}
+
+function isRetryableProviderError(error) {
+  const status = Number(error?.response?.status);
+  if (Number.isFinite(status)) return status === 408 || status === 429 || status >= 500;
+  const code = String(error?.code || '').trim().toUpperCase();
+  if (['ECONNABORTED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT'].includes(code)) {
+    return true;
+  }
+  // Axios transport failures do not carry a response. Retrying once is safe
+  // for these idempotent provider GETs and prevents a single CDN hiccup from
+  // becoming an unavailable dashboard row.
+  return !error?.response;
+}
+
+async function providerGet(client, url, config, attempts = PROVIDER_REQUEST_ATTEMPTS) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await client.get(url, config);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isRetryableProviderError(error)) throw error;
+    }
+  }
+  throw lastError;
 }
 
 function roundToTwo(value) {
@@ -85,16 +148,7 @@ function parseCboeHistoryCsv(csvText) {
 
 function newYorkParts(dateLike) {
   const date = dateLike instanceof Date ? dateLike : new Date(dateLike);
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: NEW_YORK_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  });
-  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  const parts = Object.fromEntries(NEW_YORK_PARTS_FORMATTER.formatToParts(date).map((part) => [part.type, part.value]));
   return {
     dateKey: `${parts.year}-${parts.month}-${parts.day}`,
     year: Number(parts.year),
@@ -103,86 +157,6 @@ function newYorkParts(dateLike) {
     hour: Number(parts.hour),
     minute: Number(parts.minute),
   };
-}
-
-function dateKeyToUtcDate(dateKey) {
-  return new Date(`${dateKey}T12:00:00.000Z`);
-}
-
-function addCalendarDays(dateKey, days) {
-  const date = dateKeyToUtcDate(dateKey);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function observedFixedHoliday(year, monthIndex, day) {
-  const date = new Date(Date.UTC(year, monthIndex, day));
-  if (date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() - 1);
-  if (date.getUTCDay() === 0) date.setUTCDate(date.getUTCDate() + 1);
-  return date.toISOString().slice(0, 10);
-}
-
-function nthWeekdayOfMonth(year, monthIndex, weekday, occurrence) {
-  const date = new Date(Date.UTC(year, monthIndex, 1));
-  const offset = (weekday - date.getUTCDay() + 7) % 7;
-  date.setUTCDate(1 + offset + ((occurrence - 1) * 7));
-  return date.toISOString().slice(0, 10);
-}
-
-function lastWeekdayOfMonth(year, monthIndex, weekday) {
-  const date = new Date(Date.UTC(year, monthIndex + 1, 0));
-  const offset = (date.getUTCDay() - weekday + 7) % 7;
-  date.setUTCDate(date.getUTCDate() - offset);
-  return date.toISOString().slice(0, 10);
-}
-
-function easterSundayDateKey(year) {
-  const a = year % 19;
-  const b = Math.floor(year / 100);
-  const c = year % 100;
-  const d = Math.floor(b / 4);
-  const e = b % 4;
-  const f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3);
-  const h = ((19 * a) + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4);
-  const k = c % 4;
-  const l = (32 + (2 * e) + (2 * i) - h - k) % 7;
-  const m = Math.floor((a + (11 * h) + (22 * l)) / 451);
-  const month = Math.floor((h + l - (7 * m) + 114) / 31);
-  const day = ((h + l - (7 * m) + 114) % 31) + 1;
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-function marketHolidayKeys(year) {
-  const keys = new Set([
-    observedFixedHoliday(year, 0, 1),
-    nthWeekdayOfMonth(year, 0, 1, 3),
-    nthWeekdayOfMonth(year, 1, 1, 3),
-    addCalendarDays(easterSundayDateKey(year), -2),
-    lastWeekdayOfMonth(year, 4, 1),
-    observedFixedHoliday(year, 6, 4),
-    nthWeekdayOfMonth(year, 8, 1, 1),
-    nthWeekdayOfMonth(year, 10, 4, 4),
-    observedFixedHoliday(year, 11, 25),
-  ]);
-  if (year >= 2022) keys.add(observedFixedHoliday(year, 5, 19));
-  // A Saturday New Year's Day is observed on December 31 of the prior year.
-  keys.add(observedFixedHoliday(year + 1, 0, 1));
-  return keys;
-}
-
-function isTradingDateKey(dateKey) {
-  const date = dateKeyToUtcDate(dateKey);
-  const weekday = date.getUTCDay();
-  if (weekday === 0 || weekday === 6) return false;
-  return !marketHolidayKeys(date.getUTCFullYear()).has(dateKey);
-}
-
-function previousTradingDateKey(dateKey) {
-  let candidate = addCalendarDays(dateKey, -1);
-  while (!isTradingDateKey(candidate)) candidate = addCalendarDays(candidate, -1);
-  return candidate;
 }
 
 function isUsMarketOpen(now) {
@@ -283,7 +257,15 @@ function computeVolatilityMetrics(rows) {
   };
 }
 
-function unavailableRow({ source, sourceLabel, quoteMode, freshness = 'defective', asOf = null, error = null }) {
+function unavailableRow({
+  source,
+  sourceLabel,
+  quoteMode,
+  freshness = 'defective',
+  asOf = null,
+  error = null,
+  retryable = null,
+}) {
   return {
     ...Object.fromEntries(NUMERIC_FIELDS.map((field) => [field, null])),
     source,
@@ -293,6 +275,7 @@ function unavailableRow({ source, sourceLabel, quoteMode, freshness = 'defective
     availability: 'unavailable',
     freshness,
     ...(error ? { error } : {}),
+    ...(typeof retryable === 'boolean' ? { retryable } : {}),
   };
 }
 
@@ -320,6 +303,37 @@ function historicalRow(metrics, { source, sourceLabel, quoteMode, asOf }) {
   };
 }
 
+// Overview reference evidence does not expire. It retains the provider's exact
+// observation date/time and can never become an executable quote on a refresh.
+function referenceRow(row, reason) {
+  const { retainedUntil, ...observation } = row;
+  return {
+    ...observation,
+    availability: 'reference',
+    freshness: 'refresh-delayed',
+    refreshDelayed: true,
+    displayDelayed: true,
+    displayOnly: true,
+    executable: false,
+    lastVerifiedAt: row.asOf,
+    retentionReason: reason,
+  };
+}
+
+function isVerifiedRow(name, row, currentTime) {
+  if (!row || hasRejectedEvidence(row)) return false;
+  const expectedSource = name === 'MOVE' ? 'yahoo' : 'cboe';
+  const observedAt = Date.parse(String(row.asOf || ''));
+  return row.source === expectedSource
+    && finitePositive(row.lastPx) != null
+    && Number.isFinite(observedAt)
+    && observedAt <= currentTime + 5 * 60 * 1000
+    && (row.availability === 'available' && row.freshness === 'current'
+      || row.availability === 'historical' && row.freshness === 'historical'
+      || row.availability === 'reference' && row.freshness === 'refresh-delayed'
+        && row.displayOnly === true && row.executable === false);
+}
+
 function validatePriorSession(history, quoteDate) {
   const expectedPrior = previousTradingDateKey(quoteDate);
   return history.some((row) => row.date === expectedPrior);
@@ -330,24 +344,85 @@ function createVolatilitySnapshotService({
   now = () => new Date(),
   logger = console,
   historyCacheTtlMs = CBOE_HISTORY_CACHE_TTL_MS,
+  referenceFilePath = REFERENCE_FILE_PATH,
 } = {}) {
   const client = httpClient || require('axios');
   const historyCache = new Map();
+  const verifiedRows = new Map();
+  let inFlightSnapshot = null;
+  let referenceWritePending = false;
+
+  if (referenceFilePath) {
+    try {
+      const stored = JSON.parse(fs.readFileSync(referenceFilePath, 'utf8'));
+      if (stored.schemaVersion === 1) {
+        [...CBOE_SERIES.map(({ name }) => name), 'MOVE'].forEach((name) => {
+          if (isVerifiedRow(name, stored.rows?.[name], now().getTime())) {
+            verifiedRows.set(name, stored.rows[name]);
+          }
+        });
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') logger.warn?.(`[volatility-snapshot] reference read failed: ${error.message}`);
+    }
+  }
+
+  function reconcileRows(entries) {
+    let changed = false;
+    const reconciled = entries.map(([name, incoming]) => {
+      const stored = verifiedRows.get(name);
+      const incomingVerified = isVerifiedRow(name, incoming, now().getTime());
+      if (stored && incoming.historyUnavailable) {
+        return [name, referenceRow(stored, 'history_refresh_unavailable')];
+      }
+      if (incomingVerified && (!stored || Date.parse(incoming.asOf) >= Date.parse(stored.asOf))) {
+        // A truncated history response cannot revoke independently verified
+        // periods for the exact same observation. A revised price must instead
+        // keep only its own calculated periods to avoid combining observations.
+        const row = { ...incoming };
+        if (stored && stored.asOf === incoming.asOf && stored.source === incoming.source
+          && stored.lastPx === incoming.lastPx) {
+          NUMERIC_FIELDS.forEach((field) => {
+            if (row[field] == null && Number.isFinite(stored[field])) row[field] = stored[field];
+          });
+        }
+        if (JSON.stringify(stored) !== JSON.stringify(row)) {
+          verifiedRows.set(name, row);
+          changed = true;
+        }
+        return [name, row];
+      }
+      return [name, stored ? referenceRow(stored,
+        incomingVerified ? 'older_provider_observation' : incoming.error || 'provider_refresh_unavailable') : incoming];
+    });
+    referenceWritePending ||= changed;
+    if (referenceWritePending && referenceFilePath) {
+      try {
+        fs.mkdirSync(path.dirname(referenceFilePath), { recursive: true, mode: 0o700 });
+        const temporaryPath = `${referenceFilePath}.${process.pid}.tmp`;
+        fs.writeFileSync(temporaryPath, JSON.stringify({ schemaVersion: 1, rows: Object.fromEntries(verifiedRows) }), { mode: 0o600 });
+        fs.renameSync(temporaryPath, referenceFilePath);
+        referenceWritePending = false;
+      } catch (error) {
+        logger.warn?.(`[volatility-snapshot] reference write failed: ${error.message}`);
+      }
+    }
+    return reconciled;
+  }
 
   async function fetchCboeHistory(symbol) {
     const currentTime = now().getTime();
     const cached = historyCache.get(symbol);
     if (cached && currentTime - cached.cachedAt < historyCacheTtlMs) return cached.rows;
-    historyCache.delete(symbol);
 
-    const url = `https://cdn.cboe.com/api/global/us_indices/daily_prices/${symbol}_History.csv`;
-    const response = await client.get(url, {
+    const url = `${CBOE_API_BASE_URL}/api/global/us_indices/daily_prices/${symbol}_History.csv`;
+    const response = await providerGet(client, url, {
       responseType: 'text',
       timeout: 12000,
       headers: { 'User-Agent': 'Mozilla/5.0' },
     });
     const rows = parseCboeHistoryCsv(response.data);
-    if (rows.length < 2) throw new Error(`${symbol} history is empty or invalid`);
+    if (rows.length === 0) throw new Error(`${symbol} history is empty or invalid`);
     historyCache.set(symbol, { rows, cachedAt: currentTime });
     return rows;
   }
@@ -359,20 +434,37 @@ function createVolatilitySnapshotService({
       quoteMode: 'delayed',
     };
     try {
-      const [quoteResponse, history] = await Promise.all([
-        client.get(`https://cdn.cboe.com/api/global/delayed_quotes/quotes/_${symbol}.json`, {
+      const [quoteResult, historyResult] = await Promise.allSettled([
+        providerGet(client, `${CBOE_API_BASE_URL}/api/global/delayed_quotes/quotes/_${symbol}.json`, {
           timeout: 12000,
           headers: { 'User-Agent': 'Mozilla/5.0' },
         }),
         fetchCboeHistory(symbol),
       ]);
-      const payload = quoteResponse.data || {};
+      const history = historyResult.status === 'fulfilled'
+        ? historyResult.value : historyCache.get(symbol)?.rows || [];
+      const historicalReference = () => {
+        const completedSession = mostRecentCompletedTradingDateKey(now());
+        const completedRows = history.filter((row) => row.date <= completedSession);
+        if (completedRows.length === 0) return null;
+        const metrics = computeVolatilityMetrics(completedRows)
+          || { ...Object.fromEntries(NUMERIC_FIELDS.map((field) => [field, null])), lastPx: completedRows.at(-1).close };
+        const date = completedRows.at(-1).date;
+        return referenceRow({ ...metrics, ...sourceMeta, asOf: date,
+          asOfPrecision: 'date', marketSessionDate: date, quoteMode: 'end-of-day' }, 'provider_refresh_unavailable');
+      };
+      if (quoteResult.status === 'rejected') {
+        return [name, historicalReference() || unavailableRow({ ...sourceMeta,
+          error: 'provider_error', retryable: isRetryableProviderError(quoteResult.reason) })];
+      }
+      const payload = quoteResult.value.data || {};
       const quote = payload.data || {};
       const currentPrice = finitePositive(quote.current_price);
       const asOf = parseCboeAsOf(quote.last_trade_time, payload.timestamp);
       const freshness = quoteFreshness(asOf, now(), CBOE_MAX_QUOTE_AGE_MS);
-      if (currentPrice == null || !asOf || freshness !== 'current') {
-        return [name, unavailableRow({
+      if (currentPrice == null || !asOf || freshness === 'defective'
+        || hasRejectedEvidence(payload) || hasRejectedEvidence(quote)) {
+        return [name, historicalReference() || unavailableRow({
           ...sourceMeta,
           freshness,
           asOf,
@@ -380,15 +472,29 @@ function createVolatilitySnapshotService({
         })];
       }
       const quoteDate = newYorkParts(asOf).dateKey;
-      if (!validatePriorSession(history, quoteDate)) {
-        return [name, unavailableRow({ ...sourceMeta, asOf, error: 'incomplete_history' })];
+      // Future daily rows must not overwrite an older provider quote or inherit
+      // that quote's timestamp. Every calculated period stays on its own date.
+      const quoteHistory = history.filter((row) => row.date <= quoteDate);
+      const metrics = computeVolatilityMetrics(combineCurrentQuote(quoteHistory, asOf, currentPrice))
+        || { ...Object.fromEntries(NUMERIC_FIELDS.map((field) => [field, null])), lastPx: currentPrice };
+      if (!validatePriorSession(quoteHistory, quoteDate)) {
+        NUMERIC_FIELDS.filter((field) => field !== 'lastPx').forEach((field) => { metrics[field] = null; });
       }
-      const metrics = computeVolatilityMetrics(combineCurrentQuote(history, asOf, currentPrice));
-      if (!metrics) return [name, unavailableRow({ ...sourceMeta, asOf, error: 'insufficient_history' })];
-      return [name, availableRow(metrics, { ...sourceMeta, asOf })];
+      const row = availableRow(metrics, { ...sourceMeta, asOf });
+      if (historyResult.status === 'rejected' || !validatePriorSession(quoteHistory, quoteDate)) {
+        row.historyUnavailable = true;
+      }
+      if (freshness === 'current') return [name, row];
+      const historical = historicalReference();
+      return [name, historical && Date.parse(historical.asOf) > asOf.getTime()
+        ? historical : referenceRow(row, 'observation_aged')];
     } catch (error) {
       logger.warn?.(`[volatility-snapshot] ${name} unavailable: ${error.message}`);
-      return [name, unavailableRow({ ...sourceMeta, error: 'provider_error' })];
+      return [name, unavailableRow({
+        ...sourceMeta,
+        error: 'provider_error',
+        retryable: isRetryableProviderError(error),
+      })];
     }
   }
 
@@ -399,7 +505,8 @@ function createVolatilitySnapshotService({
       quoteMode: 'end-of-day',
     };
     try {
-      const response = await client.get(
+      const response = await providerGet(
+        client,
         'https://query1.finance.yahoo.com/v8/finance/chart/%5EMOVE',
         {
           params: { range: '1y', interval: '1d', includePrePost: 'false' },
@@ -413,7 +520,7 @@ function createVolatilitySnapshotService({
       const closes = result?.indicators?.quote?.[0]?.close || [];
       const currentPrice = finitePositive(meta.regularMarketPrice);
       const asOf = meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000) : null;
-      if (!result) {
+      if (!result || [response.data, result, meta].some(hasRejectedEvidence)) {
         return ['MOVE', unavailableRow({
           ...sourceMeta,
           error: 'invalid_quote',
@@ -539,16 +646,20 @@ function createVolatilitySnapshotService({
       return ['MOVE', historicalRow(metrics, { ...sourceMeta, asOf })];
     } catch (error) {
       logger.warn?.(`[volatility-snapshot] MOVE unavailable: ${error.message}`);
-      return ['MOVE', unavailableRow({ ...sourceMeta, error: 'provider_error' })];
+      return ['MOVE', unavailableRow({
+        ...sourceMeta,
+        error: 'provider_error',
+        retryable: isRetryableProviderError(error),
+      })];
     }
   }
 
-  async function fetchSnapshot() {
+  async function buildSnapshot() {
     const generatedAt = now();
-    const entries = await Promise.all([
+    const entries = reconcileRows(await Promise.all([
       ...CBOE_SERIES.map(fetchCboeSeries),
       fetchMoveSeries(),
-    ]);
+    ]));
     const snapshot = Object.fromEntries(entries);
     const currentRows = entries
       .map(([, row]) => row)
@@ -556,8 +667,11 @@ function createVolatilitySnapshotService({
     const historicalRows = entries
       .map(([, row]) => row)
       .filter((row) => row.availability === 'historical' && row.freshness === 'historical');
-    const displayableRows = [...currentRows, ...historicalRows];
-    const lastUpdatedRows = currentRows.length > 0 ? currentRows : historicalRows;
+    const referenceRows = entries.map(([, row]) => row).filter((row) => row.availability === 'reference');
+    const displayableRows = [...currentRows, ...historicalRows, ...referenceRows];
+    const lastUpdatedRows = currentRows.length > 0
+      ? currentRows
+      : [...historicalRows, ...referenceRows];
     const lastUpdated = lastUpdatedRows
       .map((row) => new Date(row.asOf))
       .filter((date) => !Number.isNaN(date.getTime()))
@@ -571,12 +685,29 @@ function createVolatilitySnapshotService({
     return {
       status,
       generatedAt: generatedAt.toISOString(),
+      // The client uses this to distinguish a fresh after-hours fetch from a
+      // live-session quote that has aged past the intraday freshness window.
+      marketSession: isUsMarketOpen(generatedAt) ? 'open' : 'closed',
       lastUpdated: lastUpdated?.toISOString() ?? null,
       ...snapshot,
     };
   }
 
-  return { fetchSnapshot };
+  function fetchSnapshot() {
+    if (inFlightSnapshot) return inFlightSnapshot;
+    inFlightSnapshot = buildSnapshot().finally(() => {
+      inFlightSnapshot = null;
+    });
+    return inFlightSnapshot;
+  }
+
+  // Additional Cboe indices for other consumers (e.g. the prediction setup board's VXSLV); the
+  // dashboard snapshot roster above is unchanged.
+  async function fetchCboeRows(series) {
+    return Object.fromEntries(await Promise.all(series.map(fetchCboeSeries)));
+  }
+
+  return { fetchSnapshot, fetchCboeRows };
 }
 
 module.exports = {

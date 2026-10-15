@@ -147,6 +147,11 @@ describe('buildExceptionRadarRows', () => {
       volatilitySnapshot: {
         VIX: volatilityRow({ freshness: 'stale' }),
         OVX: volatilityRow({ source: 'mock-provider' }),
+        NazVol: volatilityRow({
+          availability: 'reference',
+          freshness: 'refresh-delayed',
+          refreshDelayed: true,
+        }),
       },
       marketData: {
         currencies: [

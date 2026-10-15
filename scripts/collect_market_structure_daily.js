@@ -5,7 +5,8 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const AWS = require('aws-sdk');
+const { AWS } = require('../src/services/aws/clients.cjs');
+const { preflightAwsProfile } = require('./ops/aws_profile_preflight');
 const {
   DEFAULT_BENCHMARK_PATH,
   DEFAULT_CACHE_PATH,
@@ -26,7 +27,8 @@ function parseArgs(argv) {
     years: [],
     inputFiles: [],
     writeDynamo: false,
-    reportOnly: false
+    reportOnly: false,
+    adminProfile: null,
   };
 
   argv.forEach((argument) => {
@@ -53,12 +55,30 @@ function parseArgs(argv) {
       return;
     }
 
+    if (argument.startsWith('--admin-profile=')) {
+      args.adminProfile = argument.replace('--admin-profile=', '').trim();
+      return;
+    }
+
     if (argument === '--report-only') {
       args.reportOnly = true;
     }
   });
 
   return args;
+}
+
+const ADMIN_AWS_PROFILE = 'market-dashboard-admin';
+
+function verifyAdminWriteProfile(profile = ADMIN_AWS_PROFILE) {
+  if (profile !== ADMIN_AWS_PROFILE) {
+    throw new Error(`AWS_ADMIN_PROFILE_REQUIRED: market-structure writes require ${ADMIN_AWS_PROFILE}.`);
+  }
+  const result = preflightAwsProfile({ purpose: 'admin', profile });
+  if (!result?.ok) {
+    throw new Error(`${result?.errorCode || 'AWS_PROFILE_UNUSABLE'}: ${result?.detail || 'administrator AWS profile failed preflight.'}`);
+  }
+  return profile;
 }
 
 function getDefaultYears() {
@@ -147,11 +167,10 @@ function buildBundle(records, calibrationReport, generatedAt) {
   };
 }
 
-async function writeBundleToDynamo(bundle) {
+async function writeBundleToDynamo(bundle, { profile = ADMIN_AWS_PROFILE } = {}) {
   AWS.config.update({
     region: process.env.AWS_REGION || 'us-west-1',
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    credentials: new AWS.SharedIniFileCredentials({ profile })
   });
 
   const dynamodb = new AWS.DynamoDB.DocumentClient();
@@ -213,7 +232,8 @@ async function main() {
   fs.writeFileSync(reportPath, `${JSON.stringify(calibrationReport, null, 2)}\n`);
 
   if (args.writeDynamo && !args.reportOnly) {
-    await writeBundleToDynamo(bundle);
+    const profile = verifyAdminWriteProfile(args.adminProfile);
+    await writeBundleToDynamo(bundle, { profile });
   }
 
   console.log(

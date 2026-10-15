@@ -20,6 +20,9 @@ const cloudFormationSchema = yaml.DEFAULT_SCHEMA.extend([
   new yaml.Type('!Sub', { kind: 'sequence', construct: (value) => value }),
   new yaml.Type('!Equals', { kind: 'sequence', construct: (value) => value }),
   new yaml.Type('!If', { kind: 'sequence', construct: (value) => value }),
+  new yaml.Type('!Condition', { kind: 'scalar', construct: (value) => value }),
+  new yaml.Type('!And', { kind: 'sequence', construct: (value) => value }),
+  new yaml.Type('!Not', { kind: 'sequence', construct: (value) => value }),
 ]);
 
 describe('release-keyed prediction catalog schema', () => {
@@ -98,6 +101,22 @@ describe('release-keyed prediction catalog schema', () => {
     ].forEach((field) => expect(serialized).not.toContain(field));
     expect(item).not.toHaveProperty('payload');
     expect(item).not.toHaveProperty('status');
+  });
+
+  test('preserves exact ForecastEx public identity through metadata persistence without retaining quotes', () => {
+    const item = eventCatalogItem({
+      conId: 901297197, venue: 'ForecastEx', releaseKey: 'KXCPIYOY#2026-09',
+      publicContractId: 'CPIY_0926_3.4', contractId: 'CPIY_0926_3.4', productCode: 'CPIY',
+      rulesUrl: 'https://data.forecastex.com/regulatory/CPIYTermsandConditions.pdf',
+      native_ask: .48, native_bid: .45, exchange_timestamp: '2026-09-19T18:00:00Z',
+    });
+    expect(item.metadata).toMatchObject({
+      publicContractId: 'CPIY_0926_3.4', contractId: 'CPIY_0926_3.4', productCode: 'CPIY',
+      rulesUrl: 'https://data.forecastex.com/regulatory/CPIYTermsandConditions.pdf',
+    });
+    expect(item.metadata).not.toHaveProperty('native_ask');
+    expect(item.metadata).not.toHaveProperty('native_bid');
+    expect(item.metadata).not.toHaveProperty('exchange_timestamp');
   });
 
   test('rejects non-release rows instead of making an unqueryable catalog item', () => {

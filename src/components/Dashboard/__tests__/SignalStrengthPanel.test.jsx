@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import SignalStrengthPanel, { isVerifiedLiveQuote } from '../SignalStrengthPanel';
 import { MarketDataService } from '../../../services/api/marketDataService';
+import PersistentSurface from '../../common/PersistentSurface';
 
 jest.mock('../../../constants/securitiesList', () => ({
   SECURITIES_LIST: [
@@ -83,7 +84,6 @@ describe('SignalStrengthPanel', () => {
   test('clears live values when the provider refresh reports offline', async () => {
     MarketDataService.getProviderStatus
       .mockResolvedValueOnce({ ibkr: { connected: true } })
-      .mockResolvedValueOnce({ ibkr: { connected: true } })
       .mockResolvedValue({ ibkr: { connected: false } });
 
     render(<SignalStrengthPanel onClose={jest.fn()} changelog={{}} onRefreshChangelog={jest.fn()} />);
@@ -92,5 +92,33 @@ describe('SignalStrengthPanel', () => {
     await act(async () => { jest.advanceTimersByTime(30000); });
     expect(await screen.findByText(/No live IBKR quotes/i)).toBeInTheDocument();
     expect(screen.queryByText('101.25')).not.toBeInTheDocument();
+  });
+
+  test('does not request a still-fresh quote snapshot only because the panel reopens', async () => {
+    const view = render(
+      <PersistentSurface active>
+        <SignalStrengthPanel onClose={jest.fn()} changelog={{}} onRefreshChangelog={jest.fn()} />
+      </PersistentSurface>,
+    );
+    expect(await screen.findByText('101.25')).toBeInTheDocument();
+    const providerCalls = MarketDataService.getProviderStatus.mock.calls.length;
+    const quoteCalls = MarketDataService.getQuotes.mock.calls.length;
+
+    view.rerender(
+      <PersistentSurface active={false}>
+        <SignalStrengthPanel onClose={jest.fn()} changelog={{}} onRefreshChangelog={jest.fn()} />
+      </PersistentSurface>,
+    );
+    await act(async () => { jest.advanceTimersByTime(5_000); });
+    view.rerender(
+      <PersistentSurface active>
+        <SignalStrengthPanel onClose={jest.fn()} changelog={{}} onRefreshChangelog={jest.fn()} />
+      </PersistentSurface>,
+    );
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByText('101.25')).toBeInTheDocument();
+    expect(MarketDataService.getProviderStatus).toHaveBeenCalledTimes(providerCalls);
+    expect(MarketDataService.getQuotes).toHaveBeenCalledTimes(quoteCalls);
   });
 });

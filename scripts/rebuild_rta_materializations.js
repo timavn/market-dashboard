@@ -22,11 +22,12 @@ if (process.env.MARKET_DASHBOARD_AWS_PROFILE_LOCKED === 'true') {
 }
 const fs = require('fs');
 const path = require('path');
-const AWS = require('aws-sdk/global');
-const S3 = require('aws-sdk/clients/s3');
-const DynamoDB = require('aws-sdk/clients/dynamodb');
-const STS = require('aws-sdk/clients/sts');
+const { AWS } = require('../src/services/aws/clients.cjs');
+const { S3 } = require('../src/services/aws/clients.cjs');
+const { DynamoDB } = require('../src/services/aws/clients.cjs');
+const { STS } = require('../src/services/aws/clients.cjs');
 const SERVICE_MANIFEST = require('../ops/services.json');
+const { preflightAwsProfile } = require('./ops/aws_profile_preflight');
 const { scanAllPages } = require('../src/utils/dynamoScanAllPages.cjs');
 const { materializeRtaLedgerItems } = require('../src/utils/rtaLedgerMaterialization.cjs');
 const {
@@ -35,6 +36,7 @@ const {
 } = require('../src/utils/researchEventLedger.cjs');
 const { summarizeRealTimeAlertPositions } = require('../src/utils/rtaPositionReconstruction.cjs');
 const { validateRtaCheckpoint } = require('../src/utils/rtaCheckpoint.cjs');
+const { loadRtaResolutions } = require('../src/utils/rtaResolutions.cjs');
 
 const AWS_RESOURCE_DEFAULTS = SERVICE_MANIFEST.aws?.resources || {};
 const DEFAULT_LEDGER_TABLE = process.env.HERMES_LEDGER_TABLE
@@ -51,8 +53,8 @@ const DEFAULT_BUCKET = process.env.HEDGEYE_BUCKET
   || 'market-dashboard-csv-data';
 const EXPECTED_ACCOUNT_ID = '915328198276';
 const EXPECTED_REGION = 'us-west-1';
-const EXPECTED_PROFILE = 'market-dashboard-local';
-const EXPECTED_PRINCIPAL_ARN = `arn:aws:iam::${EXPECTED_ACCOUNT_ID}:user/${EXPECTED_PROFILE}`;
+const LOCAL_PROFILE = 'market-dashboard-local';
+const ADMIN_PROFILE = 'market-dashboard-admin';
 const EXPECTED_RESOURCES = Object.freeze({
   HERMES_LEDGER_TABLE: 'HermesEmailIngestLedger',
   RESEARCH_EVENT_LEDGER_TABLE: 'ResearchEventLedgerV2',
@@ -66,14 +68,14 @@ const RESOLVED_RESOURCES = Object.freeze({
   HEDGEYE_BUCKET: DEFAULT_BUCKET,
 });
 
-function assertRuntimeConfiguration(environment = process.env) {
+function assertRuntimeConfiguration(environment = process.env, profile = LOCAL_PROFILE) {
   const region = environment.AWS_REGION || environment.AWS_DEFAULT_REGION || EXPECTED_REGION;
   if (region !== EXPECTED_REGION) {
     throw new Error(`Refusing AWS region ${region}; expected ${EXPECTED_REGION}.`);
   }
-  const profile = environment.AWS_PROFILE || environment.AWS_DEFAULT_PROFILE;
-  if (profile !== EXPECTED_PROFILE) {
-    throw new Error(`RTA rebuild requires AWS_PROFILE=${EXPECTED_PROFILE}.`);
+  const ambientProfile = environment.AWS_PROFILE || environment.AWS_DEFAULT_PROFILE;
+  if (ambientProfile && ambientProfile !== profile) {
+    throw new Error(`AWS_PROFILE_ENVIRONMENT_OVERRIDE: RTA rebuild requires the explicit ${profile} profile.`);
   }
   for (const [name, expected] of Object.entries(EXPECTED_RESOURCES)) {
     const actual = environment[name] || RESOLVED_RESOURCES[name];
@@ -83,15 +85,19 @@ function assertRuntimeConfiguration(environment = process.env) {
   }
 }
 
-function validateCallerIdentity(identity) {
+function validateCallerIdentity(identity, profile) {
   if (String(identity?.Account || '') !== EXPECTED_ACCOUNT_ID) {
     throw new Error(
       `Refusing AWS account ${identity?.Account || 'unknown'}; expected ${EXPECTED_ACCOUNT_ID}.`,
     );
   }
-  if (String(identity?.Arn || '') !== EXPECTED_PRINCIPAL_ARN) {
+  const arn = String(identity?.Arn || '');
+  const approved = profile === ADMIN_PROFILE
+    ? arn.startsWith(`arn:aws:sts::${EXPECTED_ACCOUNT_ID}:assumed-role/`)
+    : arn === `arn:aws:iam::${EXPECTED_ACCOUNT_ID}:user/${LOCAL_PROFILE}`;
+  if (!approved) {
     throw new Error(
-      `RTA rebuild requires the least-privilege ${EXPECTED_PROFILE} IAM principal.`,
+      `AWS_PROFILE_WRONG_PRINCIPAL: RTA rebuild resolved to an unapproved ${profile} principal.`,
     );
   }
   return identity;
@@ -102,10 +108,14 @@ function parseArgs(argv) {
     apply: false,
     json: false,
     windowDays: 90,
+    readProfile: LOCAL_PROFILE,
+    adminProfile: null,
   };
   for (const arg of argv) {
     if (arg === '--apply') options.apply = true;
     else if (arg === '--json') options.json = true;
+    else if (arg.startsWith('--read-profile=')) options.readProfile = arg.split('=')[1];
+    else if (arg.startsWith('--admin-profile=')) options.adminProfile = arg.split('=')[1];
     else if (arg.startsWith('--window-days=')) options.windowDays = Number(arg.split('=')[1]);
     else if (arg.startsWith('--since=')) options.since = arg.split('=')[1];
     else if (arg === '--help' || arg === '-h') options.help = true;
@@ -117,6 +127,15 @@ function parseArgs(argv) {
   if (options.since && !/^\d{4}-\d{2}-\d{2}$/.test(options.since)) {
     throw new Error('--since must use YYYY-MM-DD.');
   }
+  if (options.readProfile !== LOCAL_PROFILE) {
+    throw new Error(`AWS_PROFILE_NAME_INVALID: --read-profile must be ${LOCAL_PROFILE}.`);
+  }
+  if (options.apply && options.adminProfile !== ADMIN_PROFILE) {
+    throw new Error(`AWS_ADMIN_PROFILE_REQUIRED: --apply requires --admin-profile ${ADMIN_PROFILE}.`);
+  }
+  if (!options.apply && options.adminProfile) {
+    throw new Error('AWS_ADMIN_PROFILE_APPLY_ONLY: --admin-profile is only valid with --apply.');
+  }
   return options;
 }
 
@@ -126,7 +145,7 @@ function usage() {
     '',
     'Usage:',
     '  node scripts/rebuild_rta_materializations.js [--window-days=90] [--since=YYYY-MM-DD] [--json]',
-    '  node scripts/rebuild_rta_materializations.js --apply [--window-days=90]',
+    '  node scripts/rebuild_rta_materializations.js --apply --admin-profile=market-dashboard-admin [--window-days=90]',
     '',
     'The default is read-only dry-run. --apply writes only changed date projections.',
   ].join('\n');
@@ -185,12 +204,20 @@ async function queryResearchEvents(dynamodb, productKey) {
 }
 
 async function run(options, dependencies = {}) {
-  assertRuntimeConfiguration(process.env);
-  AWS.config.update({ region: EXPECTED_REGION });
+  const profile = options.apply ? options.adminProfile : options.readProfile;
+  const preflight = preflightAwsProfile({ purpose: options.apply ? 'admin' : 'api', profile });
+  if (!preflight?.ok) {
+    throw new Error(`${preflight?.errorCode || 'AWS_PROFILE_UNUSABLE'}: ${preflight?.detail || 'AWS profile preflight failed.'}`);
+  }
+  assertRuntimeConfiguration(process.env, profile);
+  AWS.config.update({
+    region: EXPECTED_REGION,
+    credentials: new AWS.SharedIniFileCredentials({ profile }),
+  });
   const dynamodb = dependencies.dynamodb || new DynamoDB.DocumentClient();
   const s3 = dependencies.s3 || new S3();
   const sts = dependencies.sts || new STS();
-  validateCallerIdentity(await sts.getCallerIdentity({}).promise());
+  validateCallerIdentity(await sts.getCallerIdentity({}).promise(), profile);
   const cutoff = cutoffFor(options);
   const [ledgerItems, existingItems, eventLedgerResult] = await Promise.all([
     scanAllPages(dynamodb, { TableName: DEFAULT_LEDGER_TABLE }),
@@ -231,6 +258,8 @@ async function run(options, dependencies = {}) {
   const currentBoard = summarizeRealTimeAlertPositions(materialized.snapshots, {
     windowDays: options.windowDays,
     baseline,
+    resolutions: dependencies.resolutions
+      || loadRtaResolutions(path.join(__dirname, '..', 'data', 'hedgeye', 'rta', 'resolutions.json')),
   });
 
   if (options.apply && eventLedgerResult.error) {
@@ -265,7 +294,7 @@ async function run(options, dependencies = {}) {
       || currentBoard.holdings.length !== currentBoard.longCount + currentBoard.shortCount
     )
   ) {
-    const invalidCodes = (currentBoard.dataQuality?.invalidEvents || [])
+    const invalidCodes = [...(currentBoard.dataQuality?.invalidEvents || []), ...(currentBoard.dataQuality?.unresolvedEvents || [])]
       .map((item) => item?.code)
       .filter(Boolean);
     throw new Error(

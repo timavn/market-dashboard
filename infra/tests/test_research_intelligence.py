@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 
 from botocore.exceptions import ClientError
@@ -92,12 +93,12 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertFalse(
             intelligence.product_definition("early-look")["authorities"]["trend"]
         )
-        self.assertTrue(
+        self.assertFalse(
             intelligence.product_definition("momo-tracker")["authorities"]["trade"]
         )
         self.assertEqual(
             intelligence.product_definition("momo-tracker")["validationRule"],
-            "published_trade_signals",
+            "published_tracker_rows",
         )
 
     def test_extracts_structured_tickers_aliases_and_typed_exposures(self):
@@ -192,6 +193,57 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertNotIn("ticker#MAIN", keys)
         self.assertNotIn("ticker#TODAY", keys)
 
+    def test_meridiem_tickers_require_structured_security_fields(self):
+        narrative_only = snapshot(
+            "real-time-alert",
+            "meridiem-narrative",
+            {},
+            {
+                "headline": "View it in your browser 08/10/2026 12:29 PM EDT",
+                "bodyText": "The morning edition was delivered at 08:00 AM EDT.",
+            },
+        )
+        narrative_keys = {
+            reference["entityKey"]
+            for reference in intelligence.extract_entity_references(narrative_only)
+        }
+        self.assertNotIn("ticker#PM", narrative_keys)
+        self.assertNotIn("ticker#AM", narrative_keys)
+
+        structured = snapshot(
+            "signal-strength",
+            "meridiem-structured",
+            {"added": ["PM"], "removed": ["AM"]},
+            {
+                "headline": "View it in your browser 08/10/2026 12:29 PM EDT",
+                "bodyText": "The prior edition was delivered at 08:00 AM EDT.",
+            },
+        )
+        references = intelligence.extract_entity_references(structured)
+        meridiem_references = [
+            reference
+            for reference in references
+            if reference["entityId"] in {"AM", "PM"}
+        ]
+        self.assertEqual(len(meridiem_references), 2)
+        self.assertEqual(
+            {
+                (reference["entityId"], reference["eventType"])
+                for reference in meridiem_references
+            },
+            {
+                ("PM", "signal_strength_added"),
+                ("AM", "signal_strength_removed"),
+            },
+        )
+        self.assertTrue(
+            all(
+                reference["matchType"] == "structured_membership"
+                and reference["fieldPath"].startswith("data.")
+                for reference in meridiem_references
+            )
+        )
+
     def test_same_day_publications_are_immutable_and_manifested_separately(self):
         database = FakeDynamoDb()
         first = snapshot(
@@ -265,6 +317,44 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertEqual(manifest["state"], "indexed")
         self.assertEqual(manifest["entityEventCount"], 0)
 
+    def test_validated_replay_replaces_stale_event_count_after_parser_hardening(self):
+        database = FakeDynamoDb()
+        item = snapshot(
+            "investing-ideas",
+            "investing-ideas-corrected",
+            {
+                "positions": [{
+                    "ticker": "DDOG",
+                    "side": "Long",
+                    "prevClose": 100.0,
+                    "lrr": 90.0,
+                    "hrr": 110.0,
+                }],
+            },
+        )
+        artifact_id = "c" * 64
+        database.manifests.items[("2026-07-23", "investing-ideas")] = {
+            "marketDate": "2026-07-23",
+            "productKey": "investing-ideas",
+            "version": 1,
+            "artifacts": [{
+                "artifactId": artifact_id,
+                "stage": "indexed",
+                "eventCount": 259,
+            }],
+        }
+
+        manifest = intelligence.update_product_manifest(
+            item,
+            database,
+            stage="indexed",
+            content_sha256=artifact_id,
+            event_count=1,
+        )
+
+        self.assertEqual(manifest["entityEventCount"], 1)
+        self.assertEqual(manifest["artifacts"][0]["eventCount"], 1)
+
     def test_indexed_stage_can_be_deferred_until_primary_projection_succeeds(self):
         database = FakeDynamoDb()
         item = snapshot(
@@ -316,6 +406,41 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertEqual(manifest["parsedCount"], 1)
         self.assertEqual(manifest["indexedCount"], 0)
 
+    def test_momo_outbucket_row_indexes_its_explicit_trend_without_a_range(self):
+        item = snapshot(
+            "momo-tracker",
+            "momo-outbucket",
+            {
+                "ORCL": {
+                    "buyTrade": None,
+                    "sellTrade": None,
+                    "upside": None,
+                    "downside": None,
+                    "trend": "BULLISH",
+                    "trade": "BULLISH",
+                    "lrr": None,
+                    "hrr": None,
+                    "rangeStatus": "outbucket",
+                    "rangeStatusDate": "08/13",
+                }
+            },
+        )
+
+        events = intelligence.build_entity_events(
+            item,
+            content_sha256="d" * 64,
+        )
+        oracle_events = [
+            event for event in events if event["entityKey"] == "ticker#ORCL"
+        ]
+
+        self.assertTrue(oracle_events)
+        self.assertTrue(all(event["signalValue"] == "BULLISH" for event in oracle_events))
+        self.assertTrue(all(event["direction"] == "positive" for event in oracle_events))
+        self.assertTrue(all(not event["decisionEligible"] for event in oracle_events))
+        self.assertTrue(all(event["eventType"] == "trend_signal" for event in oracle_events))
+        self.assertIn('"buyTrade": null', oracle_events[0]["excerpt"])
+
     def test_nested_bitcoin_tracker_rows_are_signals_not_container_tickers(self):
         item = snapshot(
             "bitcoin-trend-tracker",
@@ -348,6 +473,85 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertEqual(by_key["ticker#IBIT"]["signalValue"], "BEARISH")
         self.assertNotIn("ticker#CRYPTOS", by_key)
         self.assertNotIn("ticker#STOCKS", by_key)
+
+    def test_investing_ideas_emits_one_typed_position_event_per_security(self):
+        item = snapshot(
+            "investing-ideas",
+            "investing-ideas-1",
+            {
+                "longs": ["DDOG"],
+                "shorts": ["HCA"],
+                "positions": [
+                    {
+                        "ticker": "DDOG",
+                        "side": "Long",
+                        "prevClose": 267.97,
+                        "lrr": 244.0,
+                        "hrr": 275.0,
+                    },
+                    {
+                        "ticker": "HCA",
+                        "side": "Short",
+                        "prevClose": 402.59,
+                        "lrr": 363.0,
+                        "hrr": 418.0,
+                    },
+                    {
+                        "ticker": "PM",
+                        "side": "Long",
+                        "prevClose": 189.57,
+                        "lrr": 182.0,
+                        "hrr": 201.0,
+                    },
+                ],
+            },
+            {
+                "headline": "DDOG, HCA, and PM remain in the current ideas table",
+                "bodyText": "Long DDOG and PM; Short HCA. PM is also shown beside the publication time.",
+            },
+        )
+
+        references = intelligence.extract_entity_references(item)
+        position_references = [
+            reference
+            for reference in references
+            if reference["eventType"] == "investing_idea_position"
+        ]
+        self.assertEqual(len(position_references), 3)
+        self.assertEqual(
+            {reference["entityId"] for reference in position_references},
+            {"DDOG", "HCA", "PM"},
+        )
+        self.assertEqual(
+            position_references[0]["value"],
+            {
+                "side": "Long",
+                "bias": "BULLISH",
+                "prevClose": 267.97,
+                "lrr": 244.0,
+                "hrr": 275.0,
+            },
+        )
+
+        events = intelligence.build_entity_events(item, content_sha256="i" * 64)
+        typed_events = [
+            event for event in events if event["eventType"] == "investing_idea_position"
+        ]
+        self.assertEqual(len(typed_events), 3)
+        self.assertEqual(typed_events[0]["signalValue"]["bias"], "BULLISH")
+        self.assertEqual(typed_events[0]["riskRange"], {"lrr": 244.0, "hrr": 275.0})
+        self.assertTrue(all(event["decisionEligible"] is False for event in typed_events))
+
+        database = FakeDynamoDb()
+        intelligence.persist_snapshot_intelligence(
+            item,
+            database,
+            content_sha256="i" * 64,
+        )
+        stored = database.events.items[sorted(database.events.items)[0]]
+        self.assertIsInstance(stored["signalValue"]["prevClose"], Decimal)
+        self.assertIsInstance(stored["riskRange"]["lrr"], Decimal)
+        self.assertIsInstance(stored["riskRange"]["hrr"], Decimal)
 
     def test_content_hash_deduplicates_replayed_publication_across_messages(self):
         first = snapshot(

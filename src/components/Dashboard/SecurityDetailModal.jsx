@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Card, Title, Text, Metric, Grid, Badge } from '@tremor/react';
 import {
     ComposedChart,
@@ -16,6 +17,13 @@ import XMarkIcon from '@heroicons/react/24/solid/XMarkIcon';
 import LoadingIndicator from '../common/LoadingIndicator';
 import axios from 'axios';
 import { useTheme } from '../../context/ThemeContext';
+import { MarketDataService } from '../../services/api/marketDataService';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import { canonicalProductState, getCanonicalRiskRange } from '../../utils/securityIntelligenceV2';
+import { canonicalTradeResearch } from '../../utils/canonicalTradeResearch.cjs';
+import { formatResearchSourceDate, formatResearchTime } from '../../utils/researchDateFormat';
+import useHedgaiTickResearch from '../../hooks/useHedgaiTickResearch';
+import DashboardResearchLabel from './DashboardResearchLabel';
 
 const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
     const { theme } = useTheme();
@@ -23,28 +31,76 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
     const [loading, setLoading] = useState(true);
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
+    const [researchError, setResearchError] = useState(null);
+    const [canonicalResearch, setCanonicalResearch] = useState(null);
+    const [tradeResearch, setTradeResearch] = useState(null);
+    const { readings: tickReadings } = useHedgaiTickResearch({ active: isOpen });
+    const tickReading = tickReadings[String(ticker || '').toUpperCase()];
+    const tickEvidence = tickReading?.verified === true ? tickReading.tickEvidence : null;
 
-    useEffect(() => {
-        if (isOpen && ticker) {
-            fetchSecurityDetails();
-        }
-    }, [isOpen, ticker]);
-
-    const fetchSecurityDetails = async () => {
+    const fetchSecurityDetails = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
+            setResearchError(null);
+            setTradeResearch(null);
+            if (SECURITY_INTELLIGENCE_V2_ENABLED) setCanonicalResearch(null);
             // HARDCODED URL for now to ensure it hits the right port if proxy isn't working
             // Ideally use a service configuration
-            const response = await axios.get(`http://localhost:3001/api/performance/security/${ticker}`);
-            setData(response.data);
+            const [performanceResult, canonicalResult] = await Promise.allSettled([
+                axios.get(`http://localhost:3001/api/performance/security/${ticker}`),
+                MarketDataService.getSecurityIntelligenceV2({ symbols: [ticker], historyDays: 0 }),
+            ]);
+            if (canonicalResult.status === 'fulfilled') {
+                const publishedTrade = canonicalTradeResearch(canonicalResult.value, ticker);
+                setTradeResearch(publishedTrade.status === 'available' ? publishedTrade : null);
+            }
+            if (performanceResult.status === 'rejected') throw performanceResult.reason;
+
+            let nextData = performanceResult.value.data;
+            let nextCanonicalResearch = null;
+            if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+                if (canonicalResult.status === 'fulfilled' && canonicalResult.value?.schemaVersion === 2) {
+                    nextCanonicalResearch = canonicalResult.value.bySymbol?.[ticker.toUpperCase()] || null;
+                    const canonicalRange = getCanonicalRiskRange(nextCanonicalResearch, { primaryOnly: true });
+                    const canonicalDate = canonicalResult.value.marketDate || canonicalRange?.date || null;
+                    const historicalRanges = Array.isArray(nextData?.riskRanges)
+                        ? nextData.riskRanges.filter((range) => range?.date !== canonicalDate)
+                        : [];
+                    nextData = {
+                        ...nextData,
+                        riskRanges: canonicalRange
+                            ? [...historicalRanges, {
+                                date: canonicalRange.date,
+                                lrr: canonicalRange.lrr,
+                                hrr: canonicalRange.hrr,
+                                trend: canonicalRange.trend,
+                                timestamp: canonicalRange.timestamp,
+                                status: canonicalProductState(nextCanonicalResearch?.products?.['risk-ranges']),
+                            }]
+                            : historicalRanges,
+                    };
+                } else {
+                    setResearchError(
+                        canonicalResult.reason?.message || 'Canonical current security research is unavailable.',
+                    );
+                }
+            }
+            setCanonicalResearch(nextCanonicalResearch);
+            setData(nextData);
         } catch (err) {
             console.error('Error fetching security details:', err);
             setError('Failed to load security details');
         } finally {
             setLoading(false);
         }
-    };
+    }, [ticker]);
+
+    useEffect(() => {
+        if (isOpen && ticker) {
+            fetchSecurityDetails();
+        }
+    }, [fetchSecurityDetails, isOpen, ticker]);
 
     const chartData = useMemo(() => {
         if (!data?.prices) return [];
@@ -109,12 +165,22 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
     }, [data]);
 
     if (!isOpen) return null;
+    const researchNeedsAttention = SECURITY_INTELLIGENCE_V2_ENABLED
+        && !loading
+        && (researchError || !canonicalResearch || canonicalResearch.health?.status !== 'ready');
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 backdrop-blur-sm">
+    return createPortal(
+        <div
+            className="dashboard-security-detail-host fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 backdrop-blur-sm"
+            onClick={(event) => {
+                if (event.target === event.currentTarget) onClose();
+            }}
+        >
             <div
-                className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-xl shadow-2xl"
-                style={{ backgroundColor: isDark ? '#111827' : '#ffffff' }}
+                className="dashboard-security-detail-dialog relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-xl shadow-2xl"
+                style={{
+                    backgroundColor: researchNeedsAttention ? '#fef2f2' : isDark ? '#111827' : '#ffffff',
+                }}
             >
                 {/* Close Button */}
                 <button
@@ -133,6 +199,34 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
                               <LoadingIndicator label="Loading..." size="sm" className="inline-flex ml-2" />
                             )}
                         </Title>
+                        <div className="flex flex-wrap items-center gap-4 text-sm font-normal">
+                        <div className="flex items-center gap-2" aria-label={`${ticker} published Tick`}>
+                            <DashboardResearchLabel label={ticker} reading={tickReading} showName={false} showUnavailable tickFormat="full" />
+                            {tickEvidence && <>
+                                <span aria-hidden="true">·</span>
+                                <a href={tickEvidence.sourceUrl} target="_blank" rel="noreferrer"
+                                    style={{ color: 'inherit', textDecoration: 'none' }} title={tickEvidence.evidenceText}>
+                                    {tickEvidence.source}
+                                </a>
+                                <span>· {formatResearchSourceDate(tickEvidence.date)}</span>
+                            </>}
+                        </div>
+                        <div className="flex items-center gap-2" aria-label={`${ticker} published Trade`}>
+                            <span>Trade</span>
+                            <span className={tradeResearch?.direction === 'BULLISH' ? 'text-green-700' : tradeResearch?.direction === 'BEARISH' ? 'text-red-700' : 'text-gray-500'}>
+                                {tradeResearch ? tradeResearch.direction[0] + tradeResearch.direction.slice(1).toLowerCase() : '—'}
+                            </span>
+                            {tradeResearch && <>
+                                <span aria-hidden="true">·</span>
+                                <a href={tradeResearch.sourceUrl} target="_blank" rel="noreferrer"
+                                    style={{ color: 'inherit', textDecoration: 'none' }}
+                                    title={tradeResearch.signalProvenance.sourceText}>
+                                    {tradeResearch.sourceLabel || tradeResearch.source}
+                                </a>
+                                <span>· {formatResearchSourceDate(tradeResearch.sourceDate)}{formatResearchTime(tradeResearch.sourcePublishedAt) !== '—' ? ` ${formatResearchTime(tradeResearch.sourcePublishedAt)} ET` : ''}</span>
+                            </>}
+                        </div>
+                        </div>
                         {data?.transactions?.length > 0 && (
                             <Text className="text-sm text-gray-500">
                                 {data.transactions.length} Transactions found
@@ -143,6 +237,11 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
                     {error && (
                         <div className="p-4 bg-red-100 text-red-700 rounded-lg">
                             {error}
+                        </div>
+                    )}
+                    {researchError && (
+                        <div className="p-4 bg-red-100 text-red-700 rounded-lg">
+                            {researchError}
                         </div>
                     )}
 
@@ -293,7 +392,8 @@ const SecurityDetailModal = ({ ticker, isOpen, onClose }) => {
                     )}
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body,
     );
 };
 

@@ -1,5 +1,11 @@
 const SUPPORTED_CURRENCY = "USD";
 const SUPPORTED_POSITION_SCOPE = "stocks_only";
+const EVENT_CONTRACT_POSITION_SCOPE = "stocks_and_event_contracts";
+const LEGACY_EVENT_CONTRACT_POSITION_SCOPE = "stocks_and_kalshi";
+const SUPPORTED_POSITION_SCOPES = new Set([
+  SUPPORTED_POSITION_SCOPE,
+  EVENT_CONTRACT_POSITION_SCOPE,
+]);
 const SHORT_COLLATERAL_MARKUP = 1.02;
 const INTEREST_DAY_COUNT = 360;
 const CALIBRATION_WINDOW = 90;
@@ -36,12 +42,15 @@ function normalizeCurrency(value) {
 }
 
 function normalizeScope(value) {
-  return typeof value === "string"
+  const normalized = typeof value === "string"
     ? value
         .trim()
         .toLowerCase()
         .replace(/[\s-]+/g, "_")
     : "";
+  return normalized === LEGACY_EVENT_CONTRACT_POSITION_SCOPE
+    ? EVENT_CONTRACT_POSITION_SCOPE
+    : normalized;
 }
 
 function roundCent(value) {
@@ -115,10 +124,24 @@ function calculateSegmentTransfer(input) {
     ? finiteNumber(input.ibuklCash)
     : 0;
   const commoditiesCash = finiteNumber(input.commoditiesCash);
+  const eventMarketValueProvided = hasOwn(input, "eventMarketValue");
+  const legacyEventMarketValueProvided = hasOwn(input, "kalshiMarketValue");
+  const eventMarketValue = eventMarketValueProvided
+    ? finiteNumber(input.eventMarketValue)
+    : legacyEventMarketValueProvided
+      ? finiteNumber(input.kalshiMarketValue)
+    : 0;
+  const commodityAvailableFundsProvided = hasOwn(
+    input,
+    "commodityAvailableFunds",
+  );
+  const commodityAvailableFunds = commodityAvailableFundsProvided
+    ? finiteNumber(input.commodityAvailableFunds)
+    : null;
   const marginProvided = hasOwn(input, "commodityMaintenanceMargin");
   const commodityMaintenanceMargin = marginProvided
     ? finiteNumber(input.commodityMaintenanceMargin)
-    : commoditiesCash === 0
+    : commoditiesCash === 0 && eventMarketValue === 0
       ? 0
       : null;
   const reasons = [];
@@ -126,9 +149,25 @@ function calculateSegmentTransfer(input) {
   if (securitiesCash === null) reasons.push("invalid_securities_cash");
   if (ibuklCash === null) reasons.push("invalid_ibukl_cash");
   if (commoditiesCash === null) reasons.push("invalid_commodities_cash");
+  if (eventMarketValue === null || eventMarketValue < 0) {
+    reasons.push("invalid_event_market_value");
+  }
+  if (
+    eventMarketValueProvided
+    && legacyEventMarketValueProvided
+    && finiteNumber(input.eventMarketValue) !== finiteNumber(input.kalshiMarketValue)
+  ) {
+    reasons.push("conflicting_event_market_value_aliases");
+  }
+  if (
+    commodityAvailableFundsProvided
+    && (commodityAvailableFunds === null || commodityAvailableFunds < 0)
+  ) {
+    reasons.push("invalid_commodity_available_funds");
+  }
   if (commodityMaintenanceMargin === null || commodityMaintenanceMargin < 0) {
     reasons.push(
-      !marginProvided && commoditiesCash !== 0
+      !marginProvided && (commoditiesCash !== 0 || eventMarketValue !== 0)
         ? "commodity_margin_required_for_nonzero_commodities"
         : "invalid_commodity_maintenance_margin",
     );
@@ -140,8 +179,12 @@ function calculateSegmentTransfer(input) {
       ibuklCash: null,
       commoditiesCash: null,
       commodityMaintenanceMargin: null,
+      eventMarketValue: null,
+      kalshiMarketValue: null,
+      commodityAvailableFunds: null,
       combinedSecuritiesCash: null,
       securitiesDeficit: null,
+      commodityExcessBeforeBrokerHoldback: null,
       commodityExcess: null,
       commodityTransfer: null,
       eligibleCashBeforeCollateral: null,
@@ -150,10 +193,16 @@ function calculateSegmentTransfer(input) {
 
   const combinedSecuritiesCash = securitiesCash + ibuklCash;
   const securitiesDeficit = Math.max(0, -combinedSecuritiesCash);
-  const commodityExcess = Math.max(
+  const commodityExcessBeforeBrokerHoldback = Math.max(
     0,
-    commoditiesCash - commodityMaintenanceMargin,
+    commoditiesCash + eventMarketValue - commodityMaintenanceMargin,
   );
+  const commodityExcess = commodityAvailableFundsProvided
+    ? Math.min(
+        commodityExcessBeforeBrokerHoldback,
+        commodityAvailableFunds,
+      )
+    : commodityExcessBeforeBrokerHoldback;
   const commodityTransfer = Math.min(securitiesDeficit, commodityExcess);
 
   return {
@@ -162,9 +211,14 @@ function calculateSegmentTransfer(input) {
     securitiesCash,
     ibuklCash,
     commoditiesCash,
+    eventMarketValue,
+    // Backward-compatible result alias for stored forecast consumers.
+    kalshiMarketValue: eventMarketValue,
+    commodityAvailableFunds,
     commodityMaintenanceMargin,
     combinedSecuritiesCash,
     securitiesDeficit,
+    commodityExcessBeforeBrokerHoldback,
     commodityExcess,
     commodityTransfer,
     commodityExcessAfterTransfer: commodityExcess - commodityTransfer,
@@ -700,7 +754,7 @@ function normalizeForecastInput(input) {
   if (currency !== SUPPORTED_CURRENCY) {
     reasons.push("unsupported_forecast_currency");
   }
-  if (positionScope !== SUPPORTED_POSITION_SCOPE) {
+  if (!SUPPORTED_POSITION_SCOPES.has(positionScope)) {
     reasons.push("unsupported_position_scope");
   }
   if (input.accountInputsVerified !== true) {
@@ -769,6 +823,24 @@ function normalizeForecastInput(input) {
         securitiesCash: period.securitiesCash,
         ibuklCash: hasOwn(period, "ibuklCash") ? period.ibuklCash : 0,
         commoditiesCash: period.commoditiesCash,
+        eventMarketValue: hasOwn(period, "eventMarketValue")
+          ? period.eventMarketValue
+          : hasOwn(period, "kalshiMarketValue")
+            ? period.kalshiMarketValue
+            : 0,
+        legacyEventMarketValue: hasOwn(period, "kalshiMarketValue")
+          ? period.kalshiMarketValue
+          : undefined,
+        eventMarketValueProvided: hasOwn(period, "eventMarketValue"),
+        legacyEventMarketValueProvided: hasOwn(period, "kalshiMarketValue"),
+        eventAccountingVerified: period.eventAccountingVerified === true,
+        commodityAvailableFunds: hasOwn(period, "commodityAvailableFunds")
+          ? period.commodityAvailableFunds
+          : null,
+        commodityAvailableFundsProvided: hasOwn(
+          period,
+          "commodityAvailableFunds",
+        ),
         commodityMaintenanceMargin: period.commodityMaintenanceMargin,
         commodityMarginProvided: hasOwn(period, "commodityMaintenanceMargin"),
         shortPositions: period.shortPositions,
@@ -776,6 +848,13 @@ function normalizeForecastInput(input) {
         tiersVerified: periodSchedule.available,
       });
     });
+  }
+
+  if (
+    positionScope === EVENT_CONTRACT_POSITION_SCOPE
+    && periods.some((period) => period.eventAccountingVerified !== true)
+  ) {
+    reasons.push("event_accounting_not_verified");
   }
 
   if (
@@ -835,10 +914,17 @@ function forecastIbkrDebitInterest(input) {
       securitiesCash: period.securitiesCash,
       ibuklCash: period.ibuklCash,
       commoditiesCash: period.commoditiesCash,
+      eventMarketValue: period.eventMarketValue,
     };
+    if (period.legacyEventMarketValueProvided) {
+      segmentInput.kalshiMarketValue = period.legacyEventMarketValue;
+    }
     if (period.commodityMarginProvided) {
       segmentInput.commodityMaintenanceMargin =
         period.commodityMaintenanceMargin;
+    }
+    if (period.commodityAvailableFundsProvided) {
+      segmentInput.commodityAvailableFunds = period.commodityAvailableFunds;
     }
     const segment = calculateSegmentTransfer(segmentInput);
     const collateral = calculateUsdShortCollateral({
@@ -893,7 +979,13 @@ function forecastIbkrDebitInterest(input) {
       ibuklCash: segment.ibuklCash,
       combinedSecuritiesCash: segment.combinedSecuritiesCash,
       commoditiesCash: segment.commoditiesCash,
+      eventMarketValue: segment.eventMarketValue,
+      // Backward-compatible result alias for stored forecast consumers.
+      kalshiMarketValue: segment.eventMarketValue,
+      commodityAvailableFunds: segment.commodityAvailableFunds,
       commodityMaintenanceMargin: segment.commodityMaintenanceMargin,
+      commodityExcessBeforeBrokerHoldback:
+        segment.commodityExcessBeforeBrokerHoldback,
       commodityExcess: segment.commodityExcess,
       commodityTransfer: segment.commodityTransfer,
       commodityExcessAfterTransfer: segment.commodityExcessAfterTransfer,
@@ -1102,6 +1194,7 @@ function buildIbkrInterestDecision(input) {
 
 module.exports = {
   CALIBRATION_WINDOW,
+  EVENT_CONTRACT_POSITION_SCOPE,
   INTEREST_DAY_COUNT,
   Q95_PROBABILITY,
   SHORT_COLLATERAL_MARKUP,

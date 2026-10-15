@@ -8,7 +8,6 @@ export { default as TrendIcon } from './TrendIcon';
 export { default as SectionIcon } from './SectionIcon';
 
 export {
-  DEFAULT_MOCK_SIGNALS,
   MACRO_ASSET_TABS,
   DEFAULT_ASSET_CLASS,
   GROUP_TO_ASSET_CLASS,

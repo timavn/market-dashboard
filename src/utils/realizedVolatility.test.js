@@ -72,6 +72,7 @@ describe('realizedVolatility', () => {
     const snapshot = buildRealizedVolatilitySnapshot(makeSeries(80));
     expect(snapshot.status).toBe('available');
     expect(snapshot.limitedHistory).toBe(true);
+    expect(snapshot.rv21).toBeGreaterThan(0);
     expect(snapshot.rv63).toBeGreaterThan(0);
     expect(snapshot.rv252).toBeNull();
     expect(snapshot.sizingVol).toBe(snapshot.rv63);
@@ -93,10 +94,24 @@ describe('realizedVolatility', () => {
     const series = [...calm, ...spike];
     const snapshot = buildRealizedVolatilitySnapshot(series);
     expect(snapshot.status).toBe('available');
+    expect(snapshot.rv21).toBeGreaterThan(0);
     expect(snapshot.limitedHistory).toBe(false);
     expect(snapshot.rv63).toBeGreaterThan(snapshot.rv252);
     expect(snapshot.sizingVol).toBe(Math.max(snapshot.rv63, snapshot.rv252));
     expect(snapshot.spikeWarning).toBe(true);
+  });
+
+  test('can return a summary without materializing rolling volatility series', () => {
+    const snapshot = buildRealizedVolatilitySnapshot(makeSeries(320), {
+      includeSeries: false,
+    });
+
+    expect(snapshot.status).toBe('available');
+    expect(snapshot.sizingVol).toBeGreaterThan(0);
+    expect(snapshot.rolling21).toEqual([]);
+    expect(snapshot.rolling63).toEqual([]);
+    expect(snapshot.rolling252).toEqual([]);
+    expect(snapshot.priceSeries).toEqual([]);
   });
 
   test('crypto uses 365 annualization', () => {

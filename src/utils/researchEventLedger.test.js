@@ -174,6 +174,24 @@ describe('ResearchEventLedgerV2 consumers', () => {
     ]);
   });
 
+  test('accepts the deployed v3-tracker-contract ledger label and still rejects unknown parser labels', () => {
+    const rta = (parserVersion) => materializeRtaResearchEvents([event({
+      productKey: 'real-time-alert',
+      eventType: 'POSITION_ACTION',
+      parserVersion,
+      payload: { ticker: 'PALL', action: 'SELL', intent: 'open-short', side: 'short' },
+    })]);
+    const current = rta('research-event-ledger-v3-tracker-contract');
+    expect(current.rejected).toEqual([]);
+    expect(current.snapshots.flatMap((snapshot) => snapshot.data.alerts).map((alert) => alert.ticker)).toEqual(['PALL']);
+    expect(rta('research-event-ledger-v2').rejected).toEqual([]);
+    expect(rta('research-event-ledger-v9-unknown').rejected).toEqual([
+      expect.objectContaining({ reasons: ['parser-version-invalid'] }),
+    ]);
+    const etf = buildEtfProPayloadsFromResearchEvents([event({ parserVersion: 'research-event-ledger-v3-tracker-contract' })]);
+    expect(etf.rejected).toEqual([]);
+  });
+
   test('rejects a canonical event whose verified payload hash no longer matches', () => {
     const valid = event({
       eventType: 'POSITION_ACTION',

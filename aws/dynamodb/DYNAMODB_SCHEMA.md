@@ -487,11 +487,11 @@ aws dynamodb create-table \
 
 ### HedgeyeDailySnapshot
 
-**Purpose**: Store daily Hedgeye report snapshots (NEW - Jan 10, 2026)
+**Purpose**: Store dated research and official public-data snapshots using the existing shared contract.
 
 **Primary Key**:
 - Partition Key: `date` (String) - Format: "YYYY-MM-DD"
-- Sort Key: `snapshotType` (String) - "bitcoin-trend-tracker", "early-look", "portfolio-solutions", "momo-tracker", "signal-strength"
+- Sort Key: `snapshotType` (String) - includes Hedgeye products plus canonical `cftc-positioning` and audit-only `cftc-positioning-hedgeye-audit`
 
 **Attributes**:
 - `date` (String): Report publication date
@@ -505,6 +505,14 @@ aws dynamodb create-table \
 - `cryptoCount` (Number): Number of cryptos (if applicable)
 - `rankingCount` (Number): Number of rankings (if applicable)
 - `riskRangeCount` (Number): Number of risk ranges (if applicable)
+
+**Official CFTC positioning contract**:
+
+- `date` and `reportDate` are the official CFTC report date; `retrievedAt` is the distinct API retrieval timestamp.
+- `source` must equal `cftc-public-reporting-environment` for canonical rows. Legacy and Disaggregated dataset IDs/URLs, `schemaVersion`, `calculationVersion`, and `sourceContentHash` preserve provenance.
+- `contentComplete` reports whether all 34 active contracts are current. `decisionEligible` is true only when official SPX contract `13874A` is complete and current.
+- Every row includes `cftcContractMarketCode`, `seriesType`, `asOf`, `status`, and `decisionEligible` in addition to `latest`, `wwChg`, `zScore1Y`, and `zScore3Y`.
+- Hedgeye PDF/Textract/manual artifacts use `snapshotType: cftc-positioning-hedgeye-audit`, `source: hedgeye-pdf-textract`, and `decisionEligible: false`; they never replace the official key.
 
 **Sample Item (Bitcoin Tracker)**:
 ```json
@@ -894,6 +902,26 @@ aws dynamodb create-table \
   --billing-mode PAY_PER_REQUEST \
   --region us-west-1
 ```
+
+---
+
+### PredictionMarketPerformanceLedger
+
+**Purpose**: Durable, account-scoped evidence and lifecycle ledger for verified prediction-market P&L. This table is intentionally separate from the legacy manual `PredictionMarkets` table.
+
+**Primary Key**:
+- Partition Key: `accountId` (String)
+- Sort Key: `recordKey` (String) — `execution#{ibkrExecutionId}` or `lifecycle#{conid}#{sequence}`
+
+**Key Attributes**:
+- `itemType`: `execution | lifecycle`
+- `conId`, `symbol`, `contractKey`, `contractLabel`, `market`, `contractSide`, `strike`, `expiration`
+- `entryQuantity`, `entryPrincipal`, `fees`, `paid`, `risked`, `pnl`, `roi`
+- `status`: `open | awaiting_resolution | review | verified | confirmed`
+- `verification`, `reviewReason`, `correctionVersion`, `auditTrail`, `settlementEvidence`
+- `executionIds`, `resolvedDate`, `resolutionType`, `version`, `updatedAt`, `ttl`
+
+The deployed table uses on-demand capacity, server-side encryption, point-in-time recovery, and TTL retention. Only `verified` and `confirmed` lifecycle records are exposed as performance rows or included in summaries.
 
 ---
 

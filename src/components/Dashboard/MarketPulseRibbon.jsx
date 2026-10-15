@@ -1,416 +1,275 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { SECURITIES_LIST } from '../../constants/securitiesList';
-import { formatMarketMonthDay } from '../../utils/timeUtils';
-import { getBucketForSeries } from '../../utils/volatilityRegimes';
-import { getRowQuoteStatus } from './RadarReferencePanels';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import useMarketDailySnapshot, { validateMarketDailySnapshot } from '../../hooks/useMarketDailySnapshot';
+import { MarketThemePanel, MarketFactorPanel } from './MarketRotationPanels';
+import useMarketRotationSnapshot, { validateMarketRotationSnapshot } from '../../hooks/useMarketRotationSnapshot';
+import MarketDailyDetailModal from './MarketDailyDetailModal';
+import DelayedDataMarker from './DelayedDataMarker';
+import './MarketDailyStrip.css';
 
-const CHART_WIDTH = 132;
-const CHART_HEIGHT = 56;
-const CHART_INSET = 4;
-const CHART_AXIS_LEFT = 22;
-const CHART_AXIS_BOTTOM = 12;
-const PULSE_ROTATION_MS = 6000;
+const UNAVAILABLE = '—';
+const SECTION_ORDER = ['breadth', 'leadership', 'themes', 'factors', 'movers', 'outliers'];
+const VALID_QUOTE_STATUSES = new Set(['live', 'delayed', 'last-close']);
+const REJECTED_STATE = /^(?:unavailable|offline|disconnected|error|failed|stale|cache[-_ ]?only|cached|mock|seed(?:ed)?|synthetic|fallback)$/i;
+const BAD_FLAGS = ['stale', 'isStale', 'cacheOnly', 'cache_only', 'fromCache', 'mock', 'isMock', 'seed', 'seeded', 'synthetic', 'fallback', 'offline', 'disconnected'];
+const finite = (value) => (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) && Number.isFinite(Number(value));
+const number = (value) => finite(value) ? Number(value) : null;
+const tone = (value) => !finite(value) || Number(value) === 0 ? 'is-neutral' : Number(value) > 0 ? 'is-positive' : 'is-negative';
+const percent = (value, digits = 2) => finite(value) ? `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(digits)}%` : UNAVAILABLE;
+const count = (value) => finite(value) && Number(value) >= 0 && Number.isInteger(Number(value)) ? Number(value).toLocaleString('en-US') : UNAVAILABLE;
+const share = (value) => finite(value) && Number(value) >= 0 && Number(value) <= 100 ? `${Number(value).toFixed(0)}%` : UNAVAILABLE;
 
-const PULSE_CATEGORIES = Object.freeze([
-  Object.freeze({
-    id: 'equities',
-    label: 'Equities',
-    assetClass: 'equity',
-    marketKeys: Object.freeze(['us', 'sectors', 'europe', 'asia']),
-  }),
-  Object.freeze({
-    id: 'rates',
-    label: 'Rates',
-    assetClass: 'fixedIncome',
-    marketKeys: Object.freeze(['rates']),
-  }),
-  Object.freeze({
-    id: 'commodities',
-    label: 'Commodities',
-    assetClass: 'commodity',
-    marketKeys: Object.freeze(['commodities']),
-  }),
-  Object.freeze({
-    id: 'crypto',
-    label: 'Crypto',
-    assetClass: 'crypto',
-    marketKeys: Object.freeze(['crypto']),
-  }),
-]);
-
-const FEED_TO_UNIVERSE_TICKER = Object.freeze({
-  IXIC: 'COMPQ',
-  N225: 'NIKK',
-  BZ: 'BRENT',
-  CL: 'WTIC',
-  HG: 'COPPER',
-  SI: 'SILVER',
-});
-
-const CORE_CRYPTO_TICKERS = new Set(['BTC', 'ETH', 'SOL']);
-const EXCLUDED_FEED_TICKERS = new Set([
-  // Yahoo ^FVX is a five-year yield proxy, not the two-year yield implied by this label.
-  'UST2Y',
-]);
-
-const UNIVERSE_BY_TICKER = new Map(SECURITIES_LIST.map((security, index) => [
-  String(security.ticker || '').toUpperCase(),
-  { ...security, universeIndex: index },
-]));
-
-const VIX_ELIGIBLE_TICKERS = new Set([
-  'SPX', 'RSP',
-  'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK',
-  'XLP', 'XLRE', 'XLU', 'XLV', 'XLY',
-]);
-
-const VOLATILITY_BY_TICKER = Object.freeze({
-  QQQ: Object.freeze({ seriesKey: 'NazVol', label: 'VXN' }),
-  RUT: Object.freeze({ seriesKey: 'RVX', label: 'RVX' }),
-  UST10Y: Object.freeze({ seriesKey: 'MOVE', label: 'MOVE', statusLabel: 'CLOSE' }),
-  UST30Y: Object.freeze({ seriesKey: 'MOVE', label: 'MOVE', statusLabel: 'CLOSE' }),
-  WTIC: Object.freeze({ seriesKey: 'OVX', label: 'OVX' }),
-  BRENT: Object.freeze({ seriesKey: 'OVX', label: 'OVX' }),
-});
-
-const isFiniteNumber = (value) => value !== '' && value != null && Number.isFinite(Number(value));
-
-const flattenRows = (value) => {
-  if (Array.isArray(value)) return value;
-  if (!value || typeof value !== 'object') return [];
-  return Object.values(value).flatMap(flattenRows);
+const hasRejectedEvidence = (value) => {
+  if (!value || typeof value !== 'object') return false;
+  if (BAD_FLAGS.some((key) => value[key] === true) || value.connected === false || value.available === false) return true;
+  if (['status', 'availability', 'freshness', 'dataType', 'source', 'provider'].some((key) => typeof value[key] === 'string' && REJECTED_STATE.test(value[key]))) return true;
+  return Object.values(value).some((child) => child && typeof child === 'object' && hasRejectedEvidence(child));
 };
 
-const resolveUniverseSecurity = (row) => {
-  const feedTicker = String(row?.symbol || row?.ticker || '').toUpperCase();
-  if (!feedTicker || EXCLUDED_FEED_TICKERS.has(feedTicker)) return null;
-  const universeTicker = FEED_TO_UNIVERSE_TICKER[feedTicker] || feedTicker;
-  const security = UNIVERSE_BY_TICKER.get(universeTicker);
-  return security ? { feedTicker, universeTicker, security } : null;
+// The informational strip keeps expired verified observations as dated references.
+export const usableDailySnapshot = (snapshot, now = Date.now()) => Boolean(validateMarketDailySnapshot(snapshot, now));
+
+const verifiedRow = (row) => row
+  && typeof row.ticker === 'string' && row.ticker.trim() !== ''
+  && typeof row.source === 'string' && row.source.trim() !== ''
+  && Number.isFinite(Date.parse(row.asOf)) && Date.parse(row.asOf) <= Date.now()
+  && VALID_QUOTE_STATUSES.has(row.status)
+  && !hasRejectedEvidence(row) ? row : null;
+
+const timestamp = (value) => {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(parsed);
+  }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/New_York',
+  }).formatToParts(parsed);
+  const part = (key) => parts.find((entry) => entry.type === key)?.value || '';
+  return `${part('month')} ${part('day')} ${part('hour')}:${part('minute')} ET`;
 };
 
-const selectTopMovers = (marketData, category, providerStatus) => {
-  const seen = new Set();
-  const rows = category.marketKeys.flatMap((marketKey) => flattenRows(marketData?.[marketKey]));
-  const movers = [];
+const rowDetail = (row, methodology = '') => [
+  methodology,
+  row?.detail,
+  timestamp(row?.cutoff) ? `Comparison through ${timestamp(row.cutoff)}` : '',
+  row ? `${row.retained ? 'D · Last verified reading · ' : ''}${row.status === 'live' && !row.retained ? 'LIVE' : 'DELAYED'} · ${timestamp(row.asOf)}${row.delayedSource ? ' · DELAYED SOURCE' : ''}${row.marketDate ? ` · Session ${row.marketDate}` : ''}` : 'UNAVAILABLE',
+  row?.source,
+  row?.sourceUrl,
+].filter(Boolean).join('\n');
 
-  rows.forEach((row) => {
-    const resolved = resolveUniverseSecurity(row);
-    if (!resolved || resolved.security.assetClass !== category.assetClass) return;
-    if (category.id === 'crypto' && !CORE_CRYPTO_TICKERS.has(resolved.universeTicker)) return;
-    if (seen.has(resolved.universeTicker)) return;
+const Signed = ({ value, unit = '%' }) => (
+  <span className={`market-daily-strip__number ${tone(value)}`}>
+    {unit === '%' ? percent(value) : finite(value) ? `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(2)} ${unit}` : UNAVAILABLE}
+  </span>
+);
 
-    const status = getRowQuoteStatus(row, providerStatus);
-    if (!['live', 'delayed'].includes(status)) return;
-    if (!isFiniteNumber(row?.price) || !isFiniteNumber(row?.changePercent)) return;
+const BreadthCount = ({ value, direction }) => {
+  const display = count(value);
+  return <span className={display === UNAVAILABLE ? 'is-neutral' : direction}>{display}</span>;
+};
 
-    seen.add(resolved.universeTicker);
-    movers.push({
-      ...row,
-      categoryId: category.id,
-      feedTicker: resolved.feedTicker,
-      ticker: resolved.universeTicker,
-      label: resolved.security.name,
-      status,
-      universeIndex: resolved.security.universeIndex,
-      numericChange: Number(row.changePercent),
+const partialHistory = (eligible, total) => finite(eligible) && finite(total)
+  && Number(eligible) > 0 && Number(eligible) < Number(total);
+const historyDetail = (label, eligible, total) => `${label} history: ${count(eligible)} / ${count(total)} holdings.${partialHistory(eligible, total) ? ` * History available for ${count(eligible)} of ${count(total)} holdings; denominator excludes holdings without the complete window.` : ''}`;
+const HistoryMarker = ({ present, eligible, total, label }) => present && partialHistory(eligible, total)
+  ? <span className="market-daily-strip__coverage" title={historyDetail(label, eligible, total)} aria-label={`${label}: partial history coverage`}>*</span>
+  : null;
+
+const Panel = ({ section, title, label, detail, status, observation, onExpand, expanded, detailId, children }) => (
+  <section className="market-daily-strip__panel" data-daily-section={section} aria-label={label}>
+    <h2 className="market-daily-strip__heading" title={detail}>
+      <button type="button" className="market-daily-strip__expand" onClick={onExpand} aria-label={`Expand ${label.toLowerCase()}`} aria-haspopup="dialog" aria-expanded={expanded} aria-controls={expanded ? detailId : undefined}>
+        <span>{title}</span>
+      </button>
+      {status === 'D' && observation ? <DelayedDataMarker
+        status={observation.retained ? 'refresh-delayed' : 'delayed'}
+        updatedAt={observation.asOf}
+        marketSessionDate={observation.marketDate}
+        popoverLabel={`Updated ${timestamp(observation.asOf)}`}
+        className="market-daily-strip__status"
+      /> : status ? <span className="market-daily-strip__status">{status}</span> : null}
+    </h2>
+    {children}
+  </section>
+);
+
+const MetricTable = ({ label, children, variant = '' }) => (
+  <table className={`market-daily-strip__table ${variant}`} aria-label={label}>
+    <colgroup><col className="market-daily-strip__label-col" /><col /></colgroup>
+    <tbody>{children}</tbody>
+  </table>
+);
+
+const MetricRow = ({ label, children, detail }) => (
+  <tr title={detail}><td>{label}</td><td className="market-daily-strip__value">{children}</td></tr>
+);
+
+const NamedChange = ({ row, contribution = false }) => row ? (
+  <span className="market-daily-strip__named-value">
+    <span className="market-daily-strip__security" title={row.name || row.ticker}>{contribution ? row.ticker : row.name || row.ticker}</span>
+    <Signed value={contribution ? row.contributionPp : row.changePercent} unit={contribution ? 'pp' : '%'} />
+  </span>
+) : UNAVAILABLE;
+
+const MoverCells = ({ row, divider = false }) => (
+  <>
+    <td className={divider ? 'market-daily-strip__divider' : undefined} title={rowDetail(row)}>{row?.ticker || UNAVAILABLE}</td>
+    <td className="market-daily-strip__security" title={row ? `${row.name || row.ticker}\n${rowDetail(row)}` : 'UNAVAILABLE'}>{row?.name || UNAVAILABLE}</td>
+    <td className="market-daily-strip__value" title={rowDetail(row)}><Signed value={row?.changePercent} /></td>
+  </>
+);
+
+const MarketPulseRibbon = ({ snapshot: suppliedSnapshot, rotationSnapshot }) => {
+  const { snapshot: fetchedSnapshot, loading } = useMarketDailySnapshot({ enabled: suppliedSnapshot === undefined });
+  const { snapshot: fetchedRotation, loading: rotationLoading } = useMarketRotationSnapshot({ enabled: rotationSnapshot === undefined });
+  const rotation = validateMarketRotationSnapshot(rotationSnapshot === undefined ? fetchedRotation : rotationSnapshot, Date.now(), true);
+  const [expanded, setExpanded] = useState([]);
+  const [allView, setAllView] = useState(false);
+  const detailId = useId();
+  const gridRef = useRef(null);
+  const detailTrigger = useRef(null);
+  const closeDetail = useCallback(() => {
+    setExpanded([]);
+    setAllView(false);
+  }, []);
+  const expansionId = section => `${detailId}-${section}`;
+  const allExpanded = expanded.length === SECTION_ORDER.length;
+  const toggleDetail = (section, event) => {
+    detailTrigger.current = event.currentTarget;
+    if (section === 'all') setAllView(!allExpanded);
+    else if (expanded.length === 0) setAllView(false);
+    setExpanded(current => {
+      if (section === 'all') return current.length === SECTION_ORDER.length ? [] : SECTION_ORDER;
+      if (current.includes(section)) return current.filter(id => id !== section);
+      return current.length > 1 ? [...current, section] : [section];
     });
-  });
-
-  return movers
-    .sort((left, right) => (
-      Math.abs(right.numericChange) - Math.abs(left.numericChange)
-      || left.universeIndex - right.universeIndex
-      || left.ticker.localeCompare(right.ticker)
-    ))
-    .slice(0, 3);
-};
-
-const buildPoints = (values) => {
-  const finiteValues = (Array.isArray(values) ? values : [])
-    .map(Number)
-    .filter(Number.isFinite);
-  if (finiteValues.length < 2) return [];
-
-  const min = Math.min(...finiteValues);
-  const max = Math.max(...finiteValues);
-  const range = max - min;
-  const chartWidth = CHART_WIDTH - CHART_AXIS_LEFT - CHART_INSET;
-  const chartHeight = CHART_HEIGHT - CHART_AXIS_BOTTOM - (CHART_INSET * 2);
-  return finiteValues.map((value, index) => ({
-    x: CHART_AXIS_LEFT + (index * (chartWidth / (finiteValues.length - 1))),
-    y: range === 0
-      ? CHART_INSET + (chartHeight / 2)
-      : CHART_INSET + (((max - value) / range) * chartHeight),
-  }));
-};
-
-const formatAxisValue = (value) => {
-  if (!isFiniteNumber(value)) return '—';
-  const numeric = Number(value);
-  const absolute = Math.abs(numeric);
-  if (absolute >= 10000) return `${(numeric / 1000).toFixed(0)}K`;
-  if (absolute >= 1000) return `${(numeric / 1000).toFixed(1)}K`;
-  if (absolute >= 100) return numeric.toFixed(0);
-  if (absolute >= 10) return numeric.toFixed(1);
-  return numeric.toFixed(2);
-};
-
-const formatValue = (value, kind) => {
-  if (!isFiniteNumber(value)) return '—';
-  const numeric = Number(value);
-  if (kind === 'rate') return `${numeric.toFixed(2)}%`;
-  return numeric.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-};
-
-const formatChange = (value) => {
-  if (!isFiniteNumber(value)) return '—';
-  const numeric = Number(value);
-  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(2)}%`;
-};
-
-const getTone = (value) => {
-  if (!isFiniteNumber(value) || Number(value) === 0) return 'is-flat';
-  return Number(value) > 0 ? 'is-positive' : 'is-negative';
-};
-
-const getStatusLabel = (status) => {
-  switch (status) {
-    case 'live': return 'LIVE';
-    case 'delayed': return 'DLY';
-    case 'historical': return 'HIST';
-    case 'loading': return 'LOAD';
-    default: return 'NO DATA';
-  }
-};
-
-const getVolatilityStatus = (row, loading) => {
-  if (loading) return 'loading';
-  if (
-    row?.availability === 'historical'
-    && row?.freshness === 'historical'
-    && row?.quoteMode === 'end-of-day'
-    && isFiniteNumber(row.lastPx)
-  ) return 'historical';
-  if (
-    !row ||
-    row.availability !== 'available' ||
-    row.freshness !== 'current' ||
-    !isFiniteNumber(row.lastPx)
-  ) return 'unavailable';
-
-  const source = String(row.source || '').toLowerCase();
-  const quoteMode = String(row.quoteMode || row.dataType || '').toLowerCase();
-  if (quoteMode.includes('delay') || source === 'yahoo' || source === 'cboe') return 'delayed';
-  return 'live';
-};
-
-const PulseSparkline = ({ values, label, available, asOf }) => {
-  const finiteValues = available
-    ? (Array.isArray(values) ? values : []).map(Number).filter(Number.isFinite)
-    : [];
-  const points = buildPoints(finiteValues);
-  const dateLabel = formatMarketMonthDay(asOf);
-  if (points.length < 2 || !dateLabel) {
-    return <div className="efr-pulse-sparkline__empty" aria-label={`${label} intraday series unavailable`}>—</div>;
-  }
-
-  const pointString = points.map(({ x, y }) => `${x},${y}`).join(' ');
-  const last = points[points.length - 1];
-  const high = Math.max(...finiteValues);
-  const low = Math.min(...finiteValues);
-  const xAxisY = CHART_HEIGHT - CHART_AXIS_BOTTOM;
-  return (
-    <svg
-      className="efr-pulse-sparkline"
-      viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-      role="img"
-      aria-label={`${label} intraday sparkline for ${dateLabel}`}
-      preserveAspectRatio="none"
-    >
-      <g className="efr-pulse-sparkline__axes" aria-hidden="true">
-        <line className="efr-pulse-sparkline__y-axis" x1={CHART_AXIS_LEFT} x2={CHART_AXIS_LEFT} y1={CHART_INSET} y2={xAxisY} />
-        <line className="efr-pulse-sparkline__x-axis" x1={CHART_AXIS_LEFT} x2={CHART_WIDTH - CHART_INSET} y1={xAxisY} y2={xAxisY} />
-        <line className="efr-pulse-sparkline__y-tick" x1={CHART_AXIS_LEFT - 2} x2={CHART_AXIS_LEFT} y1={CHART_INSET} y2={CHART_INSET} />
-        <line className="efr-pulse-sparkline__y-tick" x1={CHART_AXIS_LEFT - 2} x2={CHART_AXIS_LEFT} y1={xAxisY} y2={xAxisY} />
-        <text className="efr-pulse-sparkline__y-label" x={CHART_AXIS_LEFT - 4} y={CHART_INSET + 2} textAnchor="end">{formatAxisValue(high)}</text>
-        <text className="efr-pulse-sparkline__y-label" x={CHART_AXIS_LEFT - 4} y={xAxisY} textAnchor="end">{formatAxisValue(low)}</text>
-        <text className="efr-pulse-sparkline__x-label" x={CHART_AXIS_LEFT} y={CHART_HEIGHT - 2}>OPEN</text>
-        <text
-          className="efr-pulse-sparkline__x-label"
-          x={(CHART_AXIS_LEFT + CHART_WIDTH - CHART_INSET) / 2}
-          y={CHART_HEIGHT - 2}
-          textAnchor="middle"
-        >
-          {dateLabel}
-        </text>
-        <text className="efr-pulse-sparkline__x-label" x={CHART_WIDTH - CHART_INSET} y={CHART_HEIGHT - 2} textAnchor="end">CLOSE</text>
-      </g>
-      <polyline points={pointString} />
-      <circle cx={last.x} cy={last.y} r="2.4" />
-    </svg>
-  );
-};
-
-const EmbeddedVolatility = ({ metric }) => {
-  if (!metric) return null;
-  const available = ['live', 'delayed', 'historical'].includes(metric.status);
-  const loading = metric.status === 'loading';
-  const displayValue = loading ? '…' : (available ? formatValue(metric.value, 'number') : '—');
-  const regime = available ? getBucketForSeries(metric.seriesKey || metric.label, metric.value) : null;
-
-  return (
-    <span
-      className={`efr-pulse-vol efr-pulse-vol--${metric.status}`}
-      aria-label={`${metric.label} volatility ${available ? displayValue : 'unavailable'}`}
-    >
-      <b>{metric.label}</b>
-      <strong className={regime ? `efr-pulse-vol__value--${regime}` : ''}>{displayValue}</strong>
-      <small>{metric.statusLabel || getStatusLabel(metric.status)}</small>
-    </span>
-  );
-};
-
-const volatilityDescriptorForMover = (mover) => {
-  if (!mover) return null;
-  if (VOLATILITY_BY_TICKER[mover.ticker]) return VOLATILITY_BY_TICKER[mover.ticker];
-  if (mover.categoryId === 'equities' && VIX_ELIGIBLE_TICKERS.has(mover.ticker)) {
-    return { seriesKey: 'VIX', label: 'VIX' };
-  }
-  return null;
-};
-
-const PulseMetricContent = ({ category, mover, loading, embeddedVolatility }) => {
-  const label = mover?.label || 'No verified mover';
-  const status = loading ? 'loading' : mover?.status || 'unavailable';
-  const available = ['live', 'delayed', 'historical'].includes(status);
-  const isLoading = status === 'loading';
-  const kind = category.id === 'rates' && mover?.unit === 'yield' ? 'rate' : 'number';
-  const displayValue = isLoading ? '…' : (available ? formatValue(mover?.price, kind) : '—');
-  const displayChange = isLoading ? '…' : (available ? formatChange(mover?.changePercent) : '—');
-
-  return (
-    <>
-      <div className="efr-pulse-metric__copy">
-        <div className="efr-pulse-metric__ticker">{mover?.ticker || '—'}</div>
-        <div className="efr-pulse-metric__heading">
-          <h2 title={label}>{label}</h2>
-          <span className={`efr-pulse-metric__status efr-pulse-metric__status--${status}`}>
-            {getStatusLabel(status)}
-          </span>
-        </div>
-        <strong>{displayValue}</strong>
-        <div className="efr-pulse-metric__footer">
-          <span className={`efr-pulse-metric__change ${available ? getTone(mover?.changePercent) : 'is-unavailable'}`}>
-            {displayChange}
-          </span>
-          <EmbeddedVolatility metric={embeddedVolatility} />
-        </div>
-      </div>
-      <PulseSparkline
-        asOf={mover?.quoteAsOf || mover?.timestamp}
-        available={available}
-        label={label}
-        values={mover?.sparklineData}
-      />
-    </>
-  );
-};
-
-const PulseMetric = ({ category, movers, activeIndex, loading, volatilityState }) => {
-  const slides = movers.length > 0 ? movers : [null];
-  return (
-    <section className="efr-pulse-metric" aria-label={`${category.label} market pulse`}>
-      {slides.map((mover, index) => {
-        const isActive = index === activeIndex;
-        const descriptor = volatilityDescriptorForMover(mover);
-        const volatilityRow = descriptor
-          ? volatilityState?.snapshot?.[descriptor.seriesKey]
-          : null;
-        const embeddedVolatility = descriptor
-          ? {
-            ...descriptor,
-            value: volatilityRow?.lastPx,
-            status: getVolatilityStatus(volatilityRow, volatilityState?.loading),
-          }
-          : null;
-        return (
-          <div
-            aria-hidden={!isActive}
-            className={`efr-pulse-metric__slide ${isActive ? 'is-active' : ''}`}
-            key={mover?.ticker || 'empty'}
-          >
-            <PulseMetricContent
-              category={category}
-              embeddedVolatility={embeddedVolatility}
-              loading={loading && !mover}
-              mover={mover}
-            />
-          </div>
-        );
-      })}
-    </section>
-  );
-};
-
-const MarketPulseRibbon = ({
-  marketData = {},
-  marketDataLoading = false,
-  providerStatus = null,
-  volatilityState = {},
-}) => {
-  const [rotationIndex, setRotationIndex] = useState(0);
+  };
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setRotationIndex((value) => (value + 1) % 3000);
-    }, PULSE_ROTATION_MS);
-    return () => clearInterval(timer);
-  }, []);
+    if (expanded.length === 0) return undefined;
+    const handleKey = event => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeDetail();
+      detailTrigger.current?.focus?.();
+    };
+    const handleOutside = event => {
+      const target = event.target;
+      const inExpansion = expanded.some(section => document.getElementById(`${detailId}-${section}`)?.contains(target));
+      const header = target.closest?.('.market-daily-strip__heading, .market-daily-strip__all');
+      if (!inExpansion && !gridRef.current?.contains(header)
+        && !target.closest?.('.dashboard-delayed-data-timestamp')) closeDetail();
+    };
+    document.addEventListener('keydown', handleKey, true);
+    document.addEventListener('pointerdown', handleOutside);
+    return () => {
+      document.removeEventListener('keydown', handleKey, true);
+      document.removeEventListener('pointerdown', handleOutside);
+    };
+  }, [expanded, detailId, closeDetail]);
+  const candidate = suppliedSnapshot === undefined ? fetchedSnapshot : suppliedSnapshot;
+  const snapshot = validateMarketDailySnapshot(candidate);
+  const breadth = snapshot?.breadth || {};
+  const coverage = snapshot?.coverage || {};
+  const universe = snapshot?.universe?.label || 'S&P 500 · SPY';
+  const totalHoldings = coverage.total || snapshot?.universe?.count;
+  const quoteRows = [
+    ...(snapshot?.winners || []), ...(snapshot?.losers || []),
+    ...Object.values(snapshot?.leadership || {}), ...Object.values(snapshot?.outliers || {}),
+  ].filter(Boolean);
+  const allLive = quoteRows.length > 0 && quoteRows.every((row) => row.status === 'live');
+  const status = !snapshot ? 'UNAVAILABLE' : snapshot.retained ? 'D' : allLive ? '' : 'D';
+  const observationDetail = evidence => evidence ? [
+    `${evidence.universe?.label || universe} · ${count(evidence.coverage?.quotes)} / ${count(evidence.coverage?.total || evidence.universe?.count)} verified quotes`,
+    `SPY equity holdings provide the constituent universe; this is an ETF proxy for the S&P 500. Holdings: ${timestamp(evidence.universe?.asOf)}.`,
+    `${evidence.retained ? 'D · Last verified reading · ' : ''}${allLive && !evidence.retained ? 'LIVE' : 'DELAYED'} · ${timestamp(evidence.asOf)}`,
+    evidence.marketDate ? `Session ${evidence.marketDate}` : '',
+    evidence.source, evidence.sourceUrl,
+  ].filter(Boolean).join('\n') : 'UNAVAILABLE · Waiting for verified observations.';
+  const evidenceFor = group => snapshot?.referenceObservations?.[group] || snapshot;
+  const detailFor = group => observationDetail(evidenceFor(group));
+  const detail = observationDetail(snapshot);
+  const coverageFor = group => evidenceFor(group)?.coverage || coverage;
+  const totalFor = group => evidenceFor(group)?.universe?.count || totalHoldings;
+  const observationFor = readings => [...readings.filter(Boolean)]
+    .sort((left, right) => Date.parse(left.asOf) - Date.parse(right.asOf))[0];
+  const statusFor = readings => readings.some(reading => reading && (reading.retained || reading.status !== 'live')) ? 'D' : undefined;
+  const breadthObservation = observationFor(['breadth', 'above50', 'above200', 'highLow'].map(evidenceFor));
 
-  const categories = useMemo(() => PULSE_CATEGORIES.map((category) => ({
-    ...category,
-    movers: selectTopMovers(marketData, category, providerStatus),
-  })), [marketData, providerStatus]);
-
-  const categoryCount = categories.length;
+  const leaders = snapshot?.leadership || {};
+  const outliers = snapshot?.outliers || {};
+  const leadingSector = verifiedRow(leaders.leadingSector);
+  const laggingSector = verifiedRow(leaders.laggingSector);
+  const lift = verifiedRow(leaders.lift);
+  const drag = verifiedRow(leaders.drag);
+  const volume = verifiedRow(outliers.relativeVolume);
+  const unusual = verifiedRow(outliers.unusualGain);
+  const reversal = verifiedRow(outliers.reversal);
+  const againstSector = verifiedRow(outliers.againstSector);
+  const advancing = number(breadth.advancing);
+  const declining = number(breadth.declining);
+  const unchanged = number(breadth.unchanged);
 
   return (
-    <div className="efr-market-pulse" aria-label="Market pulse ribbon">
-      <div className="efr-market-pulse__metrics">
-        {categories.map((category, categoryIndex) => {
-          const count = category.movers.length;
-          // Stagger left → right: only one card advances per tick, so a full
-          // pass across the ribbon takes categoryCount × PULSE_ROTATION_MS.
-          const activeIndex = count > 0
-            ? Math.floor(
-              (rotationIndex + (categoryCount - 1 - categoryIndex)) / categoryCount,
-            ) % count
-            : 0;
-          return (
-            <PulseMetric
-              activeIndex={activeIndex}
-              category={category}
-              key={category.id}
-              loading={marketDataLoading && count === 0}
-              movers={category.movers}
-              volatilityState={volatilityState}
-            />
-          );
-        })}
+    <div className="efr-market-pulse market-daily-strip" aria-label="Daily market readings" aria-busy={loading && !snapshot}>
+      <div className="efr-market-pulse__metrics market-daily-strip__grid" ref={gridRef}>
+        <Panel section="breadth" title="MARKET BREADTH · S&P 500" label="Market breadth" onExpand={event => toggleDetail('breadth', event)} expanded={expanded.includes('breadth')} detailId={expansionId('breadth')} detail={detail} status={status} observation={breadthObservation}>
+          <MetricTable label="Market breadth readings" variant="market-daily-strip__breadth">
+            <MetricRow label="Advancing / declining" detail={`${detailFor('breadth')}\nCounts use the same verified constituent universe; unchanged securities are counted separately.`}>
+              {advancing == null && declining == null ? UNAVAILABLE : <><BreadthCount value={advancing} direction="is-positive" /> / <BreadthCount value={declining} direction="is-negative" />{unchanged != null ? ` (${count(unchanged)} flat)` : ''}</>}
+            </MetricRow>
+            <MetricRow label="Above 50D / 200D average" detail={`50D: ${detailFor('above50')}\n${historyDetail('50D', coverageFor('above50').history50, totalFor('above50'))}\n200D: ${detailFor('above200')}\n${historyDetail('200D', coverageFor('above200').history200, totalFor('above200'))}`}>
+              {share(breadth.above50Pct)}<HistoryMarker present={share(breadth.above50Pct) !== UNAVAILABLE} eligible={coverageFor('above50').history50} total={totalFor('above50')} label="50D" /> / {share(breadth.above200Pct)}<HistoryMarker present={share(breadth.above200Pct) !== UNAVAILABLE} eligible={coverageFor('above200').history200} total={totalFor('above200')} label="200D" />
+            </MetricRow>
+            <MetricRow label="New 52-week highs / lows" detail={`${detailFor('highLow')}\nSecurities reaching a new 52-week extreme. ${historyDetail('52-week', coverageFor('highLow').year, totalFor('highLow'))}`}>
+              <BreadthCount value={breadth.newHighs} direction="is-positive" /> / <BreadthCount value={breadth.newLows} direction="is-negative" /><HistoryMarker present={count(breadth.newHighs) !== UNAVAILABLE || count(breadth.newLows) !== UNAVAILABLE} eligible={coverageFor('highLow').year} total={totalFor('highLow')} label="52-week" />
+            </MetricRow>
+            <MetricRow label="Median constituent return" detail={`${detailFor('breadth')}\nMedian daily percentage return across the verified universe; each security has equal weight.`}><Signed value={breadth.medianReturn} /></MetricRow>
+          </MetricTable>
+        </Panel>
+        <Panel section="leadership" title="LEADERSHIP · S&P 500" label="Sector leadership and SPY impact" onExpand={event => toggleDetail('leadership', event)} expanded={expanded.includes('leadership')} detailId={expansionId('leadership')} status={statusFor(Object.values(leaders))} observation={observationFor(Object.values(leaders))} detail={`${detail}\nContribution is based on published SPY fund weights, not official index contribution.`}>
+          <MetricTable label="Leadership readings" variant="market-daily-strip__leadership">
+            <MetricRow label="Leading sector" detail={rowDetail(leadingSector)}><NamedChange row={leadingSector} /></MetricRow>
+            <MetricRow label="Lagging sector" detail={rowDetail(laggingSector)}><NamedChange row={laggingSector} /></MetricRow>
+            <MetricRow label="SPY lift" detail={rowDetail(lift, 'Estimated SPY contribution = published ETF weight × daily security return, in percentage points.')}><NamedChange row={lift} contribution /></MetricRow>
+            <MetricRow label="SPY drag" detail={rowDetail(drag, 'Estimated SPY contribution = published ETF weight × daily security return, in percentage points.')}><NamedChange row={drag} contribution /></MetricRow>
+          </MetricTable>
+        </Panel>
+        <MarketThemePanel themes={rotation?.themes} loading={rotationLoading} onExpand={event => toggleDetail('themes', event)} expanded={expanded.includes('themes')} detailId={expansionId('themes')} />
+        <MarketFactorPanel factors={rotation?.factors} loading={rotationLoading} onExpand={event => toggleDetail('factors', event)} expanded={expanded.includes('factors')} detailId={expansionId('factors')} />
+        <Panel section="movers" title="WINNERS & LOSERS · S&P 500" label="Winners and losers" onExpand={event => toggleDetail('movers', event)} expanded={expanded.includes('movers')} detailId={expansionId('movers')} detail={detail} status={statusFor([...(snapshot?.winners || []), ...(snapshot?.losers || [])])} observation={observationFor([...(snapshot?.winners || []), ...(snapshot?.losers || [])])}>
+          <table className="market-daily-strip__table market-daily-strip__movers" aria-label="Top three gainers and decliners">
+            <colgroup><col /><col /><col /><col /><col /><col /></colgroup>
+            <tbody>
+              <tr><th>Ticker</th><th>Security</th><th className="market-daily-strip__value">Gain</th><th className="market-daily-strip__divider">Ticker</th><th>Security</th><th className="market-daily-strip__value">Decline</th></tr>
+              {[0, 1, 2].map((index) => <tr key={index}><MoverCells row={verifiedRow(snapshot?.winners?.[index])} /><MoverCells row={verifiedRow(snapshot?.losers?.[index])} divider /></tr>)}
+            </tbody>
+          </table>
+        </Panel>
+        <Panel section="outliers" title="OUTLIERS · S&P 500" label="Daily market outliers" onExpand={event => toggleDetail('outliers', event)} expanded={expanded.includes('outliers')} detailId={expansionId('outliers')} detail={detail} status={statusFor(Object.values(outliers))} observation={observationFor(Object.values(outliers))}>
+          <MetricTable label="Unusual activity readings" variant="market-daily-strip__outliers">
+            <MetricRow label="Same-time relative volume" detail={rowDetail(volume, 'Cumulative regular-session volume compared with prior sessions at the same elapsed session time.')}>
+              {volume && finite(volume.ratio) ? <>{volume.ticker} {Number(volume.ratio).toFixed(1)}× usual</> : UNAVAILABLE}
+            </MetricRow>
+            <MetricRow label="Largest gain in 40 sessions" detail={rowDetail(unusual, 'Daily return compared with the preceding 40 sessions at the same session time.')}>
+              {unusual ? <>{unusual.ticker} <Signed value={unusual.changePercent} /></> : UNAVAILABLE}
+            </MetricRow>
+            <MetricRow label="Open → now" detail={rowDetail(reversal, 'Opening gap and latest return both use the prior regular-session close as their baseline.')}>
+              {reversal ? <>{reversal.ticker} <Signed value={reversal.gapPercent} /> → <Signed value={reversal.changePercent} /></> : UNAVAILABLE}
+            </MetricRow>
+            <MetricRow label="Against its sector" detail={rowDetail(againstSector, `${againstSector?.sectorName || 'Sector'} comparison uses the same observation session.`)}>
+              {againstSector ? <>{againstSector.ticker} <Signed value={againstSector.changePercent} /> / sector <Signed value={againstSector.sectorChangePercent} /></> : UNAVAILABLE}
+            </MetricRow>
+          </MetricTable>
+        </Panel>
+        <button type="button" className="market-daily-strip__all" aria-label="Open all daily market readings" aria-haspopup="dialog" aria-expanded={allExpanded} aria-controls={expanded.length ? SECTION_ORDER.filter(section => expanded.includes(section)).map(expansionId).join(' ') : undefined} title="All daily market readings" onClick={event => toggleDetail('all', event)}>+ All</button>
       </div>
+      {allView && expanded.length > 0 && createPortal(<div className="market-daily-detail__backdrop" aria-hidden="true" />, document.body)}
+      {SECTION_ORDER.filter(section => expanded.includes(section)).map(section => <MarketDailyDetailModal key={section} id={expansionId(section)} section={section} snapshot={snapshot} rotationSnapshot={rotation} anchor={gridRef.current?.querySelector(`[data-daily-section="${section}"]`)} />)}
     </div>
   );
 };
 
-export {
-  PULSE_CATEGORIES,
-  PULSE_ROTATION_MS,
-  buildPoints,
-  getVolatilityStatus,
-  selectTopMovers,
-};
 export default MarketPulseRibbon;

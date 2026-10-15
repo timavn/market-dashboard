@@ -1,0 +1,57 @@
+.pca-risk { --pca-border: #cbd2d9; --pca-header: #edf0f3; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; min-width: 0; overflow: hidden; color: #202a34; background: #fff; font: 11px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.pca-risk button, .pca-risk input, .pca-risk select { border: 1px solid var(--pca-border); border-radius: 0; background: #fff; color: inherit; font: inherit; min-height: 25px; padding: 3px 7px; }
+.pca-risk button { cursor: pointer; }
+.pca-risk button:hover:not(:disabled), .pca-risk button.is-active { background: #e3e8ed; border-color: #8c97a2; }
+.pca-risk button:disabled { color: #87909a; cursor: default; }
+.pca-risk button:focus-visible, .pca-risk input:focus-visible, .pca-risk select:focus-visible, .pca-risk summary:focus-visible { outline: 2px solid #667483; outline-offset: 1px; }
+.pca-risk__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 39px; padding: 6px 9px; background: var(--pca-header); border-bottom: 1px solid #929da8; }
+.pca-risk__header > div, .pca-risk__actions { display: flex; align-items: center; gap: 8px; }
+.pca-risk h2 { font-size: 15px; margin: 0; font-weight: 700; }
+.pca-risk h3 { margin: 0; padding: 5px 8px; background: var(--pca-header); font-size: 11px; font-weight: 700; border-bottom: 1px solid var(--pca-border); }
+.pca-risk__date-line { display: flex; gap: 16px; flex-wrap: wrap; padding: 5px 9px; border-bottom: 1px solid var(--pca-border); }
+.pca-risk__date-line span { font: inherit; color: inherit; white-space: nowrap; }
+.pca-risk__toolbar { display: flex; align-items: center; gap: 8px; padding: 5px 9px; border-bottom: 1px solid var(--pca-border); background: #f6f7f8; flex-wrap: wrap; }
+.pca-risk__toolbar [role="tablist"] { display: flex; gap: 3px; margin-right: auto; }
+.pca-risk__toolbar label, .pca-risk__scenario-select { display: flex; align-items: center; gap: 7px; }
+.pca-risk__body { overflow: auto; min-height: 0; flex: 1; padding: 8px; }
+.pca-risk__summary { display: grid; grid-template-columns: repeat(4, minmax(115px, 1fr)); border: 1px solid var(--pca-border); margin-bottom: 8px; }
+.pca-risk__summary--comparison { grid-template-columns: repeat(3, minmax(115px, 1fr)); margin: 0; border-width: 0 0 1px; }
+.pca-risk__metric { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; border-right: 1px solid var(--pca-border); }
+.pca-risk__metric:last-child { border-right: 0; }
+.pca-risk__metric span { font-weight: 400; }
+.pca-risk__metric span:last-child { font-size: 15px; font-variant-numeric: tabular-nums; }
+.pca-risk__table-scroll { max-width: 100%; overflow: auto; border: 1px solid var(--pca-border); }
+.pca-risk table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.pca-risk th, .pca-risk td { height: var(--dashboard-table-row-height, 16px); padding: 0 7px; line-height: 1.2; border-right: 1px solid #e1e5e9; border-bottom: 1px solid #e1e5e9; white-space: nowrap; text-align: right; font-weight: 400; font-variant-numeric: tabular-nums; }
+.pca-risk th:first-child, .pca-risk td:first-child { text-align: left; }
+.pca-risk thead th { font-weight: 700; background: var(--pca-header); }
+.pca-risk tr:last-child > * { border-bottom: 0; }
+.pca-risk tr > *:last-child { border-right: 0; }
+.pca-risk tr.is-selected { background: #f4f6f8; }
+.pca-risk .pca-risk__text-button { min-height: 0; padding: 0; background: transparent; border: 0; font-weight: inherit; }
+.pca-risk .is-positive { color: #237849; }
+.pca-risk .is-negative { color: #b03434; }
+.pca-risk .is-watch { color: #876420; }
+.pca-risk__detail { margin-top: 9px; border: 1px solid var(--pca-border); }
+.pca-risk__detail .pca-risk__table-scroll { border-width: 0; }
+.pca-risk p { margin: 6px 8px; }
+.pca-risk details { padding: 5px 8px; }
+.pca-risk summary { cursor: pointer; width: fit-content; }
+.pca-risk details p { margin: 6px 0; max-width: 1050px; }
+.pca-risk__detail details .pca-risk__table-scroll { border: 1px solid var(--pca-border); margin-top: 6px; }
+.pca-risk__methodology { margin-top: 9px; border: 1px solid var(--pca-border); background: #f8f9fa; }
+.pca-risk__settings { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--pca-border); padding: 8px 9px; }
+.pca-risk__settings label, .pca-risk__compare label { display: flex; flex-direction: column; gap: 3px; }
+.pca-risk__settings input { width: 110px; }
+.pca-risk__notice { padding: 6px 8px; border: 1px solid var(--pca-border); background: #f7f4ed; margin: 0 0 8px; }
+.pca-risk__coverage, .pca-risk details.pca-risk__coverage { padding: 0 7px; margin: 0 0 6px; min-height: var(--dashboard-table-row-height, 16px); font-weight: 400; }
+.pca-risk__coverage summary { min-height: var(--dashboard-table-row-height, 16px); }
+.pca-risk__coverage .pca-risk__table-scroll { margin-top: 5px; }
+.pca-risk__empty { padding: 22px 12px; color: #626d79; text-align: center; }
+.pca-risk__compare { padding: 8px; border: 1px solid var(--pca-border); }
+.pca-risk__compare > label { max-width: 260px; }
+.pca-risk__compare p { margin: 7px 0; }
+.pca-risk__candidate { display: flex; align-items: end; gap: 8px; margin-bottom: 6px; }
+.pca-risk__candidate input { width: 160px; }
+.pca-risk__scenario-select { margin: 8px 0; }
+@media (max-width: 680px) { .pca-risk__summary { grid-template-columns: repeat(2, minmax(115px, 1fr)); } .pca-risk__header { align-items: start; } .pca-risk__header > div:first-child { align-items: start; flex-direction: column; gap: 2px; } .pca-risk__candidate input { width: 120px; } }

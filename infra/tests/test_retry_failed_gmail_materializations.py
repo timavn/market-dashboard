@@ -1,4 +1,4 @@
-"""Safety tests for the exact-three Gmail materialization retry wrapper."""
+"""Safety tests for the current Gmail parser-layout retry wrapper."""
 
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ SPEC.loader.exec_module(retry)
 NOW = datetime(2026, 7, 29, 18, 30, tzinfo=timezone.utc)
 OBSERVED_AT = NOW - timedelta(minutes=2)
 PRIVATE_IDS = {
-    "the-call": "gmail-private-call-id",
-    "the-macro-show": "gmail-private-macro-id",
+    "market-structure": "gmail-private-market-structure-id",
     "risk-ranges": "gmail-private-risk-id",
+    "investing-ideas": "gmail-private-investing-ideas-id",
 }
 RELEASE_COMMIT = "a" * 40
 
@@ -81,10 +81,10 @@ def failure_heartbeat(**overrides):
         "triggerSource": "aws-scheduler",
         "scheduleId": retry.EXPECTED_SCHEDULE,
         "scheduled": True,
-        "status": "error",
-        "errorCode": retry.EXPECTED_ERROR_CODE,
+        "status": retry.EXPECTED_HEARTBEAT_STATUS,
+        "errorCode": retry.EXPECTED_HEARTBEAT_ERROR_CODE,
         "observedAt": OBSERVED_AT.isoformat(),
-        "counts": {"errors": 3, "dropped": 0},
+        "counts": deepcopy(retry.EXPECTED_HEARTBEAT_COUNTS),
     }
     result.update(overrides)
     return result
@@ -158,7 +158,22 @@ class FakeLedgerTable:
             (row["messageId"], row["attachmentId"]): deepcopy(row)
             for row in rows
         }
-        self.runtime_state = deepcopy(runtime_state or {"status": "READY"})
+        self.runtime_state = deepcopy(
+            runtime_state
+            if runtime_state is not None
+            else {
+                "status": "WARNING",
+                "quarantinedCount": retry.EXPECTED_QUARANTINE_COUNT,
+                "quarantinedMessages": [
+                    {
+                        "messageId": row["messageId"],
+                        "errorCode": retry.EXPECTED_ERROR_CODE,
+                    }
+                    for row in rows
+                    if row.get("status") == "ERROR"
+                ],
+            }
+        )
         self.runtime_queue = deepcopy(runtime_queue or [])
         self.clear_runtime_on_invoke = clear_runtime_on_invoke
         self.yield_once_on_invoke = yield_once_on_invoke
@@ -167,6 +182,20 @@ class FakeLedgerTable:
         return {"Items": [deepcopy(row) for row in self.rows.values()]}
 
     def query(self, **_kwargs):
+        condition = _kwargs.get("KeyConditionExpression")
+        values = getattr(condition, "_values", ())
+        if (
+            len(values) == 2
+            and getattr(values[0], "name", None) == "messageId"
+        ):
+            message_id = values[1]
+            return {
+                "Items": [
+                    deepcopy(row)
+                    for row in self.rows.values()
+                    if row.get("messageId") == message_id
+                ]
+            }
         limit = int(_kwargs.get("Limit") or len(self.runtime_queue))
         rows = deepcopy(self.runtime_queue[:limit])
         response = {"Items": rows}
@@ -371,19 +400,18 @@ class TargetedRetryTests(unittest.TestCase):
                     "batchId": batch_id,
                     "gmailMessageId": message_id,
                     "sequence": sequence,
-                    "status": (
-                        "RETRYABLE"
-                        if report_type == "risk-ranges"
-                        else "COMPLETED"
-                    ),
+                    "status": "RETRYABLE",
                     "attemptCount": 1,
-                    "errorCode": (
-                        "RISK_RANGE_TRANSACTION_WRITE_FAILED"
-                        if report_type == "risk-ranges"
-                        else None
-                    ),
+                    "errorCode": retry.EXPECTED_ERROR_CODE,
                 }
             )
+        state["quarantinedMessages"] = [
+            {
+                "messageId": PRIVATE_IDS[report_type],
+                "errorCode": retry.EXPECTED_ERROR_CODE,
+            }
+            for report_type in retry.EXPECTED_REPORT_TYPES
+        ]
         return state, queue
 
     def test_profile_rejects_static_shadow_credentials(self):
@@ -397,12 +425,12 @@ class TargetedRetryTests(unittest.TestCase):
                 )
         self.assertEqual(raised.exception.code, "AWS_SSO_PROFILE_SHADOWED")
 
-    def test_latest_heartbeat_requires_exact_scheduler_failure_and_safe_gap(self):
+    def test_latest_heartbeat_requires_exact_scheduler_quarantine_and_safe_gap(self):
         validated = retry.validate_latest_failure_heartbeat(
             [failure_heartbeat()],
             now=NOW,
         )
-        self.assertEqual(validated["counts"]["errors"], 3)
+        self.assertEqual(validated["counts"]["dropped"], 3)
 
         with self.assertRaises(retry.TargetedRetryFailure) as raised:
             retry.validate_latest_failure_heartbeat(
@@ -455,7 +483,45 @@ class TargetedRetryTests(unittest.TestCase):
             "GMAIL_ACTIVE_FAILURE_SET_AMBIGUOUS",
         )
 
-    def test_receipt_accepts_current_typed_risk_range_retry_failure(self):
+    def test_selection_requires_exact_runtime_quarantine_set(self):
+        ledger = FakeLedgerTable(active_failure_rows())
+
+        ledger.runtime_state["quarantinedMessages"] = ledger.runtime_state[
+            "quarantinedMessages"
+        ][:-1]
+        with self.assertRaises(retry.TargetedRetryFailure) as raised:
+            retry.select_current_failures(ledger, failure_heartbeat())
+        self.assertEqual(
+            raised.exception.code,
+            "GMAIL_ACTIVE_FAILURE_SET_AMBIGUOUS",
+        )
+
+        ledger = FakeLedgerTable(active_failure_rows())
+        ledger.runtime_state["quarantinedMessages"].append(
+            {
+                "messageId": "historical-private-id",
+                "errorCode": retry.EXPECTED_ERROR_CODE,
+            }
+        )
+        with self.assertRaises(retry.TargetedRetryFailure) as raised:
+            retry.select_current_failures(ledger, failure_heartbeat())
+        self.assertEqual(
+            raised.exception.code,
+            "GMAIL_ACTIVE_FAILURE_SET_AMBIGUOUS",
+        )
+
+        ledger = FakeLedgerTable(active_failure_rows())
+        ledger.runtime_state["quarantinedMessages"][0][
+            "errorCode"
+        ] = "RISK_RANGE_TRANSACTION_WRITE_FAILED"
+        with self.assertRaises(retry.TargetedRetryFailure) as raised:
+            retry.select_current_failures(ledger, failure_heartbeat())
+        self.assertEqual(
+            raised.exception.code,
+            "GMAIL_ACTIVE_FAILURE_SET_AMBIGUOUS",
+        )
+
+    def test_receipt_rejects_historical_typed_risk_range_retry_failure(self):
         original = active_failure_rows()
         current = deepcopy(original)
         risk = next(
@@ -474,24 +540,23 @@ class TargetedRetryTests(unittest.TestCase):
             }
         )
 
-        selected = retry.verify_incident_live_evidence(
-            FakeHeartbeatTable([failure_heartbeat()]),
-            FakeLedgerTable(current),
-            incident_receipt(original),
-        )
+        with self.assertRaises(retry.TargetedRetryFailure) as raised:
+            retry.verify_incident_live_evidence(
+                FakeHeartbeatTable([failure_heartbeat()]),
+                FakeLedgerTable(current),
+                incident_receipt(original),
+            )
 
-        selected_risk = next(
-            row
-            for row in selected
-            if row["reportType"] == "risk-ranges"
+        self.assertEqual(
+            raised.exception.code,
+            "GMAIL_INCIDENT_EVIDENCE_DRIFT",
         )
-        self.assertTrue(selected_risk["needsRetry"])
 
     def test_receipt_rejects_typed_risk_error_for_non_risk_category(self):
         original = active_failure_rows()
         current = deepcopy(original)
         call = next(
-            row for row in current if row["reportType"] == "the-call"
+            row for row in current if row["reportType"] == "market-structure"
         )
         call.update(
             {
@@ -668,7 +733,7 @@ class TargetedRetryTests(unittest.TestCase):
             "GMAIL_TARGETED_RETRY_POSTCHECK_FAILED",
         )
 
-    def test_apply_retries_only_active_typed_risk_failure(self):
+    def test_apply_retries_only_current_parser_failures(self):
         with tempfile.TemporaryDirectory() as raw:
             private_dir = Path(raw)
             config, credentials = write_profile_files(private_dir)
@@ -687,26 +752,6 @@ class TargetedRetryTests(unittest.TestCase):
                 now=NOW,
             )
 
-            recovered_ids = [
-                PRIVATE_IDS["the-call"],
-                PRIVATE_IDS["the-macro-show"],
-            ]
-            ledger.recover(recovered_ids)
-            risk = next(
-                row
-                for row in ledger.rows.values()
-                if row["reportType"] == "risk-ranges"
-            )
-            risk.update(
-                {
-                    "errorCode": "RISK_RANGE_TRANSACTION_WRITE_FAILED",
-                    "materializationAttemptVersion": (
-                        retry.EXPECTED_MATERIALIZATION_ATTEMPT_VERSION
-                    ),
-                    "materializationAttemptCount": 1,
-                    "updatedAt": OBSERVED_AT.isoformat(),
-                }
-            )
             state, queue = self.exact_resume_state_and_queue()
             ledger.runtime_state = state
             ledger.runtime_queue = queue
@@ -724,7 +769,7 @@ class TargetedRetryTests(unittest.TestCase):
             )
 
         self.assertTrue(result["passed"])
-        self.assertEqual(result["activeFailureCount"], 1)
+        self.assertEqual(result["activeFailureCount"], 3)
         self.assertEqual(result["invocationCount"], 2)
         self.assertEqual(ledger.runtime_state, {"status": "READY"})
         self.assertEqual(ledger.runtime_queue, [])
@@ -918,7 +963,7 @@ class TargetedRetryTests(unittest.TestCase):
             {
                 "messageId": PRIVATE_IDS[report_type],
                 "reportType": report_type,
-                "needsRetry": report_type == "risk-ranges",
+                "needsRetry": True,
             }
             for report_type in retry.EXPECTED_REPORT_TYPES
         ]
@@ -937,14 +982,14 @@ class TargetedRetryTests(unittest.TestCase):
         )
 
         self.assertEqual(runtime_gate["mode"], "resume")
-        self.assertEqual(runtime_gate["expectedMessageCount"], 1)
+        self.assertEqual(runtime_gate["expectedMessageCount"], 3)
 
     def test_active_runtime_with_extra_queue_item_is_blocked(self):
         selected = [
             {
                 "messageId": PRIVATE_IDS[report_type],
                 "reportType": report_type,
-                "needsRetry": report_type == "risk-ranges",
+                "needsRetry": True,
             }
             for report_type in retry.EXPECTED_REPORT_TYPES
         ]
@@ -972,7 +1017,7 @@ class TargetedRetryTests(unittest.TestCase):
             {
                 "messageId": PRIVATE_IDS[report_type],
                 "reportType": report_type,
-                "needsRetry": report_type == "risk-ranges",
+                "needsRetry": True,
             }
             for report_type in retry.EXPECTED_REPORT_TYPES
         ]
@@ -1187,6 +1232,51 @@ class TargetedRetryTests(unittest.TestCase):
                         "private-id",
                     ]
                 )
+
+    def test_cli_requires_allowlisted_incident_and_release_for_apply(self):
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                retry.parse_args(
+                    [
+                        "--prepare",
+                        "--receipt",
+                        "/tmp/incident.json",
+                        "--receipt-key",
+                        "/tmp/incident.key",
+                    ]
+                )
+
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                retry.parse_args(
+                    [
+                        "--apply",
+                        "--incident",
+                        retry.EXPECTED_INCIDENT_PROFILE,
+                        "--receipt",
+                        "/tmp/incident.json",
+                        "--receipt-key",
+                        "/tmp/incident.key",
+                    ]
+                )
+
+        args = retry.parse_args(
+            [
+                "--apply",
+                "--incident",
+                retry.EXPECTED_INCIDENT_PROFILE,
+                "--receipt",
+                "/tmp/incident.json",
+                "--receipt-key",
+                "/tmp/incident.key",
+                "--admin-profile",
+                "market-dashboard-admin",
+                "--release-commit",
+                RELEASE_COMMIT,
+            ]
+        )
+        self.assertEqual(args.incident, retry.EXPECTED_INCIDENT_PROFILE)
+        self.assertEqual(args.release_commit, RELEASE_COMMIT)
 
 
 if __name__ == "__main__":

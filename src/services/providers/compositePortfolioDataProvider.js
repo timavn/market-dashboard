@@ -5,8 +5,9 @@ const { setPortfolioMeta } = require('./providerStatus');
  * @param {ReturnType<import('./uploadedStatementPortfolioProvider').createUploadedStatementPortfolioProvider>} uploadProvider
  */
 function createCompositePortfolioDataProvider(uploadProvider) {
-  function formatIbkrOfflineEmpty() {
-    setPortfolioMeta('ibkr_offline', null);
+  function formatIbkrOfflineEmpty(error = null, accountId = null) {
+    const message = error || 'Fresh live IBKR positions are unavailable.';
+    setPortfolioMeta('ibkr_offline', message);
     return {
       summary: {
         totalValue: 0,
@@ -22,15 +23,14 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       holdings: [],
       topHoldings: [],
       accountSummary: null,
-      funding: null,
-      fundingReference: null,
-      accountId: null,
+      accountId: accountId || null,
       lastUpdated: null,
       dataSource: 'ibkr_offline',
       positionSource: null,
       priceSource: null,
       empty: true,
       liveSessionVerified: false,
+      error: message,
     };
   }
 
@@ -150,12 +150,15 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       const ibkrSnap = await ibkrPortfolio.getPortfolioSnapshot(accountId);
       if (ibkrSnap.liveSessionVerified !== true
           || (ibkrSnap.error && !ibkrSnap.accountSummary && !(ibkrSnap.holdings?.length))) {
-        return formatIbkrOfflineEmpty();
+        return formatIbkrOfflineEmpty(
+          ibkrSnap.error,
+          ibkrSnap.accountId || accountId,
+        );
       }
       return formatIbkrResponse(ibkrSnap);
     } catch (err) {
       console.warn('[Portfolio] IBKR snapshot failed:', err.message);
-      return formatIbkrOfflineEmpty();
+      return formatIbkrOfflineEmpty(err.message, accountId);
     }
   }
 
@@ -212,8 +215,6 @@ function createCompositePortfolioDataProvider(uploadProvider) {
       positionSource: 'uploaded_statement',
       archival: true,
       liveSessionVerified: false,
-      funding: null,
-      fundingReference: null,
       empty: false,
     };
   }
@@ -265,6 +266,8 @@ function createCompositePortfolioDataProvider(uploadProvider) {
     getAccounts: ibkrPortfolio.getAccounts,
     getPositions: ibkrPortfolio.getPositions,
     getAccountSummary: ibkrPortfolio.getAccountSummary,
+    getPortfolioBalance: ibkrPortfolio.getPortfolioBalance,
+    getPortfolioBalancePreview: ibkrPortfolio.getPortfolioBalancePreview,
     getBalances: ibkrPortfolio.getBalances,
     getPnL: ibkrPortfolio.getPnL,
   };

@@ -1,7 +1,15 @@
 const crypto = require('crypto');
+const { formatMarketDate } = require('./marketDateFormat.cjs');
 const { normalizeRtaAlertEvent } = require('./rtaPositionReconstruction.cjs');
 
 const RESEARCH_EVENT_PARSER_PREFIX = 'research-event-ledger-v2';
+// Ledger parser generations the dashboard accepts. The Gmail ingestor deployed
+// since 2026-08-13 labels events `research-event-ledger-v3-tracker-contract`
+// with the same payload contract and verification hash as v2.
+const RESEARCH_EVENT_PARSER_PREFIXES = Object.freeze([
+  RESEARCH_EVENT_PARSER_PREFIX,
+  'research-event-ledger-v3-tracker-contract',
+]);
 const RESEARCH_EVENT_VERIFICATION_HASH_VERSION = 'research-event-content-v1';
 
 function stableValue(value) {
@@ -206,7 +214,7 @@ function sortResearchEvents(items = []) {
 function eventDate(item, timeZone = 'America/New_York') {
   const date = new Date(item?.eventTime || '');
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString('en-CA', { timeZone });
+  return formatMarketDate(date, timeZone);
 }
 
 function eventIdentity(item = {}) {
@@ -235,7 +243,8 @@ function validateBaseEvent(item, productKey, supportedTypes) {
   if (!item.payload || typeof item.payload !== 'object' || Array.isArray(item.payload)) {
     reasons.push('payload-invalid');
   }
-  if (!String(item.parserVersion || '').startsWith(RESEARCH_EVENT_PARSER_PREFIX)) {
+  const parserVersion = String(item.parserVersion || '');
+  if (!RESEARCH_EVENT_PARSER_PREFIXES.some((prefix) => parserVersion.startsWith(prefix))) {
     reasons.push('parser-version-invalid');
   }
   if (!String(item.eventHash || '').match(/^[a-f0-9]{64}$/i)) reasons.push('event-hash-missing');

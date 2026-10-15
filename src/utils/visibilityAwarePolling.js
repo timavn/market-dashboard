@@ -9,6 +9,7 @@ export function startVisibilityAwarePolling({
   poll,
   intervalMs,
   pollOnStart = false,
+  initialDelayMs = intervalMs,
   documentObject = typeof document !== 'undefined' ? document : null,
 }) {
   if (typeof poll !== 'function') {
@@ -19,13 +20,25 @@ export function startVisibilityAwarePolling({
   }
 
   let intervalId = null;
+  let initialTimeoutId = null;
   let stopped = false;
   let suspended = Boolean(documentObject?.hidden);
+
+  const normalizedInitialDelayMs = pollOnStart
+    ? 0
+    : Math.max(0, Math.min(Number(initialDelayMs) || 0, intervalMs));
 
   const stopInterval = () => {
     if (intervalId !== null) {
       clearInterval(intervalId);
       intervalId = null;
+    }
+  };
+
+  const stopInitialTimeout = () => {
+    if (initialTimeoutId !== null) {
+      clearTimeout(initialTimeoutId);
+      initialTimeoutId = null;
     }
   };
 
@@ -46,11 +59,30 @@ export function startVisibilityAwarePolling({
     intervalId = setInterval(run, intervalMs);
   };
 
+  const startInitialTimer = () => {
+    if (stopped || suspended || intervalId !== null || initialTimeoutId !== null) return;
+    if (normalizedInitialDelayMs <= 0) {
+      run();
+      startInterval();
+      return;
+    }
+    if (normalizedInitialDelayMs === intervalMs) {
+      startInterval();
+      return;
+    }
+    initialTimeoutId = setTimeout(() => {
+      initialTimeoutId = null;
+      run();
+      startInterval();
+    }, normalizedInitialDelayMs);
+  };
+
   const handleVisibilityChange = () => {
     const hidden = Boolean(documentObject?.hidden);
     if (hidden) {
       if (!suspended) {
         suspended = true;
+        stopInitialTimeout();
         stopInterval();
       }
       return;
@@ -62,14 +94,12 @@ export function startVisibilityAwarePolling({
     startInterval();
   };
 
-  if (pollOnStart && !suspended) {
-    run();
-  }
-  startInterval();
+  startInitialTimer();
   documentObject?.addEventListener?.('visibilitychange', handleVisibilityChange);
 
   return () => {
     stopped = true;
+    stopInitialTimeout();
     stopInterval();
     documentObject?.removeEventListener?.('visibilitychange', handleVisibilityChange);
   };

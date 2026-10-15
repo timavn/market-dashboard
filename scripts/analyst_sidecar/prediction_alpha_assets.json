@@ -1,0 +1,9 @@
+{
+  "sp500": {"instrument": "SPX", "aliases": ["SPX", "S&P 500", "S&P500"]},
+  "gold": {"instrument": "Gold", "aliases": ["Gold", "XAUUSD", "XAU/USD"]},
+  "silver": {"instrument": "Silver", "aliases": ["Silver", "XAGUSD", "XAG/USD"]},
+  "bitcoin": {"instrument": "Bitcoin", "aliases": ["Bitcoin", "BTC", "BTCUSD", "BTC/USD", "₿TC"]},
+  "ethereum": {"instrument": "Ethereum", "aliases": ["Ethereum", "Ether", "ETH", "ETHUSD", "ETH/USD"]},
+  "cpi": {"instrument": "CPI", "aliases": ["CPI", "Consumer Price Index"]},
+  "excluded": {"aliases": ["SPY", "ES", "QQQ", "IWM", "GLD", "SLV", "GC", "SI", "IBIT", "ETHA", "UST", "WTI", "Brent", "Nikkei", "Oil"]}
+}

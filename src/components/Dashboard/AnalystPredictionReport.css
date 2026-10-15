@@ -1,0 +1,238 @@
+.analyst-panel-v2 .analyst-message.analyst-prediction-report {
+  max-width: 760px;
+  margin-inline: auto;
+  text-align: left;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown,
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame {
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown h2 {
+  margin: 14px 0 6px;
+  padding: 0;
+  font-size: 14px;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown h2:first-child { margin-top: 0; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown h3 {
+  margin: 14px 0 6px;
+  font-size: 14px;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown h4 {
+  margin: 10px 0 4px;
+  color: inherit;
+  font-size: 10px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown strong { font-weight: 400; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown :is(h1, h2, h3, h4),
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown :is(h1, h2, h3, h4) strong {
+  color: var(--portfolio-review-blue, #2563eb);
+  font-weight: 400;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown p { margin: 3px 0; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame {
+  width: 100%;
+  min-width: 0;
+  margin: 6px 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame :is(th, td) {
+  padding: 4px 6px;
+  border: 1px solid var(--analyst-border, #dbe1e8);
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: break-word;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame td:first-child {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  color: inherit;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame th {
+  color: var(--analyst-ink, #172033);
+  background: #f3f4f6;
+  font-weight: 400;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame table :is(th, td):last-child { border-right: 1px solid var(--analyst-border, #dbe1e8); }
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame table tbody tr:last-child td { border-bottom: 1px solid var(--analyst-border, #dbe1e8); }
+.analyst-prediction-report .analyst-prediction-cell-date { white-space: nowrap; }
+.analyst-prediction-report .analyst-prediction-metric-col { width: 18%; }
+.analyst-prediction-report .analyst-prediction-ticker-col { width: 9%; }
+.analyst-prediction-report .analyst-prediction-security-col { width: 18%; }
+.analyst-prediction-report .analyst-prediction-date-col { width: 25%; }
+.analyst-prediction-report .analyst-prediction-contract-level-col { width: 12%; }
+.analyst-prediction-report .analyst-prediction-contract-outcome-col { width: 15%; }
+.analyst-prediction-report .analyst-prediction-contract-side-col { width: 8%; }
+.analyst-prediction-report .analyst-prediction-contract-price-col { width: 12%; }
+.analyst-prediction-report .analyst-prediction-contract-odds-col { width: 23%; }
+.analyst-prediction-report .analyst-prediction-contract-payoff-col { width: 30%; }
+.analyst-prediction-report .is-tick-comparison col:nth-child(3) { width: 9%; }
+.analyst-prediction-report .is-tick-comparison col:nth-child(4) { width: 18%; }
+.analyst-prediction-report .is-tick-comparison col:nth-child(5),
+.analyst-prediction-report .is-tick-comparison col:nth-child(8) { width: 11%; }
+.analyst-prediction-report .is-tick-comparison col:nth-child(6),
+.analyst-prediction-report .is-tick-comparison col:nth-child(7) { width: 12%; }
+.analyst-panel-v2 .analyst-prediction-report .has-dates :is(th, td):last-child { text-align: right; }
+.analyst-panel-v2 .analyst-prediction-report .is-tick-comparison :is(th, td):nth-child(5) { text-align: right; }
+.analyst-panel-v2 .analyst-prediction-report .has-securities td:nth-child(2) { color: var(--portfolio-review-blue, #2563eb); }
+.analyst-panel-v2 .analyst-prediction-report .has-securities td:nth-child(2),
+.analyst-panel-v2 .analyst-prediction-report .has-labels td:first-child,
+.analyst-panel-v2 .analyst-prediction-report .analyst-prediction-short-reading {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown .analyst-prediction-sources {
+  margin: 6px 0;
+  font-size: 10px;
+  font-weight: 400;
+}
+.analyst-prediction-report .analyst-prediction-source {
+  padding: 0;
+  color: var(--analyst-ink, #172033);
+  background: none;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.analyst-prediction-report .analyst-prediction-source:hover { color: var(--analyst-accent, #087b80); }
+.analyst-prediction-report .analyst-prediction-source:focus-visible { outline: 2px solid var(--analyst-accent, #087b80); outline-offset: 3px; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown a { color: inherit; text-decoration: none; }
+.analyst-prediction-report .analyst-research-disclosure { margin: 6px 0; }
+.analyst-prediction-report .analyst-research-disclosure > summary { cursor: pointer; font-weight: 400; }
+.analyst-prediction-report .analyst-research-disclosure[open] > summary { margin-bottom: 6px; }
+/* Setup board: every column fits the report width; readings wrap instead of overflowing. */
+.analyst-prediction-report .is-setup-board col:nth-child(1) { width: 13%; }
+.analyst-prediction-report .is-setup-board col:nth-child(2) { width: 10%; }
+.analyst-prediction-report .is-setup-board col:nth-child(3) { width: 15%; }
+.analyst-prediction-report .is-setup-board col:nth-child(4) { width: 7%; }
+.analyst-prediction-report .is-setup-board col:nth-child(5) { width: 11%; }
+.analyst-prediction-report .is-setup-board col:nth-child(6) { width: 11%; }
+.analyst-prediction-report .is-setup-board col:nth-child(7) { width: 9%; }
+.analyst-prediction-report .is-setup-board col:nth-child(8) { width: 10%; }
+.analyst-prediction-report .is-setup-board col:nth-child(9) { width: 14%; }
+/* Current board: Market | Tick | Trade | Trend | Price and Risk Range | As of. Saved boards with a Setup column keep its width. */
+.analyst-prediction-report .is-range-board col:nth-child(1) { width: 11%; }
+.analyst-prediction-report .is-range-board col:nth-child(2),
+.analyst-prediction-report .is-range-board col:nth-child(3),
+.analyst-prediction-report .is-range-board col:nth-child(4) { width: 9%; }
+.analyst-prediction-report .is-range-board col:nth-child(5) { width: 37%; }
+.analyst-prediction-report .is-range-board col:nth-child(6) { width: 25%; }
+.analyst-prediction-report .is-range-board.has-setup col:nth-child(2) { width: 38%; }
+.analyst-prediction-report .is-range-board.has-setup col:nth-child(3),
+.analyst-prediction-report .is-range-board.has-setup col:nth-child(4) { width: 11%; }
+.analyst-prediction-report .is-range-board.has-setup col:nth-child(5) { width: 9%; }
+.analyst-prediction-report .is-range-board.has-setup col:nth-child(6) { width: 8%; }
+.analyst-prediction-report .is-range-board.has-setup col:nth-child(7) { width: 11%; }
+/* Tick, Trade and Trend read as centered signal columns on the current board. */
+.analyst-panel-v2 .analyst-prediction-report .is-range-board:not(.has-setup) :is(th, td):is(:nth-child(2), :nth-child(3), :nth-child(4)) { text-align: center; }
+.analyst-prediction-stack { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.analyst-prediction-stack__key { display: inline-block; min-width: 14px; color: var(--dashboard-muted-text, #667085); }
+/* As of lines: key and product on the left, the date right-aligned. */
+.analyst-prediction-as-of-line { display: flex; align-items: baseline; gap: 4px; }
+.analyst-prediction-as-of-line__product { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.analyst-prediction-as-of-line__date { flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
+/* The US Dollar reference row sits first in each market table, set apart by a thin money-green outline. */
+.analyst-panel-v2 .analyst-prediction-report .is-range-board tr:has(.analyst-prediction-reference-cell) {
+  outline: 1px solid var(--analyst-money-green, #2e7d32);
+  outline-offset: -1px;
+}
+.analyst-prediction-stack--muted { color: var(--dashboard-muted-text, #667085); }
+.analyst-panel-v2 .analyst-prediction-report .is-setup-board :is(td, th) { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: break-word; vertical-align: middle; }
+.analyst-panel-v2 .analyst-prediction-report .is-setup-board td.analyst-prediction-range-cell { padding: 5px 6px 7px; }
+
+/* One-line price-in-range bar (AnalystPredictionRangeBar). */
+.analyst-range-bar {
+  display: grid;
+  grid-template-columns: auto minmax(24px, 1fr) auto auto;
+  grid-template-rows: 13px 12px 14px;
+  column-gap: 5px;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.analyst-range-bar__end, .analyst-range-bar__position { grid-row: 2; color: var(--dashboard-muted-text, #667085); }
+.analyst-range-bar__end--low { grid-column: 1; }
+.analyst-range-bar__end--high { grid-column: 3; }
+.analyst-range-bar__position { grid-column: 4; min-width: 26px; text-align: right; }
+.analyst-range-bar__position.is-top { color: var(--dashboard-positive, #059669); }
+.analyst-range-bar__position.is-bottom { color: var(--dashboard-negative, #dc2626); }
+.analyst-range-bar__position.is-middle { color: var(--analyst-ink, #172033); }
+.analyst-range-bar__price { grid-row: 1; line-height: 13px; font-weight: 500; }
+.analyst-range-bar__price--below { grid-column: 1; color: var(--dashboard-negative, #dc2626); }
+.analyst-range-bar__price--above { grid-column: 3; justify-self: end; color: var(--dashboard-positive, #059669); }
+.analyst-range-bar__price--inside { position: absolute; top: 0; }
+.analyst-range-bar__track { grid-column: 2; grid-row: 1 / 4; position: relative; align-self: stretch; }
+.analyst-range-bar__line { position: absolute; top: 18px; left: 0; right: 0; height: 2px; background: var(--analyst-border, #c9d1db); }
+/* Third marks straddle the line: both are centered on y = 19px. */
+.analyst-range-bar__mark { position: absolute; top: 19px; width: 2px; height: 11px; border-radius: 1px; transform: translate(-1px, -50%); }
+.analyst-range-bar__mark--bottom { left: 33.33%; background: var(--dashboard-negative, #dc2626); }
+.analyst-range-bar__mark--top { left: 66.67%; background: var(--dashboard-positive, #059669); }
+.analyst-range-bar__level { position: absolute; top: 27px; transform: translateX(-50%); line-height: 12px; font-size: 10px; }
+.analyst-range-bar__level--bottom { left: 33.33%; color: var(--dashboard-negative, #dc2626); }
+.analyst-range-bar__level--top { left: 66.67%; color: var(--dashboard-positive, #059669); }
+.analyst-range-bar__dot {
+  position: absolute; top: 19px; width: 8px; height: 8px; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--portfolio-review-blue, #2563eb);
+}
+.analyst-range-bar__dot.is-below { background: var(--dashboard-negative, #dc2626); }
+.analyst-range-bar__dot.is-above { background: var(--dashboard-positive, #059669); }
+
+/* Section drivers (AnalystPredictionDrivers): volatility and USD-correlation tables; saved reviews may carry the earlier cells. */
+.analyst-drivers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 4px 0 6px; align-items: start; }
+.analyst-drivers.has-volatility { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+/* Side by side when they fit; otherwise each table takes the full width. */
+.analyst-drivers--tables { display: flex; flex-wrap: wrap; align-items: stretch; }
+.analyst-drivers__asof { flex: 1 0 100%; text-align: right; color: var(--dashboard-muted-text, #667085); line-height: 1.2; }
+/* vs USD gets enough width for four outlined readings; volatility gives up its slack name column. */
+.analyst-drivers--tables > table[aria-label="Volatility"] { flex: 3 1 400px; min-width: 0; }
+.analyst-drivers--tables > table[aria-label="Correlation with the US Dollar"] { flex: 2 1 300px; min-width: 0; }
+.analyst-drivers__cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 4px; }
+.analyst-driver { min-width: 0; padding: 4px 6px; border: 1px solid var(--analyst-border, #dbe1e8); background: #fff; line-height: 1.35; }
+.analyst-driver__label { color: var(--dashboard-muted-text, #667085); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.analyst-driver__value { font-weight: 500; font-variant-numeric: tabular-nums; }
+.analyst-driver__rows { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; font-variant-numeric: tabular-nums; }
+.analyst-driver__rows > :nth-child(even) { text-align: right; }
+.analyst-driver__line { overflow-wrap: break-word; }
+.analyst-driver__stack { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.analyst-driver__muted, .analyst-drivers .is-muted { color: var(--dashboard-muted-text, #667085); font-weight: 400; }
+.analyst-drivers .is-positive { color: var(--dashboard-positive, #059669); }
+.analyst-drivers .is-negative { color: var(--dashboard-negative, #dc2626); }
+.analyst-drivers .is-caution { color: var(--analyst-caution, #925b0a); }
+.analyst-driver__change { font-weight: 400; }
+.analyst-panel-v2 .analyst-prediction-report table.analyst-drivers__table {
+  width: 100%; margin: 0; border-collapse: collapse; table-layout: fixed; background: #fff; font-variant-numeric: tabular-nums;
+}
+.analyst-panel-v2 .analyst-prediction-report table.analyst-drivers__table :is(th, td) {
+  padding: 3px 6px; border: 1px solid var(--analyst-border, #dbe1e8); text-align: left; vertical-align: middle; font-weight: 400;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.analyst-panel-v2 .analyst-prediction-report table.analyst-drivers__table th { background: #f3f4f6; color: var(--analyst-ink, #172033); }
+/* Every column after the name reads centered, headers included. */
+.analyst-panel-v2 .analyst-prediction-report table.analyst-drivers__table :is(th, td):not(:first-child) { text-align: center; }
+.analyst-drivers__name-col { width: 13%; }
+table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { width: 28%; }
+.analyst-drivers__regime-col { width: 18%; }
+.analyst-drivers__implied-col { width: 15%; }
+/* vs USD heat: matches USDCorrelationMatrix (red negative, green positive, outline when |r| >= 0.75). */
+.analyst-drivers .analyst-corr--neg-light, .analyst-drivers .analyst-corr--neg-strong { color: var(--dashboard-negative, #dc2626); }
+.analyst-drivers .analyst-corr--pos-light, .analyst-drivers .analyst-corr--pos-strong { color: var(--dashboard-positive, #059669); }
+.analyst-drivers :is(.analyst-corr--neg-strong, .analyst-corr--pos-strong) { padding: 0 3px; outline: 1px solid currentColor; outline-offset: -1px; }
+

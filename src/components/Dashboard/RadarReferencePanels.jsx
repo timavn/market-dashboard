@@ -1,17 +1,31 @@
+import usePageScrollLock from '../../hooks/usePageScrollLock';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { MarketDataService } from '../../services/api/marketDataService';
-import CFTCNetLongCard from './CFTCNetLongCard';
+import CFTCNetLongCard, { getCftcFreshness } from './CFTCNetLongCard';
+import DelayedDataMarker from './DelayedDataMarker';
+import { delayedMarkerMarketContext } from '../../utils/delayedMarkerMarketContext';
 import DollarLiquidityModels from './DollarLiquidityModels';
-import GlobalQuadsCard from './GlobalQuadsCard';
+import GlobalQuadsCard, { QuadsPreview } from './GlobalQuadsCard';
+import { useGlobalQuads } from '../../hooks/useGlobalQuads';
 import MarketSituationReportCard, {
   getMarketSituationFreshness,
 } from './MarketSituationReportCard';
-import MarketVolumeTable from './MarketVolumeTable';
-import DataStatusChip from './DataStatusChip';
+import MarketVolumeTable, { getVolumeCardHeaderDate } from './MarketVolumeTable';
+import PersistentSurface from '../common/PersistentSurface';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
+import { useMarketStructureReport } from '../../hooks/useMarketStructureReport';
+import { isRetainedQuoteReference, isVerifiedProviderRow } from '../../utils/marketQuoteReference.cjs';
+import { getCftcHighlightRows, getCftcReportDate } from '../../utils/cftcHighlights';
+import {
+  cftcValueClass,
+  formatCftcDate,
+  formatCftcRetrieval,
+  isCftcResearchSnapshot,
+} from '../../utils/cftcPositioningPresentation';
 
-const QUADS_STORAGE_KEY = 'quadForecast_v3';
 const ANALYTICS_REFRESH_MS = 15 * 60 * 1000;
+const IBKR_LIVE_DISPLAY_MAX_AGE_MS = 2 * 60 * 1000;
 const CONTINUOUS_CRYPTO_SYMBOLS = new Set(['BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP']);
 
 const PANEL_TITLES = {
@@ -20,6 +34,13 @@ const PANEL_TITLES = {
   quads: 'Global Quads',
   liquidity: 'Dollar Liquidity',
   volume: 'Volume',
+};
+
+const requireReferenceObject = (payload) => {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('The dated reference response was unavailable.');
+  }
+  return payload;
 };
 
 const readManualRecord = (key) => {
@@ -66,56 +87,81 @@ const formatSigned = (value, suffix = '') => {
   return `${numeric > 0 ? '+' : ''}${numeric.toFixed(2)}${suffix}`;
 };
 
-const getRowQuoteStatus = (row, providerStatus) => {
+const getRowQuoteStatus = (row, providerStatus, { allowReference = false } = {}) => {
+  if (allowReference && isRetainedQuoteReference(row)) return 'refresh-delayed';
+  if (allowReference && !isVerifiedProviderRow(row)) return 'unavailable';
   if (!row || !['current', 'delayed', 'historical'].includes(row.availability)) return 'unavailable';
   const source = String(row.source || row.provider || '').toLowerCase();
   const quoteMode = String(row.dataType || row.quoteMode || row.freshness || '').toLowerCase();
   const quoteAsOf = row.quoteAsOf || row.timestamp || row.asOf;
   const quoteDate = quoteAsOf ? new Date(quoteAsOf) : null;
-  const providerDate = providerStatus?.timestamp || providerStatus?.responseTimestamp;
-  const providerAge = providerDate ? Date.now() - new Date(providerDate).getTime() : Infinity;
-  const lastQuoteAt = providerStatus?.ibkr?.lastQuoteAt;
-  const heartbeatAge = lastQuoteAt ? Date.now() - new Date(lastQuoteAt).getTime() : Infinity;
-  const ibkrOffline =
-    providerStatus?.statusRefreshDelayed ||
-    providerStatus?.ibkr?.connected !== true ||
-    !Number.isFinite(providerAge) || providerAge < -30000 || providerAge > 30000 ||
-    !Number.isFinite(heartbeatAge) || heartbeatAge < -60000 || heartbeatAge > 60000;
+  const providerExplicitlyOffline = Boolean(
+    providerStatus
+      && (
+        providerStatus?.ibkr?.connected === false
+        || /offline|disconnected/i.test(String(providerStatus?.ibkr?.status || providerStatus?.status || ''))
+      )
+  );
 
   if (!quoteDate || Number.isNaN(quoteDate.getTime())) return 'unavailable';
   const quoteAge = Date.now() - quoteDate.getTime();
   if (quoteAge < -5 * 60 * 1000) return 'unavailable';
-  if (source.includes('ibkr') && ibkrOffline) return 'unavailable';
+  if (/(?:mock|seed|seeded|synthetic|inferred|portfolio-derived)/i.test([
+    source,
+    quoteMode,
+    row.warning,
+    row.error,
+  ].filter(Boolean).join(' '))) return 'unavailable';
   if (row.freshness && row.freshness !== 'current') return 'unavailable';
   if (row.sourceStatus && row.sourceStatus !== 'current') return 'unavailable';
+  const warning = String(row.warning || '');
+  // Auto-routed analytical rows deliberately preserve the rejected IBKR
+  // attempt in the warning when a separately timestamped Yahoo quote wins.
+  // Direct Yahoo rows also carry `yahoo_fallback` as provenance. Both are
+  // valid delayed observations; only an unapproved warning (for example a
+  // stale/cache/offline marker) should invalidate the row.
+  const yahooProvenanceWarning = source.includes('yahoo')
+    && (
+      /^ibkr\s*:/i.test(warning)
+      || warning.split(';').map((part) => part.trim()).filter(Boolean).every((part) => (
+        /^(?:ibkr_unavailable|yahoo_fallback|delayed_data)$/i.test(part)
+      ))
+    );
   if (/stale|offline|cache|mock|seed|synthetic|fallback|inferred|portfolio/i.test(
-    [quoteMode, row.warning, row.error, row.entitlementStatus].filter(Boolean).join(' ')
+    [
+      quoteMode,
+      yahooProvenanceWarning ? null : warning,
+      row.error,
+      row.entitlementStatus,
+    ].filter(Boolean).join(' ')
   )) {
     return 'unavailable';
   }
+  const datedStatus = allowReference && isVerifiedProviderRow(row) ? 'refresh-delayed' : 'unavailable';
+  if (source.includes('ibkr') && providerExplicitlyOffline) return datedStatus;
   if (row.availability === 'delayed' && quoteMode === 'delayed') {
     const symbol = String(row.symbol || row.ticker || '').toUpperCase();
     const maxAge = CONTINUOUS_CRYPTO_SYMBOLS.has(symbol)
       ? 2 * 60 * 60 * 1000
       : 4 * 24 * 60 * 60 * 1000;
-    return quoteAge <= maxAge ? 'delayed' : 'unavailable';
+    return quoteAge <= maxAge ? 'delayed' : datedStatus;
   }
   if (row.availability === 'historical' || quoteMode.includes('historical') || source.includes('fred')) return 'historical';
   if (
     row.availability === 'current' &&
     source.includes('ibkr') &&
-    ['live', 'unknown'].includes(quoteMode) &&
-    quoteAge <= 60 * 1000
-  ) return 'live';
+    ['live', 'unknown'].includes(quoteMode)
+  ) return quoteAge <= IBKR_LIVE_DISPLAY_MAX_AGE_MS ? 'live' : datedStatus;
   return 'unavailable';
 };
 
-const aggregateQuoteStatus = (rows, providerStatus) => {
-  const statuses = (Array.isArray(rows) ? rows : []).map((row) => getRowQuoteStatus(row, providerStatus));
+const aggregateQuoteStatus = (rows, providerStatus, options) => {
+  const statuses = (Array.isArray(rows) ? rows : []).map((row) => getRowQuoteStatus(row, providerStatus, options));
   const eligible = statuses.filter((status) => status !== 'unavailable');
   if (eligible.length === 0) return 'unavailable';
   if (eligible.length !== statuses.length) return 'mixed';
   if (new Set(eligible).size > 1) return 'mixed';
+  if (eligible.includes('refresh-delayed')) return 'refresh-delayed';
   if (eligible.includes('delayed')) return 'delayed';
   if (eligible.includes('historical')) return 'historical';
   return 'live';
@@ -125,37 +171,28 @@ const PreviewCard = ({
   id,
   title,
   status,
-  statusLabel,
-  statusDetail,
-  statusIssues,
+  headerNote,
   onOpen,
   children,
 }) => (
-  <section className={`efr-reference-card efr-reference-card--${id}`} aria-labelledby={`efr-reference-${id}`}>
-    <header className="efr-reference-card__header">
-      <DataStatusChip
-        status={status}
-        label={statusLabel}
-        detail={statusDetail}
-        context={title}
-        issues={statusIssues}
-        className="efr-reference-card__status"
-        compact
-        indicatorOnly
-      />
+  <section
+    className={`efr-reference-card efr-reference-card--${id}`}
+    aria-labelledby={`efr-reference-${id}`}
+    data-status={status}
+  >
+    <header className={`efr-reference-card__header${headerNote ? ' efr-reference-card__header--dated' : ''}`}>
       <button
         type="button"
         className="efr-reference-card__title"
         onClick={() => onOpen(id)}
         id={`efr-reference-${id}`}
+        aria-haspopup="dialog"
       >
         {title}
       </button>
+      {headerNote && <span className="efr-reference-card__header-note">{headerNote}</span>}
     </header>
     <div className="efr-reference-card__body">{children}</div>
-    <button type="button" className="efr-reference-card__open" onClick={() => onOpen(id)}>
-      Full view <ArrowRight size={12} aria-hidden="true" />
-    </button>
   </section>
 );
 
@@ -181,10 +218,24 @@ const CurrenciesPreview = ({
         {displayRows.map((row) => {
           const status = getRowQuoteStatus(row, providerStatus);
           const available = status !== 'unavailable';
+          const quoteAsOf = row?.lastVerifiedAt || row?.quoteAsOf || row?.timestamp || row?.asOf;
+          const delayedTitle = row?.displayDelayed
+            ? `Refresh delayed · last verified ${quoteAsOf || 'time unavailable'}`
+            : status === 'historical'
+              ? `Historical reference · as of ${quoteAsOf || 'time unavailable'}`
+              : `Delayed quote · as of ${quoteAsOf || 'time unavailable'}`;
           return (
             <tr key={row.symbol || row.name}>
               <td>{row.name || row.symbol}</td>
-              <td>{available ? formatNumber(row.price, Number(row.price) < 10 ? 3 : 2) : '—'}</td>
+              <td>
+                {available ? (
+                  <span className="efr-backdrop-price">
+                    <span>{formatNumber(row.price, Number(row.price) < 10 ? 3 : 2)}</span>
+                    <DelayedDataMarker status={status} title={delayedTitle} updatedAt={quoteAsOf}
+                      {...delayedMarkerMarketContext(row)} />
+                  </span>
+                ) : '—'}
+              </td>
               <td className={available && Number(row.changePercent) !== 0 ? (Number(row.changePercent) > 0 ? 'is-positive' : 'is-negative') : ''}>
                 {available ? formatSigned(row.changePercent, '%') : '—'}
               </td>
@@ -199,80 +250,35 @@ const CurrenciesPreview = ({
   );
 };
 
-const CftcPreview = ({ data }) => {
-  const rows = Array.isArray(data?.data) ? data.data.slice(0, 5) : [];
-  if (rows.length === 0) return <EmptyPreview />;
+const CftcPreview = ({ data, refreshFailed = false }) => {
+  const rows = getCftcHighlightRows(data);
+  if (rows.length === 0) return <EmptyPreview>UNAVAILABLE</EmptyPreview>;
+  const reportDate = getCftcReportDate(data);
+  const freshness = getCftcFreshness(reportDate, {
+    refreshFailed,
+    cacheState: data?.cacheState,
+    sourceVerified: true,
+    decisionEligible: data?.decisionEligible === true,
+    contentComplete: data?.contentComplete === true,
+  });
+  const reportTitle = `Official CFTC · ${freshness.label} · Largest absolute 1Y Z-scores first`;
   return (
-    <table className="efr-mini-table">
-      <thead><tr><th>Asset</th><th>Net position</th><th>W/W</th><th>Z-score</th></tr></thead>
+    <table className="efr-mini-table cftc-preview-grid" aria-label="CFTC positioning preview" title={reportTitle}>
+      <thead><tr><th>Asset</th><th>Net position</th><th>W/W</th><th>
+        1Y Z-score <DelayedDataMarker status={freshness.referenceOnly ? 'reference' : 'historical'} title={reportTitle}
+          updatedAt={reportDate} marketSessionDate={reportDate} />
+      </th></tr></thead>
       <tbody>
         {rows.map((row, index) => (
           <tr key={`${row.metric || 'position'}-${index}`}>
             <td>{row.metric || '—'}</td>
-            <td>{isFiniteNumber(row.latest) ? Number(row.latest).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}</td>
-            <td className={isFiniteNumber(row.wwChg) && Number(row.wwChg) !== 0 ? (Number(row.wwChg) > 0 ? 'is-positive' : 'is-negative') : ''}>
+            <td className={cftcValueClass(isFiniteNumber(row.latest) ? Number(row.latest) : null)}>{isFiniteNumber(row.latest) ? Number(row.latest).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}</td>
+            <td className={cftcValueClass(isFiniteNumber(row.wwChg) ? Number(row.wwChg) : null)}>
               {isFiniteNumber(row.wwChg) ? `${Number(row.wwChg) > 0 ? '+' : ''}${Number(row.wwChg).toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—'}
             </td>
-            <td>{formatNumber(row.zScore1Y, 2)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-};
-
-const MarketSituationPreview = ({ snapshot }) => {
-  const rows = Array.isArray(snapshot?.data?.signals) ? snapshot.data.signals : [];
-  if (rows.length !== 4) return <EmptyPreview>No verified report signals available</EmptyPreview>;
-  return (
-    <table className="efr-mini-table efr-mini-table--situation" aria-label="Market Situation signals">
-      <thead><tr><th>Signal</th><th>Reading</th></tr></thead>
-      <tbody>
-        {rows.map((signal) => (
-          <tr key={signal.id || signal.label}>
-            <td>{signal.label}</td>
-            <td>
-              <span className={`efr-situation-reading efr-situation-reading--${signal.tone || 'neutral'}`}>
-                {signal.value}
-              </span>
+            <td className={cftcValueClass(isFiniteNumber(row.zScore1Y) ? Number(row.zScore1Y) : null, { score: true })}>
+              {formatNumber(row.zScore1Y, 2)}
             </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-};
-
-const quarterSortValue = (quarter) => {
-  const match = String(quarter).match(/^(\d)Q(\d{2})E?$/);
-  return match ? Number(match[2]) * 10 + Number(match[1]) : -1;
-};
-
-const QuadsPreview = ({ record }) => {
-  const preferredRows = ['G20_MODE/MEDIAN', 'United States', 'China', 'Germany', 'Japan'];
-  const availableRows = preferredRows.filter((key) => {
-    const row = record.rows?.[key];
-    return row && Object.values(row).some((value) => String(value || '').trim() !== '');
-  });
-  const quarters = Array.from(new Set(
-    availableRows.flatMap((key) => Object.keys(record.rows[key] || {}))
-  )).filter((key) => quarterSortValue(key) >= 0).sort((a, b) => quarterSortValue(a) - quarterSortValue(b)).slice(-3);
-
-  if (availableRows.length === 0 || quarters.length === 0) {
-    return <EmptyPreview>No manual quad readings entered</EmptyPreview>;
-  }
-
-  return (
-    <table className="efr-mini-table efr-mini-table--quads">
-      <thead><tr><th>Market</th>{quarters.map((quarter) => <th key={quarter}>{quarter}</th>)}</tr></thead>
-      <tbody>
-        {availableRows.map((key) => (
-          <tr key={key}>
-            <td>{key === 'G20_MODE/MEDIAN' ? 'G20 median' : key}</td>
-            {quarters.map((quarter) => {
-              const quad = record.rows[key]?.[quarter];
-              return <td key={quarter}><span className={quad ? `efr-quad efr-quad--${quad}` : ''}>{quad || '—'}</span></td>;
-            })}
           </tr>
         ))}
       </tbody>
@@ -290,6 +296,7 @@ const LiquidityPreview = ({ data }) => {
     ['U.S. stack / GDP', us?.stackToGdp, (value) => formatNumber(value, 3)],
     ['Global regime', global?.regime, (value) => value || '—'],
     ['U.S. regime', us?.regime, (value) => value || '—'],
+    ['U.S. liquidity growth · 3M', us?.growth?.['3m'], (value) => isFiniteNumber(value) ? formatSigned(Number(value) * 100, '%') : '—'],
   ];
   return (
     <table className="efr-mini-table">
@@ -302,37 +309,25 @@ const LiquidityPreview = ({ data }) => {
 const FullReferencePanel = ({
   activePanel,
   onClose,
+  cftcState,
   marketSituationState,
+  liquidityState,
+  quadsResource,
+  volumeTitle,
 }) => {
-  const title = PANEL_TITLES[activePanel];
   const dialogRef = useRef(null);
-  const panel = useMemo(() => {
-    switch (activePanel) {
-      case 'cftc':
-        return <CFTCNetLongCard />;
-      case 'situation':
-        return (
-          <MarketSituationReportCard
-            snapshot={marketSituationState.data}
-            loading={marketSituationState.loading}
-            error={marketSituationState.error}
-          />
-        );
-      case 'quads':
-        return <GlobalQuadsCard />;
-      case 'liquidity':
-        return <DollarLiquidityModels />;
-      case 'volume':
-        return <MarketVolumeTable />;
-      default:
-        return null;
-    }
-  }, [activePanel, marketSituationState]);
+  const titleButtonRef = useRef(null);
+  const [lastPanel, setLastPanel] = useState(activePanel);
+
+  useEffect(() => {
+    if (activePanel) setLastPanel(activePanel);
+  }, [activePanel]);
+
+  usePageScrollLock(Boolean(activePanel));
 
   useEffect(() => {
     if (!activePanel) return undefined;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const frame = requestAnimationFrame(() => titleButtonRef.current?.focus());
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
         onClose();
@@ -358,104 +353,113 @@ const FullReferencePanel = ({
     };
     document.addEventListener('keydown', onKeyDown);
     return () => {
-      document.body.style.overflow = originalOverflow;
+      cancelAnimationFrame(frame);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [activePanel, onClose]);
 
-  if (!activePanel) return null;
   return (
-    <div className="efr-reference-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section ref={dialogRef} className="efr-reference-dialog" role="dialog" aria-modal="true" aria-labelledby="efr-reference-dialog-title">
-        <header className="efr-reference-dialog__header">
-          <div>
-            <span>Normal / Reference</span>
-            <h2 id="efr-reference-dialog-title">{title}</h2>
-          </div>
-          <button type="button" onClick={onClose} aria-label={`Close ${title}`} autoFocus>
-            <X size={18} aria-hidden="true" />
-          </button>
+    <PersistentSurface
+      active={Boolean(activePanel)}
+      className={`efr-reference-overlay${(activePanel || lastPanel) === 'quads' ? ' efr-reference-overlay--quads' : ''}${(activePanel || lastPanel) === 'cftc' ? ' efr-reference-overlay--cftc' : ''}`}
+      role="presentation"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <section ref={dialogRef} className={`dashboard-table-dialog efr-reference-dialog${(activePanel || lastPanel) === 'quads' ? ' efr-reference-dialog--quads' : ''}${(activePanel || lastPanel) === 'volume' ? ' efr-reference-dialog--volume' : ''}${(activePanel || lastPanel) === 'cftc' ? ' efr-reference-dialog--cftc' : ''}`} role="dialog" aria-modal="true" aria-labelledby="efr-reference-dialog-title">
+        <header className="efr-reference-dialog__header dashboard-table-dialog__header">
+          <h2 id="efr-reference-dialog-title">
+            <button
+              ref={titleButtonRef}
+              className="dashboard-table-dialog__title"
+              type="button"
+              onClick={onClose}
+              title={`Close ${PANEL_TITLES[activePanel || lastPanel] || 'reference panel'}`}
+            >
+              {(activePanel || lastPanel) === 'volume' ? volumeTitle : PANEL_TITLES[activePanel || lastPanel]}
+            </button>
+          </h2>
         </header>
-        <div className="efr-reference-dialog__body">{panel}</div>
+        <div className="efr-reference-dialog__body">
+          <PersistentSurface active={activePanel === 'cftc'}>
+            <CFTCNetLongCard resourceState={cftcState} />
+          </PersistentSurface>
+          <PersistentSurface active={activePanel === 'situation'}>
+            <MarketSituationReportCard
+              snapshot={marketSituationState.data}
+              loading={marketSituationState.loading}
+              refreshing={marketSituationState.refreshing}
+              error={marketSituationState.error}
+            />
+          </PersistentSurface>
+          <PersistentSurface active={activePanel === 'quads'}>
+            <GlobalQuadsCard resourceState={quadsResource} />
+          </PersistentSurface>
+          <PersistentSurface active={activePanel === 'liquidity'}>
+            <DollarLiquidityModels resourceState={liquidityState} />
+          </PersistentSurface>
+          <PersistentSurface active={activePanel === 'volume'}>
+            <MarketVolumeTable showDetails showAsOf={false} />
+          </PersistentSurface>
+        </div>
       </section>
-    </div>
+    </PersistentSurface>
   );
 };
 
-const RadarReferencePanels = () => {
+const RadarReferencePanels = ({ onDashboardStatusChange }) => {
   const [activePanel, setActivePanel] = useState(null);
-  const [cftcState, setCftcState] = useState({ data: null, loading: true, error: null });
-  const [marketSituationState, setMarketSituationState] = useState({
-    data: null,
-    loading: true,
-    error: null,
-  });
-  const [liquidityState, setLiquidityState] = useState({ data: null, loading: true, error: null });
   const [volumeMeta, setVolumeMeta] = useState({ sources: [], asOf: null, datasetStatus: null });
-  const [quadsRecord, setQuadsRecord] = useState(() => readManualRecord(QUADS_STORAGE_KEY));
+  const volumeTitle = <>Volume{volumeMeta.asOf ? (
+    <> <time dateTime={volumeMeta.asOf}>({getVolumeCardHeaderDate({ asOf: volumeMeta.asOf })})</time></>
+  ) : null}</>;
+  const quadsResource = useGlobalQuads();
   const lastTriggerRef = useRef(null);
-
-  const refreshManualRecords = useCallback(() => {
-    setQuadsRecord(readManualRecord(QUADS_STORAGE_KEY));
+  const loadCftc = useCallback(async () => {
+    const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
+    const response = await fetch(`${backendUrl}/api/hedgeye/snapshot/cftc-positioning`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error || `CFTC request failed (${response.status})`);
+    return payload;
   }, []);
-
-  useEffect(() => {
-    let active = true;
-    const fetchReferenceData = async () => {
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:3001';
-      setCftcState((current) => ({ ...current, loading: !current.data, error: null }));
-      setMarketSituationState((current) => ({
-        ...current,
-        loading: !current.data,
-        error: null,
-      }));
-      setLiquidityState((current) => ({ ...current, loading: !current.data, error: null }));
-
-      const [cftcResult, marketSituationResult, liquidityResult] = await Promise.allSettled([
-        fetch(`${backendUrl}/api/hedgeye/snapshot/cftc-positioning`).then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload?.error || `CFTC request failed (${response.status})`);
-          return payload;
-        }),
-        MarketDataService.getHedgeyeSnapshot('market-structure').then((payload) => {
-          if (!payload) throw new Error('No Market Situation snapshot found');
-          return payload;
-        }),
-        MarketDataService.getDollarLiquidityModels(),
-      ]);
-      if (!active) return;
-
-      setCftcState(cftcResult.status === 'fulfilled'
-        ? { data: cftcResult.value, loading: false, error: null }
-        : { data: null, loading: false, error: cftcResult.reason?.message || 'Unavailable' });
-      setMarketSituationState(marketSituationResult.status === 'fulfilled'
-        ? { data: marketSituationResult.value, loading: false, error: null }
-        : {
-          data: null,
-          loading: false,
-          error: marketSituationResult.reason?.message || 'Unavailable',
-        });
-      setLiquidityState(liquidityResult.status === 'fulfilled'
-        ? { data: liquidityResult.value, loading: false, error: null }
-        : { data: null, loading: false, error: liquidityResult.reason?.message || 'Unavailable' });
-    };
-
-    fetchReferenceData();
-    const interval = window.setInterval(fetchReferenceData, ANALYTICS_REFRESH_MS);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('storage', refreshManualRecords);
-    window.addEventListener('focus', refreshManualRecords);
-    return () => {
-      window.removeEventListener('storage', refreshManualRecords);
-      window.removeEventListener('focus', refreshManualRecords);
-    };
-  }, [refreshManualRecords]);
+  const loadLiquidity = useCallback(
+    () => MarketDataService.getDollarLiquidityModels(),
+    [],
+  );
+  const cftcResource = useDashboardResource('cftc', {}, {
+    fetcher: loadCftc,
+    validate: requireReferenceObject,
+    getObservedAt: getCftcReportDate,
+    pollIntervalMs: ANALYTICS_REFRESH_MS,
+    active: true,
+  });
+  const situationResource = useMarketStructureReport({ active: true });
+  const liquidityResource = useDashboardResource('dollar-liquidity', {}, {
+    fetcher: loadLiquidity,
+    validate: requireReferenceObject,
+    getObservedAt: (payload) => (
+      payload?.models?.us?.latest?.date || payload?.models?.global?.latest?.date || null
+    ),
+    pollIntervalMs: ANALYTICS_REFRESH_MS,
+    active: true,
+  });
+  const cftcState = {
+    data: cftcResource.data,
+    loading: cftcResource.initialLoading && !cftcResource.data,
+    refreshing: cftcResource.refreshing,
+    error: cftcResource.error?.message || null,
+  };
+  const marketSituationState = {
+    data: situationResource.data,
+    loading: situationResource.initialLoading && !situationResource.data,
+    refreshing: situationResource.refreshing,
+    error: situationResource.error?.message || null,
+  };
+  const liquidityState = {
+    data: liquidityResource.data,
+    loading: liquidityResource.initialLoading && !liquidityResource.data,
+    refreshing: liquidityResource.refreshing,
+    error: liquidityResource.error?.message || null,
+  };
 
   const openPanel = useCallback((panelId) => {
     lastTriggerRef.current = document.activeElement;
@@ -464,22 +468,37 @@ const RadarReferencePanels = () => {
 
   const closePanel = useCallback(() => {
     setActivePanel(null);
-    refreshManualRecords();
     window.requestAnimationFrame(() => lastTriggerRef.current?.focus?.());
-  }, [refreshManualRecords]);
+  }, []);
 
-  const cftcDate = cftcState.data?.date || cftcState.data?.asOf || null;
+  const cftcDate = getCftcReportDate(cftcState.data);
+  const cftcHeaderDate = isCftcResearchSnapshot(cftcState.data) ? cftcDate : null;
+  const cftcLastChecked = formatCftcRetrieval(cftcState.data?.retrievedAt);
   const marketSituationFreshness = getMarketSituationFreshness(marketSituationState.data);
+  const marketSituationDate = marketSituationState.data?.date
+    || marketSituationState.data?.publishedAt
+    || null;
   const liquidityDate =
     liquidityState.data?.models?.us?.latest?.date ||
     liquidityState.data?.models?.global?.latest?.date ||
     null;
   const cftcAvailable = Array.isArray(cftcState.data?.data) && cftcState.data.data.length > 0;
+  const cftcOfficial = cftcState.data?.source === 'cftc-public-reporting-environment';
+  const cftcDecisionEligible = cftcState.data?.decisionEligible === true;
+  const cftcPartial = cftcOfficial
+    && cftcDecisionEligible
+    && cftcState.data?.contentComplete !== true;
   const liquidityAvailable = Boolean(
     liquidityState.data?.models?.global?.latest || liquidityState.data?.models?.us?.latest
   );
-  const cftcAgeMs = cftcDate ? Date.now() - new Date(cftcDate).getTime() : Infinity;
-  const cftcStale = cftcAvailable && (!Number.isFinite(cftcAgeMs) || cftcAgeMs > 10 * 24 * 60 * 60 * 1000);
+  const liquidityGlobalModel = liquidityState.data?.models?.global?.latest;
+  const liquidityUsModel = liquidityState.data?.models?.us?.latest;
+  const cftcAgeMs = cftcDate ? Date.now() - new Date(`${String(cftcDate).slice(0, 10)}T23:59:59Z`).getTime() : Infinity;
+  const cftcStale = cftcAvailable && (
+    !Number.isFinite(cftcAgeMs)
+    || cftcAgeMs > 10 * 24 * 60 * 60 * 1000
+    || cftcState.data?.cacheState === 'stale'
+  );
   const liquidityPartial = liquidityAvailable && (
     liquidityState.data?.models?.global?.status === 'partial' ||
     liquidityState.data?.models?.us?.status === 'partial' ||
@@ -487,34 +506,166 @@ const RadarReferencePanels = () => {
   );
   const volumeStatus = useMemo(() => {
     if (!volumeMeta.sources.length) return 'loading';
-    if (volumeMeta.datasetStatus === 'missing' || volumeMeta.sources.some((source) => (
-      ['defective', 'inactive', 'offline'].includes(source.status)
-    ))) {
-      return 'unavailable';
-    }
-    if (volumeMeta.datasetStatus === 'provisional') return 'delayed';
+    const availableSources = volumeMeta.sources.filter((source) => source.status === 'current');
+    if (!availableSources.length) return 'unavailable';
+    if (availableSources.length < volumeMeta.sources.length) return 'mixed';
     return 'historical';
-  }, [volumeMeta.datasetStatus, volumeMeta.sources]);
+  }, [volumeMeta.sources]);
   const handleVolumeSources = useCallback((sources) => {
     setVolumeMeta((current) => ({ ...current, sources: Array.isArray(sources) ? sources : [] }));
   }, []);
   const handleVolumeHeader = useCallback((asOf) => {
-    setVolumeMeta((current) => ({ ...current, asOf: current.asOf || asOf || null }));
+    setVolumeMeta((current) => ({ ...current, asOf: asOf ? current.asOf : null }));
   }, []);
   const handleVolumeMetadata = useCallback((metadata) => {
     setVolumeMeta((current) => ({
       ...current,
-      asOf: metadata?.asOfTradingDate || current.asOf,
+      asOf: metadata?.asOfTradingDate || null,
       datasetStatus: metadata?.status || null,
     }));
   }, []);
-  const volumeSourceIssues = volumeMeta.sources
-    .filter((source) => ['defective', 'inactive', 'offline', 'missing', 'error'].includes(
-      String(source?.status || '').toLowerCase(),
-    ))
+  const volumeSourceIssues = useMemo(() => volumeMeta.sources
+    .filter((source) => source?.status !== 'current')
     .map((source) => (
       `${source?.label || source?.name || 'Volume source'}: ${source?.detail || source?.status || 'unavailable'}`
-    ));
+    )), [volumeMeta.sources]);
+  const cftcStatus = cftcState.loading
+    ? 'loading'
+    : cftcStale
+      ? 'delayed'
+      : !cftcAvailable || !cftcOfficial || !cftcDecisionEligible
+        ? 'unavailable'
+        : cftcPartial
+          ? 'delayed'
+          : 'historical';
+  const situationStatus = marketSituationState.loading
+    ? 'loading'
+    : marketSituationFreshness.status;
+  const liquidityStatus = liquidityState.loading
+    ? 'loading'
+    : liquidityPartial
+      ? 'delayed'
+      : liquidityAvailable
+        ? 'historical'
+        : 'unavailable';
+  const dashboardCardStatuses = useMemo(() => [
+    {
+      id: 'cftc-positioning',
+      status: cftcStatus,
+      date: cftcDate ? formatDate(cftcDate) : undefined,
+      sourceDate: cftcDate || undefined,
+      statusLabel: cftcStale ? 'STALE · REFERENCE ONLY' : cftcPartial ? 'PARTIAL' : undefined,
+      detail: cftcDate ? `${cftcStale ? 'AS OF ' : ''}${formatDate(cftcDate)}` : undefined,
+      diagnostics: [
+        { label: 'Rows', value: `${Array.isArray(cftcState.data?.data) ? cftcState.data.data.length : 0}` },
+        { label: 'As of', value: cftcDate ? formatDate(cftcDate) : 'Unavailable' },
+        { label: 'Source', value: cftcOfficial ? 'Official CFTC' : 'Unverified' },
+      ],
+      issues: [
+        cftcState.error ? `CFTC request: ${cftcState.error}` : null,
+        cftcStale ? 'The latest CFTC snapshot is older than the freshness limit.' : null,
+        cftcAvailable && !cftcOfficial ? 'The canonical official CFTC provenance is missing.' : null,
+        cftcAvailable && cftcOfficial && !cftcDecisionEligible ? 'The official SPX row is decision-ineligible.' : null,
+        cftcPartial ? 'One or more secondary CFTC contracts are unavailable.' : null,
+      ].filter(Boolean),
+    },
+    {
+      id: 'market-situation',
+      status: situationStatus,
+      date: marketSituationDate ? formatDate(marketSituationDate) : undefined,
+      sourceDate: marketSituationDate || undefined,
+      statusLabel: marketSituationFreshness.label,
+      detail: marketSituationFreshness.detail,
+      diagnostics: [
+        { label: 'Signals', value: `${Array.isArray(marketSituationState.data?.data?.signals) ? marketSituationState.data.data.signals.length : 0}/4` },
+        { label: 'As of', value: marketSituationFreshness.detail || 'Unavailable' },
+      ],
+      issues: marketSituationState.error
+        ? [`Market Situation request: ${marketSituationState.error}`]
+        : [],
+    },
+    {
+      id: 'global-quads',
+      status: quadsResource.data?.available ? 'historical' : quadsResource.initialLoading ? 'loading' : 'unavailable',
+      date: formatDate(quadsResource.data?.date) || undefined,
+      sourceDate: quadsResource.data?.date || undefined,
+      detail: quadsResource.data?.date ? `AS OF ${formatDate(quadsResource.data.date)}` : 'UNAVAILABLE',
+      diagnostics: [
+        { label: 'Source', value: 'Hedgeye published tables' },
+        { label: 'Ingestion', value: quadsResource.error ? 'Refresh unavailable' : quadsResource.data?.ingestion?.status || 'Checking' },
+      ],
+      issues: [
+        ...(quadsResource.data?.ingestion?.issues?.length
+          ? [`${quadsResource.data.ingestion.issues.length} emailed publication(s) need extraction review.`] : []),
+        ...(quadsResource.data?.ingestion?.status === 'unavailable'
+          ? ['Global Quads ingestion health is unavailable.'] : []),
+        ...(quadsResource.error ? ['Global Quads refresh unavailable; retained readings are dated research.'] : []),
+      ],
+    },
+    {
+      id: 'dollar-liquidity',
+      status: liquidityStatus,
+      date: liquidityDate ? formatDate(liquidityDate) : undefined,
+      sourceDate: liquidityDate || undefined,
+      statusLabel: liquidityPartial ? 'PARTIAL' : undefined,
+      detail: liquidityDate ? `${liquidityPartial ? 'AS OF ' : ''}${formatDate(liquidityDate)}` : undefined,
+      diagnostics: [
+        { label: 'Models', value: `${liquidityAvailable ? [liquidityGlobalModel, liquidityUsModel].filter(Boolean).length : 0}/2 available` },
+        { label: 'As of', value: liquidityDate ? formatDate(liquidityDate) : 'Unavailable' },
+      ],
+      issues: [
+        liquidityState.error ? `Liquidity request: ${liquidityState.error}` : null,
+        liquidityPartial ? 'Some liquidity model inputs are provisional or incomplete.' : null,
+      ].filter(Boolean),
+    },
+    {
+      id: 'volume',
+      status: volumeStatus,
+      date: volumeMeta.asOf ? formatDate(volumeMeta.asOf) : undefined,
+      sourceDate: volumeMeta.asOf || undefined,
+      detail: volumeMeta.asOf
+        ? `AS OF ${formatDate(volumeMeta.asOf) || String(volumeMeta.asOf).toUpperCase()}`
+        : undefined,
+      diagnostics: [
+        { label: 'Sources', value: `${volumeMeta.sources.length}` },
+        { label: 'Dataset', value: volumeMeta.datasetStatus || 'Checking' },
+      ],
+      issues: volumeSourceIssues,
+    },
+  ], [
+    cftcDate,
+    cftcAvailable,
+    cftcDecisionEligible,
+    cftcOfficial,
+    cftcPartial,
+    cftcStale,
+    cftcState.data,
+    cftcState.error,
+    cftcStatus,
+    liquidityAvailable,
+    liquidityDate,
+    liquidityGlobalModel,
+    liquidityPartial,
+    liquidityState.error,
+    liquidityStatus,
+    liquidityUsModel,
+    marketSituationDate,
+    marketSituationFreshness.detail,
+    marketSituationFreshness.label,
+    marketSituationState.data,
+    marketSituationState.error,
+    quadsResource.data,
+    quadsResource.error,
+    quadsResource.initialLoading,
+    situationStatus,
+    volumeMeta,
+    volumeSourceIssues,
+    volumeStatus,
+  ]);
+
+  useEffect(() => {
+    onDashboardStatusChange?.(dashboardCardStatuses);
+  }, [dashboardCardStatuses, onDashboardStatusChange]);
 
   return (
     <>
@@ -523,74 +674,65 @@ const RadarReferencePanels = () => {
           <PreviewCard
             id="cftc"
             title="CFTC Positioning"
-            status={cftcState.loading ? 'loading' : cftcStale ? 'delayed' : cftcAvailable ? 'historical' : 'unavailable'}
-            statusLabel={cftcStale ? 'STALE' : undefined}
-            statusDetail={cftcDate ? `${cftcStale ? 'AS OF ' : ''}${formatDate(cftcDate)}` : undefined}
-            statusIssues={cftcState.error ? [`CFTC request: ${cftcState.error}`] : []}
+            status={cftcStatus}
+            headerNote={cftcHeaderDate && (
+              <time
+                dateTime={cftcHeaderDate}
+                title={`Positions as of ${formatCftcDate(cftcHeaderDate)}. Published weekly, usually Friday at 15:30 ET.${cftcLastChecked !== 'UNAVAILABLE' ? ` Last checked ${cftcLastChecked}.` : ''}`}
+              >
+                As of {formatCftcDate(cftcHeaderDate)}
+              </time>
+            )}
             onOpen={openPanel}
           >
-            <CftcPreview data={cftcState.data} />
-          </PreviewCard>
-          <PreviewCard
-            id="situation"
-            title="Market Situation"
-            status={marketSituationState.loading ? 'loading' : marketSituationFreshness.status}
-            statusLabel={marketSituationFreshness.label}
-            statusDetail={marketSituationFreshness.detail}
-            statusIssues={marketSituationState.error
-              ? [`Market Situation request: ${marketSituationState.error}`]
-              : []}
-            onOpen={openPanel}
-          >
-            <MarketSituationPreview snapshot={marketSituationState.data} />
+            <CftcPreview data={cftcState.data} refreshFailed={Boolean(cftcState.error)} />
           </PreviewCard>
           <PreviewCard
             id="quads"
             title="Global Quads"
-            status="manual"
-            statusDetail={quadsRecord.lastEditedAt ? formatDate(quadsRecord.lastEditedAt) : 'NO AS-OF'}
+            status={quadsResource.data?.available ? 'historical' : 'unavailable'}
             onOpen={openPanel}
           >
-            <QuadsPreview record={quadsRecord} />
+            <QuadsPreview snapshot={quadsResource.data} loading={quadsResource.initialLoading} />
           </PreviewCard>
           <PreviewCard
             id="liquidity"
             title="Dollar Liquidity"
-            status={liquidityState.loading ? 'loading' : liquidityPartial ? 'delayed' : liquidityAvailable ? 'historical' : 'unavailable'}
-            statusLabel={liquidityPartial ? 'PARTIAL' : undefined}
-            statusDetail={liquidityDate ? `${liquidityPartial ? 'AS OF ' : ''}${formatDate(liquidityDate)}` : undefined}
-            statusIssues={liquidityState.error ? [`Liquidity request: ${liquidityState.error}`] : []}
+            status={liquidityStatus}
             onOpen={openPanel}
           >
             <LiquidityPreview data={liquidityState.data} />
-          </PreviewCard>
-          <PreviewCard
-            id="volume"
-            title="Volume"
-            status={volumeStatus}
-            statusLabel={volumeMeta.datasetStatus === 'provisional' ? 'PROVISIONAL' : undefined}
-            statusDetail={volumeMeta.asOf
-              ? `${volumeMeta.datasetStatus === 'provisional' ? 'AS OF ' : ''}${formatDate(volumeMeta.asOf) || String(volumeMeta.asOf).toUpperCase()}`
-              : undefined}
-            statusIssues={volumeSourceIssues}
-            onOpen={openPanel}
-          >
-            <MarketVolumeTable
-              onSourcesChange={handleVolumeSources}
-              onHeaderNoteChange={handleVolumeHeader}
-              onMetadataChange={handleVolumeMetadata}
-            />
+            <PreviewCard
+              id="volume"
+              title={volumeTitle}
+              status={volumeStatus}
+              onOpen={openPanel}
+            >
+              <MarketVolumeTable
+                onSourcesChange={handleVolumeSources}
+                onHeaderNoteChange={handleVolumeHeader}
+                onMetadataChange={handleVolumeMetadata}
+                showAsOf={false}
+              />
+            </PreviewCard>
           </PreviewCard>
         </div>
       </section>
-      <FullReferencePanel
-        activePanel={activePanel}
-        onClose={closePanel}
-        marketSituationState={marketSituationState}
-      />
+      {typeof document !== 'undefined' && createPortal(
+        <FullReferencePanel
+          activePanel={activePanel}
+          onClose={closePanel}
+          cftcState={cftcState}
+          marketSituationState={marketSituationState}
+          liquidityState={liquidityState}
+          quadsResource={quadsResource}
+          volumeTitle={volumeTitle}
+        />,
+        document.body,
+      )}
     </>
   );
 };
 
-export { aggregateQuoteStatus, CurrenciesPreview, getRowQuoteStatus, readManualRecord };
+export { aggregateQuoteStatus, CftcPreview, CurrenciesPreview, getRowQuoteStatus, readManualRecord };
 export default RadarReferencePanels;

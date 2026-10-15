@@ -1,3 +1,4 @@
+import { analystWorkspaceApi } from '../services/analyst/analystClient';
 const DRAFT_SCHEMA_VERSION = 1;
 const DRAFT_STORAGE_PREFIX = 'marketDashboard.processDocumentDraft.v1.';
 const MAX_REGION_HTML_LENGTH = 250_000;
@@ -108,6 +109,7 @@ export const readProcessDocumentDraft = (documentId, baseVersion, storage = getD
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (
+      parsed?.reset ||
       parsed?.schemaVersion !== DRAFT_SCHEMA_VERSION
       || parsed?.documentId !== documentId
       || parsed?.baseVersion !== String(baseVersion)
@@ -140,10 +142,37 @@ export const saveProcessDocumentDraft = ({ documentId, baseVersion, regions = {}
     notes: String(notes || '').slice(0, 100_000),
   };
   storage.setItem(getProcessDraftStorageKey(documentId, baseVersion), JSON.stringify(draft));
+  synchronizeProcessDrafts(storage);
   return draft;
 };
 
 export const removeProcessDocumentDraft = (documentId, baseVersion, storage = getDefaultStorage()) => {
   if (!storage || !documentId || !baseVersion) return;
-  storage.removeItem(getProcessDraftStorageKey(documentId, baseVersion));
+  // Persist a versioned reset until the server acknowledges it, including offline resets.
+  storage.setItem(getProcessDraftStorageKey(documentId, baseVersion), JSON.stringify({ documentId, baseVersion, updatedAt: new Date().toISOString(), regions: {}, notes: '', reset: true }));
+  synchronizeProcessDrafts(storage);
 };
+
+
+const processSyncInFlight = new Set();
+export async function synchronizeProcessDrafts(storage = getDefaultStorage()) {
+  if (!storage || typeof window === 'undefined') return;
+  const work = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (!key?.startsWith('marketDashboard.processDocumentDraft.v1.')) continue;
+    try {
+      const document = JSON.parse(storage.getItem(key));
+      const marker = `analyst.process.synced.${document.documentId}`;
+      if (!document.updatedAt || storage.getItem(marker) === document.updatedAt || processSyncInFlight.has(key)) continue;
+      processSyncInFlight.add(key);
+      work.push(analystWorkspaceApi.request('/process', { document }, 'PUT').then(() => {
+        storage.setItem(marker, document.updatedAt);
+        window.dispatchEvent(new CustomEvent('analyst-process-sync', { detail: { documentId: document.documentId, status: 'saved', version: document.updatedAt } }));
+      }).catch(() => {
+        window.dispatchEvent(new CustomEvent('analyst-process-sync', { detail: { documentId: document.documentId, status: 'pending' } }));
+      }).finally(() => processSyncInFlight.delete(key)));
+    } catch { /* Invalid browser drafts are never sent as Process evidence. */ }
+  }
+  await Promise.all(work);
+}

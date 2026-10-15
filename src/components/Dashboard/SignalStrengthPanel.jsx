@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSurfaceActivity } from '../common/PersistentSurface';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { SECURITY_INTELLIGENCE_V2_ENABLED } from '../../hooks/useSecurityIntelligence';
+import { canonicalProductState, getCanonicalRiskRange } from '../../utils/securityIntelligenceV2';
 import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesList';
 import ReferencePanelShell from './ReferencePanelShell';
+import ResourceDataStatusChip from './ResourceDataStatusChip';
+import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
 
 const QUOTE_POLL_MS = 30000;
 const RISK_RANGE_POLL_MS = 5 * 60 * 1000;
@@ -110,14 +116,12 @@ const SignalStrengthPanel = ({
   changelogError = null,
   onRefreshChangelog,
 }) => {
+  const active = useSurfaceActivity();
   const [quotes, setQuotes] = useState({});
-  const [riskRanges, setRiskRanges] = useState({});
   const [histories, setHistories] = useState({});
   const [providerStatus, setProviderStatus] = useState(null);
-  const [snapshot, setSnapshot] = useState(null);
   const [quoteLoading, setQuoteLoading] = useState(true);
-  const [metadataLoading, setMetadataLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
   const [assetClass, setAssetClass] = useState('all');
@@ -125,12 +129,109 @@ const SignalStrengthPanel = ({
   const [sort, setSort] = useState({ key: 'ticker', direction: 'asc' });
   const [page, setPage] = useState(0);
   const mountedRef = useRef(true);
+  const activeRef = useRef(active);
+  const quoteLoadedKeyRef = useRef(null);
+  const quoteRefreshCompletedAtRef = useRef(0);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => () => {
     mountedRef.current = false;
   }, []);
 
-  const changeData = changelog?.['signal-strength'] || {};
+  const loadResearchSnapshot = useCallback(async () => {
+    if (SECURITY_INTELLIGENCE_V2_ENABLED) {
+      const payload = await MarketDataService.getSecurityIntelligenceV2({
+        symbols: SECURITIES_LIST.map((security) => security.ticker),
+        historyDays: 0,
+      });
+      if (payload?.schemaVersion !== 2) {
+        throw new Error('Canonical security intelligence returned an unsupported schema.');
+      }
+      const nextRanges = {};
+      const nextIntelligence = {};
+      SECURITIES_LIST.forEach((security) => {
+        const ticker = security.ticker.toUpperCase();
+        const entry = payload.bySymbol?.[ticker] || null;
+        const product = entry?.products?.['risk-ranges'] || null;
+        const range = getCanonicalRiskRange(entry, { primaryOnly: true });
+        const status = canonicalProductState(product);
+        const signalProduct = entry?.products?.['signal-strength'] || null;
+        nextRanges[ticker] = range
+          ? { ...range, date: range.date, status }
+          : { lrr: null, hrr: null, trend: null, date: null, status };
+        nextIntelligence[ticker] = {
+          health: entry?.health?.status || 'unavailable',
+          rangeStatus: status,
+          action: signalProduct?.fields?.action?.value || null,
+          marketDate: entry?.marketDate || payload.marketDate || null,
+        };
+      });
+      return {
+        riskRanges: nextRanges,
+        securityIntelligence: nextIntelligence,
+        snapshot: null,
+        observedAt: payload.marketDate || payload.generatedAt || payload.fetchedAt,
+      };
+    }
+    const [ranges, nextSnapshot] = await Promise.all([
+      MarketDataService.getRiskRanges(SECURITIES_LIST.map((security) => security.ticker)),
+      MarketDataService.getHedgeyeSnapshot('signal-strength'),
+    ]);
+    const rangeDates = Object.values(ranges || {}).map((row) => row?.date).filter(Boolean).sort();
+    return {
+      riskRanges: ranges || {},
+      securityIntelligence: {},
+      snapshot: nextSnapshot || null,
+      observedAt: nextSnapshot?.date || nextSnapshot?.publishedAt || rangeDates.at(-1) || null,
+    };
+  }, []);
+
+  const validateResearchSnapshot = useCallback((value) => (
+    value
+    && typeof value === 'object'
+    && value.riskRanges
+    && typeof value.riskRanges === 'object'
+    && value.observedAt
+      ? value
+      : null
+  ), []);
+
+  const researchResource = useDashboardResource('signal-strength-research', {}, {
+    fetcher: loadResearchSnapshot,
+    validate: validateResearchSnapshot,
+    getObservedAt: (value) => value.observedAt,
+    pollIntervalMs: RISK_RANGE_POLL_MS,
+    active,
+    refreshOnActivate: false,
+  });
+  const riskRanges = researchResource.data?.riskRanges || {};
+  const securityIntelligence = researchResource.data?.securityIntelligence || {};
+  const snapshot = researchResource.data?.snapshot || null;
+  const metadataLoading = researchResource.initialLoading && !researchResource.data;
+  const refreshing = manualRefreshing || researchResource.refreshing;
+
+  const canonicalChangeData = useMemo(() => {
+    if (!SECURITY_INTELLIGENCE_V2_ENABLED) return null;
+    const added = [];
+    const removed = [];
+    Object.entries(securityIntelligence).forEach(([ticker, value]) => {
+      if (value?.action === 'ADDED') added.push(ticker);
+      if (value?.action === 'REMOVED') removed.push(ticker);
+    });
+    return {
+      added: added.sort(),
+      removed: removed.sort(),
+      currentDate: Object.values(securityIntelligence)
+        .map((value) => value?.marketDate)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || null,
+    };
+  }, [securityIntelligence]);
+  const changeData = (SECURITY_INTELLIGENCE_V2_ENABLED ? canonicalChangeData : changelog?.['signal-strength']) || {};
   const riskRangeDate = useMemo(() => {
     const dates = Object.values(riskRanges).map((row) => row?.date).filter(Boolean).sort();
     return dates[dates.length - 1] || null;
@@ -139,6 +240,7 @@ const SignalStrengthPanel = ({
   const rows = useMemo(() => SECURITIES_LIST.map((security) => {
     const ticker = security.ticker.toUpperCase();
     const range = riskRanges[ticker] || null;
+    const intelligence = securityIntelligence[ticker] || null;
     const quote = quotes[ticker] || null;
     const history = histories[ticker] || { weekly: null, monthly: null, asOf: null };
     const verifiedQuote = isVerifiedLiveQuote(quote, providerStatus) ? quote : null;
@@ -152,11 +254,13 @@ const SignalStrengthPanel = ({
       lrr: asNumber(range?.lrr),
       hrr: asNumber(range?.hrr),
       rangePosition: getRangePosition(verifiedQuote, range),
+      researchHealth: intelligence?.health || null,
+      researchStatus: intelligence?.rangeStatus || null,
       weekly: history.weekly,
       monthly: history.monthly,
       historyAsOf: history.asOf,
     };
-  }), [histories, providerStatus, quotes, riskRanges]);
+  }), [histories, providerStatus, quotes, riskRanges, securityIntelligence]);
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -184,6 +288,7 @@ const SignalStrengthPanel = ({
       if (!mountedRef.current) return;
       setProviderStatus(status);
       if (!isIbkrConnected(status)) {
+        quoteLoadedKeyRef.current = null;
         setQuotes({});
         return;
       }
@@ -192,6 +297,12 @@ const SignalStrengthPanel = ({
       const verified = Object.fromEntries(
         Object.entries(nextQuotes || {}).filter(([, quote]) => isVerifiedLiveQuote(quote, status))
       );
+      if (Object.keys(verified).length > 0) {
+        quoteLoadedKeyRef.current = visibleTickerKey;
+        quoteRefreshCompletedAtRef.current = Date.now();
+      } else {
+        quoteLoadedKeyRef.current = null;
+      }
       setQuotes((current) => {
         const next = { ...current };
         visibleTickers.forEach((ticker) => delete next[ticker]);
@@ -199,6 +310,7 @@ const SignalStrengthPanel = ({
       });
     } catch (loadError) {
       if (!mountedRef.current) return;
+      quoteLoadedKeyRef.current = null;
       setProviderStatus(null);
       setQuotes({});
       setError(loadError.message || 'Live spot quotes are unavailable.');
@@ -207,72 +319,77 @@ const SignalStrengthPanel = ({
     }
   }, [visibleTickerKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadRiskRanges = useCallback(async () => {
-    try {
-      const data = await MarketDataService.getRiskRanges(SECURITIES_LIST.map((security) => security.ticker));
-      if (mountedRef.current) setRiskRanges(data || {});
-    } catch (loadError) {
-      if (!mountedRef.current) return;
-      setRiskRanges({});
-      setError(loadError.message || 'Risk ranges are unavailable.');
-    }
-  }, []);
-
-  const loadSnapshot = useCallback(async () => {
-    const data = await MarketDataService.getHedgeyeSnapshot('signal-strength');
-    if (mountedRef.current) setSnapshot(data);
-  }, []);
-
+  const historiesLoadingRef = useRef(false);
+  const historiesCompleteRef = useRef(false);
   const loadHistories = useCallback(async () => {
+    if (historiesLoadingRef.current || historiesCompleteRef.current) return;
+    historiesLoadingRef.current = true;
     const securities = [...SECURITIES_LIST];
     const batchSize = 12;
-    for (let index = 0; index < securities.length && mountedRef.current; index += batchSize) {
-      const batch = securities.slice(index, index + batchSize);
-      const results = await Promise.all(batch.map(async (security) => {
-        try {
-          const history = await MarketDataService.getHistoricalData(security.ticker, 30);
-          return [security.ticker.toUpperCase(), buildHistoryReturns(history)];
-        } catch {
-          return [security.ticker.toUpperCase(), { weekly: null, monthly: null, asOf: null }];
+    let completed = true;
+    try {
+      for (let index = 0; index < securities.length && mountedRef.current; index += batchSize) {
+        if (!activeRef.current) {
+          completed = false;
+          break;
         }
-      }));
-      if (mountedRef.current) {
-        setHistories((current) => ({ ...current, ...Object.fromEntries(results) }));
+        const batch = securities.slice(index, index + batchSize);
+        const results = await Promise.all(batch.map(async (security) => {
+          try {
+            const history = await MarketDataService.getHistoricalData(security.ticker, 30);
+            return [security.ticker.toUpperCase(), buildHistoryReturns(history)];
+          } catch {
+            return [security.ticker.toUpperCase(), { weekly: null, monthly: null, asOf: null }];
+          }
+        }));
+        if (mountedRef.current && activeRef.current) {
+          setHistories((current) => ({ ...current, ...Object.fromEntries(results) }));
+        } else {
+          completed = false;
+        }
       }
+    } finally {
+      historiesLoadingRef.current = false;
+      if (completed && activeRef.current) historiesCompleteRef.current = true;
     }
   }, []);
 
   const refreshAll = useCallback(async () => {
-    setRefreshing(true);
+    setManualRefreshing(true);
     setError(null);
     await Promise.allSettled([
       loadProviderAndQuotes(),
-      loadRiskRanges(),
-      loadSnapshot(),
+      researchResource.refresh(),
       onRefreshChangelog?.(true),
     ]);
     if (mountedRef.current) {
-      setMetadataLoading(false);
-      setRefreshing(false);
+      setManualRefreshing(false);
     }
-  }, [loadProviderAndQuotes, loadRiskRanges, loadSnapshot, onRefreshChangelog]);
+  }, [loadProviderAndQuotes, onRefreshChangelog, researchResource]);
+
+  const historiesStartedRef = useRef(false);
+  useEffect(() => {
+    if (!active) return;
+    if (!historiesStartedRef.current || !historiesCompleteRef.current) {
+      historiesStartedRef.current = true;
+      loadHistories();
+    }
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    setMetadataLoading(true);
-    refreshAll();
-    loadHistories();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    loadProviderAndQuotes();
-    const interval = setInterval(loadProviderAndQuotes, QUOTE_POLL_MS);
-    return () => clearInterval(interval);
-  }, [loadProviderAndQuotes]);
-
-  useEffect(() => {
-    const interval = setInterval(loadRiskRanges, RISK_RANGE_POLL_MS);
-    return () => clearInterval(interval);
-  }, [loadRiskRanges]);
+    if (!active) return undefined;
+    const retainedForScope = quoteLoadedKeyRef.current === visibleTickerKey;
+    const elapsedMs = Date.now() - quoteRefreshCompletedAtRef.current;
+    const initialDelayMs = retainedForScope
+      ? Math.max(0, QUOTE_POLL_MS - elapsedMs)
+      : 0;
+    if (initialDelayMs <= 0) loadProviderAndQuotes();
+    return startVisibilityAwarePolling({
+      poll: loadProviderAndQuotes,
+      intervalMs: QUOTE_POLL_MS,
+      initialDelayMs: initialDelayMs <= 0 ? QUOTE_POLL_MS : initialDelayMs,
+    });
+  }, [active, loadProviderAndQuotes, visibleTickerKey]);
 
   const breadth = useMemo(() => rows.reduce((acc, row) => {
     const trend = String(row.trend || '').toUpperCase();
@@ -312,11 +429,21 @@ const SignalStrengthPanel = ({
       subtitle={`Signal Strength reference · product ${formatDate(snapshotDate)} · ranges ${formatDate(riskRangeDate)} · returns through ${formatDate(historyAsOf)}`}
       status={liveConnected ? `IBKR live · ${liveCount} visible/loaded` : 'No live IBKR quotes'}
       statusTone={liveConnected ? 'live' : 'error'}
+      statusIndicator={(
+        <ResourceDataStatusChip
+          resource={researchResource}
+          context="Signal Strength research"
+        />
+      )}
       onRefresh={refreshAll}
       refreshing={refreshing}
       onClose={onClose}
     >
-      {(error || changelogError) && <div className="reference-alert reference-alert--error">{error || changelogError}</div>}
+      {(error || researchResource.error?.message || changelogError) && (
+        <div className="reference-alert reference-alert--error">
+          {error || researchResource.error?.message || changelogError}
+        </div>
+      )}
       {!liveConnected && !quoteLoading && (
         <div className="reference-alert reference-alert--error">
           Live spot values are hidden because IBKR is disconnected or unavailable. Published ranges and close-to-close returns remain labeled by date.
@@ -390,17 +517,23 @@ const SignalStrengthPanel = ({
             </tr></thead>
             <tbody>
               {visibleRows.map((row) => (
-                <tr key={row.ticker}>
+                <tr
+                  key={row.ticker}
+                  className={SECURITY_INTELLIGENCE_V2_ENABLED && Object.keys(securityIntelligence).length > 0 && row.researchHealth !== 'ready' ? 'reference-row-attention' : ''}
+                  title={SECURITY_INTELLIGENCE_V2_ENABLED && Object.keys(securityIntelligence).length > 0 && row.researchHealth !== 'ready'
+                    ? `${row.ticker} current research is incomplete or unavailable.`
+                    : undefined}
+                >
                   <td className="reference-table__ticker">{row.ticker}</td>
                   <td>{row.name}</td>
                   <td>{ASSET_CLASS_NAMES[row.assetClass] || row.assetClass}</td>
                   <td className="reference-table__number">{quoteLoading && !row.quote ? '…' : formatNumber(row.spot)}</td>
                   <td className={`reference-table__number ${row.weekly > 0 ? 'reference-table__positive' : row.weekly < 0 ? 'reference-table__negative' : ''}`}>{formatPercent(row.weekly)}</td>
                   <td className={`reference-table__number ${row.monthly > 0 ? 'reference-table__positive' : row.monthly < 0 ? 'reference-table__negative' : ''}`}>{formatPercent(row.monthly)}</td>
-                  <td className={row.trend === 'BULLISH' ? 'reference-table__positive' : row.trend === 'BEARISH' ? 'reference-table__negative' : 'reference-table__muted'}>{row.trend || '—'}</td>
-                  <td className="reference-table__number">{formatNumber(row.lrr)}</td>
-                  <td className="reference-table__number">{formatNumber(row.hrr)}</td>
-                  <td className="reference-table__number">{Number.isFinite(row.rangePosition) ? `${row.rangePosition.toFixed(0)}%` : '—'}</td>
+                  <td className={row.trend === 'BULLISH' ? 'reference-table__positive' : row.trend === 'BEARISH' ? 'reference-table__negative' : 'reference-table__muted'}>{row.trend || (SECURITY_INTELLIGENCE_V2_ENABLED ? row.researchStatus === 'unavailable' ? 'UNAVAILABLE' : 'N/A' : '—')}</td>
+                  <td className="reference-table__number">{Number.isFinite(row.lrr) ? formatNumber(row.lrr) : SECURITY_INTELLIGENCE_V2_ENABLED ? row.researchStatus === 'unavailable' ? 'UNAVAILABLE' : row.researchStatus === 'conflict' ? 'CONFLICT' : 'N/A' : '—'}</td>
+                  <td className="reference-table__number">{Number.isFinite(row.hrr) ? formatNumber(row.hrr) : SECURITY_INTELLIGENCE_V2_ENABLED ? row.researchStatus === 'unavailable' ? 'UNAVAILABLE' : row.researchStatus === 'conflict' ? 'CONFLICT' : 'N/A' : '—'}</td>
+                  <td className="reference-table__number">{Number.isFinite(row.rangePosition) ? `${row.rangePosition.toFixed(0)}%` : SECURITY_INTELLIGENCE_V2_ENABLED ? row.researchStatus === 'unavailable' ? 'UNAVAILABLE' : 'N/A' : '—'}</td>
                 </tr>
               ))}
               {!visibleRows.length && <tr><td colSpan="10" className="reference-table__empty">{metadataLoading || changelogLoading ? 'Loading Signal Strength…' : 'No securities match these filters.'}</td></tr>}

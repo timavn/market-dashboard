@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { withQuoteObservation } = require('../normalize/quoteContract.cjs');
 const { normalizeYahooLegacy } = require('../normalize/normalizeQuote');
 const { normalizeCboeTreasuryYield } = require('../../../utils/treasuryYieldScale.cjs');
 
@@ -22,6 +23,7 @@ async function fetchYahooQuote(yahooTicker) {
       timeout: 10000,
     });
 
+    const receivedAt = new Date().toISOString();
     const data = response.data;
     if (data.chart?.error || !data.chart?.result?.length) return null;
 
@@ -29,7 +31,8 @@ async function fetchYahooQuote(yahooTicker) {
     if (result.error) return null;
 
     const meta = result.meta || {};
-    const isRateProxyTicker = yahooTicker === '^FVX' || yahooTicker === '^TNX' || yahooTicker === '^TYX';
+    if (meta.symbol && String(meta.symbol).toUpperCase() !== String(yahooTicker).toUpperCase()) return null;
+    const isRateProxyTicker = yahooTicker === '^TNX' || yahooTicker === '^TYX';
 
     let currentPrice = null;
     let previousClose = null;
@@ -57,17 +60,29 @@ async function fetchYahooQuote(yahooTicker) {
     }
 
     return {
-      price: currentPrice.toFixed(2),
-      change: (currentPrice - previousClose).toFixed(2),
+      receivedAt,
+      providerSymbol: meta.symbol || yahooTicker,
+      currency: meta.currency || null,
+      exchange: meta.exchangeName || null,
+      price: String(currentPrice),
+      change: String(currentPrice - previousClose),
       changePercent: previousClose > 0 ? (((currentPrice - previousClose) / previousClose) * 100).toFixed(2) : '0.00',
-      previousClose: previousClose.toFixed(2),
+      previousClose: String(previousClose),
       timestamp: Number.isFinite(meta.regularMarketTime)
         ? new Date(meta.regularMarketTime * 1000).toISOString()
-        : new Date().toISOString(),
+        : null,
     };
   } catch {
     return null;
   }
+}
+
+function explicitYahooSymbol(symbolOrInstrument) {
+  if (!symbolOrInstrument || typeof symbolOrInstrument !== 'object') return null;
+  if (symbolOrInstrument.yahooSymbol) return symbolOrInstrument.yahooSymbol;
+  return String(symbolOrInstrument.provider || '').toLowerCase() === 'yahoo'
+    ? symbolOrInstrument.providerSymbol || null
+    : null;
 }
 
 async function getQuote(symbolOrInstrument) {
@@ -75,17 +90,21 @@ async function getQuote(symbolOrInstrument) {
     typeof symbolOrInstrument === 'object'
       ? symbolOrInstrument.symbol
       : String(symbolOrInstrument).toUpperCase();
-  const explicitProviderSymbol =
-    typeof symbolOrInstrument === 'object' ? symbolOrInstrument.providerSymbol : null;
-  const mapping = explicitProviderSymbol
-    ? { source: 'yahoo', ticker: explicitProviderSymbol }
+  const yahooSymbol = explicitYahooSymbol(symbolOrInstrument);
+  const mapping = yahooSymbol
+    ? { source: 'yahoo', ticker: yahooSymbol }
     : (getTickerMappingFn || defaultMapping)(symbol);
   if (mapping.source !== 'yahoo') {
     return { canonical: null, error: 'not_yahoo_symbol' };
   }
 
   const raw = await fetchYahooQuote(mapping.ticker);
-  const canonical = normalizeYahooLegacy(raw, symbol);
+  const canonical = withQuoteObservation({
+    ...normalizeYahooLegacy(raw, symbol),
+    providerSymbol: raw?.providerSymbol || mapping.ticker,
+    currency: raw?.currency || null,
+    exchange: raw?.exchange || null,
+  }, { instrument: symbolOrInstrument, receivedAt: raw?.receivedAt ?? Date.now() });
   if (!canonical.valid) {
     canonical.warning = (canonical.warning ? `${canonical.warning}; ` : '') + 'yahoo_fallback';
   } else {
@@ -109,10 +128,9 @@ async function getHistoricalBars(symbolOrInstrument, range, interval) {
     typeof symbolOrInstrument === 'object'
       ? symbolOrInstrument.symbol
       : String(symbolOrInstrument).toUpperCase();
-  const explicitProviderSymbol =
-    typeof symbolOrInstrument === 'object' ? symbolOrInstrument.providerSymbol : null;
-  const mapping = explicitProviderSymbol
-    ? { source: 'yahoo', ticker: explicitProviderSymbol }
+  const yahooSymbol = explicitYahooSymbol(symbolOrInstrument);
+  const mapping = yahooSymbol
+    ? { source: 'yahoo', ticker: yahooSymbol }
     : (getTickerMappingFn || defaultMapping)(symbol);
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(mapping.ticker)}`;
   try {

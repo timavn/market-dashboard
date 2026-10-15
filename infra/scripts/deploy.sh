@@ -80,6 +80,7 @@ fi
 
 for control_name in \
   GMAIL_SCHEDULE_STATE \
+  CFTC_SCHEDULE_STATE \
   HERMES_SCHEDULE_STATE \
   HERMES_QUANT_ANALYST_SCHEDULE_STATE \
   HERMES_QUANT_DEVELOPER_SCHEDULE_STATE \
@@ -93,6 +94,7 @@ for control_name in \
   fi
 done
 gmail_state="DISABLED"
+cftc_state="DISABLED"
 analyst_state="DISABLED"
 developer_state="DISABLED"
 security_state="DISABLED"
@@ -289,6 +291,7 @@ run_sam deploy \
   --parameter-overrides \
     "CloudWatchdogScheduleState=${watchdog_state}" \
     "GmailScheduleState=${gmail_state}" \
+    "CftcScheduleState=${cftc_state}" \
     "QuantAnalystScheduleState=${analyst_state}" \
     "QuantDeveloperScheduleState=${developer_state}" \
     "SecurityScheduleState=${security_state}" \

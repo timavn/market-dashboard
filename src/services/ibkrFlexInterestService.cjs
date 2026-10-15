@@ -438,17 +438,32 @@ function listStoredSnapshots(config, limit) {
       'flex_interest_integrity_error',
     );
   }
-  return fs.readdirSync(directory)
-    .filter((name) => /^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}_[a-f0-9]{64}\.json$/.test(name))
-    .map((name) => validateStoredSnapshot(
+  const compare = (a, b) => String(b.fetchedAt).localeCompare(String(a.fetchedAt))
+    || b.revisionId.localeCompare(a.revisionId);
+  const snapshots = [];
+  for (const name of fs.readdirSync(directory)) {
+    if (!/^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}_[a-f0-9]{64}\.json$/.test(name)) continue;
+    // Every stored revision still verifies against its fresh bytes and exact
+    // account. Keep only the requested newest objects while scanning, rather
+    // than retaining all parsed accounting reports until the final slice.
+    const snapshot = validateStoredSnapshot(
       readPrivateJson(path.join(directory, name)),
       name,
       config.expectedAccountFingerprint,
-    ))
-    .sort((a, b) =>
-      String(b.fetchedAt).localeCompare(String(a.fetchedAt))
-      || b.revisionId.localeCompare(a.revisionId))
-    .slice(0, limit);
+    );
+    let low = 0;
+    let high = snapshots.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (compare(snapshot, snapshots[middle]) < 0) high = middle;
+      else low = middle + 1;
+    }
+    if (low < limit) {
+      snapshots.splice(low, 0, snapshot);
+      if (snapshots.length > limit) snapshots.pop();
+    }
+  }
+  return snapshots;
 }
 
 function latestStoredSnapshot(config) {
@@ -484,6 +499,18 @@ function latestStoredSnapshot(config) {
 
 function publicSnapshotSummary(snapshot) {
   if (!snapshot) return null;
+  const sectionPresence = {
+    tierInterestDetails: snapshot.tierDetailSectionPresent === true
+      || (snapshot.tierDetails?.length || 0) > 0,
+    interestAccruals: snapshot.accrualSectionPresent === true
+      || (snapshot.accruals?.length || 0) > 0,
+    cashTransactions: snapshot.cashTransactionSectionPresent === true
+      || (snapshot.cashTransactions?.length || 0) > 0,
+    cashReport: snapshot.cashReportSectionPresent === true
+      || (snapshot.cashReports?.length || 0) > 0,
+    stockBorrowFeeDetails: snapshot.borrowFeeDetailsSectionPresent === true
+      || (snapshot.borrowFeeDetails?.length || 0) > 0,
+  };
   return {
     fromDate: snapshot.fromDate,
     toDate: snapshot.toDate,
@@ -497,7 +524,9 @@ function publicSnapshotSummary(snapshot) {
       accruals: snapshot.accruals?.length || 0,
       cashTransactions: snapshot.cashTransactions?.length || 0,
       cashReports: snapshot.cashReports?.length || 0,
+      borrowFeeDetails: snapshot.borrowFeeDetails?.length || 0,
     },
+    sectionPresence,
   };
 }
 
@@ -686,9 +715,15 @@ function createIbkrFlexInterestService({
           expectedAccountMasked: maskAccountId(config.expectedAccountId),
           expectedAccountFingerprint: config.expectedAccountFingerprint,
           tierDetails: parsed.tierDetails,
+          tierDetailSectionPresent: parsed.tierDetailSectionPresent,
           accruals: parsed.accruals,
+          accrualSectionPresent: parsed.accrualSectionPresent,
           cashTransactions: parsed.cashTransactions,
+          cashTransactionSectionPresent: parsed.cashTransactionSectionPresent,
           cashReports: parsed.cashReports,
+          cashReportSectionPresent: parsed.cashReportSectionPresent,
+          borrowFeeDetails: parsed.borrowFeeDetails,
+          borrowFeeDetailsSectionPresent: parsed.borrowFeeDetailsSectionPresent,
           derived: parsed.derived,
         };
         const snapshot = {
@@ -704,7 +739,7 @@ function createIbkrFlexInterestService({
     }
   }
 
-  function status() {
+  function status({ includeStored = true } = {}) {
     const base = {
       enabled: config.enabled,
       configured: config.configured,
@@ -720,7 +755,7 @@ function createIbkrFlexInterestService({
       syncInProgress,
       latest: null,
     };
-    if (!config.enabled || !config.configured) return base;
+    if (!includeStored || !config.enabled || !config.configured) return base;
 
     try {
       const latest = latestStoredSnapshot(config);

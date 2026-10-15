@@ -1,14 +1,17 @@
 import React, { useEffect, useRef } from 'react';
+import { useSurfaceActivity } from './PersistentSurface';
 
 const MetricDefinitionPopover = ({ 
   metricKey, 
   definition, 
   onClose
 }) => {
+  const surfaceActive = useSurfaceActivity();
   const popoverRef = useRef(null);
 
   // Close on escape key
   useEffect(() => {
+    if (!surfaceActive) return undefined;
     const handleEscape = (e) => {
       if (e.key === 'Escape') {
         onClose();
@@ -16,10 +19,11 @@ const MetricDefinitionPopover = ({
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [onClose]);
+  }, [onClose, surfaceActive]);
 
   // Close on outside click
   useEffect(() => {
+    if (!surfaceActive) return undefined;
     const handleClickOutside = (e) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target)) {
         // Check if click is on the button that opened this popover
@@ -32,9 +36,9 @@ const MetricDefinitionPopover = ({
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose]);
+  }, [onClose, surfaceActive]);
 
-  if (!definition) return null;
+  if (!definition || !surfaceActive) return null;
 
   const { name, definition: def, range, interpretation, components, format, calculation, source } = definition;
 
@@ -274,4 +278,3 @@ const MetricDefinitionPopover = ({
 };
 
 export default MetricDefinitionPopover;
-

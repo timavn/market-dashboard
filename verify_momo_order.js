@@ -1,4 +1,4 @@
-const AWS = require('aws-sdk');
+const { AWS } = require('./src/services/aws/clients.cjs');
 
 // Configure AWS
 AWS.config.update({

@@ -99,7 +99,11 @@ class DeploymentRoleContractTests(unittest.TestCase):
     def test_role_exactly_covers_every_sam_owned_table_without_wildcards(self):
         table_names = {
             resource["Properties"]["TableName"]
-            for resource in self.sam_template["Resources"].values()
+            for template in (
+                self.sam_template,
+                load_cloudformation(REPO_ROOT / "infra" / "prediction-market-performance-ledger.yaml"),
+            )
+            for resource in template["Resources"].values()
             if resource.get("Type") == "AWS::DynamoDB::Table"
         }
         expected = {

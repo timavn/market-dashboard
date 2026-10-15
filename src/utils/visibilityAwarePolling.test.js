@@ -86,4 +86,44 @@ describe('startVisibilityAwarePolling', () => {
 
     stop();
   });
+
+  test('resumes after only the remaining interval instead of polling on surface activation', async () => {
+    const poll = jest.fn();
+    const intervalMs = 5 * 60 * 1000;
+    const stop = startVisibilityAwarePolling({
+      poll,
+      intervalMs,
+      initialDelayMs: 45 * 1000,
+    });
+
+    jest.advanceTimersByTime(44_999);
+    await Promise.resolve();
+    expect(poll).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(1);
+    await Promise.resolve();
+    expect(poll).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(intervalMs);
+    await Promise.resolve();
+    expect(poll).toHaveBeenCalledTimes(2);
+
+    stop();
+  });
+
+  test('cancels a pending resumed poll when its surface becomes inactive', async () => {
+    const poll = jest.fn();
+    const stop = startVisibilityAwarePolling({
+      poll,
+      intervalMs: 60_000,
+      initialDelayMs: 30_000,
+    });
+
+    jest.advanceTimersByTime(10_000);
+    stop();
+    jest.advanceTimersByTime(60_000);
+    await Promise.resolve();
+
+    expect(poll).not.toHaveBeenCalled();
+  });
 });

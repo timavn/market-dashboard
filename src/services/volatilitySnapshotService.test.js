@@ -2,11 +2,20 @@ const {
   addCalendarDays,
   combineCurrentQuote,
   computeVolatilityMetrics,
-  createVolatilitySnapshotService,
+  createVolatilitySnapshotService: createPersistentVolatilitySnapshotService,
   isTradingDateKey,
+  isUsMarketOpen,
   parseCboeHistoryCsv,
   percentageChange,
 } = require('./volatilitySnapshotService.cjs');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// Ordinary provider tests are isolated from the real server's durable evidence.
+const createVolatilitySnapshotService = (options) => createPersistentVolatilitySnapshotService({
+  referenceFilePath: null, ...options,
+});
 
 function tradingRows(startDate, count, startingClose = 100) {
   const rows = [];
@@ -48,6 +57,7 @@ function buildFakeProvider({
   failAll = false,
   failMove = false,
   invalidMove = false,
+  cboeAsOf = '2026-07-13T16:00:00-04:00',
   moveAsOf = '2026-07-13T20:30:00.000Z',
   moveHistoryEnd = '2026-07-10',
   moveHistoryRows = null,
@@ -74,7 +84,7 @@ function buildFakeProvider({
               current_price: 200,
               last_trade_time: staleCboe
                 ? '2026-07-13T12:00:00-04:00'
-                : '2026-07-13T16:00:00-04:00',
+                : cboeAsOf,
             },
           },
         };
@@ -179,6 +189,86 @@ describe('computeVolatilityMetrics', () => {
 describe('createVolatilitySnapshotService', () => {
   const afterClose = new Date('2026-07-13T20:45:00.000Z');
 
+  test('reuses time-zone formatting for MOVE history while retaining DST, weekend, and holiday session boundaries', async () => {
+    const httpClient = buildFakeProvider();
+    const constructor = jest.spyOn(Intl, 'DateTimeFormat');
+    try {
+      const result = await createVolatilitySnapshotService({
+        httpClient, now: () => afterClose, logger: { warn: jest.fn() },
+      }).fetchSnapshot();
+      expect(result.MOVE.lastPx).toBe(200);
+      expect([
+        '2026-03-06T14:29:00Z', '2026-03-06T14:30:00Z',
+        '2026-03-09T13:29:00Z', '2026-03-09T13:30:00Z', '2026-03-09T20:14:00Z', '2026-03-09T20:15:00Z',
+        '2026-11-02T14:29:00Z', '2026-11-02T14:30:00Z',
+        '2026-03-08T15:00:00Z', '2026-07-03T15:00:00Z',
+      ].map((date) => isUsMarketOpen(new Date(date)))).toEqual([
+        false, true, false, true, true, false, false, true, false, false,
+      ]);
+      expect(constructor).not.toHaveBeenCalled();
+    } finally {
+      constructor.mockRestore();
+    }
+  });
+
+  test('coalesces concurrent snapshot requests into one upstream provider batch', async () => {
+    const httpClient = buildFakeProvider();
+    const service = createVolatilitySnapshotService({
+      httpClient,
+      now: () => afterClose,
+      logger: { warn: jest.fn() },
+    });
+
+    const [first, second] = await Promise.all([
+      service.fetchSnapshot(),
+      service.fetchSnapshot(),
+    ]);
+
+    expect(second).toBe(first);
+    expect(httpClient.get).toHaveBeenCalledTimes(17);
+  });
+
+  test('uses the current Cboe API host for every quote and history request', async () => {
+    const httpClient = buildFakeProvider();
+    await createVolatilitySnapshotService({
+      httpClient, now: () => afterClose, logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+
+    const cboeUrls = httpClient.get.mock.calls.map(([url]) => url)
+      .filter((url) => url.includes('cboe.com'));
+    expect(cboeUrls).toHaveLength(16);
+    expect(cboeUrls.every((url) => new URL(url).origin === 'https://cdn-api.cboe.com')).toBe(true);
+  });
+
+  test('keeps independently verified MOVE history when all Cboe quotes are stale', async () => {
+    const snapshot = await createVolatilitySnapshotService({
+      httpClient: buildFakeProvider({ cboeAsOf: '2026-07-10T16:00:00-04:00' }),
+      now: () => new Date('2026-07-14T14:00:00.000Z'), logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+    expect(snapshot.status).toBe('partial');
+    expect(snapshot.VIX).toMatchObject({ availability: 'reference', freshness: 'refresh-delayed', lastPx: 200,
+      asOf: '2026-07-10T20:00:00.000Z', executable: false });
+    expect(snapshot.MOVE).toMatchObject({ availability: 'historical', freshness: 'historical', lastPx: 200 });
+  });
+
+  test('applies the shared 30-minute Cboe freshness boundary during market hours', async () => {
+    const marketNow = new Date('2026-07-13T18:00:00.000Z');
+    const accepted = await createVolatilitySnapshotService({
+      httpClient: buildFakeProvider({ cboeAsOf: '2026-07-13T13:30:00-04:00' }),
+      now: () => marketNow,
+      logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+    const expired = await createVolatilitySnapshotService({
+      httpClient: buildFakeProvider({ cboeAsOf: '2026-07-13T13:29:59-04:00' }),
+      now: () => marketNow,
+      logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+
+    expect(accepted.VIX).toMatchObject({ availability: 'available', freshness: 'current' });
+    expect(expired.VIX).toMatchObject({ availability: 'reference', freshness: 'refresh-delayed',
+      lastPx: 200, asOf: '2026-07-13T17:29:59.000Z', executable: false });
+  });
+
   test('returns current Cboe rows and a validated historical MOVE row', async () => {
     const snapshot = await createVolatilitySnapshotService({
       httpClient: buildFakeProvider(),
@@ -187,12 +277,23 @@ describe('createVolatilitySnapshotService', () => {
     }).fetchSnapshot();
 
     expect(snapshot.status).toBe('partial');
+    expect(snapshot.marketSession).toBe('closed');
     expect(snapshot.RVX).toMatchObject({
       lastPx: 200,
       availability: 'available',
       freshness: 'current',
       source: 'cboe',
       quoteMode: 'delayed',
+    });
+    expect(snapshot.VXEEM).toMatchObject({
+      lastPx: 200,
+      availability: 'available',
+      freshness: 'current',
+      source: 'cboe',
+      quoteMode: 'delayed',
+      asOf: '2026-07-13T20:00:00.000Z',
+      dayChangePct: expect.any(Number),
+      sixMonthChangePct: expect.any(Number),
     });
     expect(snapshot.MOVE).toMatchObject({
       lastPx: 200,
@@ -212,6 +313,7 @@ describe('createVolatilitySnapshotService', () => {
       now: () => new Date('2026-07-14T14:00:00.000Z'),
       logger: { warn: jest.fn() },
     }).fetchSnapshot();
+    expect(duringMarket.marketSession).toBe('open');
     expect(duringMarket.MOVE).toMatchObject({
       availability: 'historical',
       freshness: 'historical',
@@ -410,7 +512,7 @@ describe('createVolatilitySnapshotService', () => {
     });
   });
 
-  test('marks only a failed provider row unavailable and reports a partial snapshot', async () => {
+  test('recovers an official daily close when spot fails on the first request', async () => {
     const snapshot = await createVolatilitySnapshotService({
       httpClient: buildFakeProvider({ failSymbols: new Set(['RVX']) }),
       now: () => afterClose,
@@ -418,12 +520,43 @@ describe('createVolatilitySnapshotService', () => {
     }).fetchSnapshot();
 
     expect(snapshot.status).toBe('partial');
-    expect(snapshot.RVX.availability).toBe('unavailable');
-    expect(snapshot.RVX.lastPx).toBeNull();
+    expect(snapshot.RVX).toMatchObject({ availability: 'reference', freshness: 'refresh-delayed',
+      lastPx: tradingRowsThrough('2025-12-31', '2026-07-10', 20).at(-1).close,
+      asOf: '2026-07-10', asOfPrecision: 'date', marketSessionDate: '2026-07-10',
+      displayOnly: true, executable: false });
     expect(snapshot.VIX.availability).toBe('available');
   });
 
-  test('marks stale market-hours quotes unavailable', async () => {
+  test('retries a transient provider request before degrading the row', async () => {
+    const stableProvider = buildFakeProvider();
+    let vxnQuoteAttempts = 0;
+    const httpClient = {
+      get: jest.fn(async (...args) => {
+        if (args[0].includes('quotes/_VXN.json')) {
+          vxnQuoteAttempts += 1;
+          if (vxnQuoteAttempts === 1) {
+            throw Object.assign(new Error('timeout of 12000ms exceeded'), { code: 'ECONNABORTED' });
+          }
+        }
+        return stableProvider.get(...args);
+      }),
+    };
+
+    const snapshot = await createVolatilitySnapshotService({
+      httpClient,
+      now: () => afterClose,
+      logger: { warn: jest.fn() },
+    }).fetchSnapshot();
+
+    expect(vxnQuoteAttempts).toBe(2);
+    expect(snapshot.NazVol).toMatchObject({
+      availability: 'available',
+      freshness: 'current',
+      lastPx: 200,
+    });
+  });
+
+  test('keeps dated provider observations after intraday freshness expires', async () => {
     const duringMarket = new Date('2026-07-13T18:00:00.000Z');
     const snapshot = await createVolatilitySnapshotService({
       httpClient: buildFakeProvider({ staleCboe: true }),
@@ -432,9 +565,16 @@ describe('createVolatilitySnapshotService', () => {
     }).fetchSnapshot();
 
     expect(snapshot.VIX).toMatchObject({
-      availability: 'unavailable',
-      freshness: 'stale',
-      lastPx: null,
+      availability: 'reference',
+      freshness: 'refresh-delayed',
+      lastPx: 200,
+      asOf: '2026-07-13T16:00:00.000Z',
+      lastVerifiedAt: '2026-07-13T16:00:00.000Z',
+      displayDelayed: true,
+      executable: false,
+    });
+    expect(snapshot.VXEEM).toMatchObject({
+      availability: 'reference', freshness: 'refresh-delayed', lastPx: 200,
     });
   });
 
@@ -446,13 +586,13 @@ describe('createVolatilitySnapshotService', () => {
     }).fetchSnapshot();
 
     expect(snapshot.status).toBe('unavailable');
-    for (const name of ['VIX', 'VVIX', 'RVX', 'NazVol', 'GVZ', 'OVX', 'MOVE']) {
+    for (const name of ['VIX', 'VVIX', 'RVX', 'NazVol', 'VXEEM', 'GVZ', 'OVX', 'BITVX', 'MOVE']) {
       expect(snapshot[name].availability).toBe('unavailable');
       expect(snapshot[name].lastPx).toBeNull();
     }
   });
 
-  test('clears a formerly available row when its next spot refresh fails', async () => {
+  test('keeps a formerly verified row when its next spot refresh fails', async () => {
     const failSymbols = new Set();
     const service = createVolatilitySnapshotService({
       httpClient: buildFakeProvider({ failSymbols }),
@@ -460,11 +600,198 @@ describe('createVolatilitySnapshotService', () => {
       logger: { warn: jest.fn() },
     });
 
-    const first = await service.fetchSnapshot();
-    expect(first.RVX.availability).toBe('available');
+    expect((await service.fetchSnapshot()).RVX.availability).toBe('available');
 
     failSymbols.add('RVX');
     const second = await service.fetchSnapshot();
-    expect(second.RVX).toMatchObject({ availability: 'unavailable', lastPx: null });
+    expect(second.RVX).toMatchObject({
+      availability: 'reference',
+      freshness: 'refresh-delayed',
+      lastPx: 200,
+      asOf: '2026-07-13T20:00:00.000Z',
+      lastVerifiedAt: '2026-07-13T20:00:00.000Z',
+      displayDelayed: true,
+      executable: false,
+    });
+  });
+
+  test('never expires the last verified overview row on later refreshes', async () => {
+    const failSymbols = new Set();
+    let currentTime = afterClose;
+    const service = createVolatilitySnapshotService({
+      httpClient: buildFakeProvider({ failSymbols }),
+      now: () => currentTime,
+      logger: { warn: jest.fn() },
+    });
+
+    await service.fetchSnapshot();
+    currentTime = new Date(afterClose.getTime() + (60 * 24 * 60 * 60 * 1000));
+    failSymbols.add('RVX');
+
+    const expired = await service.fetchSnapshot();
+    expect(expired.RVX).toMatchObject({
+      availability: 'reference',
+      freshness: 'refresh-delayed',
+      lastPx: 200,
+      asOf: '2026-07-13T20:00:00.000Z',
+      lastVerifiedAt: '2026-07-13T20:00:00.000Z',
+      displayDelayed: true,
+      executable: false,
+    });
+    expect(expired.RVX).not.toHaveProperty('retainedUntil');
+  });
+
+  test('preserves every numeric field and original observation through complete outages and process restarts', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'volatility-reference-'));
+    const referenceFilePath = path.join(dataDir, 'last-verified-v1.json');
+    try {
+      let provider = buildFakeProvider();
+      let currentTime = afterClose;
+      const options = { referenceFilePath, now: () => currentTime, logger: { warn: jest.fn() },
+        httpClient: { get: (...args) => provider.get(...args) } };
+      const service = createVolatilitySnapshotService(options);
+      const verified = await service.fetchSnapshot();
+      expect(fs.existsSync(referenceFilePath)).toBe(true);
+      provider = buildFakeProvider({ failAll: true });
+      currentTime = new Date('2026-09-25T18:00:00.000Z');
+      for (const snapshot of [await service.fetchSnapshot(),
+        await createVolatilitySnapshotService(options).fetchSnapshot()]) {
+        expect(snapshot.status).toBe('partial');
+        for (const name of ['VIX', 'VVIX', 'RVX', 'NazVol', 'VXEEM', 'GVZ', 'OVX', 'BITVX', 'MOVE']) {
+          const numericFields = Object.keys(verified[name]).filter((field) => typeof verified[name][field] === 'number');
+          expect(Object.fromEntries(numericFields.map((field) => [field, snapshot[name][field]])))
+            .toEqual(Object.fromEntries(numericFields.map((field) => [field, verified[name][field]])));
+          expect(snapshot[name]).toMatchObject({ source: verified[name].source, asOf: verified[name].asOf,
+            lastVerifiedAt: verified[name].asOf, availability: 'reference', freshness: 'refresh-delayed',
+            displayDelayed: true, displayOnly: true, executable: false });
+          expect(snapshot[name]).not.toHaveProperty('retainedUntil');
+        }
+      }
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('replaces references with newer verified observations while ignoring older provider responses', async () => {
+    let provider = buildFakeProvider();
+    let currentTime = new Date('2026-07-13T20:05:00.000Z');
+    const service = createVolatilitySnapshotService({
+      httpClient: { get: (...args) => provider.get(...args) }, now: () => currentTime, logger: { warn: jest.fn() },
+    });
+    await service.fetchSnapshot();
+    provider = buildFakeProvider({ failAll: true });
+    expect((await service.fetchSnapshot()).VIX.availability).toBe('reference');
+    provider = buildFakeProvider({ cboeAsOf: '2026-07-13T15:55:00-04:00' });
+    expect((await service.fetchSnapshot()).VIX).toMatchObject({ availability: 'reference',
+      asOf: '2026-07-13T20:00:00.000Z', retentionReason: 'older_provider_observation' });
+    currentTime = new Date('2026-07-13T20:10:00.000Z');
+    provider = buildFakeProvider({ cboeAsOf: '2026-07-13T16:09:00-04:00' });
+    const recovered = await service.fetchSnapshot();
+    expect(recovered.VIX).toMatchObject({ availability: 'available', freshness: 'current',
+      asOf: '2026-07-13T20:09:00.000Z' });
+    expect(recovered.VIX).not.toHaveProperty('refreshDelayed');
+    expect(recovered.VIX).not.toHaveProperty('lastVerifiedAt');
+  });
+
+  test('history refresh failures retain the entire verified row instead of erasing its changes', async () => {
+    let failHistory = false;
+    const provider = buildFakeProvider();
+    const service = createVolatilitySnapshotService({ historyCacheTtlMs: 0,
+      httpClient: { get: (url, config) => {
+        if (failHistory && url.includes('daily_prices/')) throw new Error('history offline');
+        return provider.get(url, config);
+      } }, now: () => afterClose, logger: { warn: jest.fn() },
+    });
+    const first = await service.fetchSnapshot();
+    failHistory = true;
+    expect((await service.fetchSnapshot()).RVX).toMatchObject({ lastPx: first.RVX.lastPx,
+      dayChangePct: first.RVX.dayChangePct, sixMonthChangePct: first.RVX.sixMonthChangePct,
+      asOf: first.RVX.asOf, availability: 'reference', retentionReason: 'history_refresh_unavailable' });
+  });
+
+  test('partial history preserves prior periods only for the exact same provider observation', async () => {
+    let truncated = false;
+    let revisedPrice = null;
+    const provider = buildFakeProvider();
+    const service = createVolatilitySnapshotService({ historyCacheTtlMs: 0,
+      httpClient: { get: async (url, config) => {
+        const response = await provider.get(url, config);
+        if (truncated && url.includes('daily_prices/')) {
+          response.data = historyCsv(tradingRowsThrough('2026-07-09', '2026-07-10', 149));
+        }
+        if (revisedPrice != null && url.includes('quotes/')) response.data.data.current_price = revisedPrice;
+        return response;
+      } }, now: () => afterClose, logger: { warn: jest.fn() },
+    });
+    const first = await service.fetchSnapshot();
+    truncated = true;
+    const sameObservation = await service.fetchSnapshot();
+    expect(sameObservation.VIX).toMatchObject({ asOf: first.VIX.asOf, lastPx: first.VIX.lastPx,
+      fifteenDayChangePct: first.VIX.fifteenDayChangePct, monthChangePct: first.VIX.monthChangePct,
+      threeMonthChangePct: first.VIX.threeMonthChangePct, sixMonthChangePct: first.VIX.sixMonthChangePct });
+    revisedPrice = 201;
+    const revision = await service.fetchSnapshot();
+    expect(revision.VIX).toMatchObject({ asOf: first.VIX.asOf, lastPx: 201,
+      fifteenDayChangePct: null, monthChangePct: null, threeMonthChangePct: null, sixMonthChangePct: null });
+  });
+
+  test('keeps a verified standalone level when history has too few observations to calculate changes', async () => {
+    const provider = buildFakeProvider({ failSymbols: new Set(['VIX']) });
+    const service = createVolatilitySnapshotService({
+      httpClient: { get: (url, config) => url.includes('VIX_History.csv')
+        ? Promise.resolve({ data: historyCsv([{ date: '2026-07-10', close: 19.5 }]) }) : provider.get(url, config),
+      }, now: () => afterClose, logger: { warn: jest.fn() },
+    });
+    expect((await service.fetchSnapshot()).VIX).toMatchObject({ availability: 'reference',
+      asOf: '2026-07-10', lastPx: 19.5, dayChangePct: null, sixMonthChangePct: null });
+  });
+
+  test.each([{ mock: true }, { seeded: true }, { synthetic: true }, { inferred: true },
+    { cacheOnly: true }, { fromCache: true }, { connected: false }, { providerStatus: 'offline' }])(
+    'does not replace verified evidence with a flagged provider response: %j', async (flags) => {
+      let rejected = false;
+      const provider = buildFakeProvider();
+      const service = createVolatilitySnapshotService({ historyCacheTtlMs: 0,
+        httpClient: { get: async (url, config) => {
+          if (rejected && url.includes('daily_prices/')) throw new Error('history offline');
+          const response = await provider.get(url, config);
+          if (rejected && url.includes('quotes/')) {
+            response.data.data = { ...response.data.data, ...flags, current_price: 999,
+              last_trade_time: '2026-07-13T16:10:00-04:00' };
+          }
+          if (rejected && url.includes('%5EMOVE')) Object.assign(response.data.chart.result[0].meta, flags,
+            { regularMarketPrice: 999 });
+          return response;
+        } }, now: () => afterClose, logger: { warn: jest.fn() },
+      });
+      const first = await service.fetchSnapshot();
+      rejected = true;
+      const retained = await service.fetchSnapshot();
+      for (const name of ['VIX', 'VVIX', 'RVX', 'MOVE']) {
+        expect(retained[name]).toMatchObject({ lastPx: first[name].lastPx, asOf: first[name].asOf,
+          availability: 'reference', executable: false });
+      }
+    },
+  );
+
+  test('ignores invalid persisted evidence without manufacturing cold-start values', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'volatility-reference-'));
+    const referenceFilePath = path.join(dataDir, 'last-verified-v1.json');
+    try {
+      fs.writeFileSync(referenceFilePath, JSON.stringify({ schemaVersion: 1, rows: {
+        VIX: { source: 'cboe', availability: 'available', freshness: 'current', lastPx: 999,
+          asOf: '2026-07-13T20:00:00.000Z', mock: true },
+        VVIX: { source: 'cboe', availability: 'available', freshness: 'current', lastPx: 999, asOf: 'invalid' },
+        RVX: { source: 'cboe', availability: 'available', freshness: 'current', lastPx: 999,
+          asOf: '2027-07-13T20:00:00.000Z' },
+      } }));
+      const snapshot = await createVolatilitySnapshotService({ referenceFilePath,
+        httpClient: buildFakeProvider({ failAll: true }), now: () => afterClose, logger: { warn: jest.fn() },
+      }).fetchSnapshot();
+      for (const name of ['VIX', 'VVIX', 'RVX']) expect(snapshot[name].lastPx).toBeNull();
+      expect(snapshot.status).toBe('unavailable');
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

@@ -18,7 +18,8 @@ describe('researchProductRegistry', () => {
       trade: false,
     });
     expect(RESEARCH_PRODUCT_BY_ID['early-look'].authorities.supplementalRiskRange).toBe(true);
-    expect(RESEARCH_PRODUCT_BY_ID['momo-tracker'].authorities.trade).toBe(true);
+    expect(RESEARCH_PRODUCT_BY_ID['momo-tracker'].authorities.trade).toBe(false);
+    expect(RESEARCH_PRODUCT_BY_ID['momo-tracker'].authorities.trend).toBe(true);
     expect(RESEARCH_PRODUCTS.every((product) => (
       product.requiredStages.join(',') === 'received,parsed,validated,indexed'
     ))).toBe(true);
@@ -31,9 +32,13 @@ describe('researchProductRegistry', () => {
       marketDate: '2026-07-23',
     })).toBe(false);
     expect(isResearchProductDue('risk-ranges', {
-      now: new Date('2026-07-23T12:01:00Z'),
+      now: new Date('2026-07-23T12:15:00Z'),
       marketDate: '2026-07-23',
     })).toBe(true);
+    expect(isResearchProductDue('risk-ranges', {
+      now: new Date('2026-07-23T12:14:59Z'),
+      marketDate: '2026-07-23',
+    })).toBe(false);
     expect(isResearchProductDue('the-call', {
       now: new Date('2026-07-23T18:00:00Z'),
       marketDate: '2026-07-23',

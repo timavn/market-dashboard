@@ -38,8 +38,8 @@ PY
 )"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$EXPECTED_REGION}}"
 STACK_NAME="market-dashboard-readiness-v2"
-CANONICAL_FUNCTION_NAMES="market-dashboard-gmail-ingestor-v2,market-dashboard-hedgeye-pdf-processor-v1,market-dashboard-hermes-worker-v2,market-dashboard-hermes-cloud-watchdog-v1"
-CANONICAL_SCHEDULE_NAMES="market-dashboard-gmail-v2-every-15m,market-dashboard-hermes-quant-analyst-v2,market-dashboard-hermes-quant-developer-v2,market-dashboard-hermes-security-v2"
+CANONICAL_FUNCTION_NAMES="market-dashboard-gmail-ingestor-v2,market-dashboard-cftc-ingestor-v1,market-dashboard-hedgeye-pdf-processor-v1,market-dashboard-hermes-worker-v2,market-dashboard-hermes-cloud-watchdog-v1"
+CANONICAL_SCHEDULE_NAMES="market-dashboard-gmail-v2-every-15m,market-dashboard-cftc-weekday-v1,market-dashboard-hermes-quant-analyst-v2,market-dashboard-hermes-quant-developer-v2,market-dashboard-hermes-security-v2"
 CANONICAL_EVENT_RULE_NAMES="market-dashboard-hermes-cloud-watchdog-v1"
 merge_csv_names() {
   python3 - "$1" "$2" <<'PY'
@@ -69,7 +69,7 @@ EVENT_RULE_NAMES="$(
     "$CANONICAL_EVENT_RULE_NAMES" \
     "${MARKET_DASHBOARD_EXPORT_EVENT_RULES:-}"
 )"
-TABLE_NAMES="MarketDashboardServiceHeartbeats,HermesInputSnapshots,ResearchEventLedgerV2,ResearchEntityEventsV1,ResearchProductManifestsV1,PredictionMarketCatalogV2,RiskRangePublicationManifestsV2"
+TABLE_NAMES="MarketDashboardServiceHeartbeats,HermesInputSnapshots,ResearchEventLedgerV2,ResearchEntityEventsV1,ResearchProductManifestsV1,PredictionMarketCatalogV2,PredictionMarketPerformanceLedger,RiskRangePublicationManifestsV2"
 EXTERNAL_TABLE_NAMES="HermesEmailIngestLedger,HedgeyeDailySnapshot,HedgeyeRiskRanges,RiskRangeData,HermesAgentRuns,HermesAlerts"
 REQUIRED_EXTERNAL_TABLE_NAMES="HermesEmailIngestLedger,HedgeyeDailySnapshot"
 ABSENT_STATUS=42
@@ -282,6 +282,7 @@ mkdir -p \
   "$OUTPUT_DIR/functions" \
   "$OUTPUT_DIR/schedules" \
   "$OUTPUT_DIR/event-rules" \
+  "$OUTPUT_DIR/local-settings" \
   "$OUTPUT_DIR/tables" \
   "$OUTPUT_DIR/external-tables" \
   "$OUTPUT_DIR/bootstrap" \
@@ -292,6 +293,7 @@ chmod 700 \
   "$OUTPUT_DIR/functions" \
   "$OUTPUT_DIR/schedules" \
   "$OUTPUT_DIR/event-rules" \
+  "$OUTPUT_DIR/local-settings" \
   "$OUTPUT_DIR/tables" \
   "$OUTPUT_DIR/external-tables" \
   "$OUTPUT_DIR/bootstrap" \
@@ -808,6 +810,140 @@ if [[ "$ROLE_PRESENT" == "true" ]]; then
     exit 1
   fi
 fi
+
+python3 - "$REPO_ROOT" "$OUTPUT_DIR/local-settings/settings.json" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import plistlib
+import sys
+
+repo = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+home = pathlib.Path.home()
+allowed = {
+    "LEGACY_HERMES_MODE",
+    "REACT_APP_ANALYST_SHADOW_MODE",
+    "HERMES_BRIDGE_ENABLED",
+    "HERMES_OPERATIONS_BRIDGE_ENABLED",
+    "HERMES_PORTFOLIO_BRIDGE_ENABLED",
+    "HERMES_BRIDGE_AWS_PROFILE",
+    "READINESS_CONTROLLER_MODE",
+    "READINESS_CONTROLLER_ENABLED_ACTIONS",
+    "READINESS_CONTROLLER_HEARTBEAT_MAX_AGE_MS",
+    "READINESS_CONTROLLER_POLL_INTERVAL_MS",
+    "READINESS_CONTROLLER_STATE_FILE",
+    "HERMES_RELIABILITY_CONTROLLER_MODE",
+    "HERMES_RELIABILITY_ENABLED_ACTIONS",
+    "HERMES_CONTROLLER_HEARTBEAT_MAX_AGE_MS",
+    "HERMES_CONTROLLER_POLL_INTERVAL_MS",
+    "HERMES_CONTROLLER_STATE_FILE",
+}
+
+
+def env_file_values(path: pathlib.Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if not path.is_file():
+        return result
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key in allowed:
+            result[key] = value.strip()
+    return result
+
+
+def json_file(path: pathlib.Path):
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+plist_path = home / "Library/LaunchAgents/com.market-dashboard.stack.plist"
+plist_environment: dict[str, str] = {}
+try:
+    with plist_path.open("rb") as handle:
+        plist = plistlib.load(handle)
+    plist_environment = {
+        str(key): str(value)
+        for key, value in (plist.get("EnvironmentVariables") or {}).items()
+        if str(key) in allowed
+    }
+except (OSError, ValueError, plistlib.InvalidFileException):
+    pass
+
+supervisor_path = (
+    home / "Library/Application Support/market-dashboard/dev-stack.json"
+)
+supervisor = json_file(supervisor_path) or {}
+children = supervisor.get("children") or {}
+controller_path = (
+    home
+    / "Library/Application Support/market-dashboard/readiness-controller.json"
+)
+controller = json_file(controller_path) or {}
+payload = {
+    "schemaVersion": 1,
+    "classification": "rollback-local-settings",
+    "allowlistedEnvironment": {
+        key: str(os.environ[key]) for key in sorted(allowed) if key in os.environ
+    },
+    "repositoryEnv": env_file_values(repo / ".env"),
+    "launchAgent": {
+        "path": str(plist_path),
+        "present": plist_path.is_file(),
+        "environment": plist_environment,
+    },
+    "supervisor": {
+        "path": str(supervisor_path),
+        "present": supervisor_path.is_file(),
+        "bridgeEnabled": supervisor.get("bridgeEnabled"),
+        "bridge": {
+            key: (children.get("bridge") or {}).get(key)
+            for key in (
+                "enabled",
+                "intentionallyDisabled",
+                "status",
+                "lastHeartbeatAt",
+                "lastResultStatus",
+                "lastErrorCode",
+            )
+        },
+        "controller": {
+            key: (children.get("controller") or {}).get(key)
+            for key in (
+                "status",
+                "mode",
+                "enabledActionIds",
+                "lastHeartbeatAt",
+                "lastResultStatus",
+                "lastErrorCode",
+            )
+        },
+    },
+    "readinessController": {
+        "path": str(controller_path),
+        "present": controller_path.is_file(),
+        "serviceId": controller.get("serviceId"),
+        "mode": controller.get("mode"),
+        "enabledActionIds": controller.get("enabledActionIds") or [],
+        "status": controller.get("status"),
+        "buildFingerprint": controller.get("buildFingerprint"),
+        "observedAt": controller.get("observedAt"),
+    },
+}
+target.write_text(
+    json.dumps(payload, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+PY
 
 PREFLIGHT_STATUS=0
 python3 - \

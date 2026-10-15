@@ -312,6 +312,8 @@ test('admin preflight accepts refreshable SSO and rejects non-SSO providers', ()
     runAws: sso.run,
   });
   assert.equal(ssoResult.ok, true);
+  assert.equal(ssoResult.expiresAt, '2999-01-01T00:00:00.000Z');
+  assert.equal(publicResult(ssoResult).expiresAt, '2999-01-01T00:00:00.000Z');
   assert.doesNotMatch(JSON.stringify(ssoResult), /must-never-be-reported/);
   assert.equal(
     sso.calls.some(call => call.args[1] === 'export-credentials'),
@@ -330,6 +332,42 @@ test('admin preflight accepts refreshable SSO and rejects non-SSO providers', ()
   });
   assert.equal(result.errorCode, 'AWS_PROFILE_PROVIDER_INVALID');
   assert.equal(staticUser.calls.some(call => call.args[0] === 'sts'), false);
+});
+
+test('admin preflight rejects ambient profile and static-session overrides before AWS calls', () => {
+  const identity = {
+    Account: '915328198276',
+    Arn: 'arn:aws:sts::915328198276:assumed-role/AWSReservedSSO_Administrator/operator',
+  };
+  const fake = fakeAwsRunner({ ssoSession: true, identity });
+  assert.equal(preflightAwsProfile({
+    purpose: 'admin',
+    env: { AWS_PROFILE: 'market-dashboard-local' },
+    runAws: fake.run,
+  }).errorCode, 'AWS_PROFILE_ENVIRONMENT_OVERRIDE');
+  assert.equal(fake.calls.length, 0);
+
+  const staticResult = preflightAwsProfile({
+    purpose: 'admin',
+    env: { AWS_SESSION_TOKEN: 'ambient-token' },
+    runAws: fake.run,
+  });
+  assert.equal(staticResult.errorCode, 'AWS_PROFILE_STATIC_SESSION_REJECTED');
+  assert.equal(fake.calls.length, 0);
+});
+
+test('admin preflight distinguishes authenticated authorization denial from expiry', () => {
+  const fake = fakeAwsRunner({
+    ssoSession: true,
+    identity: {
+      Account: '915328198276',
+      Arn: 'arn:aws:sts::915328198276:assumed-role/AWSReservedSSO_Administrator/operator',
+    },
+    stsStatus: 1,
+    stsStderr: 'AccessDeniedException: not authorized',
+  });
+  const result = preflightAwsProfile({ purpose: 'admin', runAws: fake.run });
+  assert.equal(result.errorCode, 'AWS_AUTHORIZATION_DENIED');
 });
 
 test('admin SSO credentials are rejected when expired, near expiry, or unverifiable', () => {
@@ -354,6 +392,8 @@ test('admin SSO credentials are rejected when expired, near expiry, or unverifia
     });
     assert.equal(result.ok, false);
     assert.equal(result.errorCode, errorCode);
+    if (expiration) assert.equal(result.expiresAt, expiration);
+    else assert.equal(result.expiresAt, undefined);
     assert.equal(fake.calls.some(call => call.args[0] === 'sts'), false);
     assert.doesNotMatch(JSON.stringify(result), /must-never-be-reported/);
   }
@@ -366,11 +406,13 @@ test('admin SSO credentials are rejected when expired, near expiry, or unverifia
       Arn: 'arn:aws:sts::915328198276:assumed-role/Admin/operator',
     },
   });
-  assert.equal(preflightAwsProfile({
+  const boundaryResult = preflightAwsProfile({
     purpose: 'admin',
     runAws: boundary.run,
     now,
-  }).ok, true);
+  });
+  assert.equal(boundaryResult.ok, true);
+  assert.equal(boundaryResult.expiresAt, '2026-07-29T18:15:00.000Z');
 });
 
 test('a refreshable provider may resolve API credentials only when STS proves the exact user', () => {
@@ -477,6 +519,10 @@ test('refreshable expiration validation never returns exported credential fields
   }, {
     now: Date.parse('2026-07-29T18:00:00.000Z'),
   });
-  assert.deepEqual(result, { ok: true, errorCode: null });
+  assert.deepEqual(result, {
+    ok: true,
+    errorCode: null,
+    expiresAt: '2026-07-29T18:30:00.000Z',
+  });
   assert.doesNotMatch(JSON.stringify(result), /must-never-be-reported/);
 });

@@ -1,5 +1,5 @@
 // Test script to verify changelog endpoint DynamoDB query
-const AWS = require('aws-sdk');
+const { AWS } = require('./src/services/aws/clients.cjs');
 const dynamodb = new AWS.DynamoDB.DocumentClient({ region: 'us-west-1' });
 
 async function testChangelogQuery() {

@@ -168,6 +168,22 @@ describe('normalizeCpiNowcast', () => {
 });
 
 describe('deriveCpiTargetStrikes', () => {
+  test('builds every tenth from two strikes below 3.4-3.6 through two above', () => {
+    expect(deriveCpiTargetStrikes([
+      { value: 3.37 },
+      { value: 3.48 },
+      { value: 3.59 },
+    ])).toEqual([3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8]);
+  });
+
+  test('expands a 3.3/3.5/3.7 prediction to 3.1 through 3.9', () => {
+    expect(deriveCpiTargetStrikes([
+      { value: 3.3 },
+      { value: 3.5 },
+      { value: 3.7 },
+    ])).toEqual([3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9]);
+  });
+
   test('rounds YoY scenarios and pads two strikes on each side', () => {
     const model = normalizeCpiNowcast(YOY_SNAPSHOT).model;
 
@@ -379,6 +395,45 @@ describe('CPI contract ladder math', () => {
     expect(strikeRows).toHaveLength(1);
     expect(strikeRows[0].event.id).toBe('july-40');
     expect(strikeRows[0].yesPrice).toBeCloseTo(0.41);
+  });
+
+  test('keeps allocation target-scoped while all-live display scope returns the full direct-volume ladder', () => {
+    const model = normalizeCpiNowcast(YOY_SNAPSHOT).model;
+    const events = [
+      makeEvent({
+        id: 'outside-low',
+        underlying: 'KXCPIYOY',
+        contract_title: 'Above 3.0%',
+        question: 'CPI YoY Above 3.0%',
+        volume: '176534.04',
+        total_volume: 999999,
+        open_interest: 888888,
+      }),
+      makeEvent({
+        id: 'inside-target',
+        underlying: 'KXCPIYOY',
+        contract_title: 'Above 3.8%',
+        question: 'CPI YoY Above 3.8%',
+        volume: 1250,
+      }),
+      makeEvent({
+        id: 'outside-high-no-volume',
+        underlying: 'KXCPIYOY',
+        contract_title: 'Above 5.0%',
+        question: 'CPI YoY Above 5.0%',
+        volume: null,
+        total_volume: 777777,
+        open_interest: 666666,
+      }),
+    ];
+
+    const targetRows = buildCpiContractLadder(events, model, SETTINGS);
+    const displayRows = buildCpiContractLadder(events, model, SETTINGS, null, { scope: 'all-live' });
+
+    expect(targetRows.some((row) => row.threshold === 3)).toBe(false);
+    expect(targetRows.some((row) => row.threshold === 5)).toBe(false);
+    expect(displayRows.map((row) => row.threshold)).toEqual([3, 3.8, 5]);
+    expect(displayRows.map((row) => row.volume)).toEqual([176534.04, 1250, null]);
   });
 
   test('excludes non-live Kalshi CPI contracts from the ladder', () => {

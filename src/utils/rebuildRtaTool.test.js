@@ -1,3 +1,5 @@
+jest.mock('../../scripts/ops/aws_profile_preflight', () => ({ preflightAwsProfile: jest.fn() }));
+const { preflightAwsProfile } = require('../../scripts/ops/aws_profile_preflight');
 const {
   assertRuntimeConfiguration,
   compareProjections,
@@ -13,18 +15,25 @@ const {
 const SANITIZED_RTA_CHECKPOINT = require('./__fixtures__/rta-checkpoint.sanitized.json');
 
 describe('RTA rebuild tooling', () => {
+  beforeEach(() => {
+    preflightAwsProfile.mockReset();
+    preflightAwsProfile.mockReturnValue({ ok: true });
+  });
   test('is dry-run by default and requires an explicit apply flag', () => {
     expect(parseArgs([])).toMatchObject({ apply: false, json: false, windowDays: 90 });
-    expect(parseArgs(['--apply', '--window-days=120'])).toMatchObject({ apply: true, windowDays: 120 });
+    expect(parseArgs(['--apply', '--admin-profile=market-dashboard-admin', '--window-days=120'])).toMatchObject({ apply: true, windowDays: 120 });
   });
 
   test('rejects ambiguous or unsafe arguments', () => {
     expect(() => parseArgs(['--write'])).toThrow(/Unknown argument/);
+    expect(() => parseArgs(['--apply'])).toThrow(/AWS_ADMIN_PROFILE_REQUIRED/);
+    expect(() => parseArgs(['--read-profile=market-dashboard-admin'])).toThrow(/AWS_PROFILE_NAME_INVALID/);
+    expect(() => parseArgs(['--admin-profile=market-dashboard-admin'])).toThrow(/AWS_ADMIN_PROFILE_APPLY_ONLY/);
     expect(() => parseArgs(['--window-days=0'])).toThrow(/between 1 and 730/);
     expect(() => parseArgs(['--since=07-01-2026'])).toThrow(/YYYY-MM-DD/);
   });
 
-  test('pins apply tooling to the least-privilege API profile and exact AWS resources', () => {
+  test('pins runtime to the explicitly selected profile and exact AWS resources', () => {
     expect(() => assertRuntimeConfiguration({
       AWS_PROFILE: 'market-dashboard-local',
       AWS_REGION: 'us-west-1',
@@ -36,7 +45,7 @@ describe('RTA rebuild tooling', () => {
     expect(() => assertRuntimeConfiguration({
       AWS_PROFILE: 'market-dashboard-admin',
       AWS_REGION: 'us-west-1',
-    })).toThrow(/AWS_PROFILE=market-dashboard-local/);
+    })).toThrow(/AWS_PROFILE_ENVIRONMENT_OVERRIDE.*explicit market-dashboard-local profile/);
     expect(() => assertRuntimeConfiguration({
       AWS_PROFILE: 'market-dashboard-local',
       AWS_REGION: 'us-east-1',
@@ -52,15 +61,29 @@ describe('RTA rebuild tooling', () => {
     expect(validateCallerIdentity({
       Account: '915328198276',
       Arn: 'arn:aws:iam::915328198276:user/market-dashboard-local',
-    })).toMatchObject({ Account: '915328198276' });
+    }, 'market-dashboard-local')).toMatchObject({ Account: '915328198276' });
     expect(() => validateCallerIdentity({
       Account: '000000000000',
       Arn: 'arn:aws:iam::000000000000:user/market-dashboard-local',
-    })).toThrow(/expected 915328198276/);
+    }, 'market-dashboard-local')).toThrow(/expected 915328198276/);
     expect(() => validateCallerIdentity({
       Account: '915328198276',
       Arn: 'arn:aws:sts::915328198276:assumed-role/AWSReservedSSO_AdministratorAccess/test',
-    })).toThrow(/least-privilege market-dashboard-local/);
+    }, 'market-dashboard-local')).toThrow(/AWS_PROFILE_WRONG_PRINCIPAL.*market-dashboard-local/);
+  });
+
+
+  test('refuses a failed profile preflight before reading or writing projections', async () => {
+    preflightAwsProfile.mockReturnValue({ ok: false, errorCode: 'AWS_PROFILE_WRONG_PRINCIPAL', detail: 'Wrong principal.' });
+    const dynamodb = { scan: jest.fn(), query: jest.fn(), put: jest.fn() };
+    const sts = { getCallerIdentity: jest.fn() };
+    await expect(run(parseArgs(['--apply', '--admin-profile=market-dashboard-admin']), { dynamodb, sts }))
+      .rejects.toThrow(/AWS_PROFILE_WRONG_PRINCIPAL/);
+    expect(preflightAwsProfile).toHaveBeenCalledWith({ purpose: 'admin', profile: 'market-dashboard-admin' });
+    expect(sts.getCallerIdentity).not.toHaveBeenCalled();
+    expect(dynamodb.scan).not.toHaveBeenCalled();
+    expect(dynamodb.query).not.toHaveBeenCalled();
+    expect(dynamodb.put).not.toHaveBeenCalled();
   });
 
   test('does not rewrite an idempotent projection with the same canonical version', () => {
@@ -128,8 +151,8 @@ describe('RTA rebuild tooling', () => {
 
   test('performs no projection writes when canonical replay fails structural validation', async () => {
     const requiredEnvironment = {
-      AWS_PROFILE: 'market-dashboard-local',
-      AWS_DEFAULT_PROFILE: 'market-dashboard-local',
+      AWS_PROFILE: 'market-dashboard-admin',
+      AWS_DEFAULT_PROFILE: 'market-dashboard-admin',
       AWS_REGION: 'us-west-1',
       AWS_DEFAULT_REGION: 'us-west-1',
       HERMES_LEDGER_TABLE: 'HermesEmailIngestLedger',
@@ -176,14 +199,14 @@ describe('RTA rebuild tooling', () => {
       getCallerIdentity: jest.fn(() => ({
         promise: async () => ({
           Account: '915328198276',
-          Arn: 'arn:aws:iam::915328198276:user/market-dashboard-local',
+          Arn: 'arn:aws:sts::915328198276:assumed-role/AWSReservedSSO_AdministratorAccess_fixture/rebuild-test',
         }),
       })),
     };
 
     try {
       await expect(run(
-        { apply: true, json: true, windowDays: 90 },
+        parseArgs(['--apply', '--admin-profile=market-dashboard-admin', '--json']),
         {
           baseline: SANITIZED_RTA_CHECKPOINT,
           dynamodb,
@@ -272,7 +295,7 @@ describe('RTA rebuild tooling', () => {
 
     try {
       const dryRunReport = await run(
-        { apply: false, json: true, windowDays: 90 },
+        parseArgs(['--json']),
         {
           baseline: SANITIZED_RTA_CHECKPOINT,
           dynamodb,
@@ -290,8 +313,14 @@ describe('RTA rebuild tooling', () => {
       expect(dryRunReport.currentBoard.available).toBe(false);
       expect(put).not.toHaveBeenCalled();
 
+      process.env.AWS_PROFILE = 'market-dashboard-admin';
+      process.env.AWS_DEFAULT_PROFILE = 'market-dashboard-admin';
+      sts.getCallerIdentity.mockImplementation(() => ({ promise: async () => ({
+        Account: '915328198276',
+        Arn: 'arn:aws:sts::915328198276:assumed-role/AWSReservedSSO_AdministratorAccess_fixture/rebuild-test',
+      }) }));
       await expect(run(
-        { apply: true, json: true, windowDays: 90 },
+        parseArgs(['--apply', '--admin-profile=market-dashboard-admin', '--json']),
         {
           baseline: SANITIZED_RTA_CHECKPOINT,
           dynamodb,

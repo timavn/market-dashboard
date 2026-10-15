@@ -1,6 +1,5 @@
 import React from 'react';
-import ReactDOM from 'react-dom/client';
-import { act } from 'react';
+import { fireEvent, render } from '@testing-library/react';
 import RefreshButton from './RefreshButton';
 
 describe('RefreshButton', () => {
@@ -16,11 +15,7 @@ describe('RefreshButton', () => {
   });
 
   function renderButton(props) {
-    const root = ReactDOM.createRoot(container);
-    act(() => {
-      root.render(<RefreshButton onClick={() => {}} {...props} />);
-    });
-    return root;
+    return render(<RefreshButton onClick={() => {}} {...props} />, { container });
   }
 
   test('renders label and refresh icon', () => {
@@ -37,20 +32,17 @@ describe('RefreshButton', () => {
   });
 
   test('disables when loading or disabled', () => {
-    renderButton({ loading: true });
+    const { rerender } = renderButton({ loading: true });
     expect(container.querySelector('button').disabled).toBe(true);
 
-    container.innerHTML = '';
-    renderButton({ disabled: true });
+    rerender(<RefreshButton onClick={() => {}} disabled />);
     expect(container.querySelector('button').disabled).toBe(true);
   });
 
   test('calls onClick when clicked', () => {
     const onClick = jest.fn();
     renderButton({ label: 'Retry', onClick });
-    act(() => {
-      container.querySelector('button').click();
-    });
+    fireEvent.click(container.querySelector('button'));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 

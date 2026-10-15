@@ -144,42 +144,84 @@ describe('summarizeRealTimeAlertPositions', () => {
     ]);
   });
 
-  test('fails closed for an unmatched explicit cover', () => {
+  test('flags an unmatched explicit cover without discarding the rest of the book', () => {
     const summary = summarizeRealTimeAlertPositions([
-      snapshot('2026-06-01', { ticker: 'DPZ', action: 'COVER' }),
+      snapshot('2026-06-01', { ticker: 'IWM', action: 'BUY' }),
+      snapshot('2026-06-02', { ticker: 'DPZ', action: 'COVER' }),
     ]);
 
     expect(summary).toMatchObject({
-      available: false,
-      longCount: null,
-      shortCount: null,
-      ratioText: null,
-      netBias: null,
-      holdings: [],
-      dataQuality: { status: 'error' },
+      available: true,
+      longCount: 1,
+      shortCount: 0,
+      positionSourceConfidence: 'medium',
+      dataQuality: { status: 'warn', invalidEvents: [] },
     });
-    expect(summary.dataQuality.invalidEvents[0]).toMatchObject({ code: 'unmatched-cover', ticker: 'DPZ' });
+    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['IWM']);
+    expect(summary.dataQuality.unresolvedEvents[0]).toMatchObject({ code: 'unmatched-cover', ticker: 'DPZ' });
+    expect(summary.dataQuality.warnings).toContain('RTA cover for DPZ does not match an active short.');
   });
 
-  test('fails closed for an unmatched explicit remove', () => {
+  test('flags an unmatched explicit remove', () => {
     const summary = summarizeRealTimeAlertPositions([
       snapshot('2026-06-01', { ticker: 'NCLH', action: 'REMOVE', side: 'short' }),
     ]);
 
-    expect(summary.available).toBe(false);
-    expect(summary.dataQuality.invalidEvents[0]).toMatchObject({ code: 'unmatched-remove', ticker: 'NCLH' });
+    expect(summary.available).toBe(true);
+    expect(summary.dataQuality.status).toBe('warn');
+    expect(summary.dataQuality.unresolvedEvents[0]).toMatchObject({ code: 'unmatched-remove', ticker: 'NCLH' });
   });
 
-  test('fails closed when an explicit close conflicts with the active side', () => {
+  test('withholds only the ticker whose explicit close conflicts with its active side', () => {
     const summary = summarizeRealTimeAlertPositions([
       snapshot('2026-06-01', { ticker: 'SPY', action: 'BUY' }),
+      snapshot('2026-06-01', { ticker: 'QQQ', action: 'BUY' }),
       snapshot('2026-06-02', { ticker: 'SPY', action: 'COVER' }),
     ]);
 
-    expect(summary.available).toBe(false);
-    expect(summary.dataQuality.invalidEvents).toEqual([
+    expect(summary.available).toBe(true);
+    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['QQQ']);
+    expect(summary.dataQuality.status).toBe('warn');
+    expect(summary.dataQuality.invalidEvents).toEqual([]);
+    expect(summary.dataQuality.unresolvedEvents).toEqual([
       expect.objectContaining({ code: 'side-mismatch', ticker: 'SPY' }),
     ]);
+  });
+
+  test('a user-confirmed flat resolution settles that exact conflicting alert without a warning', () => {
+    const alerts = [
+      snapshot('2026-06-01', { ticker: 'SPY', action: 'BUY' }),
+      snapshot('2026-06-01', { ticker: 'QQQ', action: 'BUY' }),
+      snapshot('2026-06-02', { ticker: 'SPY', action: 'COVER', sourceMessageId: 'cover-message' }),
+    ];
+    const resolutions = [{ ticker: 'SPY', position: 'flat', sourceMessageId: 'cover-message',
+      resolvedAt: '2026-06-03T00:00:00Z', resolvedBy: 'user' }];
+    const summary = summarizeRealTimeAlertPositions(alerts, { resolutions });
+
+    expect(summary.dataQuality.status).toBe('ok');
+    expect(summary.dataQuality.warnings).toEqual([]);
+    expect(summary.holdings.map((holding) => holding.ticker)).toEqual(['QQQ']);
+    expect(summary.dataQuality.resolvedEvents).toEqual([
+      expect.objectContaining({ ticker: 'SPY', code: 'side-mismatch', resolution: expect.objectContaining({ resolvedBy: 'user' }) }),
+    ]);
+    const other = summarizeRealTimeAlertPositions(alerts, { resolutions: [{ ...resolutions[0], sourceMessageId: 'another-alert' }] });
+    expect(other.dataQuality.status).toBe('warn');
+  });
+
+  test('reads current quipped headlines by their signal verb, never by words in the quip', () => {
+    const summary = summarizeRealTimeAlertPositions([
+      snapshot('2026-09-01', { ticker: 'WMT', action: 'SELL',
+        headline: "Real-Time Alert: Biolsi Sell Signal (WHEN I'm NOT buying): Walmart (WMT) -KM" }),
+      snapshot('2026-09-02', { ticker: 'PBR', action: 'BUY',
+        headline: 'Real-Time Alert: Jonesy Buy Signal (For The Fam!): Petrobras (PBR) -KM' }),
+      snapshot('2026-09-03', { ticker: 'PBR', action: null,
+        headline: 'Real-Time Alert: Book-SOME Signal (Energy Alpha vs. Consumer): PBR -KM' }),
+      snapshot('2026-09-04', { ticker: 'EWL', action: 'SELL',
+        headline: 'Real-Time Alert: Macro Sell Signal (Macro Hedging): Switzerland (EWL) -KM' }),
+    ]);
+
+    expect(summary.dataQuality.status).toBe('ok');
+    expect(summary.holdings.map(({ ticker, side }) => `${ticker}:${side}`)).toEqual(['EWL:short', 'WMT:short']);
   });
 
   test('uses eventTime, then snapshot scrapedAt, then date around a same-day baseline', () => {
@@ -281,7 +323,7 @@ describe('summarizeRealTimeAlertPositions', () => {
     expect(summary.holdings.find((holding) => holding.ticker === 'KVYO')).toBeDefined();
   });
 
-  test('marks a stored-style sequence unavailable when history contains an unmatched close', () => {
+  test('flags a stored-style sequence whose history contains an unmatched close', () => {
     const summary = summarizeRealTimeAlertPositions([
       snapshot('2026-07-01', {
         ticker: 'SHORT',
@@ -293,11 +335,10 @@ describe('summarizeRealTimeAlertPositions', () => {
       snapshot('2026-07-04', { ticker: 'NEWS', action: 'SELL' }),
     ], { baseline: JUNE_28_BASELINE });
 
-    expect(summary.available).toBe(false);
-    expect(summary.longCount).toBeNull();
-    expect(summary.shortCount).toBeNull();
-    expect(summary.holdings).toEqual([]);
-    expect(summary.dataQuality.invalidEvents).toEqual([
+    expect(summary.available).toBe(true);
+    expect(summary.dataQuality.status).toBe('warn');
+    expect(summary.dataQuality.invalidEvents).toEqual([]);
+    expect(summary.dataQuality.unresolvedEvents).toEqual([
       expect.objectContaining({ code: 'unmatched-remove', ticker: 'NCLH' }),
     ]);
   });

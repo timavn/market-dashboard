@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { isTradingDay } from '../../utils/marketHolidays';
 import ReferencePanelShell from './ReferencePanelShell';
+import { useSurfaceActivity } from '../common/PersistentSurface';
 
 const NEW_YORK_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
@@ -110,11 +111,13 @@ const PositionPills = ({ values, tone }) => {
 };
 
 const HedgeyeShowPanel = ({ snapshotType, title, onClose }) => {
+  const active = useSurfaceActivity();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
+  const loadedRef = useRef(false);
 
   const load = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -124,9 +127,9 @@ const HedgeyeShowPanel = ({ snapshotType, title, onClose }) => {
     try {
       const snapshots = await Promise.all(days.map((day) => resolveSnapshot(snapshotType, day.dateKey)));
       setRows(days.map((day, index) => ({ ...day, snapshot: snapshots[index] || null })));
+      loadedRef.current = true;
       if (!snapshots.some(Boolean)) setError(`No ${title} snapshots are available for the last five market days.`);
     } catch (loadError) {
-      setRows(days.map((day) => ({ ...day, snapshot: null })));
       setError(loadError?.message || `Unable to load ${title}.`);
     } finally {
       setLoading(false);
@@ -135,8 +138,8 @@ const HedgeyeShowPanel = ({ snapshotType, title, onClose }) => {
   }, [snapshotType, title]);
 
   useEffect(() => {
-    load(false);
-  }, [load]);
+    if (active && !loadedRef.current) load(false);
+  }, [active, load]);
 
   const snapshots = useMemo(() => rows.filter((row) => row.snapshot), [rows]);
   const latestRow = snapshots[0] || null;

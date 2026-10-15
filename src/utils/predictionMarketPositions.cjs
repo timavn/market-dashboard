@@ -38,6 +38,7 @@ function classifyPredictionMarketPosition(position = {}) {
     return {
       marketFamily: 'wti',
       marketProduct: 'weekly',
+      marketVenue: 'kalshi',
       workbench: 'wti',
       supported: true,
     };
@@ -47,6 +48,7 @@ function classifyPredictionMarketPosition(position = {}) {
     return {
       marketFamily: 'wti',
       marketProduct: 'daily',
+      marketVenue: 'kalshi',
       workbench: 'wti',
       supported: true,
     };
@@ -56,6 +58,22 @@ function classifyPredictionMarketPosition(position = {}) {
     return {
       marketFamily: 'wti',
       marketProduct: 'unsupported',
+      marketVenue: 'kalshi',
+      workbench: 'wti',
+      supported: false,
+    };
+  }
+
+  // IBKR models ForecastEx's daily WTI contract family as option-like
+  // COMCO instruments (for example COMCO_081326_82_NO). The live portfolio
+  // snapshot can omit the exchange even though contract details identify the
+  // venue as FORECASTX, so retain the broker-native product code as the exact
+  // classification boundary instead of relying on a generic "oil" label.
+  if (/\bCOMCO(?:[-_ ]|$)/.test(text)) {
+    return {
+      marketFamily: 'wti',
+      marketProduct: 'forecastex-daily',
+      marketVenue: 'forecastex',
       workbench: 'wti',
       supported: false,
     };

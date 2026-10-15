@@ -1,0 +1,456 @@
+import React from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import AnalystInbox from './AnalystInbox';
+import { buildAnalystInbox } from '../../utils/analystInboxAlerts.cjs';
+
+const finding = (overrides = {}) => ({
+  id: 'amzn', symbol: 'AMZN', action: 'signal change', state: 'pending verification', unread: 1,
+  payload: {
+    action: 'signal change', summary: 'A signal changed. Verified holding: 15. Reading this finding does not confirm a trade.',
+    holdingsVerifiedAt: '2026-09-14T19:02:36.957411Z', marketSession: 'open',
+    publicationTime: '2026-09-14T00:00:00Z',
+    event: { entityId: 'AMZN', eventType: 'risk_range', signalValue: 'BEARISH', qualityStatus: 'validated',
+      productKey: 'risk-ranges', productLabel: 'Risk Ranges', fieldPath: 'data.AMZN',
+      sourceMessageId: 'today', publishedAt: '2026-09-14T00:00:00Z', marketDate: '2026-09-14' },
+    citation: { title: 'Risk Ranges', publicationDate: '2026-09-14', excerpt: 'AMZN trend BEARISH' },
+  },
+  ...overrides,
+});
+
+const currentHolding = (asOf, weightPct = 1.25) => ({
+  weightPct, source: 'ibkr', asOf, basis: 'absolute_market_value_over_net_liquidation',
+});
+
+const attention = (id, overrides = {}) => ({ id, unread: 1, payload: {
+  attentionVersion: 1, state: 'open', kind: 'operational', priority: 0, fingerprint: `${id}-revision`,
+  publicationTime: '2026-09-22T15:30:00Z', presentation: {
+    subject: 'IB Gateway', date: '2026-09-22', rows: [
+      { label: 'Issue', text: 'IB Gateway is disconnected.' },
+      { label: 'Impact', text: 'Portfolio holdings and balances cannot refresh.' },
+      { label: 'Next step', text: 'Reconnect IB Gateway.' },
+    ], sourceLinks: [{ label: 'Systems', citation: { title: 'IB Gateway status', sourceUri: '/systems' } }],
+  }, ...overrides,
+} });
+
+test('existing source exclusion warnings disappear while evidenced publication discrepancies remain', () => {
+  const warnings = ['Monthly Inflation Nowcast', 'Bitcoin Tracker', 'IBKR account exposure', 'Risk Ranges', 'Portfolio research archive']
+    .map((label, index) => attention(`excluded-${index}`, { managedBy: 'review-sources',
+      presentation: { subject: label, rows: [{ label: 'Problem', text: `${label} was excluded from this saved review.` }] } }));
+  const discrepancy = attention('source-discrepancy', { managedBy: 'review-sources', sourceDiscrepancy: true,
+    sourceQuality: { issues: [{ code: 'REVERSED_RISK_RANGE' }] },
+    presentation: { subject: 'Early Look', rows: [{ label: 'Issue', text: 'The published lower bound exceeds the upper bound.' }] } });
+  const { rerender } = render(<AnalystInbox findings={[...warnings, discrepancy]} />);
+  expect(screen.getAllByRole('heading', { level: 3 }).map(item => item.textContent)).toEqual(['Early Look']);
+  expect(screen.queryByText(/excluded from this saved review/)).not.toBeInTheDocument();
+  rerender(<AnalystInbox findings={warnings} />);
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
+});
+
+test('retained Research delivery, Quant Analyst and Security checks warnings are removed without hiding source evidence', () => {
+  const warnings = [['gmail.ingestion', 'Research delivery'], ['research-verification', 'Research delivery'],
+    ['hermes.quant-analyst', 'Quant Analyst'], ['hermes.quant-developer', 'Quant Developer'], ['hermes.security', 'Security checks']]
+    .map(([key, subject]) => attention(`attention:operations:${key}`, { presentation: { subject, rows: [{ label: 'Issue', text: 'A scheduled check is unavailable.' }] } }));
+  const source = attention('published-issue', { presentation: { subject: 'Early Look', rows: [{ label: 'Issue', text: 'The publication has conflicting bounds.' }] } });
+  render(<AnalystInbox findings={[...warnings, source]} />);
+  expect(screen.getAllByRole('heading', { level: 3 }).map(item => item.textContent)).toEqual(['Early Look']);
+  expect(screen.queryByText('A scheduled check is unavailable.')).not.toBeInTheDocument();
+});
+
+test('operational attention describes the issue and consequence without position filler and acknowledges its revision', () => {
+  const item = attention('gateway', { materialRevision: 2 });
+  const onCitation = jest.fn();
+  const onAcknowledge = jest.fn();
+  render(<AnalystInbox findings={[item]} onCitation={onCitation} onAcknowledge={onAcknowledge} />);
+  expect(screen.getByRole('heading', { name: 'IB Gateway' }).closest('header')).toHaveTextContent('Sep 22, 2026');
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Issue:', 'Impact:', 'Next step:']);
+  expect(screen.queryByText('Current position:')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Systems' }));
+  expect(onCitation).toHaveBeenCalledWith(item.payload.presentation.sourceLinks[0].citation);
+  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+  expect(onAcknowledge).toHaveBeenCalledWith('gateway', 'gateway-revision', 2);
+});
+
+test('orders urgent concerns before newer ideas and colors directional words and Quad labels', () => {
+  const idea = attention('idea', { kind: 'opportunity', priority: 1, publicationTime: '2026-09-22T16:30:00Z',
+    presentation: { subject: 'ABC', date: '2026-09-22', rows: [
+      { label: 'Case', text: 'Long idea with Bullish Trend; short-term weakness and Neutral Trade are counterevidence. Quad 2 supports the research case.' },
+    ] } });
+  render(<AnalystInbox findings={[idea, attention('resolved', { state: 'resolved' }), attention('gateway')]} />);
+  expect(screen.getAllByRole('heading', { level: 3 }).map(item => item.textContent)).toEqual(['IB Gateway', 'ABC']);
+  expect(screen.getByText('Long')).toHaveClass('analyst-inbox-signal--positive');
+  expect(screen.getByText('Bullish')).toHaveClass('analyst-inbox-signal--positive');
+  expect(screen.getByText('Neutral')).toHaveClass('analyst-inbox-signal--neutral');
+  expect(screen.getByText('Quad 2')).toHaveClass('analyst-inbox-quad--2');
+  expect(screen.queryByText('short', { exact: true })).not.toBeInTheDocument();
+});
+
+test('fresh holdings expiry removes portfolio actions while retaining research ideas without stale portfolio claims', () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-09-22T15:30:00Z'));
+  try {
+    const holdings = { quantity: 15, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(), currentHolding: currentHolding(new Date().toISOString()) };
+    const portfolio = attention('portfolio', { ...holdings, kind: 'portfolio', presentation: { subject: 'AMZN', date: '2026-09-22', rows: [{ label: 'Action', text: 'Exit the long position.' }] } });
+    const idea = attention('idea', { ...holdings, kind: 'opportunity', presentation: { subject: 'ABC', date: '2026-09-22', rows: [
+      { label: 'Current position', text: 'Long' }, { label: 'Position size', text: '1.25%' },
+      { label: 'Portfolio fit', text: 'Adds to current exposure.', requiresFreshHoldings: true },
+      { label: 'Case', text: 'A published Bullish Trade reversal supports further research.' },
+    ] } });
+    render(<AnalystInbox findings={[portfolio, idea]} />);
+    expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
+    expect(screen.getByText('1.25%')).toBeInTheDocument();
+    act(() => jest.advanceTimersByTime(65_000));
+    expect(screen.queryByRole('heading', { name: 'AMZN' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'ABC' })).toBeInTheDocument();
+    expect(screen.queryByText('Portfolio fit:')).not.toBeInTheDocument();
+    expect(screen.queryByText('1.25%')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Unavailable')).toHaveLength(2);
+  } finally { jest.useRealTimers(); }
+});
+
+test.each([{ providerConnected: false }, { stale: true }, { cacheOnly: true }, { mock: true }, { seeded: true }])('unavailable portfolio inputs suppress modern actions (%j)', invalid => {
+  const item = attention('portfolio', { ...invalid, kind: 'portfolio', quantity: 15, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString() });
+  render(<AnalystInbox findings={[item]} />);
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
+});
+
+test('balance expiry removes current deficits but retains dated historical accounting evidence', () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-09-22T15:30:00Z'));
+  try {
+    const deficit = attention('deficit', { kind: 'account', requiresFreshBalance: true, balanceVerified: true, balanceVerifiedAt: new Date().toISOString(),
+      presentation: { subject: 'Account funding', date: '2026-09-22', rows: [{ label: 'Issue', text: 'Verified settled cash is below zero.' }] } });
+    const history = attention('history', { kind: 'account', researchOnly: true,
+      presentation: { subject: 'Interest reconciliation', date: '2026-09-21', rows: [{ label: 'Issue', text: 'The dated accounting report has an unresolved reconciliation difference.' }] } });
+    render(<AnalystInbox findings={[deficit, history]} />);
+    expect(screen.getByRole('heading', { name: 'Account funding' })).toBeInTheDocument();
+    act(() => jest.advanceTimersByTime(65_000));
+    expect(screen.queryByRole('heading', { name: 'Account funding' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Interest reconciliation' })).toBeInTheDocument();
+  } finally { jest.useRealTimers(); }
+});
+
+test.each([{ providerConnected: false }, { stale: true }, { cacheOnly: true }, { from_cache: true }, { mock: true }, { seeded: true }, { balanceVerified: false }])('unavailable balance inputs suppress current account claims (%j)', invalid => {
+  const item = attention('account', { kind: 'account', requiresFreshBalance: true, balanceVerified: true, balanceVerifiedAt: new Date().toISOString(), ...invalid });
+  render(<AnalystInbox findings={[item]} />);
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
+});
+
+test('leads with current position before the actual signal and dated source without boilerplate', () => {
+  render(<AnalystInbox findings={[finding()]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  const inbox = screen.getByRole('region', { name: 'Portfolio inbox' });
+  expect(within(inbox).queryByRole('heading', { name: 'Portfolio inbox' })).not.toBeInTheDocument();
+  const titleBar = within(inbox).getByRole('heading', { name: 'AMZN' }).closest('header');
+  expect(titleBar).toHaveTextContent(/^AMZNSep 14, 2026$/);
+  expect(titleBar).not.toHaveTextContent(/Trend|Bearish/);
+  expect(within(inbox).getAllByRole('term')[0]).toHaveTextContent('Current position:');
+  expect(within(inbox).getAllByRole('definition')[0]).toHaveTextContent(/^Unavailable$/);
+  expect(within(inbox).getAllByRole('term').slice(0, 3).map(term => term.textContent.trim())).toEqual([
+    'Current position:', 'Position size:', 'Action:',
+  ]);
+  expect(within(inbox).getAllByRole('definition')[1]).toHaveTextContent(/^Unavailable$/);
+  expect(within(inbox).getAllByRole('definition')[2]).toHaveTextContent(/^Unavailable$/);
+  expect(within(inbox).getByText('Trend:')).toBeInTheDocument();
+  expect(within(inbox).queryByRole('list')).not.toBeInTheDocument();
+  expect(within(inbox).queryByRole('listitem')).not.toBeInTheDocument();
+  expect(within(inbox).getByText('Bearish', { exact: true })).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(inbox).getByText('Risk Ranges')).toBeInTheDocument();
+  expect(within(inbox).getByText('Sep 14, 2026')).toBeInTheDocument();
+  expect(inbox).not.toHaveTextContent(/pending verification|holdings verified|Verified holding|does not confirm|signal changed|marketSession|19:02:36|\bopen\b/i);
+});
+
+test('shows the dated change, portfolio implication, and source evidence without repeated daily readings', () => {
+  const current = finding();
+  const rows = [['prior', '2026-09-09', 'NEUTRAL'], ['changed', '2026-09-10', 'BEARISH'], ['latest', '2026-09-14', 'BEARISH']].map(([id, date, signalValue]) => finding({ id, payload: { ...current.payload,
+    quantity: 15, holdingsVerified: true,
+    event: { ...current.payload.event, sourceMessageId: id, signalValue, publishedAt: `${date}T00:00:00Z`, marketDate: date, sourceUrl: `https://app.hedgeye.com/feed_items/${id}` },
+    citation: { title: 'Risk Ranges', publicationDate: date, sourceUri: `https://app.hedgeye.com/feed_items/${id}` },
+  } }));
+  const { findings } = buildAnalystInbox({ findings: rows }, '2026-09-14T21:00:00Z');
+  const onCitation = jest.fn();
+  render(<AnalystInbox findings={findings} onCitation={onCitation} onAcknowledge={jest.fn()} />);
+  expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(1);
+  expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
+  const update = screen.getAllByRole('definition')[3];
+  expect(within(update).getByText('Neutral', { exact: true })).toHaveClass('analyst-inbox-signal--neutral');
+  expect(within(update).getByText('Bearish', { exact: true })).toHaveClass('analyst-inbox-signal--negative');
+  expect(screen.getByText('History:').parentElement).toHaveTextContent('First reported Sep 10, after Neutral on Sep 9. Confirmed Bearish Sep 14.');
+  expect(screen.getByText('Context:')).toBeInTheDocument();
+  expect(screen.getByText('Context:').parentElement).toHaveTextContent('Trend has weakened further for your long position. If Trade is Bullish, both Neutral and Bearish Trend call for your minimum size.');
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Current position:', 'Position size:', 'Action:', 'Trend:', 'History:', 'Context:']);
+  const details = screen.getAllByRole('definition');
+  expect(details[3]).toHaveTextContent('Neutral → Bearish');
+  expect(details[4]).toHaveTextContent(/^First reported Sep 10/);
+  expect(details[5]).toHaveTextContent(/^Trend has weakened further/);
+  expect(within(details[4]).getByText('Neutral')).toHaveClass('analyst-inbox-signal--neutral');
+  expect(within(details[4]).getByText('Bearish')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(details[5]).getByText('long')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(details[5]).getByText('Bullish')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(details[5]).getByText('Bearish')).toHaveClass('analyst-inbox-signal--negative');
+  expect(screen.getByText('Hedgeye Risk Ranges')).toBeInTheDocument();
+  expect(screen.getByText('Sep 10, 2026')).toBeInTheDocument();
+  const actions = screen.getByRole('group', { name: 'Alert actions' });
+  expect(within(actions).getByRole('button', { name: 'Acknowledge' })).toBeInTheDocument();
+  expect(within(actions).getAllByRole('button')).toHaveLength(4);
+  for (const [index, date] of ['Sep 9', 'Sep 10', 'Sep 14'].entries()) {
+    fireEvent.click(within(actions).getByRole('button', { name: `${date} source` }));
+    expect(onCitation).toHaveBeenLastCalledWith(rows[index].payload.citation);
+  }
+});
+
+test('uses green for a verified bullish signal while keeping its English label', () => {
+  const current = finding();
+  render(<AnalystInbox findings={[finding({ payload: { ...current.payload,
+    event: { ...current.payload.event, signalValue: 'BULLISH' },
+  } })]} />);
+  expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
+  expect(within(screen.getAllByRole('definition')[3]).getByText('Bullish')).toHaveClass('analyst-inbox-signal--positive');
+});
+
+test('suppresses a generic sell report that identifies no change for an existing short', () => {
+  const excerpt = 'Cheer Sell call. Source context: who knows, who cares.';
+  const citation = { title: 'Hedgeye Real-Time Alerts', publicationDate: '2026-09-11',
+    excerpt, sourceUri: 'https://app.hedgeye.com/feed_items/wing' };
+  const alert = { id: 'wing', symbol: 'WING', action: 'exit', unread: 1, payload: {
+    action: 'exit', citation,
+    quantity: -20, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    alertContext: { kind: 'source-action', changedAt: '2026-09-11', recordedPosition: { side: 'SHORT' } },
+    event: { entityId: 'WING', eventType: 'position_change', qualityStatus: 'validated',
+      productLabel: 'Real-Time Alerts', action: 'SELL', sourceUrl: citation.sourceUri,
+      excerpt: JSON.stringify({ ticker: 'WING', action: 'SELL', signalPhrase: 'Cheer Sell', context: 'who knows, who cares' }),
+    },
+  } };
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  expect(screen.queryByRole('heading', { name: 'WING' })).not.toBeInTheDocument();
+  expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
+});
+
+test('shows SJM’s current long position before the report’s explicit partial-sale action', () => {
+  const observedAt = new Date().toISOString();
+  const instruction = 'Portfolio Managers should be selling-SOME of Bullish TRENDs that are green today';
+  const sourceReport = {
+    title: 'SELL SIGNAL SJM $121.95',
+    bodyText: `${instruction}... Coaching Notes: I sold 4 Macro positions in ETF Pro.`,
+    sourceMessageId: 'sjm-report', publicationDate: '2026-09-14', contentHash: 'sjm-report-content',
+  };
+  const citation = { title: 'Hedgeye Real-Time Alerts', publicationDate: '2026-09-14',
+    sourceUri: 'https://app.hedgeye.com/feed_items/sjm', excerpt: sourceReport.bodyText };
+  const alert = { id: 'sjm', symbol: 'SJM', action: 'exit', unread: 1, payload: {
+    action: 'exit', citation, quantity: 10, holdingsVerified: true, holdingsVerifiedAt: observedAt,
+    currentHolding: currentHolding(observedAt, 2.35),
+    alertContext: { kind: 'source-action', changedAt: '2026-09-14', recordedPosition: { side: 'LONG', asOf: observedAt } },
+    event: { entityId: 'SJM', eventType: 'position_change', qualityStatus: 'validated',
+      productLabel: 'Real-Time Alerts', action: 'SELL', sourceUrl: citation.sourceUri,
+      sourceMessageId: 'sjm-report', marketDate: '2026-09-14', publishedAt: '2026-09-14T14:28:00Z',
+      excerpt: JSON.stringify({ ticker: 'SJM', action: 'SELL', headline: sourceReport.title }), sourceReport,
+    },
+  } };
+  const onCitation = jest.fn();
+  render(<AnalystInbox findings={[alert]} onCitation={onCitation} onAcknowledge={jest.fn()} />);
+  const inbox = screen.getByRole('region', { name: 'Portfolio inbox' });
+  expect(within(inbox).getByRole('heading', { name: 'SJM' }).closest('header')).toHaveTextContent(/^SJMSep 14, 2026$/);
+  expect(within(inbox).getAllByRole('term').map(term => term.textContent.trim())).toEqual([
+    'Current position:', 'Position size:', 'Action:', 'Context:',
+  ]);
+  const details = within(inbox).getAllByRole('definition');
+  expect(details[0]).toHaveTextContent(/^Long$/);
+  expect(within(details[0]).getByText('Long')).toHaveClass('analyst-inbox-signal--positive');
+  expect(details[1]).toHaveTextContent(/^2.35%$/);
+  expect(details[2]).toHaveTextContent(/^Sell some — reduce position size$/);
+  expect(details[3]).toHaveTextContent(/^Trend remains bullish\.$/);
+  expect(within(details[3]).getByText('bullish')).toHaveClass('analyst-inbox-signal--positive');
+  expect(inbox).not.toHaveTextContent(/Report:|of portfolio|The report|Portfolio Managers/);
+  expect(inbox).not.toHaveTextContent(/sell signal update|goes against your long position|Coaching Notes|sold 4 Macro|Exit the position/i);
+  expect(within(inbox).queryByRole('list')).not.toBeInTheDocument();
+  fireEvent.click(within(inbox).getByRole('button', { name: 'View source' }));
+  expect(onCitation).toHaveBeenCalledWith(citation);
+});
+
+test('expires current position and size after 60 seconds without a refresh and removes both immediately on failure', () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-09-14T19:00:00Z'));
+  try {
+    const current = finding();
+    const alert = finding({ payload: { ...current.payload, quantity: 15, holdingsVerified: true,
+      holdingsVerifiedAt: new Date().toISOString(),
+      currentHolding: currentHolding(new Date().toISOString()),
+      alertContext: { recordedPosition: { side: 'LONG', asOf: '2026-09-13T19:00:00Z' } },
+    } });
+    const view = render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+    const position = () => screen.getAllByRole('definition')[0];
+    const size = () => screen.getAllByRole('definition')[1];
+    expect(position()).toHaveTextContent(/^Long$/);
+    expect(size()).toHaveTextContent(/^1.25%$/);
+    expect(within(position()).getByText('Long')).toHaveClass('analyst-inbox-signal--positive');
+    act(() => jest.advanceTimersByTime(60_000));
+    expect(position()).toHaveTextContent(/^Long$/);
+    expect(size()).toHaveTextContent(/^1.25%$/);
+    act(() => jest.advanceTimersByTime(5_000));
+    expect(position()).toHaveTextContent(/^Unavailable$/);
+    expect(size()).toHaveTextContent(/^Unavailable$/);
+    expect(position().querySelector('[class*="signal--positive"], [class*="signal--negative"]')).toBeNull();
+
+    const refreshed = { ...alert, payload: { ...alert.payload, quantity: -15, holdingsVerifiedAt: new Date().toISOString(),
+      currentHolding: currentHolding(new Date().toISOString(), 0.85),
+    } };
+    view.rerender(<AnalystInbox findings={[refreshed]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+    expect(position()).toHaveTextContent(/^Short$/);
+    expect(size()).toHaveTextContent(/^0.85%$/);
+    expect(within(position()).getByText('Short')).toHaveClass('analyst-inbox-signal--negative');
+    view.rerender(<AnalystInbox findings={[{ ...refreshed, payload: { ...refreshed.payload, holdingsVerified: false } }]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+    expect(position()).toHaveTextContent(/^Unavailable$/);
+    expect(size()).toHaveTextContent(/^Unavailable$/);
+    expect(screen.queryByText(/^0.85%$/)).not.toBeInTheDocument();
+    expect(screen.getByText('Bearish', { exact: true })).toBeInTheDocument();
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('emphasizes the Russell source index beneath IWM’s RUT Trend update', () => {
+  const current = finding();
+  const rows = [['prior', '2026-09-09', 'NEUTRAL'], ['changed', '2026-09-10', 'BEARISH']].map(([id, date, signalValue]) => finding({
+    id, symbol: 'IWM', payload: { ...current.payload, symbol: 'IWM',
+      event: { ...current.payload.event, entityId: 'IWM', fieldPath: 'data.RUT', matchedText: 'RUT',
+        matchType: 'structured_membership', excerpt: 'RUT: {"originalName":"Russell 2000"}',
+        sourceMessageId: id, signalValue, publishedAt: `${date}T00:00:00Z`, marketDate: date },
+      citation: { title: 'Risk Ranges', publicationDate: date },
+    },
+  }));
+  const { findings } = buildAnalystInbox({ findings: rows }, '2026-09-14T21:00:00Z');
+  render(<AnalystInbox findings={findings} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  const titleBar = screen.getByRole('heading', { name: 'IWM' }).closest('header');
+  expect(titleBar).toHaveTextContent(/^IWMSep 10, 2026$/);
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Current position:', 'Position size:', 'Action:', 'RUT Trend:', 'Underlying:', 'History:']);
+  expect(screen.getAllByRole('definition')[3]).toHaveTextContent('Neutral → Bearish');
+  const sourceIndex = screen.getByText('Russell 2000 (RUT)');
+  expect(sourceIndex.tagName).toBe('STRONG');
+  expect(screen.getAllByRole('definition')[4]).toContainElement(sourceIndex);
+  expect(screen.getAllByRole('definition')[4]).toHaveTextContent('Russell 2000 (RUT) — tracked by IWM.');
+});
+
+test('shows a short-cover action once and omits an empty context row', () => {
+  const observedAt = new Date().toISOString();
+  const alert = { id: 'xlu', symbol: 'XLU', action: 'cover', unread: 1, payload: {
+    action: 'cover', citation: { title: 'Hedgeye Real-Time Alerts', publicationDate: '2026-09-11' },
+    quantity: -25, holdingsVerified: true, holdingsVerifiedAt: observedAt,
+    currentHolding: currentHolding(observedAt, 1.75),
+    alertContext: { kind: 'source-action', changedAt: '2026-09-11', recordedPosition: { side: 'SHORT' } },
+    event: { entityId: 'XLU', eventType: 'position_change', qualityStatus: 'validated',
+      productLabel: 'Real-Time Alerts', action: 'Cover-SOME',
+    },
+  } };
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  const titleBar = screen.getByRole('heading', { name: 'XLU' }).closest('header');
+  expect(titleBar).toHaveTextContent(/^XLUSep 11, 2026$/);
+  expect(titleBar).not.toHaveTextContent(/Hedgeye|:|Close/);
+  expect(screen.getAllByRole('definition')[1]).toHaveTextContent(/^1.75%$/);
+  expect(screen.getAllByRole('definition')[2]).toHaveTextContent(/^Close part of the short position — reduce position size$/);
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Current position:', 'Position size:', 'Action:']);
+  const directions = screen.getAllByText(/^short$/i);
+  expect(directions).toHaveLength(2);
+  directions.forEach(word => expect(word).toHaveClass('analyst-inbox-signal--negative'));
+  expect(screen.queryByText('Context:')).not.toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Portfolio inbox' })).not.toHaveTextContent(/Report:|of portfolio|The report recommends/);
+  expect(screen.queryByText('Dashboard interpretation:')).not.toBeInTheDocument();
+});
+
+test('shows exact source context directly without repeating the action or adding a report preface', () => {
+  const summary = 'XLU remains a short hedge against long SPY exposure.';
+  const bullet = 'The short-term bounce in XLU leaves its bearish Trend unchanged.';
+  const citation = { title: 'Hedgeye Real-Time Alerts', publicationDate: '2026-09-11',
+    sourceUri: 'https://app.hedgeye.com/feed_items/xlu-cover' };
+  const alert = { id: 'xlu-context', symbol: 'XLU', action: 'cover', payload: {
+    action: 'cover', citation,
+    alertContext: { kind: 'source-action', changedAt: '2026-09-11', recordedPosition: { side: 'SHORT' } },
+    event: { entityId: 'XLU', eventType: 'position_change', qualityStatus: 'validated',
+      productLabel: 'Real-Time Alerts', action: 'COVER-SOME', sourceMessageId: 'xlu-report', marketDate: '2026-09-11',
+      sourceReport: { entityId: 'XLU', sourceMessageId: 'xlu-report', publicationDate: '2026-09-11', contentHash: 'exact-content',
+        title: 'COVER-SOME SIGNAL XLU', summary, bodyText: `${summary}\n• ${bullet}` },
+    },
+  } };
+  const onCitation = jest.fn();
+  render(<AnalystInbox findings={[alert]} onCitation={onCitation} />);
+  const context = screen.getByText('Context:').parentElement;
+  expect(context).toHaveTextContent(`Context: ${summary}`);
+  expect(context).not.toHaveTextContent(/The report|buying back|reducing your short exposure|[“”]/);
+  expect(screen.queryByText('Report:')).not.toBeInTheDocument();
+  expect(context.textContent.split(summary)).toHaveLength(2);
+  within(context).getAllByText('short', { exact: true }).forEach(word => expect(word).toHaveClass('analyst-inbox-signal--negative'));
+  expect(within(context).getByText('long', { exact: true })).toHaveClass('analyst-inbox-signal--positive');
+  expect(screen.getAllByRole('term').filter(term => term.textContent.trim() === 'Context:')).toHaveLength(1);
+  expect(within(context).queryByRole('list')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'View source' }));
+  expect(onCitation).toHaveBeenCalledWith(citation);
+});
+
+test('keeps short-term time horizons uncolored while coloring the reported bearish signal', () => {
+  const citation = { title: 'Hedgeye Real-Time Alerts', publicationDate: '2026-09-11' };
+  const alert = { id: 'time-horizon', symbol: 'XLU', action: 'cover', payload: { action: 'cover', citation,
+    alertContext: { kind: 'source-action', changedAt: '2026-09-11', recordedPosition: { side: 'SHORT' } },
+    event: { entityId: 'XLU', eventType: 'position_change', qualityStatus: 'validated', action: 'COVER-SOME',
+      sourceMessageId: 'xlu-report', marketDate: '2026-09-11', sourceReport: {
+        entityId: 'XLU', sourceMessageId: 'xlu-report', publicationDate: '2026-09-11', contentHash: 'exact-content',
+        bodyText: 'The short-term bounce in XLU leaves its bearish Trend unchanged.',
+      },
+    },
+  } };
+  render(<AnalystInbox findings={[alert]} />);
+  const quote = screen.getByText('Context:').parentElement;
+  expect(quote).toHaveTextContent('The short-term bounce in XLU leaves its bearish Trend unchanged.');
+  expect(within(quote).queryByText('short', { exact: true })).not.toBeInTheDocument();
+  expect(within(quote).getByText('bearish', { exact: true })).toHaveClass('analyst-inbox-signal--negative');
+});
+
+test.each([
+  ['unvalidated', { qualityStatus: 'unvalidated' }],
+  ['failed', { qualityStatus: 'failed' }],
+  ['unknown signal', { signalValue: 'UNAVAILABLE' }],
+  ['missing signal', { signalValue: undefined, excerpt: 'AMZN is bearish' }],
+])('does not invent a directional label or color from %s evidence', (label, event) => {
+  const current = finding();
+  render(<AnalystInbox findings={[finding({ payload: { ...current.payload,
+    event: { ...current.payload.event, ...event },
+  } })]} />);
+  expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
+  const update = screen.getAllByRole('definition')[3];
+  expect(screen.getAllByRole('term')[3]).toHaveTextContent('Signal:');
+  expect(within(update).queryByText(/Bullish|Bearish/)).not.toBeInTheDocument();
+  expect(within(update).getByText('Signal details unavailable')).not.toHaveClass('analyst-inbox-signal--negative', 'analyst-inbox-signal--positive');
+});
+
+test('empty inbox does not imply a baseline is a new signal alert', () => {
+  render(<AnalystInbox findings={buildAnalystInbox({ findings: [finding()] }).findings} />);
+  expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { level: 3 })).not.toBeInTheDocument();
+});
+
+test('keeps source and acknowledgment actions without marking an alert read just by viewing it', async () => {
+  const alert = finding();
+  const onCitation = jest.fn();
+  const onAcknowledge = jest.fn().mockResolvedValue();
+  const view = render(<AnalystInbox findings={[alert]} onCitation={onCitation} onAcknowledge={onAcknowledge} />);
+  expect(onAcknowledge).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'View source' }));
+  expect(onCitation).toHaveBeenCalledWith(alert.payload.citation);
+  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+  await waitFor(() => expect(onAcknowledge).toHaveBeenCalledWith('amzn'));
+  view.rerender(<AnalystInbox findings={[{ ...alert, unread: 0 }]} onCitation={onCitation} onAcknowledge={onAcknowledge} />);
+  expect(screen.queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'AMZN' })).not.toBeInTheDocument();
+  expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
+});
+
+test('shows a restored alert with a retryable acknowledgment after a save error', () => {
+  const onAcknowledge = jest.fn();
+  render(<AnalystInbox findings={[finding()]} error="Couldn’t mark this alert as read. Try again." onAcknowledge={onAcknowledge} />);
+  expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t mark this alert as read. Try again.');
+  expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeEnabled();
+  expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+  expect(onAcknowledge).toHaveBeenCalledWith('amzn');
+});

@@ -3,15 +3,173 @@ const {
   buildSecurityIntelligence,
   canonicalizeSymbol,
   defaultResearchMarketDate,
+  extractSnapshotReferences,
+  filterSourceQualityRevisions,
   isValidMarketDate,
   loadSecurityIntelligenceInputs,
   manifestChecksumForArtifacts,
   marketDateSequence,
   normalizeRequestedSymbols,
+  prepareNarrativeReferenceMatchers,
+  prepareStructuredReferenceMatchers,
 } = require('./securityIntelligence.cjs');
 
 const MARKET_DATE = '2026-07-23';
 const NOW = new Date('2026-07-23T18:00:00Z');
+const explicitTrade = (ticker, value) => ({ trade: value, signalProvenance: { field: 'trade', method: 'explicit-field', sourceField: `data.${ticker}.trade`, sourceText: `${ticker}: Trade ${value}` } });
+
+describe('request-local direct narrative matching', () => {
+  const symbols = ['SPY', 'SPX', 'QQQ', 'TLT', 'DDOG', 'GLD', 'USO', 'UUP', 'AM', 'PM', 'BRK.B',
+    ...Array.from({ length: 58 }, (_, index) => `TEST${index}`)];
+  const direct = entries => entries.filter(entry => ['direct', 'direct_alias'].includes(entry.reference.matchType));
+  const source = {
+    date: MARKET_DATE, snapshotType: 'signal-strength', publishedAt: '2026-07-23T16:29:00Z',
+    article: { feedUrl: 'https://app.hedgeye.com/feed_items/123',
+      bodyText: 'SPX and BRK.B led growth and technology. Gold and the US dollar held. 08:00 AM and 12:29 PM EDT.' },
+    data: { added: ['AM', 'PM', 'QQQ'], removed: ['TLT'],
+      notes: ['DDOG and GLD appeared beside USO and UUP.', 'SPY TEST2 and TEST57; NOTSPY and TEST570 are different tokens.'] },
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  test('prepared69-symbol direct-only results equal default direct results, preserving aliases and typed meridiem tickers', () => {
+    const baseline = extractSnapshotReferences(source, symbols, 'indexed');
+    expect(baseline.some(entry => entry.reference.matchType === 'inferred_exposure')).toBe(true);
+    const preparedNarrativeMatchers = prepareNarrativeReferenceMatchers(symbols);
+    const optimized = extractSnapshotReferences(source, symbols, 'indexed', {
+      skipExposureMentions: true, preparedNarrativeMatchers,
+    });
+    expect(symbols).toHaveLength(69);
+    expect(optimized).toEqual(direct(baseline));
+    expect(optimized).toContainEqual(expect.objectContaining({ symbol: 'SPY', reference: expect.objectContaining({
+      kind: 'summary_mention', matchedText: 'SPX', matchType: 'direct_alias',
+    }) }));
+    expect(optimized.filter(entry => ['AM', 'PM'].includes(entry.symbol)).map(entry => entry.reference.kind))
+      .toEqual(['signal_strength_added', 'signal_strength_added']);
+    expect(extractSnapshotReferences(source, symbols, 'indexed', { preparedNarrativeMatchers })).toEqual(baseline);
+  });
+
+  test('preparation copies capture identity and a different symbol request cannot inherit its matches', () => {
+    const requested = ['SPY'];
+    const preparedNarrativeMatchers = prepareNarrativeReferenceMatchers(requested);
+    requested[0] = 'QQQ';
+    const options = { skipExposureMentions: true, preparedNarrativeMatchers };
+    expect(extractSnapshotReferences(source, ['SPY'], 'indexed', options))
+      .toEqual(direct(extractSnapshotReferences(source, ['SPY'], 'indexed')));
+    const different = extractSnapshotReferences(source, requested, 'indexed', options);
+    expect(different).toEqual(direct(extractSnapshotReferences(source, requested, 'indexed')));
+    expect(different.every(entry => entry.symbol === 'QQQ')).toBe(true);
+  });
+
+  test('direct token patterns compile once for many publications and structured-only reads skip every narrative pattern', () => {
+    const expectedStructured = extractSnapshotReferences(source, symbols, 'indexed')
+      .filter(entry => ['signal_strength_added', 'signal_strength_removed'].includes(entry.reference.kind));
+    const NativeRegExp = RegExp;
+    const constructor = jest.spyOn(global, 'RegExp').mockImplementation(function (pattern, flags) {
+      return new NativeRegExp(pattern, flags);
+    });
+    const preparedNarrativeMatchers = prepareNarrativeReferenceMatchers(symbols);
+    const compiled = constructor.mock.calls.filter(([pattern]) => String(pattern).startsWith('(^|[^A-Z0-9])')).length;
+    expect(compiled).toBeGreaterThan(60);
+    for (let index = 0; index < 40; index += 1) {
+      extractSnapshotReferences({ ...source, date: `2026-07-${String(1 + index % 23).padStart(2, '0')}` }, symbols, 'indexed', {
+        skipExposureMentions: true, preparedNarrativeMatchers,
+      });
+    }
+    expect(constructor.mock.calls.filter(([pattern]) => String(pattern).startsWith('(^|[^A-Z0-9])'))).toHaveLength(compiled);
+    constructor.mockClear();
+    const structured = extractSnapshotReferences(source, symbols, 'indexed', { skipNarrativeMentions: true });
+    expect(structured).toEqual(expectedStructured);
+    expect(constructor.mock.calls.filter(([pattern]) => String(pattern).startsWith('(^|[^A-Z0-9])'))).toEqual([]);
+  });
+});
+
+describe('request-local structured reference matching', () => {
+  const symbols = ['SPX', 'SPY', 'SPX', 'GOLD', 'GC', 'GLD', 'AM', 'PM', 'BRK.B'];
+  const sources = [
+    { snapshotType: 'risk-ranges', data: {
+      SPX: { ticker: 'SPX', lrr: 590, hrr: 610, trend: 'Bullish', trade: 'Bearish' },
+      GOLD: { ticker: 'GOLD', lrr: 2500, hrr: 2600, trend: 'Neutral', trade: 'Bullish' },
+      AM: { ticker: 'AM', lrr: 17, hrr: 19, trend: 'Neutral' },
+    } },
+    { snapshotType: 'signal-strength', data: { added: ['PM', 'AM'], removed: ['SPX'] } },
+    { snapshotType: 'investing-ideas', data: { positions: [{ ticker: 'GLD', side: 'Long' }, { ticker: 'BRK.B', side: 'Short' }] } },
+    { snapshotType: 'portfolio-solutions', data: { rankings: [{ ticker: 'SPX', rank: 2 }], topMovers: { weekly: [{ ticker: 'BRK.B', change: 3 }] } } },
+    { snapshotType: 'momo-tracker', data: { stocks: { SPX: { ticker: 'SPX', trend: 'Bearish' } } } },
+    { snapshotType: 'the-call', data: { longs: ['SPX'], shorts: ['BRK.B'], neutrals: ['AM'] } },
+    { snapshotType: 'real-time-alert', data: { alerts: [{ ticker: 'PM', action: 'SELL-SOME' }] } },
+    { snapshotType: 'etf-pro', data: { changes: [{ ticker: 'AM', action: 'REMOVE' }] } },
+  ].map(source => ({ ...source, date: MARKET_DATE, publishedAt: '2026-07-23T16:00:00Z',
+    article: { feedUrl: 'https://app.hedgeye.com/feed_items/123' } }));
+  const options = { includeUnverifiedRiskRanges: true, skipNarrativeMentions: true };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.dontMock('./publishedResearchSignals.cjs');
+  });
+
+  test('canonical indexes preserve ordered duplicate matches while exact Trade never inherits an exposure alias', () => {
+    const requested = [...symbols];
+    const preparedStructuredMatchers = prepareStructuredReferenceMatchers(requested);
+    requested.reverse();
+    const baseline = sources.flatMap(source => extractSnapshotReferences(source, symbols, 'indexed', options));
+    const optimized = sources.flatMap(source => extractSnapshotReferences(source, symbols, 'indexed', {
+      ...options, preparedStructuredMatchers,
+    }));
+    expect(optimized).toEqual(baseline);
+    expect(optimized.filter(entry => entry.reference.kind === 'historical_risk_range' && entry.reference.matchedText === 'SPX')
+      .map(entry => entry.symbol)).toEqual(['SPX', 'SPY', 'SPX']);
+    const trades = optimized.filter(entry => entry.reference.kind === 'trade_signal');
+    expect(trades.some(entry => entry.reference.sourceTicker === 'SPX' && entry.symbol === 'SPY')).toBe(false);
+    expect(trades.some(entry => entry.reference.sourceTicker === 'GOLD' && ['GC', 'GLD'].includes(entry.symbol))).toBe(false);
+    expect(trades.filter(entry => entry.reference.sourceTicker === 'SPX').map(entry => entry.symbol)).toEqual(['SPX', 'SPX']);
+    expect(extractSnapshotReferences(sources[1], ['PM'], 'indexed', { ...options, preparedStructuredMatchers }))
+      .toEqual(extractSnapshotReferences(sources[1], ['PM'], 'indexed', options));
+  });
+
+  test('typed rows normalize their ticker once instead of revalidating the entire69-symbol request', () => {
+    const requested = ['SPY', 'SPX', 'AM', 'PM', ...Array.from({ length: 65 }, (_, index) => `TEST${index}`)];
+    const source = sources[1];
+    let validations = 0;
+    const nativeTest = RegExp.prototype.test;
+    jest.spyOn(RegExp.prototype, 'test').mockImplementation(function (value) {
+      if (this.source.startsWith('^[A-Z0-9][A-Z0-9.')) validations += 1;
+      return nativeTest.call(this, value);
+    });
+    const baseline = Array.from({ length: 40 }, () => extractSnapshotReferences(source, requested, 'indexed', options));
+    const baselineValidations = validations;
+    validations = 0;
+    const preparedStructuredMatchers = prepareStructuredReferenceMatchers(requested);
+    const optimized = Array.from({ length: 40 }, () => extractSnapshotReferences(source, requested, 'indexed', {
+      ...options, preparedStructuredMatchers,
+    }));
+    expect(optimized).toEqual(baseline);
+    expect(validations).toBeGreaterThan(0);
+    expect(validations).toBeLessThan(baselineValidations / 10);
+  });
+
+  test('exact Trade matching is evaluated once per distinct source ticker and prepared request', () => {
+    const signals = jest.requireActual('./publishedResearchSignals.cjs');
+    const sameSignalInstrument = jest.fn(signals.sameSignalInstrument);
+    jest.isolateModules(() => {
+      jest.doMock('./publishedResearchSignals.cjs', () => ({ ...signals, sameSignalInstrument }));
+      const utilities = require('./securityIntelligence.cjs');
+      const requested = ['SPY', 'SPX', 'GOLD', 'GC', ...Array.from({ length: 65 }, (_, index) => `TEST${index}`)];
+      const preparedStructuredMatchers = utilities.prepareStructuredReferenceMatchers(requested);
+      const baseline = Array.from({ length: 30 }, () => utilities.extractSnapshotReferences(sources[0], requested, 'indexed', options));
+      expect(sameSignalInstrument).toHaveBeenCalledTimes(30 * 2 * requested.length);
+      sameSignalInstrument.mockClear();
+      const optimized = Array.from({ length: 30 }, () => utilities.extractSnapshotReferences(sources[0], requested, 'indexed', {
+        ...options, preparedStructuredMatchers,
+      }));
+      expect(optimized).toEqual(baseline);
+      expect(sameSignalInstrument).toHaveBeenCalledTimes(2 * requested.length);
+      const nextCapture = utilities.prepareStructuredReferenceMatchers(requested);
+      utilities.extractSnapshotReferences(sources[0], requested, 'indexed', { ...options, preparedStructuredMatchers: nextCapture });
+      expect(sameSignalInstrument).toHaveBeenCalledTimes(4 * requested.length);
+    });
+  });
+});
 
 function indexedManifest(productKey, marketDate = MARKET_DATE, {
   artifactCount = 1,
@@ -54,6 +212,137 @@ function verifiedRiskEnvelope(ranges, marketDate = MARKET_DATE) {
 }
 
 describe('security intelligence projection', () => {
+  test('uses only the manifest-selected discrepancy revision without losing valid report fields', () => {
+    const revision = 'quality-revision-1';
+    const contentSha256 = 'publication-content-hash';
+    const manifest = indexedManifest('early-look', MARKET_DATE, { eventCount: 2 });
+    Object.assign(manifest.artifacts[0], {
+      contentSha256,
+      sourceMessageId: 'original-publication',
+      sourceQuality: { status: 'discrepancy', revision },
+    });
+    manifest.manifestChecksum = manifestChecksumForArtifacts(manifest.artifacts);
+    const original = [
+      { entityKey: 'ticker#RUT', excerpt: 'RUT: {"lrr":2834,"hrr":2825,"trend":"BULLISH"}' },
+      { entityKey: 'ticker#SPX', excerpt: 'SPX: {"lrr":6500,"hrr":6700,"trend":"BULLISH"}' },
+    ].map(event => ({
+      ...event,
+      marketDate: MARKET_DATE,
+      productKey: 'early-look',
+      eventType: 'supplemental_risk_range',
+      sourceEventId: contentSha256,
+      contentSha256,
+      sourceMessageId: 'original-publication',
+      signalValue: 'BULLISH',
+      decisionEligible: false,
+    }));
+    const revised = original.map(event => ({ ...event, sourceQualityRevision: revision }));
+    revised[0].excerpt = 'RUT: {"trend":"BULLISH","withheldFields":["hrr","lrr"]}';
+    const response = buildSecurityIntelligence({
+      symbols: ['RUT', 'SPX'], marketDate: MARKET_DATE, historyDays: 0, now: NOW,
+      productManifests: [manifest], entityEvents: [...original, ...revised],
+    });
+    expect(response.products.find(product => product.id === 'early-look')).toMatchObject({ status: 'indexed' });
+    expect(response.bySymbol.RUT.directReferences).toHaveLength(1);
+    expect(response.bySymbol.RUT.directReferences[0]).toMatchObject({ value: 'BULLISH', qualityStatus: 'indexed' });
+    expect(response.bySymbol.RUT.directReferences[0].excerpt).not.toMatch(/2834|2825/);
+    expect(response.bySymbol.SPX.directReferences).toHaveLength(1);
+    expect(response.bySymbol.SPX.directReferences[0].excerpt).toContain('6500');
+    expect(original[0].excerpt).toContain('2834');
+  });
+
+  test('does not substitute old events when a selected discrepancy revision has not arrived', () => {
+    const manifest = indexedManifest('early-look', MARKET_DATE, { eventCount: 1 });
+    Object.assign(manifest.artifacts[0], {
+      contentSha256: 'publication-hash',
+      sourceQuality: { revision: 'selected-revision' },
+    });
+    manifest.manifestChecksum = manifestChecksumForArtifacts(manifest.artifacts);
+    const response = buildSecurityIntelligence({
+      symbols: ['RUT'], marketDate: MARKET_DATE, historyDays: 0, now: NOW,
+      productManifests: [manifest],
+      entityEvents: [{
+        marketDate: MARKET_DATE, productKey: 'early-look', entityKey: 'ticker#RUT',
+        contentSha256: 'publication-hash', excerpt: 'RUT LRR 2834 HRR 2825',
+      }],
+    });
+    expect(response.bySymbol.RUT.directReferences).toEqual([]);
+    expect(response.products.find(product => product.id === 'early-look')).toMatchObject({
+      status: 'failed', error: 'manifest-event-count-mismatch',
+    });
+  });
+
+  test('requires exact artifact revision and keeps independent artifacts from the same message', () => {
+    const productKey = 'early-look';
+    const record = { marketDate: MARKET_DATE, productKey, sourceMessageId: 'same-message' };
+    const manifests = [{ marketDate: MARKET_DATE, productKey, artifacts: [
+      { artifactId: 'revised', contentSha256: 'revised-hash', sourceMessageId: 'same-message', sourceQuality: { revision: 'r1' } },
+      { artifactId: 'valid', contentSha256: 'valid-hash', sourceMessageId: 'same-message' },
+    ] }];
+    const current = { ...record, contentSha256: 'revised-hash', sourceQualityRevision: 'r1' };
+    const independent = { ...record, contentSha256: 'valid-hash' };
+    expect(filterSourceQualityRevisions([
+      current, independent, record,
+      { ...current, sourceQualityRevision: 'r0' },
+      { ...current, contentSha256: 'wrong-hash' },
+    ], manifests)).toEqual([current, independent]);
+    expect(filterSourceQualityRevisions([current], [])).toEqual([]);
+  });
+
+  test('filters old snapshot projections using their publication and selected revision', () => {
+    const original = { date: MARKET_DATE, snapshotType: 'early-look', gmailMessageId: 'message-1', data: { RUT: { lrr: 2834, hrr: 2825 } } };
+    const revised = { ...original, sourceQuality: { revision: 'r1' }, data: { RUT: { trend: 'BULLISH' } } };
+    const manifests = [{ marketDate: MARKET_DATE, productKey: 'early-look', artifacts: [{
+      sourceMessageId: 'message-1', sourceQuality: { revision: 'r1' },
+    }] }];
+    expect(filterSourceQualityRevisions([original, revised], manifests, { snapshots: true })).toEqual([revised]);
+  });
+
+  test('keeps narrative Momo direction separate from the canonical structured bias', () => {
+    const response = buildSecurityIntelligence({
+      symbols: ['AMZN'],
+      marketDate: MARKET_DATE,
+      historyDays: 0,
+      now: NOW,
+      productManifests: [
+        indexedManifest('momo-tracker', MARKET_DATE, { eventCount: 1 }),
+        indexedManifest('risk-ranges', MARKET_DATE, { eventCount: 1 }),
+      ],
+      entityEvents: [{
+        marketDate: MARKET_DATE,
+        productKey: 'momo-tracker',
+        entityKey: 'ticker#AMZN',
+        eventType: 'trade_signal',
+        direction: 'NEGATIVE',
+        signalValue: 'BULLISH',
+        excerpt: 'AMZN: Trade BULLISH; narrative direction negative.',
+        publishedAt: `${MARKET_DATE}T13:00:00Z`,
+        sourceEventId: 'amzn-momo-structured',
+        matchType: 'direct',
+      }],
+      riskRangeEnvelope: verifiedRiskEnvelope({
+        AMZN: {
+          lrr: 258,
+          hrr: 300,
+          trend: 'BULLISH',
+          timestamp: `${MARKET_DATE}T12:00:00Z`,
+        },
+      }),
+    });
+
+    expect(response.bySymbol.AMZN.decision).toMatchObject({
+      trade: { status: 'available', value: 'BULLISH', sourceId: 'momo-tracker' },
+      trend: { status: 'available', value: 'BULLISH', sourceId: 'risk-ranges' },
+    });
+    expect(response.bySymbol.AMZN.directReferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        productId: 'momo-tracker',
+        direction: 'NEGATIVE',
+        value: 'BULLISH',
+      }),
+    ]));
+  });
+
   test('publishes only authority-approved decision inputs and separates exposure references', () => {
     const response = buildSecurityIntelligence({
       symbols: ['DDOG'],
@@ -80,7 +369,7 @@ describe('security intelligence projection', () => {
           snapshotType: 'momo-tracker',
           publishedAt: '2026-07-23T13:00:00Z',
           data: {
-            DDOG: { trend: 'BEARISH', buyTrade: 135, sellTrade: 151 },
+            DDOG: { ...explicitTrade('DDOG', 'BEARISH'), trend: 'BULLISH', buyTrade: 135, sellTrade: 151 },
           },
         },
         {
@@ -148,6 +437,7 @@ describe('security intelligence projection', () => {
         exposureId: 'technology',
         exposureType: 'sector',
         exposureLabel: 'Technology',
+        matchedText: 'Technology',
         excerpt: 'Software and technology leadership improved during the session.',
       }),
     ]));
@@ -156,7 +446,7 @@ describe('security intelligence projection', () => {
       expect.objectContaining({ id: 'technology', type: 'sector', label: 'Technology' }),
     ]);
     expect(row.directReferences.find((ref) => ref.kind === 'primary_risk_range'))
-      .toMatchObject({ decisionEligible: true, qualityStatus: 'indexed' });
+      .toMatchObject({ decisionEligible: true, qualityStatus: 'indexed', matchedText: 'DDOG' });
     expect(response.products.find((product) => product.id === 'the-macro-show'))
       .toMatchObject({ status: 'indexed', publishedAt: '2026-07-23T14:15:00.000Z' });
   });
@@ -206,7 +496,7 @@ describe('security intelligence projection', () => {
     expect(row.directReferences).toHaveLength(0);
     expect(row.history[0].marketDate).toBe(staleDate);
     expect(row.history[0].directReferences).toEqual(expect.arrayContaining([
-      expect.objectContaining({ productId: 'momo-tracker', kind: 'tracker_trade' }),
+      expect.objectContaining({ productId: 'momo-tracker', kind: 'trend_signal' }),
       expect.objectContaining({
         productId: 'risk-ranges',
         kind: 'historical_risk_range',
@@ -345,7 +635,7 @@ describe('security intelligence projection', () => {
     expect(row.history[0].directReferences).toEqual([
       expect.objectContaining({
         productId: 'momo-tracker',
-        kind: 'trade_signal',
+        kind: 'mention',
         qualityStatus: 'parsed',
       }),
     ]);
@@ -369,7 +659,7 @@ describe('security intelligence projection', () => {
     expect(response.bySymbol.AAPL.decision.trade).toMatchObject({
       status: 'unavailable',
       value: null,
-      reason: 'no-verified-published-tracker-signal',
+      reason: 'no-verified-published-trade-signal',
     });
     expect(response.bySymbol.AAPL.directReferences[0]).toMatchObject({
       productId: 'momo-tracker',
@@ -422,7 +712,7 @@ describe('security intelligence projection', () => {
     });
   });
 
-  test('uses an indexed immutable tracker event without requiring a snapshot fallback', () => {
+  test('rejects legacy immutable tracker events that relabeled a Trend as Trade', () => {
     const response = buildSecurityIntelligence({
       symbols: ['AAPL'],
       marketDate: MARKET_DATE,
@@ -445,9 +735,9 @@ describe('security intelligence projection', () => {
     });
 
     expect(response.bySymbol.AAPL.decision.trade).toMatchObject({
-      status: 'available',
-      value: 'BULLISH',
-      sourceId: 'momo-tracker',
+      status: 'unavailable',
+      value: null,
+      sourceId: null,
     });
     expect(response.bySymbol.AAPL.directReferences[0].qualityStatus).toBe('indexed');
   });
@@ -516,12 +806,12 @@ describe('security intelligence projection', () => {
         {
           date: MARKET_DATE,
           snapshotType: 'momo-tracker',
-          data: { AAPL: { trend: 'BULLISH' } },
+          data: { AAPL: explicitTrade('AAPL', 'BULLISH') },
         },
         {
           date: MARKET_DATE,
           snapshotType: 'bitcoin-trend-tracker',
-          data: { stocks: { AAPL: { trend: 'BEARISH' } } },
+          data: { stocks: { AAPL: explicitTrade('AAPL', 'BEARISH') } },
         },
       ],
       productManifests: [
@@ -534,7 +824,7 @@ describe('security intelligence projection', () => {
     expect(response.bySymbol.AAPL.decision.trade).toMatchObject({
       status: 'conflict',
       value: null,
-      reason: 'conflicting-published-tracker-signals',
+      reason: 'conflicting-published-trade-signals',
     });
   });
 
@@ -563,7 +853,7 @@ describe('security intelligence projection', () => {
     expect(response.bySymbol.AAPL.decision.trade).toMatchObject({
       status: 'unavailable',
       value: null,
-      reason: 'no-verified-published-tracker-signal',
+      reason: 'no-verified-published-trade-signal',
     });
     expect(response.bySymbol.AAPL.directReferences[0]).toMatchObject({
       qualityStatus: 'indexed',
@@ -881,6 +1171,201 @@ describe('security intelligence projection', () => {
     ]));
     expect(response.coverage.state).toBe('partial');
     expect(response.bySymbol.AAPL.directReferences[0].qualityStatus).toBe('failed');
+  });
+
+  test('accepts AM and PM from typed snapshot rows but never from meridiem prose', () => {
+    const narrativeSnapshots = [
+      {
+        date: MARKET_DATE,
+        snapshotType: 'signal-strength',
+        publishedAt: '2026-07-23T16:29:00Z',
+        article: {
+          bodyText: 'View it in your browser 07/23/2026 12:29 PM EDT Signal Strength Stocks.',
+        },
+        data: { added: ['AFRM'], removed: [] },
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'real-time-alert',
+        publishedAt: '2026-07-23T12:00:00Z',
+        article: { bodyText: 'The alert was distributed at 08:00 AM EDT.' },
+        data: {},
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'etf-pro',
+        publishedAt: '2026-07-23T18:05:00Z',
+        article: { bodyText: '07/23/2026 02:05 PM EDT ETF Pro Plus.' },
+        data: {},
+      },
+    ];
+    const narrativeReferences = narrativeSnapshots.flatMap((snapshot) => (
+      extractSnapshotReferences(snapshot, ['AM', 'PM'], 'indexed')
+    ));
+    expect(narrativeReferences).toEqual([]);
+
+    const structuredSnapshots = [
+      {
+        date: MARKET_DATE,
+        snapshotType: 'signal-strength',
+        publishedAt: '2026-07-23T14:00:00Z',
+        data: { added: ['PM'], removed: ['AM'] },
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'portfolio-solutions',
+        publishedAt: '2026-07-23T15:00:00Z',
+        data: { rankings: [{ ticker: 'PM', rank: 4 }, { ticker: 'AM', rank: 7 }] },
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'early-look',
+        publishedAt: '2026-07-23T11:30:00Z',
+        data: {
+          PM: { lrr: 181, hrr: 202, trend: 'BULLISH' },
+          AM: { lrr: 17, hrr: 19, trend: 'NEUTRAL' },
+        },
+      },
+      {
+        date: MARKET_DATE,
+        snapshotType: 'investing-ideas',
+        publishedAt: '2026-07-23T16:00:00Z',
+        data: {
+          positions: [
+            { ticker: 'PM', side: 'Long', prevClose: 189.57, lrr: 182, hrr: 201 },
+            { ticker: 'AM', side: 'Short', prevClose: 18.4, lrr: 17, hrr: 19 },
+          ],
+        },
+      },
+    ];
+    const structuredReferences = structuredSnapshots.flatMap((snapshot) => (
+      extractSnapshotReferences(snapshot, ['AM', 'PM'], 'indexed')
+    ));
+    const kindsFor = (symbol) => structuredReferences
+      .filter((entry) => entry.symbol === symbol)
+      .map((entry) => entry.reference.kind);
+
+    expect(kindsFor('PM')).toEqual(expect.arrayContaining([
+      'signal_strength_added',
+      'portfolio_solutions_rank',
+      'supplemental_risk_range',
+      'investing_idea_position',
+    ]));
+    expect(kindsFor('AM')).toEqual(expect.arrayContaining([
+      'signal_strength_removed',
+      'portfolio_solutions_rank',
+      'supplemental_risk_range',
+      'investing_idea_position',
+    ]));
+    expect(structuredReferences.find((entry) => (
+      entry.symbol === 'PM' && entry.reference.kind === 'investing_idea_position'
+    )).reference.value).toMatchObject({
+      side: 'LONG',
+      bias: 'BULLISH',
+      lrr: 182,
+      hrr: 201,
+    });
+    expect(structuredReferences.some((entry) => entry.reference.kind === 'summary_mention')).toBe(false);
+  });
+
+  test('ignores legacy prose events for AM and PM in current and historical rows', () => {
+    const historicalDate = '2026-07-22';
+    const response = buildSecurityIntelligence({
+      symbols: ['AM', 'PM'],
+      marketDate: MARKET_DATE,
+      historyDays: 1,
+      now: NOW,
+      productManifests: [
+        indexedManifest('signal-strength', MARKET_DATE, { eventCount: 4 }),
+        indexedManifest('signal-strength', historicalDate, { eventCount: 2 }),
+      ],
+      entityEvents: [
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#PM',
+          eventType: 'signal_strength_membership',
+          matchType: 'explicit_ticker',
+          matchedText: 'PM',
+          fieldPath: 'article.bodyText',
+          excerpt: 'View it in your browser 07/23/2026 12:29 PM EDT.',
+          publishedAt: '2026-07-23T16:29:00Z',
+          sourceEventId: 'pm-time-current',
+        },
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#AM',
+          eventType: 'signal_strength_membership',
+          matchType: 'explicit_ticker',
+          matchedText: 'AM',
+          fieldPath: 'article.bodyText',
+          excerpt: 'The morning edition was delivered at 08:00 AM EDT.',
+          publishedAt: '2026-07-23T12:00:00Z',
+          sourceEventId: 'am-time-current',
+        },
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#PM',
+          eventType: 'signal_strength_added',
+          matchType: 'structured_membership',
+          matchedText: 'PM',
+          fieldPath: 'data.added[0]',
+          excerpt: 'PM',
+          publishedAt: '2026-07-23T14:00:00Z',
+          sourceEventId: 'pm-structured-current',
+        },
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#AM',
+          eventType: 'signal_strength_removed',
+          matchType: 'structured_membership',
+          matchedText: 'AM',
+          fieldPath: 'data.removed[0]',
+          excerpt: 'AM',
+          publishedAt: '2026-07-23T14:00:00Z',
+          sourceEventId: 'am-structured-current',
+        },
+        {
+          marketDate: historicalDate,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#PM',
+          eventType: 'signal_strength_membership',
+          matchType: 'explicit_ticker',
+          excerpt: '07/22/2026 03:36 PM EDT.',
+          publishedAt: '2026-07-22T19:36:00Z',
+          sourceEventId: 'pm-time-history',
+        },
+        {
+          marketDate: historicalDate,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#AM',
+          eventType: 'signal_strength_membership',
+          matchType: 'explicit_ticker',
+          excerpt: '07/22/2026 08:00 AM EDT.',
+          publishedAt: '2026-07-22T12:00:00Z',
+          sourceEventId: 'am-time-history',
+        },
+      ],
+      riskRangeEnvelope: verifiedRiskEnvelope({}),
+    });
+
+    expect(response.bySymbol.PM.directReferences.map((reference) => reference.sourceEventId))
+      .toEqual(['pm-structured-current']);
+    expect(response.bySymbol.AM.directReferences.map((reference) => reference.sourceEventId))
+      .toEqual(['am-structured-current']);
+    expect(response.bySymbol.PM.history[0].directReferences).toEqual([]);
+    expect(response.bySymbol.AM.history[0].directReferences).toEqual([]);
+    expect(response.bySymbol.PM.decision.signalStrength).toMatchObject({
+      status: 'available',
+      value: 'ADDED',
+    });
+    expect(response.bySymbol.AM.decision.signalStrength).toMatchObject({
+      status: 'available',
+      value: 'REMOVED',
+    });
   });
 
   test('matches controlled ticker aliases without creating inferred market data', () => {

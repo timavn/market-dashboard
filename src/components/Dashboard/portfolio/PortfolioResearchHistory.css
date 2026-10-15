@@ -1,0 +1,26 @@
+.pcv2-intel-history {
+  background: #ffffff;
+}
+
+.pcv2-intel-history summary {
+  box-sizing: border-box;
+  width: 50%;
+  height: 18px;
+  padding: 0 8px;
+  color: #536785;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: left;
+  border-bottom: 1px solid var(--pcv2-border);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.pcv2-intel-history-empty {
+  height: 24px;
+  color: #8995a8 !important;
+  font-size: 9px !important;
+  font-weight: 500 !important;
+  text-align: center;
+}

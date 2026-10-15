@@ -1,7 +1,8 @@
 import { SECURITY_CATEGORY_MAPPING } from './securityCategoryMapping';
 import { SECURITIES_LIST } from './securitiesList';
+import { QUAD_EXPOSURE_REVIEW, QUAD_EXPOSURE_REVIEW_DATE } from './quadExposureReview';
 
-export const EXPOSURE_CLASSIFICATION_VERSION = '2026-07-26';
+export const EXPOSURE_CLASSIFICATION_VERSION = '2026-09-07';
 
 export const EXPOSURE_DIMENSIONS = Object.freeze({
   assetClasses: Object.freeze({ id: 'asset-classes', label: 'Asset Classes' }),
@@ -101,6 +102,7 @@ const DIMENSION_ID_PREFIX = Object.freeze({
 const EXTRA_EXPOSURES = Object.freeze([
   Object.freeze({ dimension: 'assetClasses', label: 'Cash' }),
   Object.freeze({ dimension: 'assetClasses', label: 'Cryptocurrency' }),
+  Object.freeze({ dimension: 'assetClasses', label: 'Managed Futures' }),
 ]);
 
 const slugify = (value) => String(value || '')
@@ -166,6 +168,11 @@ const exposureDefinitions = buildExposureSeeds().reduce((catalog, seed) => {
 
 export const EXPOSURE_DEFINITIONS = Object.freeze(exposureDefinitions);
 export const EXPOSURE_LIST = Object.freeze(Object.values(EXPOSURE_DEFINITIONS));
+// The +EV table may show only labels that appear in a stored Hedgeye worksheet
+// best/worst list. Other classifications remain available to describe holdings.
+export const HEDGEYE_EXPOSURE_LIST = Object.freeze(EXPOSURE_LIST.filter(exposure => (
+  Object.values(exposure.quadFits).some(fit => fit.status !== 'not-listed')
+)));
 
 const normalizeLookupValue = (value) => String(value || '')
   .trim()
@@ -622,6 +629,15 @@ export const LIVE_BOOK_SECURITY_PROFILES = Object.freeze({
   ]),
 });
 
+export const CURRENT_BOOK_SECURITY_PROFILES = Object.freeze(Object.fromEntries(
+  QUAD_EXPOSURE_REVIEW.flatMap(review => review.symbols.map(symbol => [symbol, Object.freeze({
+    ...makeReviewedProfile(symbol, review.primary, review.secondary),
+    classificationNote: review.note,
+    classificationSources: Object.freeze(review.sources),
+    reviewedAt: QUAD_EXPOSURE_REVIEW_DATE,
+  })])),
+));
+
 const buildSecurityProfiles = () => {
   const profiles = SECURITIES_LIST.reduce((catalog, security) => {
     const symbol = normalizeSymbol(security.ticker);
@@ -633,6 +649,7 @@ const buildSecurityProfiles = () => {
     if (profile) profiles[symbol] = profile;
   });
   Object.assign(profiles, LIVE_BOOK_SECURITY_PROFILES);
+  Object.assign(profiles, CURRENT_BOOK_SECURITY_PROFILES);
   return profiles;
 };
 
@@ -677,7 +694,9 @@ const quadExposureCatalog = {
   QUAD_PLAYBOOK,
   EXPOSURE_DEFINITIONS,
   EXPOSURE_LIST,
+  HEDGEYE_EXPOSURE_LIST,
   LIVE_BOOK_SECURITY_PROFILES,
+  CURRENT_BOOK_SECURITY_PROFILES,
   SECURITY_EXPOSURE_PROFILES,
   CONID_SECURITY_PROFILE_OVERRIDES,
   normalizeQuadKey,

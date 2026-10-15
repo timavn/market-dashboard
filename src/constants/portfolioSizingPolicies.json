@@ -1,0 +1,19 @@
+{
+  "asOf": "2026-09-18",
+  "authority": "User portfolio process",
+  "scope": "portfolio-sizing-only",
+  "unit": "percentage-points-of-NLV",
+  "policies": {
+    "commodity": {
+      "id": "commodity",
+      "label": "Commodity",
+      "minWeight": 1,
+      "maxWeight": 4,
+      "requiresBeta": false,
+      "applyAtrRiskCap": true
+    }
+  },
+  "symbols": {
+    "IBIT": "commodity"
+  }
+}

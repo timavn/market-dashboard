@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const { formatMarketDate } = require('./marketDateFormat.cjs');
+const { sourceQualityIssues } = require('./researchSourceQuality.cjs');
 const {
   RESEARCH_PRODUCTS,
   REQUIRED_STAGES,
@@ -65,7 +67,7 @@ function isoDate(value, timeZone = 'America/New_York') {
   if (/^\d{4}-\d{2}-\d{2}$/.test(literal)) return literal;
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString('en-CA', { timeZone });
+  return formatMarketDate(date, timeZone);
 }
 
 function observedTime(item) {
@@ -377,6 +379,8 @@ function evidenceForProduct({
       + (riskRangeFailed ? 1 : 0)
       + (manifestCompletenessMismatch ? 1 : 0),
   };
+  const qualityIssues = sourceQualityIssues(artifacts, snapshots, manifests);
+  const sourceQuality = qualityIssues.length ? { status: 'discrepancy', issues: qualityIssues } : null;
 
   return {
     id: product.id,
@@ -394,12 +398,14 @@ function evidenceForProduct({
     errorCode,
     detail,
     sourceIds,
+    ...(sourceQuality ? { sourceQuality } : {}),
     evidenceHash: coverageHash({
       productId: product.id,
       marketDate,
       stages,
       counts,
       sourceIds,
+      ...(sourceQuality ? { sourceQuality } : {}),
     }),
   };
 }

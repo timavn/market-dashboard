@@ -5,6 +5,7 @@ import {
   calculateDirectionalStreaks,
   calculateRangePosition,
   calculateRecordSignal,
+  calculateSizingBand,
   calculateSizingDecision,
   calculateTargetWeight,
   validateInstrumentContext,
@@ -143,6 +144,57 @@ describe('beta and ATR bands (weights are percentage points)', () => {
     expect(blocked).toMatchObject({ riskBlocked: true, lifecycleState: 'EXIT' });
     expect(blocked.research).toMatchObject({ action: 'EXIT', recommendedWeight: 0 });
   });
+});
+
+describe('portfolio sizing policies', () => {
+  test('IBIT uses the commodity 1–4% policy independently of beta', () => {
+    for (const beta of [null, 0.2, 1, 3]) {
+      expect(calculateSizingBand({ symbol: ' ibit ', beta })).toMatchObject({
+        available: true, requiresBeta: false, minWeight: 1, maxWeight: 4,
+        betaMaxWeight: null, effectiveBeta: null,
+        policy: { id: 'commodity', authority: 'User portfolio process' },
+      });
+    }
+    expect(calculateSizingBand({ symbol: 'SPY', beta: 1 })).toMatchObject({
+      requiresBeta: true, minWeight: 2, maxWeight: 6, policy: null,
+    });
+    expect(calculateSizingBand({ symbol: 'BTC', beta: null }).available).toBe(false);
+  });
+
+  test('the commodity band governs opening, MAX trims and Trend-break MIN without changing Trade exits', () => {
+    const input = baseInput({ symbol: 'IBIT', beta: null });
+    const opened = calculateSizingDecision(input);
+    expect(opened).toMatchObject({ minWeight: 1, maxWeight: 4, operationalMaxWeight: 4 });
+    expect(opened.research).toMatchObject({ action: 'OPEN', recommendedWeight: 1 });
+    expect(opened.actionable).toMatchObject({ available: true, recommendedWeight: 1 });
+    expect(opened.researchProvenance).toEqual({ available: true, blockers: [] });
+    const held = { ...input, position: { exists: true, side: 'LONG', weight: 5 } };
+    expect(calculateSizingDecision(held).research).toMatchObject({ action: 'TRIM', recommendedWeight: 4 });
+    expect(calculateSizingDecision({ ...held, trendSignal: 'BEARISH' }).research)
+      .toMatchObject({ action: 'REDUCE_TO_BENCH', recommendedWeight: 1 });
+    expect(calculateSizingDecision({ ...held, tradeSignal: 'BEARISH' }).research)
+      .toMatchObject({ action: 'EXIT', recommendedWeight: 0 });
+  });
+
+  test('IBIT retains the ATR cap and verified price requirements', () => {
+    const input = baseInput({ symbol: 'IBIT', beta: null, atr14: null });
+    expect(calculateSizingDecision(input).actionable).toMatchObject({ available: false, targetShares: null });
+    const capped = calculateSizingDecision(baseInput({ symbol: 'IBIT', beta: null, atr14: 10 }));
+    expect(capped).toMatchObject({ minWeight: 1, maxWeight: 2.5, riskBlocked: false });
+    const blocked = calculateSizingDecision(baseInput({
+      symbol: 'IBIT', beta: null, atr14: 30, position: { exists: true, side: 'LONG', weight: 2 },
+    }));
+    expect(blocked).toMatchObject({ riskBlocked: true, lifecycleState: 'EXIT' });
+  });
+
+  test.each(['offline', 'stale', 'cache-only', 'seeded', 'mock'])(
+    'a fixed commodity policy does not authorize executable sizing from %s quotes', status => {
+      const result = calculateSizingDecision(baseInput({ symbol: 'IBIT', beta: null,
+        liveContext: liveContext({ quote: { status }, accountSummary: { netLiquidationValue: 1_000_000 } }),
+      }));
+      expect(result.actionable).toMatchObject({ available: false, action: null, targetShares: null, targetNotional: null });
+    },
+  );
 });
 
 describe('range, structure, record, and conviction', () => {

@@ -9,6 +9,21 @@ import {
 import { mapNormalizedRowToMacroSignal } from '../components/Dashboard/macroSignals/mapNormalizedRow';
 import { formatBoundaryForAsset } from '../components/Dashboard/macroSignals/formatNumber';
 
+test('all-product canonical Trade reaches its exact security even without a Risk Range or tracker row', () => {
+  const source = { status: 'available', value: 'BEARISH', sourceId: 'early-look', sourceLabel: 'Early Look',
+    sourceDate: '2026-09-25', publishedAt: '2026-09-25T12:00:00Z', sourceUrl: 'https://app.hedgeye.com/feed_items/123',
+    sourceTicker: 'GLD', signalProvenance: { field: 'trade', method: 'explicit-statement', sourceField: 'body', sourceText: 'GLD Trade is Bearish' } };
+  const canonicalResearch = { schemaVersion: 2, marketDate: '2026-09-25', bySymbol: {
+    GLD: { decision: { trade: source } },
+    ONLYTRADE: { decision: { trade: { ...source, sourceTicker: 'ONLYTRADE' } } },
+  } };
+  const rows = normalizePredictionMarketSignals({ canonicalResearch }).rows;
+  expect(rows.find(row => row.symbol === 'GLD').tradeResearch.direction).toBe('BEARISH');
+  expect(rows.find(row => row.symbol === 'GOLD').tradeResearch.status).toBe('unavailable');
+  expect(mapNormalizedRowToMacroSignal(rows.find(row => row.symbol === 'ONLYTRADE')).trade).toBe('Sell');
+  expect(getMacroSignalQuotePlan({}, canonicalResearch)).toContainEqual({ display: 'ONLYTRADE', quote: 'ONLYTRADE' });
+});
+
 describe('resolveMacroSignalQuoteSymbol', () => {
   test('quotes RUT index when IWM row uses RUT risk range', () => {
     expect(resolveMacroSignalQuoteSymbol('IWM', 'RUT')).toBe('RUT');

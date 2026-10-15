@@ -1,0 +1,4 @@
+# Build tools are part of the audited environment, even when no runtime
+# dependency imports them. Keep CI, fresh installs and Mac rebuilds aligned.
+pip==26.2.1
+setuptools==83.0.0

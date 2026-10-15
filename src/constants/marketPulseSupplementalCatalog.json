@@ -1,0 +1,42 @@
+[
+  {
+    "symbol": "BKLN",
+    "label": "Senior loans ETF",
+    "provider": {
+      "provider": "yahoo",
+      "yahooSymbol": "BKLN",
+      "secType": "ETF"
+    },
+    "sourceUrl": "https://www.invesco.com/us/en/financial-products/etfs/invesco-senior-loan-etf.html"
+  },
+  {
+    "symbol": "MBB",
+    "label": "Mortgage bonds ETF",
+    "provider": {
+      "provider": "yahoo",
+      "yahooSymbol": "MBB",
+      "secType": "ETF"
+    },
+    "sourceUrl": "https://www.ishares.com/us/products/239465/ishares-mbs-etf"
+  },
+  {
+    "symbol": "EMB",
+    "label": "Emerging-market USD bonds ETF",
+    "provider": {
+      "provider": "yahoo",
+      "yahooSymbol": "EMB",
+      "secType": "ETF"
+    },
+    "sourceUrl": "https://www.ishares.com/us/products/239572/EMB"
+  },
+  {
+    "symbol": "TIP",
+    "label": "Inflation-protected bonds ETF",
+    "provider": {
+      "provider": "yahoo",
+      "yahooSymbol": "TIP",
+      "secType": "ETF"
+    },
+    "sourceUrl": "https://www.ishares.com/us/products/239467/ishares-tips-bond-etf"
+  }
+]

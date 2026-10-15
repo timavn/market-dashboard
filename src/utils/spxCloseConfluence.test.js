@@ -135,6 +135,30 @@ describe('buildSpxCloseConfluence eligibility gate', () => {
     expect(trade.raw).toBeNull();
   });
 
+  test.each([
+    { trend: 'BULLISH' },
+    { trackerTrend: 'BULLISH' },
+    { trade: 'BULLISH' },
+  ])('rejects legacy tracker fields without independently labeled Trade evidence %p', (slot) => {
+    expect(extractSpxTradeSignal({
+      snapshotType: 'momo-tracker', date: TARGET_DATE,
+      sourceUrl: 'https://app.hedgeye.com/feed_items/123', data: { stocks: { SPX: slot } },
+    }).direction).toBeNull();
+  });
+
+  test('reads an explicit Trade from another canonical research product without replacing opposing Trend', () => {
+    const trade = extractSpxTradeSignal({
+      schemaVersion: 2, marketDate: TARGET_DATE,
+      bySymbol: { SPX: { decision: {
+        trend: { status: 'available', value: 'BULLISH' },
+        trade: { status: 'available', value: 'BEARISH', sourceId: 'early-look', sourceDate: TARGET_DATE,
+          sourceUrl: 'https://app.hedgeye.com/feed_items/123', sourceTicker: 'SPX',
+          signalProvenance: { field: 'trade', sourceField: 'article.bodyText', method: 'explicit-statement', sourceText: 'SPX is BEARISH on TRADE.' } },
+      } } },
+    });
+    expect(trade).toMatchObject({ direction: 'bearish', source: 'early-look', date: TARGET_DATE });
+  });
+
   test('a selected strike outside the Risk Range blocks the setup', () => {
     const result = buildSpxCloseConfluence(readyInputs('bullish', {
       selectedMarket: { threshold: 7510 },
@@ -233,6 +257,24 @@ describe('SPX close confluence point domains', () => {
     expect(normalized.bucket).toBe(bucket);
   });
 
+  test('does not promote a refresh-delayed VIX reference into confluence scoring', () => {
+    const normalized = normalizeVixSnapshot({
+      VIX: {
+        lastPx: 18.5,
+        asOf: `${TARGET_DATE}T15:00:00-04:00`,
+        availability: 'reference',
+        freshness: 'refresh-delayed',
+        refreshDelayed: true,
+        lastVerifiedAt: `${TARGET_DATE}T15:01:00-04:00`,
+        retainedUntil: `${TARGET_DATE}T15:31:00-04:00`,
+      },
+    });
+
+    expect(normalized).toMatchObject({ value: 18.5, bucket: 'investable', current: false });
+    const result = buildSpxCloseConfluence(readyInputs('bullish', { vix: normalized }));
+    expect(result.volatility).toMatchObject({ inputAvailable: false, available: false, points: null });
+  });
+
   test.each([
     ['bullish', 'investable', 1],
     ['bullish', 'chop', 0],
@@ -306,9 +348,76 @@ describe('SPX close confluence point domains', () => {
     expect(result.band).toBeNull();
     expect(result.missing).toContain(missingDomain);
   });
+
+  test('accepts a complete Market Situation signal inside its explicit weekly coverage window', () => {
+    const result = buildSpxCloseConfluence(readyInputs('bullish', {
+      marketStructure: alignedStructure('bullish', {
+        date: '2026-07-19',
+        validFrom: '2026-07-20',
+        validThrough: '2026-07-24',
+      }),
+    }));
+
+    expect(result.gamma).toMatchObject({ inputAvailable: true, available: true });
+    expect(result.structure).toMatchObject({
+      exactDate: false,
+      currentForSession: true,
+      inputAvailable: true,
+      available: true,
+    });
+    expect(result.scoreReady).toBe(true);
+  });
 });
 
 describe('normalizeMarketStructureSnapshot', () => {
+  const chartReport = () => ({
+    snapshotType: 'market-structure', schemaVersion: 'market-structure-v4', contentComplete: true,
+    date: '2026-09-16',
+    data: {
+      signals: [{ id: 'spxGammaExposure', value: 'Negative' }],
+      charts: [{ id: 'a'.repeat(64), sha256: 'a'.repeat(64) }],
+      chartMetrics: {
+        spxGammaVolatilityThrottle: {
+          chartId: 'a'.repeat(64), chartDate: '2026-09-15',
+          extractionBasis: 'labeled-chart-ocr', parserVersion: 'market-structure-chart-metrics-v3',
+          source: 'Tier1Alpha.com', gammaThrottle: -4.72, tenDayRealizedVolatility: 9.46,
+        },
+      },
+    },
+  });
+
+  test('reads the same verified chart metrics as the monitor with the printed observation date', () => {
+    expect(normalizeMarketStructureSnapshot(chartReport())).toMatchObject({
+      gammaExposure: 'negative', gammaThrottle: -4.72, realizedVol10d: 9.46,
+      gammaThrottleDate: '2026-09-15', gammaThrottleSource: 'Tier1Alpha.com',
+    });
+  });
+
+  test('keeps throttle independent of exposure and does not mix missing chart companions with narrative', () => {
+    const report = chartReport();
+    report.data.signals = [];
+    delete report.data.chartMetrics.spxGammaVolatilityThrottle.tenDayRealizedVolatility;
+    report.article = { bodyText: '10-day realized volatility is 8.71.' };
+    expect(normalizeMarketStructureSnapshot(report)).toMatchObject({
+      gammaExposure: null, gammaThrottle: -4.72, realizedVol10d: null, gammaThrottleDate: '2026-09-15',
+    });
+  });
+
+  test.each([
+    { connected: false }, { stale: true }, { cacheOnly: true }, { seeded: true }, { mock: true },
+    { refreshFailed: true },
+  ])('rejects unsafe market-structure evidence %p', (flags) => {
+    expect(normalizeMarketStructureSnapshot({ ...chartReport(), ...flags })).toMatchObject({
+      gammaExposure: null, gammaThrottle: null, realizedVol10d: null, gammaThrottleDate: null,
+    });
+  });
+
+  test.each(['2026-09-14', '2026-09-20'])('omits chart metrics outside the session window %s', (targetDate) => {
+    expect(normalizeMarketStructureSnapshot(chartReport(), targetDate)).toMatchObject({
+      gammaThrottle: null, realizedVol10d: null, gammaThrottleDate: null,
+    });
+  });
+
   test('parses the proposed nested SPX daily-email snapshot', () => {
     const normalized = normalizeMarketStructureSnapshot({
       snapshotType: 'hedgeye-market-structure',
@@ -328,18 +437,56 @@ describe('normalizeMarketStructureSnapshot', () => {
 
     expect(normalized).toEqual({
       date: TARGET_DATE,
+      validFrom: null,
+      validThrough: null,
       scrapedAt: `${TARGET_DATE}T12:05:00.000Z`,
       source: 'hedgeye-market-structure',
       gammaExposure: 'positive',
       gammaExposureRaw: 'Positive',
       gammaThrottle: 4.03,
       realizedVol10d: 9.58,
+      gammaThrottleDate: TARGET_DATE,
+      gammaThrottleSource: 'Market Situation Report structured data',
       systematicFlow: 'neutral',
       systematicFlowRaw: 'Neutral',
       pvBand: 'neutral',
       pvBandRaw: 'Neutral',
       strategicAllocation: 'risk_on',
       strategicAllocationRaw: 'Risk On',
+    });
+  });
+
+  test('parses the persisted Market Situation signal matrix and explicit GVT read', () => {
+    const normalized = normalizeMarketStructureSnapshot({
+      snapshotType: 'market-structure',
+      schemaVersion: 'market-structure-v2',
+      contentComplete: true,
+      date: '2026-08-17',
+      scrapedAt: '2026-08-17T10:30:31.000Z',
+      article: {
+        bodyText: 'Positive dealer gamma remains in place. The historical average of our GVT index at 12.63 remains in play.',
+      },
+      data: {
+        signals: [
+          { id: 'spxGammaExposure', label: 'SPX Gamma Exposure', value: 'Positive' },
+          { id: 'systematicFlowRisk', label: 'Systematic Flow Risk', value: 'Neutral' },
+          { id: 'pvBandRiskReward', label: 'PV Band Risk/Reward', value: 'Neutral' },
+          { id: 'strategicAllocation', label: 'Strategic Allocation', value: 'Risk On' },
+        ],
+        blocks: [{ type: 'heading', text: 'WEEKLY GAME PLAN: August 17th- 21st' }],
+      },
+    });
+
+    expect(normalized).toMatchObject({
+      date: '2026-08-17',
+      validFrom: '2026-08-17',
+      validThrough: '2026-08-21',
+      source: 'Market Situation Report',
+      gammaExposure: 'positive',
+      gammaThrottle: 12.63,
+      systematicFlow: 'neutral',
+      pvBand: 'neutral',
+      strategicAllocation: 'risk_on',
     });
   });
 });

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, Text, Button } from '@tremor/react';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
+import ReactQuill from '../common/RichTextEditor';
 import { notesService } from '../../services/api/notesService';
 import MarketCalendar from './MarketCalendar';
 import LoadingIndicator from '../common/LoadingIndicator';
@@ -180,7 +179,7 @@ const DailyNotepad = () => {
   const formats = [
     'header',
     'bold', 'italic', 'underline', 'strike',
-    'list', 'bullet',
+    'list',
     'link', 'image',
     'color', 'background'
   ];
@@ -364,4 +363,3 @@ const DailyNotepad = () => {
 };
 
 export default DailyNotepad;
-

@@ -40,6 +40,7 @@ Thumbs.db
 
 # Python virtual environments and bytecode
 **/.venv/
+**/.venv
 **/.venv.*/
 **/__pycache__/
 *.py[cod]
@@ -72,4 +73,16 @@ aws/lambda/*.png
 # Local live-data/runtime snapshots
 /data/hedgeye/rta/*.json
 /data/ibkr-flex/
+/data/market-quotes-reference/
+/data/volatility-reference/
 /src/services/predictionMarketsIngest/mock/.local-ingest-cache.json
+
+# Private source images and OCR verification artifacts.
+.cache/global-quads/
+
+# Immutable local historical research sources and editions.
+/data/quad-research/
+
+# Append-only local GDP observations; reviewed source artifacts remain versioned.
+/data/research/gdp/records.jsonl
+/data/research/published-trade-v1.json

@@ -1,5 +1,11 @@
 import React from 'react';
+import {
+  buildRiskRangeThirdBands,
+  RISK_RANGE_BAND_COLORS,
+} from '../../utils/riskRangeChart';
 import { formatMarketMonthDay } from '../../utils/timeUtils';
+import { delayedMarkerMarketContext } from '../../utils/delayedMarkerMarketContext';
+import DelayedDataMarker from './DelayedDataMarker';
 
 export const VOLATILITY_METRIC_PERIODS = Object.freeze([
   Object.freeze({ key: 'dayChangePct', levelKey: 'day1Ago', label: 'DAY' }),
@@ -24,6 +30,7 @@ export const VOLATILITY_METRIC_CHART_POINTS = Object.freeze([
 
 const CHART_SIZE = Object.freeze({ width: 244, height: 76 });
 const CHART_MARGIN = Object.freeze({ top: 6, right: 6, bottom: 18, left: 34 });
+const CHART_CONTEXT_RATIO = 0.5;
 
 export const isFiniteMetricNumber = (value) => (
   value !== '' && value != null && Number.isFinite(Number(value))
@@ -77,11 +84,38 @@ const formatLevel = (value) => {
   });
 };
 
+export const normalizeVolatilityRiskRange = (riskRange) => {
+  if (riskRange?.verified !== true || riskRange?.status !== 'available') return null;
+  const source = String(riskRange?.source || '').trim();
+  const lrr = isFiniteMetricNumber(riskRange?.lrr) ? Number(riskRange.lrr) : null;
+  const hrr = isFiniteMetricNumber(riskRange?.hrr) ? Number(riskRange.hrr) : null;
+  if (!source || lrr == null || hrr == null || lrr >= hrr) return null;
+
+  const bands = buildRiskRangeThirdBands([
+    { kind: 'underlying', label: 'LRR', tone: 'low', value: lrr, status: 'available', source },
+    { kind: 'underlying', label: 'HRR', tone: 'high', value: hrr, status: 'available', source },
+  ]);
+  if (bands.length !== 2) return null;
+  return {
+    lrr,
+    hrr,
+    bands,
+    date: riskRange.date || null,
+    asOf: riskRange.asOf || null,
+    source,
+  };
+};
+
 export const buildVolatilityMetricChart = (
   row,
   width = CHART_SIZE.width,
   height = CHART_SIZE.height,
-  { available = true, historical = false } = {},
+  {
+    available = true,
+    historical = false,
+    regimeRanges = null,
+    riskRange = null,
+  } = {},
 ) => {
   const chartPoints = getChartPoints(row);
   const observationDateLabel = formatMarketMonthDay(row?.asOf);
@@ -92,12 +126,33 @@ export const buildVolatilityMetricChart = (
   ) return null;
 
   const values = chartPoints.map(({ key }) => Number(row[key]));
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const verifiedRiskRange = normalizeVolatilityRiskRange(riskRange);
+  const domainValues = verifiedRiskRange
+    ? [...values, verifiedRiskRange.lrr, verifiedRiskRange.hrr]
+    : values;
+  const min = Math.min(...domainValues);
+  const max = Math.max(...domainValues);
   const rawRange = max - min;
-  const step = getNiceStep((rawRange || Math.max(Math.abs(max) * 0.1, 1)) / 2);
-  let axisMin = Math.floor(min / step) * step;
-  let axisMax = Math.ceil(max / step) * step;
+  const contextPadding = Math.max(
+    rawRange * CHART_CONTEXT_RATIO,
+    Math.max(Math.abs(max) * 0.05, 1),
+  );
+  const finiteBoundaries = (Array.isArray(regimeRanges) ? regimeRanges : [])
+    .flatMap(({ min: lower, max: upper }) => [lower, upper])
+    .map(Number)
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+  const nextBoundary = finiteBoundaries.find((boundary) => boundary > max);
+  const paddedMin = Math.max(0, min - contextPadding);
+  const paddedMax = Math.max(max + contextPadding, nextBoundary || -Infinity);
+  const step = getNiceStep(
+    (paddedMax - paddedMin || Math.max(Math.abs(max) * 0.1, 1)) / 4,
+  );
+  let axisMin = Math.floor(paddedMin / step) * step;
+  let axisMax = Math.ceil(paddedMax / step) * step;
+  if (nextBoundary != null) {
+    axisMax = Math.max(axisMax, Math.ceil(nextBoundary / step) * step);
+  }
   if (axisMin === axisMax) {
     axisMin -= step;
     axisMax += step;
@@ -145,6 +200,9 @@ export const buildVolatilityMetricChart = (
     points,
     segments,
     yTicks,
+    axisMin,
+    axisMax,
+    riskRange: verifiedRiskRange,
   };
 };
 
@@ -154,8 +212,7 @@ export const buildVolatilityMetricSparkline = (row, width, height, options) => (
 
 const buildRegimeBands = (chart, regimeRanges) => {
   if (!chart || !Array.isArray(regimeRanges)) return [];
-  const axisMin = chart.yTicks.at(-1)?.value;
-  const axisMax = chart.yTicks[0]?.value;
+  const { axisMin, axisMax } = chart;
   const valueToY = (value) => (
     chart.plotTop + (((axisMax - value) / (axisMax - axisMin)) * (chart.plotBottom - chart.plotTop))
   );
@@ -172,19 +229,73 @@ const buildRegimeBands = (chart, regimeRanges) => {
   });
 };
 
-const VolatilityMetricSparkline = ({ row, symbol, available, historical, regimeRanges }) => {
-  const chart = buildVolatilityMetricChart(row, undefined, undefined, { available, historical });
+export const buildVolatilityRiskRangeOverlay = (chart) => {
+  const riskRange = chart?.riskRange;
+  const { axisMin, axisMax } = chart || {};
+  if (!riskRange || !Number.isFinite(axisMin) || !Number.isFinite(axisMax) || axisMax <= axisMin) {
+    return null;
+  }
+  const valueToY = (value) => (
+    chart.plotTop + (((axisMax - value) / (axisMax - axisMin)) * (chart.plotBottom - chart.plotTop))
+  );
+
+  return {
+    ...riskRange,
+    bands: riskRange.bands.map((band) => {
+      const top = valueToY(band.y2);
+      const bottom = valueToY(band.y1);
+      return { ...band, y: top, height: bottom - top };
+    }),
+    lines: [
+      { key: 'lrr', label: 'LRR', tone: 'low', value: riskRange.lrr, y: valueToY(riskRange.lrr) },
+      { key: 'hrr', label: 'HRR', tone: 'high', value: riskRange.hrr, y: valueToY(riskRange.hrr) },
+    ],
+  };
+};
+
+const riskRangeStatusLabel = (status) => {
+  if (status === 'loading') return 'RR LOADING';
+  if (status === 'unavailable') return 'RR UNAVAILABLE';
+  return null;
+};
+
+const VolatilityMetricSparkline = ({
+  row,
+  symbol,
+  available,
+  historical,
+  regimeRanges,
+  riskRange,
+  riskRangeStatus,
+}) => {
+  const riskRangeForDisplay = riskRangeStatus == null || riskRangeStatus === 'available'
+    ? riskRange
+    : null;
+  const chart = buildVolatilityMetricChart(row, undefined, undefined, {
+    available,
+    historical,
+    regimeRanges,
+    riskRange: riskRangeForDisplay,
+  });
   if (!chart) return <div className="efr-vol-sparkline__empty">NO LIVE SERIES</div>;
   const rangeStart = chart.points[0]?.key === 'month6Ago' ? 'six months ago' : 'three months ago';
   const endpointLabel = chart.points[chart.points.length - 1]?.label;
   const regimeBands = buildRegimeBands(chart, regimeRanges);
+  const riskRangeOverlay = buildVolatilityRiskRangeOverlay(chart);
+  const resolvedRiskRangeStatus = riskRangeStatus === 'available' && !riskRangeOverlay
+    ? 'unavailable'
+    : riskRangeStatus;
+  const rangeStatusLabel = riskRangeStatusLabel(resolvedRiskRangeStatus);
+  const rangeAriaLabel = riskRangeOverlay
+    ? ` with verified ${symbol} Risk Range ${formatLevel(riskRangeOverlay.lrr)} to ${formatLevel(riskRangeOverlay.hrr)}${riskRangeOverlay.date ? ` for ${riskRangeOverlay.date}` : ''}`
+    : rangeStatusLabel ? `; ${rangeStatusLabel.toLowerCase()}` : '';
 
   return (
     <div className="efr-vol-sparkline">
       <svg
         viewBox={`0 0 ${chart.width} ${chart.height}`}
         role="img"
-        aria-label={`${symbol} volatility from ${rangeStart} to ${endpointLabel === 'CLOSE' ? 'close' : endpointLabel}`}
+        aria-label={`${symbol} volatility from ${rangeStart} to ${endpointLabel === 'CLOSE' ? 'close' : endpointLabel}${rangeAriaLabel}`}
       >
         {regimeBands.map(({ color, y, height }) => (
           <rect
@@ -192,6 +303,20 @@ const VolatilityMetricSparkline = ({ row, symbol, available, historical, regimeR
             className={`efr-vol-sparkline__regime-band efr-vol-sparkline__regime-band--${color}`}
             height={height}
             key={color}
+            width={chart.plotRight - chart.plotLeft}
+            x={chart.plotLeft}
+            y={y}
+          />
+        ))}
+        {riskRangeOverlay?.bands.map(({ key, tone, y, height }) => (
+          <rect
+            aria-hidden="true"
+            className={`efr-vol-sparkline__risk-band efr-vol-sparkline__risk-band--${tone}`}
+            data-risk-range-band={key}
+            fill={RISK_RANGE_BAND_COLORS[tone]}
+            fillOpacity="0.62"
+            height={height}
+            key={key}
             width={chart.plotRight - chart.plotLeft}
             x={chart.plotLeft}
             y={y}
@@ -220,6 +345,30 @@ const VolatilityMetricSparkline = ({ row, symbol, available, historical, regimeR
             <text x={x} y={chart.height - 3}>{label}</text>
           </g>
         ))}
+        {riskRangeOverlay?.lines.map(({ key, label, tone, value, y }) => (
+          <g
+            className={`efr-vol-sparkline__risk-line efr-vol-sparkline__risk-line--${tone}`}
+            data-risk-range-line={key}
+            key={key}
+          >
+            <line x1={chart.plotLeft} y1={y} x2={chart.plotRight} y2={y} />
+            <text
+              x={chart.plotRight - 2}
+              y={tone === 'high' ? y - 3 : y + 7}
+            >
+              {label} {Number(value).toFixed(2)}
+            </text>
+          </g>
+        ))}
+        {rangeStatusLabel ? (
+          <text
+            className="efr-vol-sparkline__risk-status"
+            x={chart.plotRight - 2}
+            y={chart.plotTop + 8}
+          >
+            {rangeStatusLabel}
+          </text>
+        ) : null}
         {chart.segments.map(({ key, from, to, direction }) => (
           <line
             className={`efr-vol-sparkline__segment ${direction}`}
@@ -241,70 +390,124 @@ const VolatilityMetricRow = ({
   symbol,
   available,
   historical = false,
-  asOfLabel = null,
+  refreshDelayed = false,
   bucket = null,
   regimeLabel = null,
   regimeRange = null,
   regimeRanges = null,
+  riskRange = null,
+  riskRangeStatus = null,
   resolveLevelBucket = null,
+  onTickerClick = null,
   ariaLabel,
   className = '',
-}) => (
-  <article
-    className={`efr-vol-row${available ? '' : ' is-unavailable'}${className ? ` ${className}` : ''}`}
-    aria-label={ariaLabel}
-  >
-    <div className="efr-vol-row__chart">
-      <VolatilityMetricSparkline
-        row={row}
-        symbol={symbol}
-        available={available}
-        historical={historical}
-        regimeRanges={regimeRanges}
-      />
-    </div>
-    <div className="efr-vol-row__data">
-      <div className="efr-vol-row__metrics">
-        {VOLATILITY_METRIC_PERIODS.map(({ key, levelKey, label }) => {
-          const levelBucket = available ? resolveLevelBucket?.(row?.[levelKey]) : null;
-          return (
-            <span
-              className={available
-                ? volatilityMetricDirectionClass(row?.[key])
-                : 'is-flat'}
-              key={key}
+}) => {
+  const verifiedRiskRange = available
+    && (riskRangeStatus == null || riskRangeStatus === 'available')
+    ? normalizeVolatilityRiskRange(riskRange)
+    : null;
+  const displayedStatus = refreshDelayed ? 'refresh-delayed' : historical ? 'historical' : 'live';
+  const referenceAsOf = row?.asOf || row?.lastVerifiedAt || row?.timestamp;
+  const markerTitle = refreshDelayed
+    ? `Refresh delayed · last verified ${referenceAsOf || 'time unavailable'}`
+    : `Historical reference · as of ${referenceAsOf || 'time unavailable'}`;
+
+  return (
+    <article
+      className={`efr-vol-row${available ? '' : ' is-unavailable'}${refreshDelayed ? ' is-refresh-delayed' : ''}${className ? ` ${className}` : ''}`}
+      aria-label={ariaLabel}
+    >
+      <div className="efr-vol-row__chart">
+        <VolatilityMetricSparkline
+          row={row}
+          symbol={symbol}
+          available={available}
+          historical={historical}
+          regimeRanges={regimeRanges}
+          riskRange={riskRange}
+          riskRangeStatus={riskRangeStatus}
+        />
+      </div>
+      <div className="efr-vol-row__data">
+        <div className="efr-vol-row__metrics">
+          {VOLATILITY_METRIC_PERIODS.map(({ key, levelKey, label }) => {
+            const metricDirection = available
+              ? volatilityMetricDirectionClass(row?.[key])
+              : 'is-flat';
+            const levelBucket = available ? resolveLevelBucket?.(row?.[levelKey]) : null;
+            const metricLevelClass = levelBucket
+              ? `efr-vol-row__metric-level efr-vol-row__metric-level--${levelBucket}`
+              : `efr-vol-row__metric-level efr-vol-row__metric-level--${metricDirection.replace('is-', '')}`;
+            return (
+              <span
+                className={metricDirection}
+                key={key}
+              >
+                <small>{label}</small>
+                {available ? (
+                  <span className="efr-vol-row__metric-values">
+                    <strong>{formatChange(row?.[key])}</strong>
+                    <span className="efr-vol-row__metric-separator" aria-hidden="true">:</span>
+                    <b className={metricLevelClass}>
+                      {formatLevel(row?.[levelKey])}
+                    </b>
+                  </span>
+                ) : <strong>—</strong>}
+              </span>
+            );
+          })}
+        </div>
+        <div className={`efr-vol-row__regime${bucket ? ` efr-vol-row__regime--${bucket}` : ''}`}>
+          <strong>{regimeLabel || '—'}</strong>
+          {regimeRange ? <small>{regimeRange}</small> : null}
+        </div>
+        <div className="efr-vol-row__identity">
+          <strong className="efr-vol-row__ticker">
+            {onTickerClick ? (
+              <button
+                type="button"
+                className="efr-vol-row__ticker-button"
+                onClick={onTickerClick}
+                aria-haspopup="dialog"
+                aria-label={`Explain ${symbol} volatility index`}
+                title={`What ${symbol} is and how it is used`}
+              >
+                {symbol}
+              </button>
+            ) : symbol}
+          </strong>
+          {verifiedRiskRange ? (
+            <dl
+              className="efr-vol-row__risk-range"
+              aria-label={`${symbol} Risk Range`}
             >
-              <small>{label}</small>
-              {available ? (
-                <span className="efr-vol-row__metric-values">
-                  <strong>{formatChange(row?.[key])}</strong>
-                  <span className="efr-vol-row__metric-separator" aria-hidden="true">:</span>
-                  <b className={levelBucket ? `efr-vol-row__metric-level efr-vol-row__metric-level--${levelBucket}` : 'efr-vol-row__metric-level'}>
-                    {formatLevel(row?.[levelKey])}
-                  </b>
-                </span>
-              ) : <strong>—</strong>}
-            </span>
-          );
-        })}
-      </div>
-      <div className={`efr-vol-row__regime${bucket ? ` efr-vol-row__regime--${bucket}` : ''}`}>
-        <strong>{regimeLabel || '—'}</strong>
-        {regimeRange ? <small>{regimeRange}</small> : null}
-      </div>
-      <div className="efr-vol-row__identity">
-        <strong>
-          {symbol}
-          {historical && asOfLabel ? (
-            <time className="efr-vol-row__eod">AS OF {asOfLabel}</time>
+              <div className="efr-vol-row__risk-range-bound efr-vol-row__risk-range-bound--high">
+                <dt>HRR</dt>
+                <dd>{formatLevel(verifiedRiskRange.hrr)}</dd>
+              </div>
+              <div className="efr-vol-row__risk-range-bound efr-vol-row__risk-range-bound--low">
+                <dt>LRR</dt>
+                <dd>{formatLevel(verifiedRiskRange.lrr)}</dd>
+              </div>
+            </dl>
           ) : null}
-        </strong>
-        <span className={bucket ? `efr-vol-regime-value efr-vol-regime-value--${bucket}` : ''}>
-          {available ? formatLevel(row?.lastPx) : '—'}
-        </span>
+          <span className={`efr-vol-row__spot${bucket ? ` efr-vol-regime-value efr-vol-regime-value--${bucket}` : ''}`}>
+            {available ? (
+              <>
+                {formatLevel(row?.lastPx)}
+                <DelayedDataMarker
+                  status={displayedStatus}
+                  title={markerTitle}
+                  updatedAt={referenceAsOf}
+                  {...delayedMarkerMarketContext(row, { symbol })}
+                />
+              </>
+            ) : '—'}
+          </span>
+        </div>
       </div>
-    </div>
-  </article>
-);
+    </article>
+  );
+};
 
 export default VolatilityMetricRow;

@@ -48,6 +48,53 @@ const CORRELATION_STATE = {
 };
 
 describe('USDCorrelationMatrix', () => {
+  test('shows Silver beside Gold in the ten-row dashboard matrix', () => {
+    render(<USDCorrelationMatrix variant="radar" showFxVolatility={false} state={{
+      ...CORRELATION_STATE,
+      correlations: {
+        ...CORRELATION_STATE.correlations,
+        SILVER: CORRELATION_STATE.correlations.SPX,
+        UST10Y: CORRELATION_STATE.correlations.SPX,
+        COPPER: CORRELATION_STATE.correlations.SPX,
+      },
+      rollingStats: {
+        ...CORRELATION_STATE.rollingStats,
+        SILVER: CORRELATION_STATE.rollingStats.SPX,
+        UST10Y: CORRELATION_STATE.rollingStats.SPX,
+        COPPER: CORRELATION_STATE.rollingStats.SPX,
+      },
+    }} />);
+    const table = screen.getByRole('table', { name: 'USD correlations' });
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(11);
+    expect(rows[6]).toHaveTextContent('GOLD');
+    expect(rows[7]).toHaveTextContent('SILVER');
+    expect(within(table).getByText('SILVER')).toHaveAttribute('title', 'Silver Futures');
+    expect(within(table).getByText('UST10Y')).toHaveAttribute('title', '10-Year U.S. Treasury Yield');
+    expect(within(table).getByText('COPPER')).toHaveAttribute('title', 'Copper Futures');
+    expect(screen.queryByLabelText('UST10Y correlation data unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('COPPER correlation data unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('SILVER correlation data unavailable')).not.toBeInTheDocument();
+  });
+
+  test.each(['SILVER', 'UST10Y', 'COPPER'])('keeps incomplete %s correlations unavailable rather than converting null to zero', (symbol) => {
+    render(<USDCorrelationMatrix variant="radar" showFxVolatility={false} state={{
+      ...CORRELATION_STATE,
+      correlations: { ...CORRELATION_STATE.correlations, [symbol]: { ...CORRELATION_STATE.correlations.SPX, '15D': null } },
+      rollingStats: { ...CORRELATION_STATE.rollingStats, [symbol]: CORRELATION_STATE.rollingStats.SPX },
+    }} />);
+    const row = screen.getByLabelText(`${symbol} correlation data unavailable`);
+    expect(within(row).getAllByRole('cell').slice(1).map(cell => cell.textContent)).toEqual(Array(9).fill('--'));
+  });
+
+  test('removes the separate FX volatility panel when displayed in the main volatility table', () => {
+    render(<USDCorrelationMatrix variant="radar" showFxVolatility={false}
+      state={{ ...CORRELATION_STATE, fxvlSnapshot: COMPLETE_FXVL }} />);
+    expect(screen.queryByRole('region', { name: 'FX Volatility' })).not.toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'USD correlations' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Market events quick reference' })).not.toBeInTheDocument();
+  });
+
   test('uses neutral, light, and strong red/green correlation bands', () => {
     expect(corrHeatProps(-1).className).toBe('usd-corr-heat--neg-strong');
     expect(corrHeatProps(-0.75).className).toBe('usd-corr-heat--neg-strong');
@@ -86,7 +133,7 @@ describe('USDCorrelationMatrix', () => {
     render(
       <USDCorrelationMatrix
         correlations={{
-          SPX: { '5D': 0.05, '15D': 0.1, '30D': 0.2, '1M': 0.25, '3M': 0.3, '6M': 0.4 },
+          SPX: { '5D': 0.05, '15D': 0.1, '30D': 0.2, '1M': 0.25, '3M': 0.3, '6M': 0.4, '90D': -0.925, '120D': -0.76, '180D': -0.71 },
         }}
         rollingStats={{
           SPX: { high: 0.8, low: -0.7, percentPositive: 42, percentNegative: 58 },
@@ -100,19 +147,36 @@ describe('USDCorrelationMatrix', () => {
 
     expect(screen.getByText('USD Correlations')).toBeTruthy();
     expect(screen.queryByText('Key USD Correlations')).toBeNull();
+    expect(screen.queryByText('Trending Price-Level Pearson · Trading Days')).not.toBeInTheDocument();
+    expect(screen.queryByText('1Y Stats · 30D Rolling')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /status details for usd correlations/i })).toBeInTheDocument();
     expect(screen.getByLabelText('FXVL correlation data unavailable')).toHaveTextContent('NO DATA');
+    expect(screen.getByRole('row', { name: /^SPX/ })).toHaveTextContent('-0.93');
     expect(screen.getByText('42%')).toBeTruthy();
     expect(screen.getByText('58%')).toBeTruthy();
-    expect(Array.from(screen.getByRole('table').querySelectorAll('thead th')).map(({ textContent }) => textContent.trim()))
-      .toEqual(['METRIC', '5D', '15D', '30D', '1M', '3M', '6M', 'HIGH', 'LOW', '% TIME POS', '% TIME NEG']);
+    expect(within(screen.getByRole('table')).getAllByRole('columnheader').map(({ textContent }) => textContent.trim()))
+      .toEqual(['METRIC', '15D', '30D', '90D', '120D', '180D', 'HIGH', 'LOW', '% TIME POS', '% TIME NEG']);
+  });
+
+  test('keeps the dated matrix visible while a refresh is in flight', () => {
+    render(
+      <USDCorrelationMatrix
+        {...CORRELATION_STATE}
+        refreshing
+      />,
+    );
+
+    expect(screen.getByText(/Refreshing verified correlation data/i)).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'USD correlations' })).toBeInTheDocument();
+    expect(screen.getByText('42%')).toBeInTheDocument();
   });
 
   test('renders current FXVL correlations as the first metric row', () => {
     render(
       <USDCorrelationMatrix
         correlations={{
-          FXVL: { '5D': 0.05, '15D': 0.11, '30D': 0.22, '1M': 0.25, '3M': 0.33, '6M': 0.44 },
-          SPX: { '5D': 0.05, '15D': 0.1, '30D': 0.2, '1M': 0.25, '3M': 0.3, '6M': 0.4 },
+          FXVL: { '5D': 0.05, '15D': 0.11, '30D': 0.22, '1M': 0.25, '3M': 0.33, '6M': 0.44, '90D': 0.33, '120D': 0.44, '180D': 0.55 },
+          SPX: { '5D': 0.05, '15D': 0.1, '30D': 0.2, '1M': 0.25, '3M': 0.3, '6M': 0.4, '90D': 0.3, '120D': 0.4, '180D': 0.5 },
         }}
         rollingStats={{
           FXVL: { high: 0.72, low: -0.61, percentPositive: 63, percentNegative: 37 },
@@ -138,7 +202,7 @@ describe('USDCorrelationMatrix', () => {
       <USDCorrelationMatrix
         state={{
           correlations: {
-            SPX: { '5D': 0.05, '15D': 0.1, '30D': 0.2, '1M': 0.25, '3M': 0.3, '6M': 0.4 },
+            SPX: { '5D': 0.05, '15D': 0.1, '30D': 0.2, '1M': 0.25, '3M': 0.3, '6M': 0.4, '90D': 0.3, '120D': 0.4, '180D': 0.5 },
           },
           rollingStats: {
             SPX: { high: 0.8, low: -0.7, percentPositive: 42, percentNegative: 58 },
@@ -150,16 +214,19 @@ describe('USDCorrelationMatrix', () => {
           retry,
         }}
         variant="radar"
+        correlationStatus={<span>Correlation snapshot status</span>}
         currencyPanel={<section aria-label="Currency section">Currency rows</section>}
       />,
     );
 
     expect(screen.getByTestId('usd-correlation-panel').getAttribute('data-variant')).toBe('radar');
     expect(screen.queryByText('USD')).not.toBeInTheDocument();
-    expect(screen.queryByText('USD Correlations')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'FX Volatility' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'FX Volatility' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Correlations' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'USD Correlations' })).toBeInTheDocument();
+    expect(screen.queryByText('Trending Price-Level Pearson · Trading Days')).not.toBeInTheDocument();
+    expect(screen.queryByText('1Y Stats · 30D Rolling')).not.toBeInTheDocument();
+    expect(screen.getByText('Correlation snapshot status')).toBeInTheDocument();
     expect(screen.getByLabelText('Currency section')).toHaveTextContent('Currency rows');
     expect(screen.getByText('42%')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /status details for usd correlations/i })).toBeNull();
@@ -178,10 +245,21 @@ describe('USDCorrelationMatrix', () => {
     const row = screen.getByLabelText('FXVL current volatility');
     expect(row).toHaveClass('efr-vol-row', 'usd-corr-fxvl-summary');
     expect(within(row).getByText('5.75')).toBeInTheDocument();
-    expect(Array.from(row.querySelectorAll('.efr-vol-row__metrics small')).map(({ textContent }) => textContent))
-      .toEqual(['DAY', '15D', '1M', '3M', '6M']);
-    expect(Array.from(row.querySelectorAll('.efr-vol-row__metric-level')).map(({ textContent }) => textContent))
-      .toEqual(['6.29', '6.10', '7.12', '5.61', '6.80']);
+    ['DAY', '15D', '1M', '3M', '6M'].forEach(label => {
+      expect(within(row).getAllByText(label)).toHaveLength(label === 'DAY' ? 1 : 2);
+    });
+    [
+      ['6.29', 'falling'],
+      ['6.10', 'falling'],
+      ['7.12', 'falling'],
+      ['5.61', 'rising'],
+      ['6.80', 'falling'],
+    ].forEach(([level, direction]) => {
+      expect(within(row).getByText(level)).toHaveClass(
+        'efr-vol-row__metric-level',
+        `efr-vol-row__metric-level--${direction}`,
+      );
+    });
 
     const chart = within(row).getByLabelText('FXVL volatility from six months ago to 7/14');
     expect(within(chart).getAllByText(/^(6M|3M|1M|15D|1D|7\/14)$/).map(({ textContent }) => textContent))
@@ -210,7 +288,7 @@ describe('USDCorrelationMatrix', () => {
     );
 
     const row = screen.getByLabelText('FXVL closing volatility as of JUL 13');
-    expect(within(row).getByText('AS OF JUL 13')).toBeInTheDocument();
+    expect(within(row).queryByText('AS OF JUL 13')).not.toBeInTheDocument();
     const chart = within(row).getByLabelText('FXVL volatility from six months ago to close');
     expect(chart).toBeInTheDocument();
     expect(within(chart).getAllByText(/^(6M|3M|1M|15D|1D|CLOSE)$/).map(({ textContent }) => textContent))
@@ -240,11 +318,15 @@ describe('USDCorrelationMatrix', () => {
     const row = screen.getByLabelText('G5RV G5 FX 1M realized vol as of JUL 13');
     expect(row).toHaveTextContent('5.75');
     expect(within(row).getByText('G5RV')).toBeInTheDocument();
+    expect(within(row).queryByText('AS OF JUL 13')).not.toBeInTheDocument();
+    expect(within(row).getByText('5.75')).toHaveClass('efr-vol-regime-value', 'efr-vol-regime-value--green');
+    expect(within(row).getByText('Investable')).toBeInTheDocument();
+    expect(within(row).getByText('<8')).toBeInTheDocument();
+    expect(within(row).queryByText('—')).not.toBeInTheDocument();
   });
 
   test.each([
     ['stale', { ...COMPLETE_FXVL, freshness: 'stale' }],
-    ['incomplete', { ...COMPLETE_FXVL, month6Ago: null }],
     ['unattributed', { ...COMPLETE_FXVL, source: null }],
   ])('withholds %s FXVL values', (_case, fxvlSnapshot) => {
     render(

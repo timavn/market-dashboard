@@ -9,12 +9,29 @@
   --dashboard-positive-soft: #ecfdf5;
   --dashboard-negative: #dc2626;
   --dashboard-negative-soft: #fef2f2;
+  --dashboard-attention: #f97316;
+  --dashboard-attention-soft: #fff7ed;
+  /* Shared quad palette from the portfolio quad reference and factor matrix. */
+  --dashboard-quad-1: #059669;
+  --dashboard-quad-2: #78b33d;
+  --dashboard-quad-3: #ffc107;
+  --dashboard-quad-4: #df2a2f;
+  /* Shared neutral label type for dashboard tables and metadata. */
+  --dashboard-muted-text: #667085;
+  --dashboard-muted-text-soft: #8993a2;
+  --dashboard-label-size: clamp(7px, 0.42vw, 8px);
+  --dashboard-label-weight: 760;
+  --dashboard-label-tracking: 0.04em;
+  --dashboard-label-line-height: 1;
+  --dashboard-table-row-height: 16px;
 }
 
 /* Use translucent versions of the same benchmark pair on dark surfaces. */
 .dark .dashboard-shell {
   --dashboard-positive-soft: rgba(5, 150, 105, 0.16);
   --dashboard-negative-soft: rgba(220, 38, 38, 0.16);
+  --dashboard-attention: #fb923c;
+  --dashboard-attention-soft: rgba(249, 115, 22, 0.18);
 }
 
 /*
@@ -83,12 +100,21 @@ body {
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow: auto !important;
 }
 
-/* Prevent Tremor Select from locking body scroll */
-html {
-  overflow: auto !important;
+/* The dashboard is a fixed desktop; expanded windows own their scrolling. */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  scroll-behavior: auto;
+}
+
+#root,
+.App {
+  height: 100%;
+  min-height: 0;
 }
 
 code {

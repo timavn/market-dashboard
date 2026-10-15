@@ -27,10 +27,29 @@ function supplement(ticker, date = '2026-07-17', overrides = {}) {
 }
 
 describe('risk range publication envelope', () => {
+  test('preserves the published instrument name independently of its catalog ticker', () => {
+    const rows = [primary('GLD', '2026-07-21', {
+      name: 'Gold Spot Price', lrr: 4250, hrr: 4424, prevClose: 4421, trend: 'NEUTRAL',
+    })];
+    const envelope = buildRiskRangeEnvelope(rows, {
+      now: new Date('2026-07-21T17:00:00Z'), minPrimaryCount: 1,
+    });
+    expect(envelope.ranges.GLD).toMatchObject({
+      originalName: 'Gold Spot Price', lrr: 4250, hrr: 4424, trend: 'NEUTRAL',
+    });
+    expect(normalizeRiskRangeItem(primary('GLD', '2026-07-21', {
+      originalName: ' Gold Spot Price ', name: 'An unrelated alias',
+    })).value.originalName).toBe('Gold Spot Price');
+    expect(normalizeRiskRangeItem(primary('GLD')).value).not.toHaveProperty('originalName');
+    expect(riskRangeManifestChecksum(rows, '2026-07-21')).toBe(
+      riskRangeManifestChecksum(rows.map(({ name, ...row }) => row), '2026-07-21'),
+    );
+  });
+
   test('keeps Early Look-only tickers out of decision ranges', () => {
     const rows = [
       supplement('SPX', '2026-07-21', { lrr: 1, hrr: 2 }),
-      primary('SPX', '2026-07-21', { lrr: 6000, hrr: 6100 }),
+      primary('SPX', '2026-07-21', { lrr: 6000, hrr: 6100, prevClose: 6042 }),
       supplement('UST10Y', '2026-07-21', { lrr: 4.1, hrr: 4.3 }),
     ];
     const envelope = buildRiskRangeEnvelope(rows, {
@@ -40,7 +59,9 @@ describe('risk range publication envelope', () => {
 
     expect(envelope.status).toBe('current');
     expect(envelope.available).toBe(true);
-    expect(envelope.ranges.SPX).toMatchObject({ lrr: 6000, hrr: 6100, provenance: 'primary' });
+    expect(envelope.ranges.SPX).toMatchObject({
+      lrr: 6000, hrr: 6100, previousClose: 6042, provenance: 'primary',
+    });
     expect(envelope.ranges.UST10Y).toBeUndefined();
     expect(envelope.supplementalRanges.UST10Y).toMatchObject({
       lrr: 4.1,
@@ -242,5 +263,45 @@ describe('risk range publication envelope', () => {
       'manifest-unavailable',
       'manifest-missing',
     ]));
+  });
+
+  test('serves the verified valid subset while preserving the disputed source values', () => {
+    const now = new Date('2026-07-21T17:00:00Z');
+    const valid = primary('SPX', '2026-07-21');
+    const rows = [valid, primary('RUT', '2026-07-21', { lrr: 2834, hrr: 2825 })];
+    const sourceQuality = { status: 'discrepancy', issues: [{ ticker: 'RUT', field: 'riskRange',
+      observed: { lrr: 2834, hrr: 2825 } }] };
+    const manifest = { publicationDate: '2026-07-21', manifestType: 'primary', completionState: 'complete',
+      count: 1, checksum: riskRangeManifestChecksum([valid], '2026-07-21'), sourceQuality };
+    const envelope = buildRiskRangeEnvelope(rows, { now });
+    expect(envelope.available).toBe(false);
+    const result = applyPersistedManifestGate(envelope, rows, manifest, { now, expectedDate: '2026-07-21', afterDeadline: true });
+    expect(result.available).toBe(true);
+    expect(Object.keys(result.ranges)).toEqual(['SPX']);
+    expect(result.sourceQuality).toEqual(sourceQuality);
+    expect(applyPersistedManifestGate(envelope, rows, { ...manifest, checksum: 'wrong' }, {
+      now, expectedDate: '2026-07-21', afterDeadline: true,
+    }).available).toBe(false);
+  });
+
+  test('does not substitute a prior same-day range for a newly disputed range', () => {
+    const now = new Date('2026-07-21T17:00:00Z');
+    const rows = [primary('SPX', '2026-07-21'), primary('RUT', '2026-07-21')];
+    const manifest = { publicationDate: '2026-07-21', manifestType: 'primary', completionState: 'complete', count: 1,
+      checksum: riskRangeManifestChecksum(rows.slice(0, 1), '2026-07-21'),
+      sourceQuality: { status: 'discrepancy', issues: [{ ticker: 'RUT', field: 'riskRange' }] } };
+    const result = applyPersistedManifestGate(buildRiskRangeEnvelope(rows, { now }), rows, manifest, {
+      now, expectedDate: '2026-07-21', afterDeadline: true,
+    });
+    expect(Object.keys(result.ranges)).toEqual(['SPX']);
+  });
+
+  test('one invalid historical reading does not hide independent verified historical ranges', () => {
+    const result = buildRiskRangeEnvelope([
+      primary('SPX', '2026-07-21'), primary('RUT', '2026-07-21', { lrr: 2834, hrr: 2825 }),
+    ], { requestedDate: '2026-07-21' });
+    expect(result.status).toBe('historical');
+    expect(Object.keys(result.ranges)).toEqual(['SPX']);
+    expect(result.diagnostics.invalid).toEqual([expect.objectContaining({ ticker: 'RUT' })]);
   });
 });

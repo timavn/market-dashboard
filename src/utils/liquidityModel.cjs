@@ -1,8 +1,16 @@
 const fs = require('fs');
 const path = require('path');
+const {
+  DEFAULT_GDP_LAG_MONTHS,
+  GLOBAL_LIQUIDITY_RATIO_PRESSURE_WEIGHTS,
+  GLOBAL_LIQUIDITY_REGIME_THRESHOLDS,
+  GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS,
+  GLOBAL_LIQUIDITY_WEIGHTS,
+  US_LIQUIDITY_ACCELERATION_TOLERANCE,
+  US_LIQUIDITY_GREEN_STACK_TO_GDP,
+} = require('../constants/liquidityModelMetadata.cjs');
 
 const DEFAULT_START_DATE = '2000-01-01';
-const DEFAULT_GDP_LAG_MONTHS = 1;
 const HISTORY_LIMIT = 180;
 let defaultAxiosClient;
 
@@ -10,14 +18,6 @@ function getDefaultAxiosClient() {
   if (!defaultAxiosClient) defaultAxiosClient = require('axios');
   return defaultAxiosClient;
 }
-
-const WEIGHTS = {
-  m2_growth_1m: 0.10,
-  m2_growth_3m: 0.25,
-  m2_growth_6m: 0.25,
-  growth_gap: 0.25,
-  m2_to_gdp_pressure: 0.15,
-};
 
 const GLOBAL_COUNTRIES = [
   {
@@ -223,19 +223,19 @@ function linearScore(value, points) {
 }
 
 function growthRisk(value) {
-  return linearScore(value, [[-0.05, 100], [0, 65], [0.05, 35], [0.10, 10], [0.15, 0]]);
+  return linearScore(value, GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS.growth);
 }
 
 function gapRisk(value) {
-  return linearScore(value, [[-0.05, 100], [0, 70], [0.05, 35], [0.10, 0]]);
+  return linearScore(value, GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS.growthGap);
 }
 
 function ratioLevelRisk(value) {
-  return linearScore(value, [[0.95, 100], [1.00, 75], [1.05, 55], [1.20, 25], [1.50, 0]]);
+  return linearScore(value, GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS.ratioLevel);
 }
 
 function ratioTrendRisk(value) {
-  return linearScore(value, [[-0.05, 100], [0, 65], [0.05, 30], [0.10, 0]]);
+  return linearScore(value, GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS.ratioTrend);
 }
 
 function weightedScore(parts) {
@@ -252,13 +252,17 @@ function weightedScore(parts) {
 
 function regimeLabel(score) {
   if (!Number.isFinite(score)) return 'unavailable';
-  if (score < 30) return 'supportive';
-  if (score < 60) return 'neutral/caution';
-  if (score < 80) return 'yellow risk';
+  if (score < GLOBAL_LIQUIDITY_REGIME_THRESHOLDS.supportiveBelow) return 'supportive';
+  if (score < GLOBAL_LIQUIDITY_REGIME_THRESHOLDS.neutralCautionBelow) return 'neutral/caution';
+  if (score < GLOBAL_LIQUIDITY_REGIME_THRESHOLDS.yellowRiskBelow) return 'yellow risk';
   return 'red risk';
 }
 
-function accelerationLabel(shortRate, longRate, tolerance = 0.0025) {
+function accelerationLabel(
+  shortRate,
+  longRate,
+  tolerance = US_LIQUIDITY_ACCELERATION_TOLERANCE,
+) {
   if (!Number.isFinite(shortRate) || !Number.isFinite(longRate)) return 'unavailable';
   const spread = shortRate - longRate;
   if (spread > tolerance) return 'accelerating';
@@ -273,7 +277,12 @@ function stackRegime(row) {
   const stackToGdp = row.stack_to_gdp;
   if (![growth3m, growth6m, growth12m, stackToGdp].every(Number.isFinite)) return 'unavailable';
   if (growth3m < 0 || growth6m < 0) return 'red risk';
-  if (stackToGdp >= 1.05 && growth3m > 0 && growth6m > 0 && growth12m > 0) return 'green';
+  if (
+    stackToGdp >= US_LIQUIDITY_GREEN_STACK_TO_GDP
+    && growth3m > 0
+    && growth6m > 0
+    && growth12m > 0
+  ) return 'green';
   return 'yellow';
 }
 
@@ -488,17 +497,17 @@ async function buildGlobalModel(options = {}) {
     });
     const riskGrowthGap = averageFinite([next.growth_gap_3m_ann, next.growth_gap_6m_ann]);
     const riskScore = weightedScore({
-      m2Growth1m: { value: growthRisk(next.m2_growth_1m_ann), weight: WEIGHTS.m2_growth_1m },
-      m2Growth3m: { value: growthRisk(next.m2_growth_3m_ann), weight: WEIGHTS.m2_growth_3m },
-      m2Growth6m: { value: growthRisk(next.m2_growth_6m_ann), weight: WEIGHTS.m2_growth_6m },
-      gap: { value: gapRisk(riskGrowthGap), weight: WEIGHTS.growth_gap },
+      m2Growth1m: { value: growthRisk(next.m2_growth_1m_ann), weight: GLOBAL_LIQUIDITY_WEIGHTS.m2_growth_1m },
+      m2Growth3m: { value: growthRisk(next.m2_growth_3m_ann), weight: GLOBAL_LIQUIDITY_WEIGHTS.m2_growth_3m },
+      m2Growth6m: { value: growthRisk(next.m2_growth_6m_ann), weight: GLOBAL_LIQUIDITY_WEIGHTS.m2_growth_6m },
+      gap: { value: gapRisk(riskGrowthGap), weight: GLOBAL_LIQUIDITY_WEIGHTS.growth_gap },
       ratio: {
         value: weightedScore({
-          level: { value: ratioLevelRisk(next.m2_to_gdp), weight: 0.5 },
-          trend3m: { value: ratioTrendRisk(next.m2_to_gdp_change_3m_ann), weight: 0.25 },
-          trend6m: { value: ratioTrendRisk(next.m2_to_gdp_change_6m_ann), weight: 0.25 },
+          level: { value: ratioLevelRisk(next.m2_to_gdp), weight: GLOBAL_LIQUIDITY_RATIO_PRESSURE_WEIGHTS.level },
+          trend3m: { value: ratioTrendRisk(next.m2_to_gdp_change_3m_ann), weight: GLOBAL_LIQUIDITY_RATIO_PRESSURE_WEIGHTS.trend3m },
+          trend6m: { value: ratioTrendRisk(next.m2_to_gdp_change_6m_ann), weight: GLOBAL_LIQUIDITY_RATIO_PRESSURE_WEIGHTS.trend6m },
         }),
-        weight: WEIGHTS.m2_to_gdp_pressure,
+        weight: GLOBAL_LIQUIDITY_WEIGHTS.m2_to_gdp_pressure,
       },
     });
     next.liquidity_risk_score = riskScore;

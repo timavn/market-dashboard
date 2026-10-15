@@ -1,4 +1,10 @@
 import { dateKeyInTimeZone } from './spxClosePredictionMarket';
+import { canonicalTradeResearch } from './canonicalTradeResearch.cjs';
+import { extractPublishedTradeSignals, selectLatestPublishedTrade } from './publishedResearchSignals.cjs';
+const {
+  hasUnsafeMarketStructureEvidence,
+  verifiedMarketStructureChartMetricForDate,
+} = require('./marketStructureReport.cjs');
 
 export const SPX_CONFLUENCE_MAX_SCORE = 8;
 export const USD_CORRELATION_BASE_TIER = 0.5;
@@ -63,57 +69,108 @@ function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null) ?? null;
 }
 
-function findTickerSlot(data, ticker) {
-  if (!data || typeof data !== 'object') return null;
-  const upper = String(ticker || '').toUpperCase();
-  const direct = data?.stocks?.[upper] || data?.securities?.[upper] || data?.[upper];
-  if (direct && typeof direct === 'object') return direct;
+const MONTH_NUMBER = Object.freeze({
+  JANUARY: 1,
+  FEBRUARY: 2,
+  MARCH: 3,
+  APRIL: 4,
+  MAY: 5,
+  JUNE: 6,
+  JULY: 7,
+  AUGUST: 8,
+  SEPTEMBER: 9,
+  OCTOBER: 10,
+  NOVEMBER: 11,
+  DECEMBER: 12,
+});
 
-  const rows = [data.rows, data.stocks, data.securities]
-    .find((candidate) => Array.isArray(candidate));
-  if (rows) {
-    const row = rows.find((candidate) => (
-      String(candidate?.ticker || candidate?.symbol || '').toUpperCase() === upper
-    ));
-    if (row) return row;
-  }
-
-  const namedEntry = Object.entries(data).find(([key, value]) => (
-    value &&
-    typeof value === 'object' &&
-    (String(key).toUpperCase() === upper || String(key).toUpperCase().includes(`(${upper})`))
+function marketStructureSignalValue(data, id, label) {
+  const normalizedId = String(id || '').trim().toLowerCase();
+  const normalizedLabel = String(label || '').trim().toLowerCase();
+  const signal = (Array.isArray(data?.signals) ? data.signals : []).find((candidate) => (
+    String(candidate?.id || '').trim().toLowerCase() === normalizedId
+    || String(candidate?.label || '').trim().toLowerCase() === normalizedLabel
   ));
-  return namedEntry?.[1] || null;
+  const value = signal?.value;
+  return value == null || String(value).trim() === '' ? null : value;
 }
 
-/**
- * Trade is intentionally independent from Risk Range Trend. It may come from
- * an explicit published tracker slot or a future explicit `trade` field on the
- * range record, but it is never copied from `riskRange.trend`.
- */
-export function extractSpxTradeSignal(snapshot, riskRange = null) {
-  const explicitRangeTrade = firstDefined(
-    riskRange?.trade,
-    riskRange?.tradeSignal,
-    riskRange?.trackerTrade,
+function marketStructureNarrative(snapshot) {
+  const blocks = Array.isArray(snapshot?.data?.blocks) ? snapshot.data.blocks : [];
+  return [
+    snapshot?.article?.reportHeading,
+    snapshot?.article?.bodyText,
+    ...blocks.map((block) => block?.text),
+  ].filter((value) => typeof value === 'string' && value.trim()).join('\n');
+}
+
+function explicitMarketStructureNumber(snapshot, patterns) {
+  const narrative = marketStructureNarrative(snapshot);
+  for (const pattern of patterns) {
+    const match = narrative.match(pattern);
+    const value = finiteNumber(match?.[1]);
+    if (value != null) return value;
+  }
+  return null;
+}
+
+function isoCalendarDate(year, month, day) {
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (
+    !Number.isInteger(Number(year))
+    || !Number.isInteger(Number(month))
+    || !Number.isInteger(Number(day))
+    || date.getUTCFullYear() !== Number(year)
+    || date.getUTCMonth() + 1 !== Number(month)
+    || date.getUTCDate() !== Number(day)
+  ) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function marketStructureCoverage(snapshot, sourceDate) {
+  if (snapshot?.contentComplete !== true || !sourceDate) return null;
+  const match = marketStructureNarrative(snapshot).match(
+    /\bWEEKLY\s+GAME\s+PLAN\b\s*:?\s*(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+(\d{1,2})(?:ST|ND|RD|TH)?\s*(?:-|–|—|TO)\s*(?:(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+)?(\d{1,2})(?:ST|ND|RD|TH)?(?:\s*,?\s*(\d{4}))?/i,
   );
-  if (normalizeDirection(explicitRangeTrade)) {
-    return {
-      direction: normalizeDirection(explicitRangeTrade),
-      raw: explicitRangeTrade,
-      date: riskRange?.tradeDate || riskRange?.date || null,
-      source: riskRange?.tradeSource || 'published-tracker',
+  if (!match) return null;
+
+  const sourceYear = Number(String(sourceDate).slice(0, 4));
+  const startMonth = MONTH_NUMBER[String(match[1]).toUpperCase()];
+  const endMonth = MONTH_NUMBER[String(match[3] || match[1]).toUpperCase()];
+  const startYear = Number(match[5] || sourceYear);
+  const endYear = endMonth < startMonth ? startYear + 1 : startYear;
+  const validFrom = isoCalendarDate(startYear, startMonth, Number(match[2]));
+  const validThrough = isoCalendarDate(endYear, endMonth, Number(match[4]));
+  if (!validFrom || !validThrough) return null;
+
+  const sourceMs = Date.parse(`${sourceDate}T12:00:00.000Z`);
+  const startMs = Date.parse(`${validFrom}T12:00:00.000Z`);
+  const endMs = Date.parse(`${validThrough}T12:00:00.000Z`);
+  if (
+    !Number.isFinite(sourceMs)
+    || !Number.isFinite(startMs)
+    || !Number.isFinite(endMs)
+    || endMs < startMs
+    || sourceMs < startMs - 24 * 60 * 60_000
+    || sourceMs > endMs
+  ) return null;
+  return { validFrom, validThrough };
+}
+
+/** Trade requires its own published evidence; tracker Trend is never a substitute. */
+export function extractSpxTradeSignal(snapshot) {
+  let payload = snapshot;
+  if (snapshot?.schemaVersion !== 2) {
+    const reading = selectLatestPublishedTrade(extractPublishedTradeSignals(snapshot), { ticker: 'SPX' });
+    payload = {
+      schemaVersion: 2, marketDate: snapshot?.date,
+      bySymbol: { SPX: { decision: { trade: reading && {
+        ...reading, sourceId: reading.sourceProduct, sourceDate: reading.date,
+      } } } },
     };
   }
-
-  const slot = findTickerSlot(snapshot?.data, 'SPX');
-  const raw = firstDefined(slot?.trade, slot?.tradeSignal, slot?.trackerTrend, slot?.trend);
-  return {
-    direction: normalizeDirection(raw),
-    raw,
-    date: slot?.date || snapshot?.date || null,
-    source: slot ? (snapshot?.snapshotType || 'published-tracker') : null,
-  };
+  const trade = canonicalTradeResearch(payload, 'SPX');
+  return { ...trade, direction: normalizeDirection(trade.direction) };
 }
 
 /**
@@ -122,52 +179,81 @@ export function extractSpxTradeSignal(snapshot, riskRange = null) {
  * pvBandRiskReward, and strategicAllocation. A nested `SPX`/`spx` object is
  * also accepted so ingestion can retain report-level metadata at the root.
  */
-export function normalizeMarketStructureSnapshot(snapshot) {
-  const data = snapshot?.data && typeof snapshot.data === 'object' ? snapshot.data : {};
-  const spx = data.SPX || data.spx || data.marketStructure || data.market_structure || {};
+export function normalizeMarketStructureSnapshot(snapshot, targetDate = snapshot?.date) {
+  const sourceData = snapshot?.data && typeof snapshot.data === 'object' ? snapshot.data : {};
+  const sourceSpx = sourceData.SPX || sourceData.spx || sourceData.marketStructure || sourceData.market_structure || {};
+  const unsafe = [snapshot, sourceData, sourceSpx].some(hasUnsafeMarketStructureEvidence);
+  const data = unsafe ? {} : sourceData;
+  const spx = unsafe ? {} : sourceSpx;
+  const completeReport = snapshot?.snapshotType === 'market-structure' && snapshot?.contentComplete === true;
+  const reportSignals = completeReport ? data : null;
   const gammaExposureRaw = firstDefined(
     spx.gammaExposure,
     spx.spxGammaExposure,
     data.gammaExposure,
     data.spxGammaExposure,
+    marketStructureSignalValue(reportSignals, 'spxGammaExposure', 'SPX Gamma Exposure'),
   );
   const systematicRaw = firstDefined(
     spx.systematicFlowRisk,
     spx.systematicFlow,
     data.systematicFlowRisk,
     data.systematicFlow,
+    marketStructureSignalValue(reportSignals, 'systematicFlowRisk', 'Systematic Flow Risk'),
   );
   const pvRaw = firstDefined(
     spx.pvBandRiskReward,
     spx.pvBand,
     data.pvBandRiskReward,
     data.pvBand,
+    marketStructureSignalValue(reportSignals, 'pvBandRiskReward', 'PV Band Risk/Reward'),
   );
   const allocationRaw = firstDefined(
     spx.strategicAllocation,
     data.strategicAllocation,
+    marketStructureSignalValue(reportSignals, 'strategicAllocation', 'Strategic Allocation'),
   );
+  const sourceDate = spx.date || data.date || snapshot?.date || null;
+  const coverage = marketStructureCoverage(snapshot, sourceDate);
+  const throttleMetric = unsafe ? null : verifiedMarketStructureChartMetricForDate(
+    snapshot, 'spxGammaVolatilityThrottle', targetDate,
+  );
+  const narrativeThrottle = completeReport && !unsafe ? explicitMarketStructureNumber(snapshot, [
+    /\b(?:SPX\s+)?GAMMA(?:\s+VOLATILITY)?\s+THROTTLE\b\s*(?::|=|AT|IS|OF)\s*([+-]?\d+(?:\.\d+)?)/i,
+    /\bGVT(?:\s+INDEX)?\b\s*(?:(?:HAS\s+)?(?:RISEN|FALLEN|INCREASED|DECREASED|MOVED)\s+)?(?:TO|AT|IS|OF|=|:)\s*([+-]?\d+(?:\.\d+)?)/i,
+  ]) : null;
+  const narrativeRealizedVol = completeReport && !unsafe ? explicitMarketStructureNumber(snapshot, [
+    /\b(?:CORRESPONDING\s+)?10\s*[-–— ]?\s*DAY\s+REALIZED\s+VOLATILITY\b\s*(?:OF|AT|IS|TO|=|:)\s*([+-]?\d+(?:\.\d+)?)/i,
+    /\b10D\s+REALIZED\s+VOLATILITY\b\s*(?:OF|AT|IS|TO|=|:)\s*([+-]?\d+(?:\.\d+)?)/i,
+  ]) : null;
+  // Chart companions belong to one observation. Do not fill a missing chart
+  // field with a differently dated narrative or structured reading.
+  const gammaThrottle = finiteNumber(throttleMetric ? throttleMetric.gammaThrottle : firstDefined(
+    spx.gammaThrottle, spx.gammaVolatilityThrottle, data.gammaThrottle,
+    data.gammaVolatilityThrottle, narrativeThrottle,
+  ));
+  const realizedVol10d = finiteNumber(throttleMetric ? throttleMetric.tenDayRealizedVolatility : firstDefined(
+    spx.realizedVol10d, spx.tenDayRealizedVolatility, spx.rVol10d,
+    data.realizedVol10d, data.tenDayRealizedVolatility, data.rVol10d, narrativeRealizedVol,
+  ));
+  const hasGammaMetrics = gammaThrottle != null || realizedVol10d != null;
 
   return {
-    date: spx.date || data.date || snapshot?.date || null,
+    date: sourceDate,
+    validFrom: coverage?.validFrom || null,
+    validThrough: coverage?.validThrough || null,
     scrapedAt: snapshot?.scrapedAt || snapshot?.updatedAt || null,
-    source: snapshot ? (snapshot.snapshotType || 'market-structure') : null,
+    source: snapshot
+      ? (snapshot.snapshotType === 'market-structure' ? 'Market Situation Report' : snapshot.snapshotType)
+      : null,
     gammaExposure: normalizeGammaExposure(gammaExposureRaw),
     gammaExposureRaw,
-    gammaThrottle: finiteNumber(firstDefined(
-      spx.gammaThrottle,
-      spx.gammaVolatilityThrottle,
-      data.gammaThrottle,
-      data.gammaVolatilityThrottle,
-    )),
-    realizedVol10d: finiteNumber(firstDefined(
-      spx.realizedVol10d,
-      spx.tenDayRealizedVolatility,
-      spx.rVol10d,
-      data.realizedVol10d,
-      data.tenDayRealizedVolatility,
-      data.rVol10d,
-    )),
+    gammaThrottle,
+    realizedVol10d,
+    gammaThrottleDate: hasGammaMetrics ? throttleMetric?.chartDate || sourceDate : null,
+    gammaThrottleSource: hasGammaMetrics ? throttleMetric?.source
+      || (narrativeThrottle != null || narrativeRealizedVol != null
+        ? 'Market Situation Report narrative' : 'Market Situation Report structured data') : null,
     systematicFlow: normalizeStructureToken(systematicRaw, 'flow'),
     systematicFlowRaw: systematicRaw,
     pvBand: normalizeStructureToken(pvRaw, 'pv'),
@@ -216,6 +302,21 @@ function dateOnly(value) {
 
 export function isExactSessionInput(value, targetDate) {
   return Boolean(dateOnly(value) && dateOnly(value) === dateOnly(targetDate));
+}
+
+export function isCoveredSessionInput(value, targetDate) {
+  if (isExactSessionInput(value?.date, targetDate)) return true;
+  const target = dateOnly(targetDate);
+  const validFrom = dateOnly(value?.validFrom);
+  const validThrough = dateOnly(value?.validThrough);
+  return Boolean(
+    target
+    && validFrom
+    && validThrough
+    && validFrom <= validThrough
+    && target >= validFrom
+    && target <= validThrough
+  );
 }
 
 export function isRecentReferenceInput(value, targetDate, maxCalendarDays = 3) {
@@ -302,12 +403,13 @@ function structureDirection(value, kind) {
 
 function structureScore(structure, direction, targetDate) {
   const exactDate = isExactSessionInput(structure?.date, targetDate);
+  const currentForSession = isCoveredSessionInput(structure, targetDate);
   const fieldsPresent = Boolean(
     structure?.systematicFlow &&
     structure?.pvBand &&
     structure?.strategicAllocation
   );
-  const inputAvailable = Boolean(exactDate && fieldsPresent);
+  const inputAvailable = Boolean(currentForSession && fieldsPresent);
   const available = Boolean(direction && inputAvailable);
   const directions = available ? [
     structureDirection(structure.systematicFlow, 'flow'),
@@ -317,7 +419,7 @@ function structureScore(structure, direction, targetDate) {
   const alignedCount = directions.filter((value) => value === direction).length;
   const conflictCount = directions.filter((value) => value && value !== direction).length;
   const points = available ? (alignedCount === 3 ? 2 : alignedCount >= 2 ? 1 : 0) : null;
-  return { inputAvailable, exactDate, available, points, alignedCount, conflictCount };
+  return { inputAvailable, exactDate, currentForSession, available, points, alignedCount, conflictCount };
 }
 
 export function buildSpxCloseConfluence({
@@ -361,7 +463,7 @@ export function buildSpxCloseConfluence({
   const eligibilityPassed = blockers.length === 0;
   const correlation = correlationScore(usd, targetDate, historical);
   const structure = structureScore(marketStructure, direction, targetDate);
-  const gammaCurrent = isExactSessionInput(marketStructure?.date, targetDate);
+  const gammaCurrent = isCoveredSessionInput(marketStructure, targetDate);
   const gamma = gammaCurrent
     ? gammaScore(marketStructure?.gammaExposure, geometry.coverage, geometry.available)
     : { inputAvailable: false, available: false, points: null };

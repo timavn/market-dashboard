@@ -1,6 +1,8 @@
 const { getCurrentCpiRelease } = require('./cpiRelease');
 const { discoverIbkrEventContracts } = require('./providers/ibkrProvider');
 const { persistCatalogEvents } = require('./cache');
+const { createPublicSources } = require('../predictionMarketTest/publicSources.cjs');
+const { cpiIdentity } = require('../predictionMarketTest/cpiForecastExReviewService.cjs');
 
 const RECONCILIATION_TYPE = 'cpi_catalog_reconciliation';
 const VALID_TRIGGERS = new Set(['manual', 'premarket', 'release_change', 'startup']);
@@ -213,8 +215,69 @@ function assessCatalogCandidates(candidates = [], release = {}, at = new Date())
   };
 }
 
+function matchOfficialCpiCandidates(candidates, identity) {
+  const officialByStrike = new Map(identity.lines.map((line) => [line.threshold, line]));
+  const expectedExpiry = identity.releaseAt.slice(0, 10).replaceAll('-', '');
+  const failures = [];
+  const pairs = new Set();
+  const conIds = new Set();
+  const expiryMatches = (value) => String(value || '') === expectedExpiry
+    || (/(?:Z|[+-]\d{2}:?\d{2})$/.test(String(value || ''))
+      && Date.parse(value) === Date.parse(identity.releaseAt));
+  const matched = candidates.map((candidate) => {
+    const key = String(Number(candidate.conId ?? candidate.conid));
+    const local = String(candidate.localSymbol || '').match(/^(CPIY_\d{4})_(-?\d+(?:\.\d+)?)_(YES|NO)$/);
+    const strike = candidate.strike == null || candidate.strike === '' || typeof candidate.strike === 'boolean'
+      ? NaN : Number(candidate.strike);
+    const official = officialByStrike.get(strike);
+    const side = String(candidate.quote_side || candidate.native_side || '').toUpperCase();
+    const pair = `${strike}:${side}`;
+    if (!official || !local || local[1] !== identity.generationId || Number(local[2]) !== strike || local[3] !== side) {
+      failures.push(`${key}:official_contract_mismatch`);
+    }
+    if (candidate.symbol !== 'CPIY' || candidate.tradingClass !== 'CPIY'
+      || candidate.secType !== 'OPT' || candidate.exchange !== 'FORECASTX'
+      || candidate.right !== (side === 'YES' ? 'C' : side === 'NO' ? 'P' : null)
+      || !expiryMatches(candidate.lastTradeDateOrContractMonth)
+      || (candidate.expiration_time != null && !expiryMatches(candidate.expiration_time))
+      || (candidate.close_time != null && Date.parse(candidate.close_time) !== Date.parse(identity.releaseAt))) {
+      failures.push(`${key}:native_contract_mismatch`);
+    }
+    if ((candidate.native_side != null && candidate.native_side !== side)
+      || (candidate.conid != null && Number(candidate.conid) !== Number(key))
+      || (candidate.api_raw_id != null && String(candidate.api_raw_id) !== key)
+      || (candidate.publicContractId != null && candidate.publicContractId !== official?.contractId)
+      || (candidate.contractId != null && candidate.contractId !== official?.contractId)) {
+      failures.push(`${key}:conflicting_contract_identity`);
+    }
+    if (pairs.has(pair) || conIds.has(key)) failures.push(`${key}:duplicate_native_contract`);
+    pairs.add(pair);
+    conIds.add(key);
+    if (!official) return candidate;
+    return {
+      ...candidate,
+      publicContractId: official.contractId,
+      contractId: official.contractId,
+      productCode: official.productId,
+      reportMonthId: identity.month,
+      close_time: official.lastTradeDate,
+      expiration_time: official.expirationDate,
+      rulesUrl: official.rulesUrl || official.exchangeSpecUrl,
+      question: official.question,
+      contract_title: official.question,
+    };
+  });
+  for (const line of identity.lines) {
+    for (const side of ['YES', 'NO']) {
+      if (!pairs.has(`${line.threshold}:${side}`)) failures.push(`${line.contractId}:${side}:missing_native_side`);
+    }
+  }
+  return { failures: [...new Set(failures)], candidates: matched };
+}
+
 function createCpiCatalogReconciler({
   loadCurrentRelease = getCurrentCpiRelease,
+  loadOfficialCatalog = null,
   discover = discoverIbkrEventContracts,
   promoteCatalog = persistCatalogEvents,
   now = () => new Date(),
@@ -223,6 +286,9 @@ function createCpiCatalogReconciler({
   logger = console,
   env = process.env,
 } = {}) {
+  const publicSources = loadOfficialCatalog ? null : createPublicSources({ now: () => currentDate(now), env });
+  const readOfficialCatalog = loadOfficialCatalog
+    || (() => publicSources.getForecastExContracts('CPIY', { forceRefresh: true }));
   const pollMs = positiveInteger(env.PM_CPI_RECONCILE_POLL_MS, DEFAULT_POLL_MS);
   const premarketIntervalMs = positiveInteger(
     env.PM_CPI_PREMARKET_RECONCILE_MS,
@@ -290,17 +356,38 @@ function createCpiCatalogReconciler({
         currentRelease = currentRelease || await loadCurrentRelease();
         const fingerprint = releaseFingerprint(currentRelease);
         state.lastObservedFingerprint = fingerprint;
-        requestBody = operationalDiscoveryBody(currentRelease, requestedBody);
+        const officialCatalog = await readOfficialCatalog(currentRelease);
+        const officialIdentity = cpiIdentity(officialCatalog, currentRelease, currentDate(now).getTime());
+        if (!officialIdentity) {
+          const error = new Error('The current CPI release could not be verified against the official ForecastEx inventory.');
+          error.code = 'CATALOG_OFFICIAL_INVENTORY_UNVERIFIED';
+          throw error;
+        }
+        const discoveryRelease = {
+          ...currentRelease,
+          cpi: {
+            ...(currentRelease.cpi || currentRelease.request?.cpi),
+            targetStrikes: officialIdentity.lines.map((line) => line.threshold),
+          },
+        };
+        requestBody = operationalDiscoveryBody(discoveryRelease, requestedBody);
         const discovery = await discover(requestBody);
-        const qualification = assessDiscoveryQualification(discovery, currentRelease);
+        const qualification = assessDiscoveryQualification(discovery, discoveryRelease);
         const candidates = Array.isArray(discovery?.catalog_contracts)
           ? discovery.catalog_contracts
           : [];
-        const candidateAssessment = assessCatalogCandidates(candidates, currentRelease, started);
+        const validatedAt = currentDate(now);
+        const candidateAssessment = assessCatalogCandidates(candidates, discoveryRelease, validatedAt);
+        const officialMatch = matchOfficialCpiCandidates(candidates, officialIdentity);
+        if (!cpiIdentity(officialCatalog, currentRelease, validatedAt.getTime())) {
+          officialMatch.failures.push('catalog:official_inventory_expired');
+        }
+        candidateAssessment.failures.push(...officialMatch.failures);
+        candidateAssessment.ok = candidateAssessment.ok && officialMatch.failures.length === 0;
         let persisted = null;
         if (discovery?.ok !== false && qualification.ok && candidateAssessment.ok) {
           try {
-            persisted = await promoteCatalog(candidates, {
+            persisted = await promoteCatalog(officialMatch.candidates, {
               releaseKey: currentRelease.releaseKey,
               venues: candidateAssessment.venues,
               source: 'authoritative-ibkr-contract-details',

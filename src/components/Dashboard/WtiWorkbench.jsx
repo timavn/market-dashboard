@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   BarChart3,
   Droplet,
   RefreshCw,
@@ -9,7 +10,10 @@ import {
 import Pmv2CardChrome from './Pmv2CardChrome';
 import predictionMarketsIngestService from '../../services/api/predictionMarketsIngestService';
 import { MarketDataService } from '../../services/api/marketDataService';
-import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
+import { isExplicitLiveInvalidation } from '../../utils/sessionResourceStore';
+import { useSurfaceActivity } from '../common/PersistentSurface';
+import ResourceDataStatusChip from './ResourceDataStatusChip';
 import {
   dateKeyInNewYork,
   describeWtiGeometry,
@@ -166,18 +170,38 @@ function SessionStrip({ data, sessions }) {
   );
 }
 
-function WtiHeader({ cadence, onCadenceChange, data, sessions, modeMessage, refreshing, onRefresh }) {
+function WtiHeader({ cadence, onBack, onCadenceChange, data, sessions, modeMessage, refreshing, onRefresh, resource }) {
   const historical = data?.historicalOnly === true;
+  const referenceOnly = data?.referenceOnly === true;
   const mapping = data?.settlementMapping;
+  const contractStructure = data?.seriesTicker === 'KXWTI'
+    ? 'KXWTI · daily “Above $X” contracts'
+    : data?.seriesTicker === 'KXWTIW'
+      ? 'KXWTIW · weekly settlement bands'
+      : null;
   return (
     <header className="cpi-calculator-header wti-header">
       <div className="wti-header-row">
         <div className="wti-title-block">
+          {onBack && (
+            <button
+              type="button"
+              className="wti-back-button"
+              onClick={onBack}
+              aria-label="Back to prediction markets overview"
+            >
+              <ArrowLeft size={13} aria-hidden="true" />
+              Back
+            </button>
+          )}
           <span className="wti-title-accent" aria-hidden="true" />
           <Droplet size={19} aria-hidden="true" />
           <div>
             <h1>WTI Prediction Markets</h1>
-            <span>{historical ? 'Last verified settlement' : 'Direct venue books · research only'}</span>
+            <span>{[
+              contractStructure,
+              historical ? 'Last verified settlement' : 'Direct venue books · research only',
+            ].filter(Boolean).join(' · ')}</span>
           </div>
         </div>
 
@@ -188,6 +212,9 @@ function WtiHeader({ cadence, onCadenceChange, data, sessions, modeMessage, refr
               type="button"
               className={cadence === option ? 'active' : ''}
               aria-pressed={cadence === option}
+              title={option === 'daily'
+                ? 'KXWTI: daily “Above $X” threshold contracts'
+                : 'KXWTIW: weekly mutually exclusive settlement bands'}
               onClick={() => onCadenceChange?.(option)}
             >
               {option === 'daily' ? 'Daily' : 'Weekly'}
@@ -202,8 +229,13 @@ function WtiHeader({ cadence, onCadenceChange, data, sessions, modeMessage, refr
         </dl>
 
         <div className="wti-header-actions">
-          <span className={`wti-mode-chip ${historical ? 'historical' : data ? 'live' : 'unavailable'}`}>
-            {historical ? 'SETTLED · NOT TRADEABLE' : data ? 'DIRECT MARKET · NO EXECUTION' : 'NO VERIFIED CONTRACT'}
+          <ResourceDataStatusChip resource={resource} context="WTI workbench" />
+          <span className={`wti-mode-chip ${historical || referenceOnly ? 'historical' : data ? 'live' : 'unavailable'}`}>
+            {historical
+              ? 'SETTLED · NOT TRADEABLE'
+              : referenceOnly
+                ? 'REFERENCE GEOMETRY · NO QUOTES'
+                : data ? 'DIRECT MARKET · NO EXECUTION' : 'NO VERIFIED CONTRACT'}
           </span>
           <button type="button" onClick={onRefresh} disabled={refreshing} aria-label="Refresh WTI workbench">
             <RefreshCw size={13} className={refreshing ? 'wti-spin' : ''} aria-hidden="true" />
@@ -219,7 +251,13 @@ function WtiHeader({ cadence, onCadenceChange, data, sessions, modeMessage, refr
 
 function ContractsCard({ data, loading, error, selectedTicker, onSelect }) {
   const historical = data?.historicalOnly === true;
+  const referenceOnly = data?.referenceOnly === true;
   const markets = data?.markets || [];
+  const contractHeading = data?.seriesTicker === 'KXWTI'
+    ? 'Above threshold'
+    : data?.seriesTicker === 'KXWTIW'
+      ? 'Settlement band'
+      : 'Contract';
   return (
     <Pmv2CardChrome
       icon={<Target size={14} />}
@@ -227,10 +265,12 @@ function ContractsCard({ data, loading, error, selectedTicker, onSelect }) {
       titleId="wti-contracts-title"
       className="wti-contracts-card"
       actions={(
-        <span className={`wti-card-status ${historical ? 'historical' : data ? 'live' : 'unavailable'}`}>
+        <span className={`wti-card-status ${historical || referenceOnly ? 'historical' : data ? 'live' : 'unavailable'}`}>
           {historical
             ? 'SETTLED OUTCOMES · NO QUOTES'
-            : data ? `${markets.filter(hasCompleteNativeWtiBook).length}/${markets.length} COMPLETE NATIVE BOOKS` : 'UNAVAILABLE'}
+            : referenceOnly
+              ? 'LAST VERIFIED GEOMETRY · NO QUOTES'
+              : data ? `${markets.filter(hasCompleteNativeWtiBook).length}/${markets.length} COMPLETE NATIVE BOOKS` : 'UNAVAILABLE'}
         </span>
       )}
     >
@@ -244,11 +284,11 @@ function ContractsCard({ data, loading, error, selectedTicker, onSelect }) {
             <thead>
               {historical ? (
                 <tr>
-                  <th>Contract</th><th>Result</th><th>$1 payout</th><th>Volume</th><th>Open interest</th>
+                  <th>{contractHeading}</th><th>Result</th><th>$1 payout</th><th>Volume</th><th>Open interest</th>
                 </tr>
               ) : (
                 <tr>
-                  <th>Contract</th><th>YES bid / ask</th><th>NO bid / ask</th><th>YES depth</th><th>NO depth</th><th>24h / OI</th><th>Book</th>
+                  <th>{contractHeading}</th><th>YES bid / ask</th><th>NO bid / ask</th><th>YES depth</th><th>NO depth</th><th>24h / OI</th><th>Book</th>
                 </tr>
               )}
             </thead>
@@ -394,7 +434,12 @@ function ContextDetails({ data, riskRangeState, ovxState }) {
         <small>Exact event-date Hedgeye reference only. It is not a market quote or probability.</small>
       </div>
       <div className="wti-context-card">
-        <div className="wti-section-heading"><span>OVX context</span><strong className={ovx ? 'available' : 'unavailable'}>{ovx ? 'CURRENT' : 'UNAVAILABLE'}</strong></div>
+        <div className="wti-section-heading">
+          <span>OVX context</span>
+          <strong className={ovx ? 'available' : 'unavailable'}>
+            {ovx ? (String(ovx.quoteMode || '').toLowerCase().includes('delay') ? 'DELAYED' : 'LIVE') : 'UNAVAILABLE'}
+          </strong>
+        </div>
         {ovx ? (
           <dl><div><dt>OVX</dt><dd>{ovx.value.toFixed(2)}</dd></div><div><dt>As of</dt><dd>{formatDate(ovx.asOf, { includeTime: true })}</dd></div><div><dt>Source</dt><dd>{ovx.source || '—'}{ovx.quoteMode ? ` · ${ovx.quoteMode}` : ''}</dd></div></dl>
         ) : <p>{ovxState.message}</p>}
@@ -484,30 +529,18 @@ function settledPayloadFromSession(session) {
 
 export default function WtiWorkbench({
   cadence = 'daily',
+  onBack,
   onCadenceChange,
   sharedPositionsState = EMPTY_POSITIONS_STATE,
 }) {
+  const active = useSurfaceActivity();
   const normalizedCadence = normalizeWtiCadence(cadence);
-  const [data, setData] = useState(null);
-  const [sessions, setSessions] = useState([]);
-  const [selectedTicker, setSelectedTicker] = useState(null);
-  const [riskRangeState, setRiskRangeState] = useState({ value: null, message: 'Checking exact-date WTIC Risk Range.' });
-  const [ovxState, setOvxState] = useState({ value: null, message: 'Checking current-session OVX context.' });
-  const [modeMessage, setModeMessage] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const mountedRef = useRef(true);
-  const requestRef = useRef(0);
-
-  const loadWorkbench = useCallback(async ({ manual = false } = {}) => {
-    const requestId = requestRef.current + 1;
-    requestRef.current = requestId;
-    if (manual) setRefreshing(true);
+  const [selectedTickers, setSelectedTickers] = useState({});
+  const safeAuxByCadenceRef = useRef(new Map());
+  const loadWorkbench = useCallback(async () => {
     const capture = (promise) => promise
       .then((value) => ({ value, error: null }))
       .catch((loadError) => ({ value: null, error: loadError }));
-
     const [liveResult, settledResult, recentResult, historyResult, volatilityResult] = await Promise.all([
       capture(predictionMarketsIngestService.getWtiWorkbench(normalizedCadence)),
       capture(predictionMarketsIngestService.getLastSettledWtiSession(normalizedCadence)),
@@ -515,82 +548,116 @@ export default function WtiWorkbench({
       capture(MarketDataService.getRiskRangeHistory('WTIC', 45)),
       capture(MarketDataService.getVolatilitySnapshot()),
     ]);
-    if (!mountedRef.current || requestId !== requestRef.current) return;
 
     const live = normalizeWtiWorkbench(liveResult.value, normalizedCadence);
     const settled = normalizeSettledWtiSession(settledPayloadFromSession(settledResult.value), normalizedCadence);
     const nextData = live.ok ? live.data : settled;
-    const recentSessions = normalizeRecentSettledWtiSessions(recentResult.value, normalizedCadence);
-    setSessions(recentSessions);
-
     if (!nextData) {
-      setData(null);
-      setSelectedTicker(null);
-      setRiskRangeState({ value: null, message: historyResult.error ? localizedMessage(historyResult.error, 'WTIC Risk Range history is unavailable.') : 'No exact-date WTIC Risk Range is available.' });
-      setOvxState({ value: null, message: 'OVX context is unavailable without a verified WTI session.' });
-      setModeMessage(null);
-      setError(localizedMessage(
-        liveResult.error || settledResult.error,
+      const refreshError = liveResult.error || settledResult.error;
+      const failure = refreshError instanceof Error
+        ? refreshError
+        : new Error(localizedMessage(
+        refreshError,
         live.reason === 'no_direct_native_book'
           ? 'No direct native WTI prices are available, and no verified settled session could be loaded.'
           : 'No verified live or settled WTI session is available for this cadence.',
-      ));
-      setLoading(false);
-      setRefreshing(false);
-      return;
+        ));
+      if (isExplicitLiveInvalidation(refreshError)) failure.liveInvalidation = true;
+      throw failure;
     }
 
+    const previousAux = safeAuxByCadenceRef.current.get(normalizedCadence) || {};
+    const sessions = recentResult.error
+      ? previousAux.sessions || []
+      : normalizeRecentSettledWtiSessions(recentResult.value, normalizedCadence);
     const inlineRiskRange = findWtiRiskRangeForEvent([nextData.riskRange], nextData.event);
     const exactRiskRange = inlineRiskRange || findWtiRiskRangeForEvent(historyResult.value, nextData.event);
-    const ovx = normalizeOvxReference(volatilityResult.value, { historical: nextData.historicalOnly });
-    setData(nextData);
-    setSelectedTicker((current) => (
-      nextData.markets.some((market) => market.ticker === current)
-        ? current
-        : selectDefaultWtiMarket(nextData.markets)?.ticker || null
-    ));
-    setRiskRangeState({
-      value: exactRiskRange,
-      message: exactRiskRange
+    const eventDate = dateKeyInNewYork(nextData.event?.strikeDate || nextData.event?.closeTime);
+    const retainedRiskRange = historyResult.error && previousAux.riskRange?.date === eventDate
+      ? previousAux.riskRange
+      : null;
+    const riskRange = exactRiskRange || retainedRiskRange;
+    const normalizedOvx = normalizeOvxReference(volatilityResult.value, {
+      historical: nextData.historicalOnly,
+    });
+    const ovxReference = normalizedOvx.status === 'available' ? normalizedOvx : null;
+    const snapshot = {
+      ...nextData,
+      cadence: normalizedCadence,
+      sessions,
+      riskRange,
+      riskRangeMessage: riskRange
         ? null
         : historyResult.error
-          ? localizedMessage(historyResult.error, 'WTIC Risk Range history is unavailable.')
-          : `No date-matched WTIC Risk Range is available for ${dateKeyInNewYork(nextData.event?.strikeDate || nextData.event?.closeTime) || 'this event'}.`,
-    });
-    setOvxState({
-      value: ovx.status === 'available' ? ovx : null,
-      message: ovx.status === 'available'
+          ? localizedMessage(historyResult.error, 'WTIC Risk Range refresh is delayed.')
+          : `No date-matched WTIC Risk Range is available for ${eventDate || 'this event'}.`,
+      ovxReference,
+      ovxMessage: ovxReference
         ? null
-        : volatilityResult.error
-          ? localizedMessage(volatilityResult.error, 'OVX reference is unavailable.')
-          : ovx.reason,
-    });
-    setModeMessage(live.ok
+        : nextData.historicalOnly
+          ? 'Historical OVX snapshots are not available.'
+          : volatilityResult.error
+            ? localizedMessage(volatilityResult.error, 'OVX reference is unavailable.')
+            : normalizedOvx.reason,
+      modeMessage: live.ok
       ? null
-      : `Live ${normalizedCadence} books are unavailable. Showing the most recent fully verified settlement; no live quotes are displayed.`);
-    setError(null);
-    setLoading(false);
-    setRefreshing(false);
+        : `Live ${normalizedCadence} books are unavailable. Showing the most recent fully verified settlement; no live quotes are displayed.`,
+      resourceObservedAt: new Date(Date.now()).toISOString(),
+    };
+    safeAuxByCadenceRef.current.set(normalizedCadence, {
+      sessions,
+      riskRange,
+      ovxReference,
+    });
+    return snapshot;
   }, [normalizedCadence]);
+  const resource = useDashboardResource('wti-workbench', { cadence: normalizedCadence }, {
+    fetcher: loadWorkbench,
+    validate: (value) => (
+      value
+      && typeof value === 'object'
+      && value.cadence === normalizedCadence
+      && Array.isArray(value.markets)
+      && value.resourceObservedAt
+        ? value
+        : null
+    ),
+    getObservedAt: (value) => value.resourceObservedAt,
+    maxAgeMs: Math.max(WTI_POLL_MS + 15_000, 45_000),
+    pollIntervalMs: WTI_POLL_MS,
+    active,
+    refreshOnActivate: false,
+    invalidateOnScopeChange: true,
+    isExplicitInvalidation: isExplicitLiveInvalidation,
+  });
+  const data = resource.data || resource.referenceData;
+  const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+  const riskRangeState = {
+    value: data?.riskRange || null,
+    message: data?.riskRangeMessage || 'Checking exact-date WTIC Risk Range.',
+  };
+  const ovxState = {
+    value: data?.ovxReference || null,
+    message: data?.ovxMessage || 'Checking current-session OVX context.',
+  };
+  const modeMessage = data?.modeMessage || (
+    resource.error && data
+      ? 'WTI refresh delayed. Showing the last validated non-executable reference.'
+      : null
+  );
+  const error = resource.error
+    ? localizedMessage(resource.error, 'WTI workbench is unavailable.')
+    : null;
+  const loading = resource.initialLoading && !data;
+  const refreshing = resource.refreshing;
+  const selectedTicker = selectedTickers[normalizedCadence] || null;
 
   useEffect(() => {
-    mountedRef.current = true;
-    setLoading(true);
-    setData(null);
-    setSessions([]);
-    setSelectedTicker(null);
-    setModeMessage(null);
-    setError(null);
-    setRiskRangeState({ value: null, message: 'Checking exact-date WTIC Risk Range.' });
-    setOvxState({ value: null, message: 'Checking current-session OVX context.' });
-    loadWorkbench();
-    const stopPolling = startVisibilityAwarePolling({ poll: loadWorkbench, intervalMs: WTI_POLL_MS });
-    return () => {
-      mountedRef.current = false;
-      requestRef.current += 1;
-      if (typeof stopPolling === 'function') stopPolling();
-    };
-  }, [loadWorkbench]);
+    if (!data?.markets?.length) return;
+    if (data.markets.some((market) => market.ticker === selectedTicker)) return;
+    const fallback = selectDefaultWtiMarket(data.markets)?.ticker || null;
+    setSelectedTickers((current) => ({ ...current, [normalizedCadence]: fallback }));
+  }, [data, normalizedCadence, selectedTicker]);
 
   const selectedMarket = useMemo(
     () => data?.markets?.find((market) => market.ticker === selectedTicker) || data?.markets?.[0] || null,
@@ -601,12 +668,14 @@ export default function WtiWorkbench({
     <section className="wti-workbench cpi-workbench-shell" aria-label="WTI prediction-market workbench">
       <WtiHeader
         cadence={normalizedCadence}
+        onBack={onBack}
         onCadenceChange={onCadenceChange}
         data={data}
         sessions={sessions}
         modeMessage={modeMessage}
         refreshing={refreshing}
-        onRefresh={() => loadWorkbench({ manual: true })}
+        onRefresh={resource.refresh}
+        resource={resource}
       />
       <div className="wti-workbench-grid">
         <ContractsCard
@@ -614,7 +683,10 @@ export default function WtiWorkbench({
           loading={loading}
           error={error}
           selectedTicker={selectedMarket?.ticker}
-          onSelect={setSelectedTicker}
+          onSelect={(ticker) => setSelectedTickers((current) => ({
+            ...current,
+            [normalizedCadence]: ticker,
+          }))}
         />
         <DetailsCard
           data={data}

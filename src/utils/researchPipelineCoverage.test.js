@@ -24,6 +24,29 @@ function buildFor(id, overrides = {}) {
 }
 
 describe('research pipeline coverage', () => {
+  test('indexed partial publication preserves source discrepancies across snapshots and manifest artifacts', () => {
+    const issue = { id: 'original-rut-range', code: 'invalid_bounds', ticker: 'RUT', field: 'riskRange',
+      observed: { lrr: 2834, hrr: 2825, trend: 'BULLISH' }, disposition: 'withheld_from_structured_data',
+      source: { productId: 'early-look', reportDate: MARKET_DATE, url: 'https://app.hedgeye.com/feed_items/187503' } };
+    const quality = { status: 'discrepancy', issues: [issue] };
+    const base = {
+      snapshotItems: [{ snapshotType: 'early-look', date: MARKET_DATE, data: { SPX: { lrr: 7000, hrr: 7100 } },
+        sourceQuality: quality }],
+      manifestItems: [{ productKey: 'early-look', marketDate: MARKET_DATE, state: 'indexed',
+        receivedCount: 1, indexedCount: 1, entityEventCount: 0,
+        sourceQuality: quality, artifacts: [{ sourceKey: 'raw/early-look.html', stage: 'indexed', sourceQuality: quality }] }],
+    };
+    const indexed = buildFor('early-look', base);
+    expect(indexed.products[0]).toMatchObject({ status: PIPELINE_STATUS.INDEXED, counts: { failures: 0 }, sourceQuality: quality });
+    expect(indexed.products[0].sourceQuality.issues).toHaveLength(1);
+    // The manifest still retains the original publication warning after a clean
+    // snapshot/replay: success alone is not evidence of publisher correction.
+    base.snapshotItems[0].sourceQuality = { status: 'clear', issues: [] };
+    base.manifestItems[0].sourceQuality = { status: 'clear', issues: [] };
+    const replayed = buildFor('early-look', base);
+    expect(replayed.products[0].sourceQuality).toEqual(quality);
+    expect(replayed.products[0].status).toBe(PIPELINE_STATUS.INDEXED);
+  });
   test('shows event-driven products as not due until an artifact is received', () => {
     const result = buildFor('the-call');
 

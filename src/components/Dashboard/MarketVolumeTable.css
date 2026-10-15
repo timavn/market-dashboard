@@ -31,9 +31,7 @@
   text-align: left;
 }
 
-/* Volume labels ("Total Market Volume*", "Total Exchange Volume**") are much
-   longer than index names used in the region MW tables, so widen the METRIC
-   column and tighten the numeric columns to prevent label/value overlap.
+/* Keep the volume label clear of the four numeric comparisons.
    Selectors are anchored to .market-volume-table--mw to win over the shared
    region-mw-quotes-table rules in MultiRegionMarketOverview.css, which loads
    after this file. */
@@ -55,3 +53,24 @@
   padding: 8px 10px 10px;
 }
 
+.market-volume-table--mw .volume-footnotes a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.efr-reference-dialog.efr-reference-dialog--volume {
+  width: min(760px, 100%);
+  background: #ffffff;
+}
+
+.efr-reference-dialog--volume .efr-reference-dialog__body,
+.efr-reference-dialog--volume .efr-reference-dialog__body > * {
+  min-height: 0;
+}
+
+.efr-reference-dialog--volume .volume-footnotes {
+  color: #667085;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.5;
+}

@@ -1,0 +1,29 @@
+{
+  "themes": [
+    { "id": "software", "ticker": "IGV", "name": "Software", "issuerUrl": "https://www.ishares.com/us/products/239771/ishares-north-american-techsoftware-etf" },
+    { "id": "semiconductors", "ticker": "SMH", "name": "Semiconductors", "issuerUrl": "https://www.vaneck.com/us/en/investments/semiconductor-etf-smh" },
+    { "id": "cybersecurity", "ticker": "CIBR", "name": "Cybersecurity", "issuerUrl": "https://www.ftportfolios.com/retail/etf/etfsummary.aspx?ticker=cibr" },
+    { "id": "cloud", "ticker": "SKYY", "name": "Cloud computing", "issuerUrl": "https://www.ftportfolios.com/Retail/etf/etfsummary.aspx?Ticker=SKYY" },
+    { "id": "biotech", "ticker": "XBI", "name": "Biotech", "issuerUrl": "https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-biotech-etf-xbi" },
+    { "id": "regional-banks", "ticker": "KRE", "name": "Regional banks", "issuerUrl": "https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-regional-banking-etf-kre" },
+    { "id": "home-construction", "ticker": "ITB", "name": "Home construction", "issuerUrl": "https://www.ishares.com/us/products/239512/ishares-u-s-home-construction-etf" },
+    { "id": "retail", "ticker": "XRT", "name": "Retail", "issuerUrl": "https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-retail-etf-xrt" },
+    { "id": "solar", "ticker": "TAN", "name": "Solar", "issuerUrl": "https://www.invesco.com/us/en/financial-products/etfs/invesco-solar-etf.html" },
+    { "id": "uranium", "ticker": "URA", "name": "Uranium & nuclear", "issuerUrl": "https://www.globalxetfs.com/funds/ura" }
+  ],
+  "factors": [
+    { "id": "growth-value", "label": "Growth vs value", "left": "IWF", "right": "IWD" },
+    { "id": "momentum-market", "label": "Momentum vs market", "left": "MTUM", "right": "SPY" },
+    { "id": "high-beta-low-vol", "label": "High beta vs low vol", "left": "SPHB", "right": "SPLV" },
+    { "id": "small-large", "label": "Small vs large", "left": "IWM", "right": "SPY" }
+  ],
+  "instruments": [
+    { "ticker": "IWF", "name": "Growth", "issuerUrl": "https://www.ishares.com/us/products/239706/ishares-russell-1000-growth-etf" },
+    { "ticker": "IWD", "name": "Value", "issuerUrl": "https://www.ishares.com/us/products/239708/ishares-russell-1000-value-etf" },
+    { "ticker": "MTUM", "name": "Momentum", "issuerUrl": "https://www.ishares.com/us/products/251614/ishares-msci-usa-momentum-factor-etf" },
+    { "ticker": "SPY", "name": "S&P 500", "issuerUrl": "https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-500-etf-trust-spy" },
+    { "ticker": "SPHB", "name": "High beta", "issuerUrl": "https://www.invesco.com/us/en/financial-products/etfs/invesco-sp-500-high-beta-etf.html" },
+    { "ticker": "SPLV", "name": "Low volatility", "issuerUrl": "https://www.invesco.com/us/en/financial-products/etfs/invesco-sp-500-low-volatility-etf.html" },
+    { "ticker": "IWM", "name": "Small caps", "issuerUrl": "https://www.ishares.com/us/products/239710/" }
+  ]
+}

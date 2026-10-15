@@ -391,6 +391,7 @@ class DeployScriptTests(unittest.TestCase):
             self.assertNotIn("--config-file", deploy_args)
             for override in (
                 "GmailScheduleState=DISABLED",
+                "CftcScheduleState=DISABLED",
                 "QuantAnalystScheduleState=DISABLED",
                 "QuantDeveloperScheduleState=DISABLED",
                 "SecurityScheduleState=DISABLED",

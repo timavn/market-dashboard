@@ -1,0 +1,173 @@
+.dashboard-top-navigation,
+.dashboard-top-navigation__menu {
+  color-scheme: light;
+  --navigation-ink: #2e3640;
+  --navigation-muted: #586573;
+  --navigation-rule: #dce1e5;
+  color: var(--navigation-ink);
+  background: #fff;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.dashboard-top-navigation {
+  align-items: center;
+  justify-content: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  width: max-content;
+  padding: 0;
+  border: 1px solid var(--navigation-rule);
+  box-shadow: 0 2px 6px #1f293714;
+  pointer-events: auto;
+}
+
+.dashboard-top-navigation button,
+.dashboard-top-navigation__menu button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.dashboard-top-navigation__links,
+.dashboard-top-navigation__utilities {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.dashboard-top-navigation__utilities {
+  border-left: 1px solid var(--navigation-rule);
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.dashboard-top-navigation .dashboard-top-navigation__item,
+.dashboard-top-navigation__menu .dashboard-top-navigation__item {
+  align-items: center;
+  color: var(--navigation-muted);
+  display: inline-flex;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 400;
+  gap: 5px;
+  line-height: 1.25;
+  min-height: 42px;
+  padding: 10px 12px;
+  position: relative;
+  text-align: center;
+}
+
+.dashboard-top-navigation button:hover,
+.dashboard-top-navigation__menu button:hover {
+  background: #f5f6f7;
+  color: var(--navigation-ink);
+}
+
+.dashboard-top-navigation button:focus-visible,
+.dashboard-top-navigation__menu button:focus-visible {
+  background: #f5f6f7;
+  outline: 1px solid #aab1b9;
+  outline-offset: -1px;
+}
+
+.dashboard-top-navigation .is-active,
+.dashboard-top-navigation__menu .is-active {
+  background: #e9ecef;
+  color: var(--navigation-ink);
+}
+
+.dashboard-top-navigation__menu .is-active {
+  font-weight: 600;
+}
+
+/* Each destination has one labeled button. */
+.dashboard-top-navigation__links > .dashboard-top-navigation__group-trigger,
+.dashboard-top-navigation__utilities > .dashboard-top-navigation__item + .dashboard-top-navigation__item,
+.dashboard-top-navigation .market-events-navigation-trigger {
+  border-left: 1px solid var(--navigation-rule);
+}
+
+.dashboard-top-navigation__links > :first-child {
+  border-left: 0;
+}
+
+.dashboard-top-navigation__menu {
+  border: 1px solid #cbd1d8;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  box-shadow: 0 2px 8px #1f293714;
+  position: fixed;
+  z-index: 1600;
+}
+
+.dashboard-top-navigation__menu .dashboard-top-navigation__menu-item {
+  font-size: 12px;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--navigation-rule);
+  text-align: left;
+  width: 100%;
+}
+
+.dashboard-top-navigation__section {
+  background: #f5f6f7;
+  border-bottom: 1px solid var(--navigation-rule);
+  color: var(--navigation-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 5px 12px;
+}
+
+.dashboard-top-navigation__selection {
+  min-width: 10px;
+}
+
+.dashboard-top-navigation__menu .dashboard-top-navigation__item[data-indicator-tone='bullish'] {
+  border-left: 2px solid #177347;
+  color: #177347;
+  padding-left: 10px;
+}
+
+.dashboard-top-navigation__menu .dashboard-top-navigation__item[data-indicator-tone='bearish'] {
+  border-left: 2px solid #ba4141;
+  color: #ba4141;
+  padding-left: 10px;
+}
+
+.dashboard-top-navigation .dashboard-top-navigation__item.has-notification {
+  background: #edf6ff;
+  box-shadow: inset 0 0 0 1px #71b7ee88, inset 0 0 14px #3c9df533, 0 0 8px #3093ec2b;
+  z-index: 1;
+}
+
+@media (max-width: 900px) {
+  .dashboard-top-navigation .dashboard-top-navigation__item {
+    padding-inline: 8px;
+    min-height: 38px;
+    font-size: 11px;
+  }
+
+  .dashboard-top-navigation__links {
+    display: contents;
+  }
+
+  .dashboard-top-navigation__utilities {
+    border-left: 0;
+    margin-left: 0;
+    padding-left: 0;
+  }
+}

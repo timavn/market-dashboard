@@ -1,19 +1,6 @@
 import React from 'react';
 import { normalizeCpiNowcast } from '../../../utils/cpiPredictionMarket';
 
-const MANUAL_INFLATION_NOWCAST = {
-  metric: 'Headline CPI M/M',
-  forecastMonth: 'June 2026',
-  publishedText: '06/16/2026 11:47 AM EDT',
-  releaseDate: '2026-07-14',
-  outlook: 'Probable Disinflation',
-  scenarios: [
-    { key: 'upside', label: 'Upside', value: 0.4 },
-    { key: 'base', label: 'Base Case', value: 0.3 },
-    { key: 'downside', label: 'Downside', value: 0.2 },
-  ],
-};
-
 function formatPercent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '-';
@@ -38,9 +25,9 @@ function formatDate(value) {
 function resolveNowcast(inflationNowcast) {
   if (!inflationNowcast) {
     return {
-      data: MANUAL_INFLATION_NOWCAST,
-      sourceLabel: 'Manual fallback',
-      unavailableMessage: null,
+      data: null,
+      sourceLabel: 'Snapshot unavailable',
+      unavailableMessage: 'Verified inflation nowcast unavailable.',
     };
   }
 

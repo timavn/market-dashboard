@@ -1,0 +1,112 @@
+.market-daily-detail__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482999;
+  pointer-events: none;
+  background: var(--dashboard-window-backdrop);
+  backdrop-filter: blur(var(--dashboard-window-blur));
+  -webkit-backdrop-filter: blur(var(--dashboard-window-blur));
+}
+.market-daily-detail--expanded {
+  position: fixed;
+  z-index: 2147483000;
+  margin: 0;
+  transition: none;
+  animation: none;
+}
+.market-daily-detail {
+  display: flex;
+  flex-direction: column;
+  width: min(600px, calc(100vw - 32px));
+  max-height: var(--dashboard-dialog-max-height);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--dashboard-window-border);
+  border-radius: 0;
+  box-shadow: var(--dashboard-window-shadow);
+  background: #fff;
+  color: #384354;
+  font-family: Inter, Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+.market-daily-detail__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #a5afb9; background: #e9edf1; }
+.market-daily-detail__header h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .025em; }
+.market-daily-detail__heading { flex: 1; min-width: 0; }
+.market-daily-detail__heading :is(h2, h3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-daily-detail__timestamp { flex: 0 0 auto; margin-left: auto; text-align: right; white-space: nowrap; font-size: 10px; font-weight: 400; color: #66717e; }
+.market-daily-detail__timestamp .dashboard-delayed-data-marker { top: 0; margin: 0; font-size: 10px; font-weight: 400; }
+.market-daily-detail__body { padding: 12px 18px 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.market-daily-detail__group + .market-daily-detail__group { margin-top: 15px; }
+.market-daily-detail table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.market-daily-detail :is(th, td) { padding: 5px 6px; border: 0; border-bottom: 1px solid #dce1e7; font-size: 12px; font-weight: 400; text-align: left; vertical-align: middle; }
+.market-daily-detail th { width: 42%; padding-left: 0; }
+.market-daily-detail__security { width: 24%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-daily-detail__security span { display: block; overflow: hidden; text-overflow: ellipsis; color: #66717e; font-size: 10px; }
+.market-daily-detail .market-daily-detail__value { width: 34%; text-align: right; padding-right: 0; white-space: nowrap; }
+.market-daily-detail__narrative { margin: 9px 0 0; line-height: 1.55; }
+.market-daily-detail__research { margin: 6px 0 0; font-size: 11px; line-height: 1.5; }
+.market-daily-detail a { color: #606c78; text-decoration: none; }
+.market-daily-detail a:hover { color: #263341; }
+.market-daily-detail .is-positive { color: #28845b; }
+.market-daily-detail .is-negative { color: #cc413c; }
+.market-daily-detail .is-neutral { color: #778290; }
+.market-daily-detail .analyst-process--positive { color: var(--dashboard-positive, #059669); }
+.market-daily-detail .analyst-process--negative { color: var(--dashboard-negative, #dc2626); }
+.market-daily-detail .analyst-process--muted { color: var(--dashboard-muted-text, #667085); }
+.market-daily-detail__footer { margin-top: 15px; padding-top: 8px; border-top: 1px solid #dce1e7; font-size: 10px; color: #66717e; }
+.market-daily-detail__footer summary { width: fit-content; cursor: pointer; }
+.market-daily-detail__footer p { margin: 8px 0; white-space: pre-line; overflow-wrap: anywhere; }
+.market-daily-detail__sources { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.market-daily-detail :is(button, a, summary):focus-visible { outline: 1px solid #586776; outline-offset: 2px; }
+@media (max-width: 520px) {
+  .market-daily-detail__body { padding: 10px 12px; }
+  .market-daily-detail :is(th, td) { font-size: 11px; }
+  .market-daily-detail th { width: 38%; }
+  .market-daily-detail__security { width: 20%; }
+  .market-daily-detail .market-daily-detail__value { width: 42%; white-space: normal; }
+}
+
+.market-daily-detail__subtitle { margin: 1px 0 0; color: #66717e; font-size: 10px; }
+
+.market-daily-detail caption { padding: 0 0 5px; font-size: 12px; font-weight: 700; text-align: left; }
+.market-daily-detail thead th { background: #f0f3f5; font-size: 10px; font-weight: 700; }
+.market-daily-detail .market-daily-detail__table--metrics th { width: 66%; }
+.market-daily-detail .market-daily-detail__table--securities th { width: 13%; }
+.market-daily-detail .market-daily-detail__table--securities .market-daily-detail__security { width: 62%; }
+.market-daily-detail .market-daily-detail__table--securities .market-daily-detail__value { width: 25%; }
+.market-daily-detail .market-daily-detail__table--comparison th { width: 34%; }
+.market-daily-detail .market-daily-detail__table--comparison .market-daily-detail__leg { width: 23%; text-align: right; white-space: nowrap; }
+.market-daily-detail .market-daily-detail__table--comparison .market-daily-detail__value { width: 20%; }
+
+.market-daily-detail .market-daily-detail--outliers th { width: 13%; }
+.market-daily-detail .market-daily-detail--outliers .market-daily-detail__security { width: 47%; }
+.market-daily-detail .market-daily-detail--outliers .market-daily-detail__value { width: 40%; }
+
+.market-daily-detail--expanded > .market-daily-detail__header { flex-wrap: wrap; gap: 3px 8px; padding: 6px 8px; }
+.market-daily-detail--expanded > .market-daily-detail__header .market-daily-detail__heading { order: 1; }
+.market-daily-detail--expanded > .market-daily-detail__header h2 { font-size: 11px; }
+.market-daily-detail--expanded > .market-daily-detail__header .market-daily-detail__timestamp { order: 2; }
+.market-daily-detail--expanded > .market-daily-detail__body { padding: 8px; overflow: auto; }
+.market-daily-detail--expanded :is(th, td) { padding: 4px 3px; font-size: 11px; }
+.market-daily-detail--expanded .market-daily-detail__table--metrics { min-width: 230px; }
+.market-daily-detail--expanded .market-daily-detail__table--securities { min-width: 290px; }
+.market-daily-detail--expanded .market-daily-detail__table--comparison { min-width: 360px; }
+.market-daily-detail--expanded .market-daily-detail__group + .market-daily-detail__group { margin-top: 12px; }
+.market-daily-detail--expanded .market-daily-detail__narrative { margin-top: 7px; }
+
+/* Expansions keep the evidence inside their original card width. */
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__timestamp { white-space: normal; }
+.market-daily-detail.market-daily-detail--expanded table { min-width: 0; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--metrics th { width: 56%; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--metrics .market-daily-detail__value { width: 44%; white-space: normal; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--securities th { width: 26%; overflow-wrap: anywhere; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--securities .market-daily-detail__security { width: 39%; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--securities .market-daily-detail__value { width: 35%; white-space: normal; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--comparison th { width: 36%; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--comparison .market-daily-detail__leg { width: 22%; white-space: normal; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--comparison .market-daily-detail__leg span { display: block; }
+.market-daily-detail.market-daily-detail--expanded .market-daily-detail__table--comparison .market-daily-detail__value { width: 20%; white-space: normal; }

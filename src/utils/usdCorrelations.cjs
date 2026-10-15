@@ -7,6 +7,7 @@ const CORRELATION_WINDOWS = Object.freeze([
   Object.freeze({ key: '6M', sessions: 126 }),
 ]);
 const LEGACY_CORRELATION_WINDOWS = Object.freeze([
+  Object.freeze({ key: '60D', sessions: 60 }),
   Object.freeze({ key: '90D', sessions: 90 }),
   Object.freeze({ key: '120D', sessions: 120 }),
   Object.freeze({ key: '180D', sessions: 180 }),
@@ -17,11 +18,14 @@ const OUTPUT_CORRELATION_WINDOWS = Object.freeze([
 ]);
 const ROLLING_WINDOW = 30;
 const ROLLING_SAMPLE_COUNT = 252;
-const REQUIRED_ROLLING_RETURNS = ROLLING_WINDOW + ROLLING_SAMPLE_COUNT - 1;
+const REQUIRED_ROLLING_OBSERVATIONS = ROLLING_WINDOW + ROLLING_SAMPLE_COUNT - 1;
+// Backward-compatible export for callers that imported the old return-oriented name.
+const REQUIRED_ROLLING_RETURNS = REQUIRED_ROLLING_OBSERVATIONS;
 const DEFAULT_MAX_STALE_DAYS = 5;
 
-const REQUIRED_SYMBOLS = ['DXY', 'SPX', 'BRENT', 'CRB', 'GOLD', 'BTC'];
-const METRIC_SYMBOLS = REQUIRED_SYMBOLS.filter((symbol) => symbol !== 'DXY');
+const REQUIRED_SYMBOLS = ['DXY', 'SPX', 'NDX', 'WTI', 'BRENT', 'CRB', 'GOLD', 'BTC'];
+const OPTIONAL_SYMBOLS = ['SILVER', 'UST2Y', 'UST10Y', 'UST30Y', 'COPPER', 'ETH'];
+const METRIC_SYMBOLS = [...REQUIRED_SYMBOLS, ...OPTIONAL_SYMBOLS].filter((symbol) => symbol !== 'DXY');
 
 class UsdCorrelationDataError extends Error {
   constructor(message, code = 'USD_CORRELATION_DATA_UNAVAILABLE') {
@@ -78,23 +82,11 @@ function normalizeHistory(history = [], cutoffDate = null) {
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function buildReturnsByDate(history = []) {
-  const returns = [];
-  for (let index = 1; index < history.length; index += 1) {
-    const previous = history[index - 1];
-    const current = history[index];
-    if (!previous || !current || previous.close <= 0 || current.close <= 0) continue;
-    const value = Math.log(current.close / previous.close);
-    if (Number.isFinite(value)) returns.push({ date: current.date, value });
-  }
-  return returns;
-}
-
-function alignReturns(baseReturns = [], metricReturns = []) {
-  const baseByDate = new Map(baseReturns.map((row) => [row.date, row.value]));
-  return metricReturns
+function alignPriceLevels(baseHistory = [], metricHistory = []) {
+  const baseByDate = new Map(baseHistory.map((row) => [row.date, row.close]));
+  return metricHistory
     .filter((row) => baseByDate.has(row.date))
-    .map((row) => ({ date: row.date, base: baseByDate.get(row.date), metric: row.value }));
+    .map((row) => ({ date: row.date, base: baseByDate.get(row.date), metric: row.close }));
 }
 
 function pearsonCorrelation(pairs = []) {
@@ -115,16 +107,16 @@ function pearsonCorrelation(pairs = []) {
   return Math.max(-1, Math.min(1, covariance / Math.sqrt(baseVariance * metricVariance)));
 }
 
-function correlationForExactWindow(alignedReturns, window) {
-  if (!Array.isArray(alignedReturns) || alignedReturns.length < window) return null;
-  return pearsonCorrelation(alignedReturns.slice(-window));
+function correlationForExactWindow(alignedLevels, window) {
+  if (!Array.isArray(alignedLevels) || alignedLevels.length < window) return null;
+  return pearsonCorrelation(alignedLevels.slice(-window));
 }
 
-function buildRollingStats(alignedReturns) {
-  if (!Array.isArray(alignedReturns) || alignedReturns.length < REQUIRED_ROLLING_RETURNS) return null;
+function buildRollingStats(alignedLevels) {
+  if (!Array.isArray(alignedLevels) || alignedLevels.length < REQUIRED_ROLLING_OBSERVATIONS) return null;
   const rolling = [];
-  for (let end = ROLLING_WINDOW; end <= alignedReturns.length; end += 1) {
-    const correlation = pearsonCorrelation(alignedReturns.slice(end - ROLLING_WINDOW, end));
+  for (let end = ROLLING_WINDOW; end <= alignedLevels.length; end += 1) {
+    const correlation = pearsonCorrelation(alignedLevels.slice(end - ROLLING_WINDOW, end));
     if (!Number.isFinite(correlation)) return null;
     rolling.push(correlation);
   }
@@ -164,24 +156,37 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
       throw new UsdCorrelationDataError(`No current daily history is available for ${symbol}`);
     }
   }
+  for (const symbol of OPTIONAL_SYMBOLS) {
+    // ETH daily candles close at 00:00 UTC, later than the DXY cutoff on
+    // U.S. afternoons. Do not turn its still-open candle into a daily return.
+    const priorUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
+      .toISOString().slice(0, 10);
+    const completedCutoff = symbol === 'ETH' && priorUtcDay < cutoffDate ? priorUtcDay : cutoffDate;
+    const history = normalizeHistory(histories?.[symbol], completedCutoff);
+    if (history.length >= 2) normalized[symbol] = history;
+  }
 
   const calculationDate = REQUIRED_SYMBOLS
     .map((symbol) => normalized[symbol][normalized[symbol].length - 1].date)
     .sort()[0];
   assertFreshCalculationDate(calculationDate, now, maxStaleDays);
 
-  for (const symbol of REQUIRED_SYMBOLS) {
+  for (const symbol of Object.keys(normalized)) {
     normalized[symbol] = normalized[symbol].filter((row) => row.date <= calculationDate);
   }
 
-  const dxyReturns = buildReturnsByDate(normalized.DXY);
   const correlations = {};
   const rollingStats = {};
   for (const symbol of METRIC_SYMBOLS) {
-    const aligned = alignReturns(dxyReturns, buildReturnsByDate(normalized[symbol]));
-    if (aligned.length < REQUIRED_ROLLING_RETURNS) {
+    if (!normalized[symbol]) continue;
+    const aligned = alignPriceLevels(normalized.DXY, normalized[symbol]);
+    // Optional comparisons must reach the same completed session as the matrix.
+    // Never label an older series with the required series' newer calculation date.
+    if (OPTIONAL_SYMBOLS.includes(symbol) && aligned.at(-1)?.date !== calculationDate) continue;
+    if (aligned.length < REQUIRED_ROLLING_OBSERVATIONS) {
+      if (OPTIONAL_SYMBOLS.includes(symbol)) continue;
       throw new UsdCorrelationDataError(
-        `${symbol} has ${aligned.length} aligned returns; ${REQUIRED_ROLLING_RETURNS} are required`,
+        `${symbol} has ${aligned.length} aligned closing levels; ${REQUIRED_ROLLING_OBSERVATIONS} are required`,
         'USD_CORRELATION_INSUFFICIENT_HISTORY',
       );
     }
@@ -190,6 +195,10 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
     for (const { key, sessions } of OUTPUT_CORRELATION_WINDOWS) {
       const value = correlationForExactWindow(aligned, sessions);
       if (!Number.isFinite(value)) {
+        if (OPTIONAL_SYMBOLS.includes(symbol)) {
+          delete correlations[symbol];
+          break;
+        }
         throw new UsdCorrelationDataError(
           `${symbol} ${key} correlation could not be calculated`,
           'USD_CORRELATION_CALCULATION_FAILED',
@@ -197,9 +206,14 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
       }
       correlations[symbol][key] = round(value);
     }
+    if (!correlations[symbol]) continue;
 
     const stats = buildRollingStats(aligned);
     if (!stats) {
+      if (OPTIONAL_SYMBOLS.includes(symbol)) {
+        delete correlations[symbol];
+        continue;
+      }
       throw new UsdCorrelationDataError(
         `${symbol} rolling correlation statistics could not be calculated`,
         'USD_CORRELATION_CALCULATION_FAILED',
@@ -208,9 +222,87 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
     rollingStats[symbol] = stats;
   }
 
+  const assetContext = {};
+  const dxyRows = normalized.DXY || [];
+  const dxyLatest = dxyRows.at(-1) || null;
+  const dxyPrevious = dxyRows.at(-2) || null;
+  if (dxyLatest?.date === calculationDate && Number.isFinite(dxyLatest.close) && dxyLatest.close > 0) {
+    const dxyChange = (sessions) => {
+      const reference = dxyRows.at(-(sessions + 1));
+      return Number.isFinite(reference?.close) && reference.close > 0
+        ? round(((dxyLatest.close / reference.close) - 1) * 100, 4)
+        : null;
+    };
+    assetContext.dxy = {
+      status: 'historical',
+      availability: 'historical',
+      value: round(dxyLatest.close, 4),
+      previousClose: Number.isFinite(dxyPrevious?.close) && dxyPrevious.close > 0
+        ? round(dxyPrevious.close, 4)
+        : null,
+      changePercent: dxyChange(1),
+      fifteenDayChangePercent: dxyChange(15),
+      thirtyDayChangePercent: dxyChange(30),
+      asOf: dxyLatest.date,
+      source: 'Yahoo Finance completed DXY daily bars',
+      decisionEligible: false,
+    };
+  }
+  if (normalized.SILVER) {
+    const realized = buildRealizedVolatilitySnapshot(normalized.SILVER, {
+      assetType: 'commodity',
+      includeLongWindows: false,
+      includeSeries: false,
+    });
+    if (realized.status === 'available' && Number.isFinite(realized.rv21) && realized.rv21 > 0 && realized.asOf) {
+      assetContext.silverRealizedVolatility = {
+        status: 'historical',
+        availability: 'historical',
+        value: realized.rv21,
+        window: 21,
+        annualized: true,
+        annualizationFactor: realized.annualizationFactor,
+        observations: realized.observationCount,
+        asOf: realized.asOf,
+        source: 'Yahoo Finance completed Silver futures daily bars',
+        decisionEligible: false,
+      };
+    }
+  }
+  if (normalized.ETH?.at(-1)?.date === calculationDate) {
+    const realized = buildRealizedVolatilitySnapshot(normalized.ETH, {
+      assetType: 'crypto', includeLongWindows: false, includeSeries: false,
+    });
+    if (realized.status === 'available' && Number.isFinite(realized.rv21) && realized.rv21 > 0) {
+      assetContext.ethereumRealizedVolatility = {
+        status: 'historical', availability: 'historical', value: realized.rv21,
+        window: 21, annualized: true, annualizationFactor: realized.annualizationFactor,
+        observations: realized.observationCount, asOf: realized.asOf,
+        source: 'Yahoo Finance completed ETH-USD daily bars', decisionEligible: false,
+      };
+    }
+  }
+  const wtiByDate = new Map((normalized.WTI || []).map((row) => [row.date, row.close]));
+  const alignedSpread = (normalized.BRENT || []).filter((row) => wtiByDate.has(row.date));
+  const spreadRow = alignedSpread.at(-1) || null;
+  if (spreadRow) {
+    const wtiClose = wtiByDate.get(spreadRow.date);
+    assetContext.brentWtiSpread = {
+      status: 'historical',
+      availability: 'historical',
+      value: round(spreadRow.close - wtiClose, 4),
+      brentClose: spreadRow.close,
+      wtiClose,
+      asOf: spreadRow.date,
+      source: 'Yahoo Finance aligned completed Brent and WTI futures daily bars',
+      decisionEligible: false,
+    };
+  }
+
   return {
     correlations,
     rollingStats,
+    assetContext,
     timestamp: now.toISOString(),
     calculationDate,
     source: 'Yahoo Finance daily bars',
@@ -220,15 +312,17 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
 
 module.exports = {
   CORRELATION_WINDOWS,
+  DEFAULT_MAX_STALE_DAYS,
   LEGACY_CORRELATION_WINDOWS,
   OUTPUT_CORRELATION_WINDOWS,
   ROLLING_SAMPLE_COUNT,
   ROLLING_WINDOW,
+  REQUIRED_ROLLING_OBSERVATIONS,
   REQUIRED_ROLLING_RETURNS,
   REQUIRED_SYMBOLS,
+  OPTIONAL_SYMBOLS,
   UsdCorrelationDataError,
-  alignReturns,
-  buildReturnsByDate,
+  alignPriceLevels,
   buildRollingStats,
   buildUsdCorrelationSnapshot,
   completedDailyBarCutoff,
@@ -236,3 +330,4 @@ module.exports = {
   normalizeHistory,
   pearsonCorrelation,
 };
+const { buildRealizedVolatilitySnapshot } = require('./realizedVolatility.cjs');

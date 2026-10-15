@@ -1,4 +1,14 @@
-import { MARKET_HOLIDAYS_2026, formatDateKey } from '../constants/marketHolidays';
+const {
+  getUsEquityHoliday,
+  isTradingDateKey,
+} = require('./usEquityMarketCalendar.cjs');
+
+const formatLocalDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 /**
  * Check if a given date is a US market holiday
@@ -6,8 +16,7 @@ import { MARKET_HOLIDAYS_2026, formatDateKey } from '../constants/marketHolidays
  * @returns {boolean} - True if the date is a market holiday
  */
 export const isMarketHoliday = (date) => {
-  const dateKey = formatDateKey(date);
-  return MARKET_HOLIDAYS_2026.some(holiday => holiday.date === dateKey);
+  return Boolean(getUsEquityHoliday(formatLocalDateKey(date)));
 };
 
 /**
@@ -16,8 +25,7 @@ export const isMarketHoliday = (date) => {
  * @returns {string|null} - The name of the holiday, or null if not a holiday
  */
 export const getHolidayName = (date) => {
-  const dateKey = formatDateKey(date);
-  const holiday = MARKET_HOLIDAYS_2026.find(h => h.date === dateKey);
+  const holiday = getUsEquityHoliday(formatLocalDateKey(date));
   return holiday ? holiday.name : null;
 };
 
@@ -27,16 +35,7 @@ export const getHolidayName = (date) => {
  * @returns {boolean} - True if the date is a trading day
  */
 export const isTradingDay = (date) => {
-  const dayOfWeek = date.getDay();
-  // Skip weekends (Sunday = 0, Saturday = 6)
-  if (dayOfWeek === 0 || dayOfWeek === 6) {
-    return false;
-  }
-  // Skip holidays
-  if (isMarketHoliday(date)) {
-    return false;
-  }
-  return true;
+  return isTradingDateKey(formatLocalDateKey(date));
 };
 
 /**

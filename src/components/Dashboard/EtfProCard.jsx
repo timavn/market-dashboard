@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { useDashboardResource } from '../../hooks/useDashboardResource';
 import { isFreshForToday } from '../../utils/dateFreshness';
+import { useSurfaceActivity } from '../common/PersistentSurface';
+import ResourceDataStatusChip from './ResourceDataStatusChip';
 import './EtfProCard.css';
 
 function formatSignedPercent(value, digits = 2) {
@@ -139,10 +142,6 @@ function EtfProTable({ rows, toggleSort, newlyAdded }) {
   );
 
   useEffect(() => {
-    setPage(0);
-  }, [rows]);
-
-  useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === 'undefined') {
       setPageSize(ETFPRO_PAGE_SIZE_FALLBACK);
@@ -242,42 +241,43 @@ function EtfProTable({ rows, toggleSort, newlyAdded }) {
 }
 
 const EtfProCard = ({ onFreshness }) => {
-  const [rows, setRows] = useState([]);
-  const [changes, setChanges] = useState(EMPTY_CHANGES);
-  const [snapshotDate, setSnapshotDate] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const active = useSurfaceActivity();
   const [sort, setSort] = useState({ key: 'relativePerformance', dir: 'desc' });
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const snapshot = await MarketDataService.getHedgeyeEtfPro();
-      setRows(Array.isArray(snapshot?.rows) ? snapshot.rows : []);
-      setSnapshotDate(snapshot?.meta?.snapshotDate || null);
-      setChanges(
-        snapshot?.changes && typeof snapshot.changes === 'object' ? { ...EMPTY_CHANGES, ...snapshot.changes } : EMPTY_CHANGES
-      );
-      if (onFreshness) onFreshness(isFreshForToday(snapshot?.meta?.snapshotDate));
-    } catch (e) {
-      const msg =
-        e?.response?.data?.error ||
-        e?.message ||
-        'Failed to load ETF Pro. Run npm run collect:etfpro to sync from the ETF Pro folder.';
-      setError(msg);
-      setRows([]);
-      setSnapshotDate(null);
-      setChanges(EMPTY_CHANGES);
-      if (onFreshness) onFreshness(false);
-    } finally {
-      setLoading(false);
-    }
-  }, [onFreshness]);
+    return MarketDataService.getHedgeyeEtfPro();
+  }, []);
+  const resource = useDashboardResource('etf-pro', {}, {
+    fetcher: load,
+    validate: (value) => (
+      value
+      && typeof value === 'object'
+      && Array.isArray(value.rows)
+      && value.mock !== true
+      && value.seeded !== true
+        ? value
+        : null
+    ),
+    getObservedAt: (value) => value?.meta?.snapshotDate || value?.generatedAt,
+    active,
+    refreshOnActivate: false,
+  });
+  const snapshot = resource.data;
+  const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
+  const snapshotDate = snapshot?.meta?.snapshotDate || null;
+  const changes = snapshot?.changes && typeof snapshot.changes === 'object'
+    ? { ...EMPTY_CHANGES, ...snapshot.changes }
+    : EMPTY_CHANGES;
+  const loading = resource.initialLoading && !snapshot;
+  const error = resource.error
+    ? resource.error?.response?.data?.error
+      || resource.error.message
+      || 'Failed to load ETF Pro. Run npm run collect:etfpro to sync from the ETF Pro folder.'
+    : null;
 
   useEffect(() => {
-    load();
-  }, [load]);
+    onFreshness?.(Boolean(snapshotDate && isFreshForToday(snapshotDate) && !resource.error));
+  }, [onFreshness, resource.error, snapshotDate]);
 
   const { longRows, shortRows } = useMemo(() => {
     const longs = [];
@@ -304,6 +304,9 @@ const EtfProCard = ({ onFreshness }) => {
 
   return (
     <div className="etfpro-body">
+      <div className="etfpro-resource-status">
+        <ResourceDataStatusChip resource={resource} context="ETF Pro reference" />
+      </div>
       {error && <div className="etfpro-error">{error}</div>}
 
       {loading ? (

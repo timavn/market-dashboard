@@ -305,6 +305,10 @@
   align-items: center;
 }
 
+.vol-mw-row--refresh-delayed .region-mw-td-name {
+  background: #fffdf7;
+}
+
 .vol-mw-regime-stack {
   width: 44px;
   min-width: 44px;

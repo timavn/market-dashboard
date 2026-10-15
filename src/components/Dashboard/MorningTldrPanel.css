@@ -1,0 +1,707 @@
+/* The TL;DR is a reading surface, not a dashboard card grid.  The Process
+ * wiki supplies the shared serif type, search chrome, Contents rail, tabs,
+ * article measure, and restrained table treatment. */
+.morning-tldr-panel.morning-tldr-wiki {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  --process-font-size: 14px;
+  --process-article-width: 650px;
+}
+
+.morning-tldr-wiki .process-wiki__site-header {
+  flex: 0 0 auto;
+  padding-right: 18px;
+}
+
+.morning-tldr-wiki .process-wiki__search input {
+  font-family: Cochin, Athelas, Georgia, "Times New Roman", serif !important;
+  font-size: 15px;
+}
+
+.morning-tldr-wiki .process-wiki__search input::placeholder {
+  color: var(--process-muted);
+  opacity: 0.72;
+}
+
+.morning-tldr-wiki .tldr-search-submit {
+  flex: 0 0 auto;
+  font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+.morning-tldr-wiki .tldr-search-submit:hover:not(:disabled),
+.morning-tldr-wiki .tldr-search-submit:focus-visible {
+  background: var(--process-light-border);
+  outline: 1px solid var(--process-ink);
+  outline-offset: -1px;
+}
+
+.morning-tldr-wiki .tldr-search-submit:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.tldr-search-empty {
+  padding: 10px;
+  color: var(--process-muted);
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.tldr-search-group + .tldr-search-group {
+  border-top: 1px solid var(--process-border);
+}
+
+.tldr-search-group__heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 9px 12px 7px;
+  color: var(--process-ink);
+  border-bottom: 1px solid var(--process-light-border);
+  background: var(--process-subtle-bg);
+  font: 700 16px/1.25 Cochin, Athelas, Georgia, "Times New Roman", serif;
+}
+
+.tldr-search-group__mentions {
+  display: grid;
+}
+
+.morning-tldr-wiki .tldr-search-mention {
+  position: relative;
+  min-height: 40px;
+  padding: 8px 34px 8px 12px;
+  display: block;
+  font: 14px/1.45 Cochin, Athelas, Georgia, "Times New Roman", serif;
+}
+
+.morning-tldr-wiki .tldr-search-mention::after {
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  color: var(--process-muted);
+  content: "›";
+  font: 20px/1 Georgia, serif;
+  transform: translateY(-52%);
+}
+
+.morning-tldr-wiki .tldr-search-mention[aria-selected="true"] {
+  background: rgba(255, 218, 92, 0.2);
+}
+
+.tldr-search-mention__highlight {
+  padding: 0 1px;
+  color: inherit;
+  background: rgba(255, 190, 46, 0.62);
+}
+
+::highlight(morning-tldr-search-match) {
+  color: inherit;
+  background: rgba(255, 218, 92, 0.58);
+}
+
+::highlight(morning-tldr-search-current) {
+  color: #17130a;
+  background: #ffbe2e;
+  text-decoration: underline 2px #8b5d00;
+}
+
+.morning-tldr-wiki [data-tldr-search-current] {
+  scroll-margin-block: 96px;
+}
+
+.morning-tldr-wiki .process-wiki__body {
+  grid-template-columns: 170px minmax(0, var(--process-article-width)) 150px;
+  padding-block: 4.8px 6.4px;
+}
+
+.morning-tldr-wiki .process-wiki__article-scroll {
+  scroll-behavior: smooth;
+}
+
+.morning-tldr-wiki .process-wiki__article-scroll > * {
+  max-width: var(--process-article-width);
+}
+
+.morning-tldr-wiki .process-wiki__document-header {
+  margin-bottom: 19px;
+}
+
+.morning-tldr-wiki .process-wiki__tabs {
+  justify-content: flex-start;
+}
+
+.morning-tldr-wiki .tldr-date-tabs {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  justify-content: flex-start;
+  gap: 0;
+}
+
+.morning-tldr-wiki .tldr-date-tab {
+  flex: 0 0 auto;
+  min-width: 76px;
+  padding-left: 13px;
+  padding-right: 13px;
+  white-space: nowrap;
+}
+
+.morning-tldr-wiki .tldr-date-tab:focus-visible {
+  outline: 2px solid var(--process-link);
+  outline-offset: -2px;
+}
+
+.tldr-date-tabs__empty {
+  padding: 0 8px 7px;
+}
+
+.morning-tldr-wiki .process-wiki__document-header h1 {
+  font-size: 29px;
+}
+
+.morning-tldr-wiki .process-wiki__save-status {
+  max-width: var(--process-article-width);
+}
+
+.morning-tldr-refresh {
+  color: var(--process-link) !important;
+}
+
+.morning-tldr-wiki .process-wiki__contents {
+  padding-bottom: 22px;
+}
+
+.tldr-wiki-article {
+  padding-bottom: 42px;
+}
+
+.tldr-wiki-section {
+  scroll-margin-top: 8px;
+}
+
+.tldr-wiki-section + .tldr-wiki-section {
+  margin-top: 44px;
+  padding-top: 2px;
+}
+
+.tldr-wiki-section-header {
+  margin: 0 0 20px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--process-border);
+}
+
+.tldr-wiki-section-heading-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 14px;
+  min-width: 0;
+}
+
+.tldr-wiki-section-header h2 {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom: 0 !important;
+}
+
+.tldr-wiki-section-header > p:not(.process-wiki__metadata) {
+  margin: 0 0 3px;
+  color: var(--process-muted);
+  font-size: 0.88em;
+}
+
+.tldr-wiki-top-three-intro {
+  margin: 0 0 18px !important;
+  color: var(--process-muted);
+  font-style: italic;
+}
+
+.tldr-wiki-top-three {
+  margin: 0;
+  padding-left: 28px;
+}
+
+.tldr-wiki-top-three > li {
+  margin: 0 0 24px;
+  padding-left: 7px;
+}
+
+.tldr-wiki-top-three > li::marker {
+  color: var(--process-link);
+  font-weight: 700;
+}
+
+.tldr-wiki-top-three h3 {
+  margin: 0 0 6px !important;
+}
+
+.tldr-wiki-top-three .tldr-wiki-text-blocks p:last-child {
+  margin-bottom: 0 !important;
+}
+
+.tldr-wiki-source-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.tldr-wiki-source-meta span,
+.tldr-wiki-source-meta a {
+  white-space: nowrap;
+}
+
+.tldr-wiki-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--process-muted);
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.tldr-wiki-status__dot {
+  width: 6px;
+  height: 6px;
+  display: inline-block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.tldr-wiki-status--fresh { color: #16734a; }
+.tldr-wiki-status--warning { color: #946b15; }
+.tldr-wiki-status--error { color: #b23a3a; }
+
+.tldr-wiki-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tldr-wiki-table {
+  min-width: 570px;
+  margin-top: 13px !important;
+  margin-bottom: 22px !important;
+}
+
+.tldr-wiki-table caption {
+  padding: 0 0 7px;
+  color: var(--process-ink);
+  font-size: 1.05em;
+  font-weight: 600;
+  text-align: left;
+}
+
+.tldr-wiki-table th,
+.tldr-wiki-table td {
+  white-space: nowrap;
+}
+
+.tldr-wiki-table td small {
+  display: block;
+  color: var(--process-muted);
+  font-size: 10px;
+}
+
+.tldr-wiki-level-list {
+  margin: 13px 0 22px;
+  padding: 0;
+  list-style: none;
+}
+
+.tldr-wiki-level-list__item {
+  margin: 0 0 9px;
+  line-height: 1.45;
+}
+
+.tldr-wiki-level-list__range {
+  white-space: nowrap;
+}
+
+.tldr-wiki-security-blocks {
+  margin: 0 0 20px;
+}
+
+.tldr-wiki-security-blocks .tldr-wiki-security-block {
+  margin: 0 0 22px;
+}
+
+.tldr-wiki-security-blocks .tldr-wiki-security-block:last-child {
+  margin-bottom: 0;
+}
+
+.tldr-wiki-comparison-table th,
+.tldr-wiki-comparison-table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.tldr-wiki-risk-sort {
+  width: 100%;
+  padding: 2px 5px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: inherit;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tldr-wiki-risk-sort:hover,
+.tldr-wiki-risk-sort:focus-visible {
+  color: var(--process-link);
+  background: var(--process-subtle-bg);
+  outline: 1px solid var(--process-link);
+  outline-offset: 1px;
+}
+
+.tldr-wiki-risk-sort small {
+  color: var(--process-link);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tldr-wiki-signal-table {
+  min-width: 420px;
+}
+
+.tldr-wiki-signal-table th,
+.tldr-wiki-signal-table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.tldr-wiki-signal-table th[scope="row"] {
+  color: var(--process-ink);
+  font-weight: 600;
+}
+
+.tldr-wiki-comparison-table td small {
+  margin-top: 2px;
+}
+
+.tldr-wiki-risk-level {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 42px;
+  width: 100%;
+}
+
+.tldr-wiki-risk-level__value {
+  display: block;
+}
+
+.tldr-wiki-risk-level__footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.tldr-wiki-risk-level__footer small {
+  margin-top: 2px;
+}
+
+.tldr-wiki-risk-level__delta {
+  text-align: left;
+}
+
+.tldr-wiki-risk-level__percent {
+  text-align: right;
+}
+
+.tldr-wiki-risk-level__footer small.tldr-wiki-number--positive {
+  color: #16734a;
+}
+
+.tldr-wiki-risk-level__footer small.tldr-wiki-number--negative {
+  color: #b23a3a;
+}
+
+.tldr-wiki-risk-level__footer small.tldr-wiki-number--neutral {
+  color: var(--process-muted);
+}
+
+.tldr-wiki-risk-close {
+  position: relative;
+  display: block;
+  min-height: 42px;
+  width: 100%;
+  line-height: 1.1;
+}
+
+.tldr-wiki-risk-close__value {
+  display: block;
+  position: absolute;
+  top: 50%;
+  left: clamp(2.5rem, var(--tldr-risk-close-position, 50%), calc(100% - 2.5rem));
+  transform: translate(-50%, -50%);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tldr-wiki-risk-trend {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+
+.tldr-wiki-risk-trend__bias {
+  display: block;
+}
+
+.tldr-wiki-risk-ratio {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 0.84em;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tldr-wiki-risk-ratio__downside {
+  color: #b23a3a;
+}
+
+.tldr-wiki-risk-ratio__separator {
+  color: #000000 !important;
+}
+
+.tldr-wiki-risk-ratio__upside {
+  color: #16734a;
+}
+
+.morning-tldr-wiki .tldr-wiki-comparison-row--added > th,
+.morning-tldr-wiki .tldr-wiki-comparison-row--added > td {
+  background: #e9f7ef !important;
+}
+
+.morning-tldr-wiki .tldr-wiki-comparison-row--removed > th,
+.morning-tldr-wiki .tldr-wiki-comparison-row--removed > td {
+  background: #fdecec !important;
+}
+
+.dark .morning-tldr-wiki .tldr-wiki-comparison-row--added > th,
+.dark .morning-tldr-wiki .tldr-wiki-comparison-row--added > td {
+  background: rgba(22, 115, 74, 0.22) !important;
+}
+
+.dark .morning-tldr-wiki .tldr-wiki-comparison-row--removed > th,
+.dark .morning-tldr-wiki .tldr-wiki-comparison-row--removed > td {
+  background: rgba(178, 58, 58, 0.22) !important;
+}
+
+.tldr-wiki-prior-value .tldr-wiki-trend {
+  font-size: inherit;
+}
+
+.tldr-wiki-table-link {
+  padding: 0;
+  color: var(--process-link);
+  border: 0;
+  background: transparent;
+  font: inherit !important;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tldr-wiki-table-link:hover,
+.tldr-wiki-table-link:focus-visible {
+  color: var(--process-link-hover);
+  text-decoration: underline;
+  outline: none;
+}
+
+.tldr-wiki-trend {
+  font-weight: 600;
+}
+
+.tldr-wiki-trend--positive,
+.tldr-wiki-number--positive,
+.tldr-wiki-position-list--positive { color: #16734a; }
+
+.tldr-wiki-trend--negative,
+.tldr-wiki-number--negative,
+.tldr-wiki-position-list--negative { color: #b23a3a; }
+
+.tldr-wiki-trend--neutral { color: var(--process-ink); }
+
+.tldr-quad-token {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.tldr-quad-label {
+  display: inline;
+  font-weight: 700;
+}
+
+.tldr-quad-label--1 {
+  color: var(--dashboard-quad-1);
+}
+
+.tldr-quad-label--2 {
+  color: var(--dashboard-quad-2);
+}
+
+.tldr-quad-label--3 {
+  color: var(--dashboard-quad-3);
+}
+
+.tldr-quad-label--4 {
+  color: var(--dashboard-quad-4);
+}
+
+.tldr-wiki-note {
+  margin: 15px 0;
+  padding: 9px 12px;
+  color: var(--process-muted);
+  border-left: 3px solid var(--process-border);
+  background: var(--process-subtle-bg);
+  font-size: 0.91em;
+  line-height: 1.5;
+}
+
+.tldr-wiki-note strong {
+  color: var(--process-ink);
+}
+
+.tldr-wiki-note p {
+  margin: 5px 0 0 !important;
+}
+
+.tldr-wiki-note--error {
+  border-left-color: #b23a3a;
+}
+
+.tldr-wiki-change-list,
+.tldr-wiki-position-groups {
+  margin: 12px 0 19px;
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 6px 14px;
+}
+
+.tldr-wiki-change-list dt,
+.tldr-wiki-position-groups dt {
+  color: var(--process-ink);
+  font-weight: 600;
+}
+
+.tldr-wiki-change-list dd,
+.tldr-wiki-position-groups dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.tldr-wiki-position-list {
+  color: var(--process-ink);
+}
+
+.tldr-wiki-position-list--positive,
+.tldr-wiki-position-label--positive {
+  color: #16734a;
+}
+
+.tldr-wiki-position-list--negative,
+.tldr-wiki-position-label--negative {
+  color: #b23a3a;
+}
+
+.tldr-wiki-position-list--neutral,
+.tldr-wiki-position-label--neutral {
+  color: var(--process-ink);
+}
+
+.tldr-wiki-change-list dt.tldr-wiki-position-label--positive,
+.tldr-wiki-position-groups dt.tldr-wiki-position-label--positive {
+  color: #16734a;
+}
+
+.tldr-wiki-change-list dt.tldr-wiki-position-label--negative,
+.tldr-wiki-position-groups dt.tldr-wiki-position-label--negative {
+  color: #b23a3a;
+}
+
+.tldr-wiki-change-list dt.tldr-wiki-position-label--neutral,
+.tldr-wiki-position-groups dt.tldr-wiki-position-label--neutral {
+  color: var(--process-ink);
+}
+
+.tldr-wiki-change-item {
+  color: var(--process-ink);
+}
+
+.tldr-wiki-subsection {
+  margin-top: 21px;
+}
+
+.tldr-wiki-subsection h4 {
+  margin-bottom: 7px !important;
+}
+
+.tldr-wiki-source-line {
+  margin-top: 13px !important;
+}
+
+.tldr-wiki-details {
+  margin: -8px 0 20px;
+  color: var(--process-link);
+  font-size: 12px;
+}
+
+.tldr-wiki-details summary {
+  cursor: pointer;
+}
+
+.tldr-wiki-footer {
+  margin-top: 35px;
+  padding-top: 13px;
+  border-top: 1px solid var(--process-light-border);
+}
+
+@media (max-width: 1060px) {
+  .morning-tldr-wiki .process-wiki__body {
+    grid-template-columns: 180px minmax(0, var(--process-article-width));
+  }
+
+  .morning-tldr-wiki .process-wiki__article-scroll {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .morning-tldr-wiki .process-wiki__site-header {
+    padding-right: 8px;
+  }
+
+  .morning-tldr-wiki .process-wiki__body {
+    grid-template-columns: minmax(0, 1fr);
+    padding-block: 3px 4.8px;
+  }
+
+  .morning-tldr-wiki .process-wiki__article-scroll {
+    grid-column: 1;
+  }
+
+  .tldr-wiki-change-list,
+  .tldr-wiki-position-groups {
+    grid-template-columns: 105px minmax(0, 1fr);
+  }
+}

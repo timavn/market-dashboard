@@ -1,7 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import ProcessPage from './ProcessPage';
+import { useSurfaceActivity } from '../common/PersistentSurface';
 
 const ProcessOverlay = ({ documentId, onClose, onNavigate }) => {
+  const active = useSurfaceActivity();
   const dialogRef = useRef(null);
   const onCloseRef = useRef(onClose);
 
@@ -10,6 +12,7 @@ const ProcessOverlay = ({ documentId, onClose, onNavigate }) => {
   }, [onClose]);
 
   useEffect(() => {
+    if (!active) return undefined;
     const dialog = dialogRef.current;
     const searchInput = dialog?.querySelector('input[type="search"]');
     searchInput?.focus();
@@ -22,7 +25,7 @@ const ProcessOverlay = ({ documentId, onClose, onNavigate }) => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [active]);
 
   return (
     <div className="process-overlay-host" data-testid="process-overlay">

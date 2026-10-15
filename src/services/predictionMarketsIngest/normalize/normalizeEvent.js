@@ -43,6 +43,7 @@ function normalizeKalshi(raw, ctx = {}) {
   const m = raw.market || raw;
   const event = raw.event || ctx.event || {};
   const series = raw.series || ctx.series || {};
+  const quoteRetrievedAt = new Date().toISOString();
   const yesBid = fromKalshiCents(m.yes_bid ?? m.yes_bid_dollars);
   const yesAsk = fromKalshiCents(m.yes_ask ?? m.yes_ask_dollars);
   const noBid = fromKalshiCents(m.no_bid ?? m.no_bid_dollars);
@@ -72,9 +73,15 @@ function normalizeKalshi(raw, ctx = {}) {
     status: mapStatus(m.status),
     yes_bid: yesBid,
     yes_ask: yesAsk,
+    yes_bid_size: toNum(m.yes_bid_size_fp ?? m.yes_bid_size),
+    yes_ask_size: toNum(m.yes_ask_size_fp ?? m.yes_ask_size),
     yes_mid: null,
     no_bid: noBid,
     no_ask: noAsk,
+    // Kalshi does not expose native no-side size fields in this market
+    // snapshot. Keep them absent instead of deriving complementary depth.
+    no_bid_size: toNum(m.no_bid_size_fp ?? m.no_bid_size),
+    no_ask_size: toNum(m.no_ask_size_fp ?? m.no_ask_size),
     no_mid: null,
     last_price: last,
     implied_probability_mid: null,
@@ -88,7 +95,10 @@ function normalizeKalshi(raw, ctx = {}) {
     url: m.ticker ? `https://kalshi.com/markets/${m.ticker}` : null,
     api_raw_symbol: m.ticker,
     api_raw_id: m.ticker,
-    updated_at: new Date().toISOString(),
+    market_updated_at: m.updated_time || null,
+    quote_retrieved_at: quoteRetrievedAt,
+    order_book_provenance: 'kalshi_market_snapshot_top_of_book',
+    updated_at: quoteRetrievedAt,
     comparison_group_id: null,
     data_quality_flags: [],
     fee_adjusted_edge: null,
@@ -130,7 +140,11 @@ function normalizeIbkrForecastEx(raw, ctx = {}) {
     last_price: last,
     implied_probability_mid: null,
     spread: null,
-    volume: toNum(snap['7059']),
+    // IBKR field 7059 is LAST SIZE, not traded volume. ForecastEx activity
+    // comes from the official public pair tape and must not be synthesized
+    // from a quote snapshot.
+    last_size: toNum(snap['7059']),
+    volume: null,
     open_interest: null,
     liquidity: null,
     min_tick: 0.01,
@@ -180,7 +194,8 @@ function normalizeIbkrCme(raw, ctx = {}) {
     last_price: last,
     implied_probability_mid: null,
     spread: null,
-    volume: toNum(snap['7059']),
+    last_size: toNum(snap['7059']),
+    volume: null,
     open_interest: null,
     liquidity: null,
     min_tick: 1,

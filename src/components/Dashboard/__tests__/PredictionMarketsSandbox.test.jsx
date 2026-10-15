@@ -253,10 +253,13 @@ const fridayBearishPriceStructure = spxPriceStructureResponse({
 const bullishSpxTradeSnapshot = {
   snapshotType: 'momo-tracker',
   date: '2026-07-17',
+  htmlSource: 'hedgeye-email/messages/2026-07-17/momo-tracker/test.html',
+  sourceUrl: 'https://app.hedgeye.com/feed_items/123',
   data: {
     stocks: {
       SPX: {
         trade: 'BULLISH',
+        signalProvenance: { field: 'trade', sourceField: 'data.stocks.SPX.trade', method: 'explicit-field', sourceText: 'SPX Trade: BULLISH' },
         date: '2026-07-17',
       },
     },
@@ -404,6 +407,7 @@ describe('PredictionMarketsSandbox', () => {
     render(<PredictionMarketsSandbox onClose={jest.fn()} portfolioData={{ accountId: 'U25779973' }} />);
 
     const workbench = screen.getByTestId('spx-close-workbench');
+    expect(screen.getByTestId('spx-detail-workbench')).toContainElement(workbench);
     const ladder = await within(workbench).findByRole('table', { name: 'S&P 500 cash close threshold ladder' });
     expect(within(workbench).getByRole('heading', { name: 'S&P 500 Close' })).toBeInTheDocument();
     expect(within(workbench).getByText('Cash S&P 500 Index · Settlement 4:00 PM ET')).toBeInTheDocument();
@@ -480,7 +484,7 @@ describe('PredictionMarketsSandbox', () => {
     };
 
     expect(resolveVerifiedLiveSpxQuote(quote, currentStatus, now)).toMatchObject({ status: 'live', price: 7540 });
-    expect(resolveVerifiedLiveSpxQuote(quote, { ...currentStatus, statusRefreshDelayed: true }, now)).toMatchObject({ status: 'unavailable', price: null });
+    expect(resolveVerifiedLiveSpxQuote(quote, { ...currentStatus, statusRefreshDelayed: true }, now)).toMatchObject({ status: 'live', price: 7540 });
     expect(resolveVerifiedLiveSpxQuote(quote, { ...currentStatus, ibkr: { connected: false } }, now)).toMatchObject({ status: 'unavailable', price: null });
     expect(resolveVerifiedLiveSpxQuote({ SPX: { ...quote.SPX, last: null, price: '7540.00' } }, currentStatus, now)).toMatchObject({ status: 'unavailable', price: null });
   });
@@ -544,6 +548,33 @@ describe('PredictionMarketsSandbox', () => {
     expect(allocationRow).toHaveTextContent('ALIGNED');
     expect(structureRow).toHaveTextContent('3 aligned · 0 conflict');
     expect(structureRow).toHaveTextContent('2/2');
+  });
+
+  test('shows verified dated throttle context even when the independent exposure signal is absent', async () => {
+    MarketDataService.getHedgeyeSnapshot.mockImplementation(async (snapshotType) => {
+      if (snapshotType === 'momo-tracker') return bullishSpxTradeSnapshot;
+      if (snapshotType === 'market-structure') return {
+        snapshotType: 'market-structure', schemaVersion: 'market-structure-v4', contentComplete: true,
+        date: '2026-07-17', data: {
+          charts: [{ id: 'a'.repeat(64), sha256: 'a'.repeat(64) }],
+          chartMetrics: { spxGammaVolatilityThrottle: {
+            chartId: 'a'.repeat(64), chartDate: '2026-07-16',
+            parserVersion: 'market-structure-chart-metrics-v3', extractionBasis: 'labeled-chart-ocr',
+            source: 'Tier1Alpha.com', gammaThrottle: -4.72, tenDayRealizedVolatility: 9.46,
+          } },
+        },
+      };
+      return null;
+    });
+    render(<PredictionMarketsSandbox onClose={jest.fn()} />);
+    const ledger = await screen.findByRole('table', { name: 'SPX confluence score ledger' });
+    const gammaRow = within(ledger).getByRole('row', { name: /Gamma \/ threshold fit/ });
+    expect(gammaRow).toHaveTextContent('throttle −4.72 · 10D rVol 9.46');
+    expect(gammaRow).toHaveTextContent('Jul 16');
+    expect(gammaRow).toHaveTextContent('UNAVAILABLE');
+    const gammaRead = within(gammaRow).getAllByRole('cell')[0];
+    expect(gammaRead).not.toHaveTextContent('Positive');
+    expect(gammaRead).not.toHaveTextContent('Negative');
   });
 
   test('shows the completed cash-index HH / HL run as a signed reference without changing the 0–8 confluence total', async () => {
@@ -676,7 +707,7 @@ describe('PredictionMarketsSandbox', () => {
     expect(within(workbench).queryByText(/−2\s*\/\s*8/)).not.toBeInTheDocument();
   });
 
-  test('clears a displayed HH / HL reference when its forced provider refresh fails', async () => {
+  test('withholds a dated HH / HL reference when its forced provider refresh fails', async () => {
     MarketDataService.getSecurityRiskMetrics
       .mockResolvedValueOnce(priorSessionBullishPriceStructure)
       .mockRejectedValueOnce(new Error('completed index history unavailable'));

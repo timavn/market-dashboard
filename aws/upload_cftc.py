@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Upload CFTC Non-Commercial Net Long Positioning PDF
-Scans local folder for the latest PDF, parses with Textract, and stores in DynamoDB.
+Upload a Hedgeye CFTC PDF as a decision-ineligible audit artifact.
+The official CFTC public-reporting Lambda owns the canonical positioning feed.
 
 Default folder:
   ~/Desktop/dashboard/hedgeye/cftc/
@@ -21,7 +21,7 @@ from pathlib import Path
 # Add lambda dir to path so we can import the parser
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lambda'))
 
-from parse_cftc import extract_cftc_data, save_to_dynamodb
+from parse_cftc import extract_cftc_data, save_audit_to_dynamodb
 from date_utils import extract_date_from_pdf
 
 # Import helper functions from parse_bitcoin_tracker for S3 upload
@@ -108,7 +108,7 @@ def process_cftc(cftc_dir=None, pdf_file=None):
 
     # Save to DynamoDB
     try:
-        save_to_dynamodb(data, pdf_s3_key, pdf_date)
+        save_audit_to_dynamodb(data, pdf_s3_key, pdf_date)
         print("   ✅ DynamoDB save completed")
         return True
     except Exception as e:
