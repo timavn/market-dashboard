@@ -450,6 +450,39 @@ python3 infra/scripts/replay_security_intelligence.py \
 The apply command stops with `AWS_ADMIN_LOGIN_REQUIRED` until the approved
 role is verified. It must not be rerun under `market-dashboard-local`.
 
+For the bounded Top 3 Things classifier repair, capture the ten visible TL;DR
+dates while the existing Gmail schedule is enabled. The command scans only
+the immutable ledger and archived S3 bodies, selects the latest valid
+publication per date, fingerprints each separate Macro Show Summary snapshot,
+and writes message identifiers only to a private authenticated receipt:
+
+```bash
+top_three_parent="$(mktemp -d "${TMPDIR:-/tmp}/market-dashboard-top-three.XXXXXX")"
+chmod 700 "$top_three_parent"
+python3 infra/scripts/backfill_top_three_things.py \
+  --prepare \
+  --receipt "$top_three_parent/replay.json" \
+  --receipt-key "$top_three_parent/replay.key" \
+  --admin-profile market-dashboard-admin
+```
+
+After the tested base deployment has disabled every schedule, apply the same
+receipt. Apply mode authenticates and revalidates all evidence, requires the
+deployed Lambda build and code hash to match the tested release, replays at
+most eight message IDs per invocation batch, and verifies all ten Top 3 and
+Macro Show snapshots before returning success:
+
+```bash
+python3 infra/scripts/backfill_top_three_things.py \
+  --apply \
+  --receipt "$top_three_parent/replay.json" \
+  --receipt-key "$top_three_parent/replay.key" \
+  --release-commit "$MARKET_DASHBOARD_RELEASE_COMMIT" \
+  --release-receipt "$MARKET_DASHBOARD_RELEASE_RECEIPT" \
+  --release-key "$MARKET_DASHBOARD_RELEASE_RECEIPT_KEY" \
+  --admin-profile market-dashboard-admin
+```
+
 For the bounded parser-repair incident involving exactly one current
 `market-structure`, `risk-ranges`, and `investing-ideas` quarantine, do **not**
 run a mailbox backfill. While the existing Gmail schedule is still enabled and

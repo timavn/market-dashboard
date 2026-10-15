@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -30,10 +31,12 @@ PRODUCT_MANIFEST_TABLE = os.environ.get(
     "RESEARCH_PRODUCT_MANIFEST_TABLE",
     "ResearchProductManifestsV1",
 )
-PARSER_VERSION = "security-intelligence-v3-explicit-trade"
+PARSER_VERSION = "security-intelligence-v4-authoritative-tracker"
 MAX_MANIFEST_WRITE_RETRIES = 4
 MAX_BODY_TEXT_LENGTH = 40_000
 MANIFEST_STAGES = {"received", "parsed", "validated", "indexed", "failed"}
+AUTHORITATIVE_TRACKER_PRODUCTS = {"momo-tracker", "bitcoin-trend-tracker"}
+AUTHORITATIVE_TRACKER_TRENDS = {"BULLISH", "BEARISH", "NEUTRAL"}
 CONTROLLED_EXPOSURE_TYPES = {
     "factor",
     "sector",
@@ -270,22 +273,22 @@ def _iter_content_blocks(
 
 def _direction_from_path(path: str, text: str = "") -> Optional[str]:
     haystack = f"{path} {text[:80]}".lower()
-    # A structured tracker trend is authoritative.  Never let a neighboring
-    # JSON key such as ``sellTrade`` or ``downside`` turn an explicit NEUTRAL
-    # row into a negative event.
+    # Structured tracker trends are authoritative. Neighboring JSON keys such
+    # as sellTrade or downside must not turn an explicit bullish/neutral row
+    # into a negative event.
     explicit = re.search(
-        r'"?(?:trade|tradeBias|signal|trend)"?\s*[:=]\s*"?\s*(BULLISH|BEARISH|NEUTRAL|LONG|SHORT|BUY|SELL)\b',
+        r'"?(?:trade|tradeBias|signal|trend)"?\s*[:=]\s*"?\s*'
+        r"(BULLISH|BEARISH|NEUTRAL|LONG|SHORT|BUY|SELL)\b",
         text,
         re.IGNORECASE,
     )
     if explicit:
         value = explicit.group(1).upper()
-        if value in {"NEUTRAL"}:
+        if value == "NEUTRAL":
             return "neutral"
         if value in {"BULLISH", "LONG", "BUY"}:
             return "positive"
-        if value in {"BEARISH", "SHORT", "SELL"}:
-            return "negative"
+        return "negative"
     if any(token in haystack for token in ("removed", "remove", "short", "bear", "sell")):
         return "negative"
     if any(token in haystack for token in ("added", "add", "long", "bull", "buy")):
@@ -664,6 +667,38 @@ def _structured_ticker_references(
     return references
 
 
+def _deduplicate_entity_references(
+    references: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    deduplicated: Dict[str, Dict[str, Any]] = {}
+    for reference in references:
+        signature = "|".join(
+            [
+                reference["entityKey"],
+                reference["eventType"],
+                str(reference.get("direction") or ""),
+                reference["fieldPath"],
+                reference["excerpt"],
+            ]
+        )
+        deduplicated[hashlib.sha256(signature.encode("utf-8")).hexdigest()] = reference
+    return list(deduplicated.values())
+
+
+def _is_authoritative_tracker_reference(reference: Dict[str, Any]) -> bool:
+    event_type = reference.get("eventType")
+    value = reference.get("value")
+    if event_type == "trend_signal":
+        trend = value.get("trend") if isinstance(value, dict) else value
+        return str(trend or "").strip().upper() in AUTHORITATIVE_TRACKER_TRENDS
+    if event_type == "trade_signal":
+        return (
+            str(value or "").strip().upper() in AUTHORITATIVE_TRACKER_TRENDS
+            and explicit_provenance(reference.get("signalProvenance"))
+        )
+    return False
+
+
 def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
     product_id = str(
         snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
@@ -685,6 +720,16 @@ def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
         reference.update({"eventType": "trade_signal", "sourceTicker": signal["sourceTicker"],
                           "sourceText": signal["sourceText"], "signalProvenance": signal["signalProvenance"]})
         references.append(reference)
+    if product_id in AUTHORITATIVE_TRACKER_PRODUCTS:
+        # Tracker rows are the only authority for tracker products. OCR prose,
+        # chart labels, image names, and neighboring JSON keys must never be
+        # promoted into ticker signals. Keep the typed Trend row for each
+        # security plus any explicit, provenance-backed Trade evidence.
+        return _deduplicate_entity_references(
+            reference
+            for reference in references
+            if _is_authoritative_tracker_reference(reference)
+        )
     searchable_data = snapshot.get("data") or {}
     if product_id == "investing-ideas" and isinstance(searchable_data, dict):
         # A complete Investing Ideas position book is already represented by
@@ -776,19 +821,7 @@ def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
                 )
                 break
 
-    deduplicated: Dict[str, Dict[str, Any]] = {}
-    for reference in references:
-        signature = "|".join(
-            [
-                reference["entityKey"],
-                reference["eventType"],
-                str(reference.get("direction") or ""),
-                reference["fieldPath"],
-                reference["excerpt"],
-            ]
-        )
-        deduplicated[hashlib.sha256(signature.encode("utf-8")).hexdigest()] = reference
-    return list(deduplicated.values())
+    return _deduplicate_entity_references(references)
 
 
 def build_entity_events(
@@ -1022,6 +1055,7 @@ def update_product_manifest(
     content_sha256: Optional[str] = None,
     event_count: int = 0,
     error: Optional[str] = None,
+    replace_existing: bool = False,
 ) -> Dict[str, Any]:
     if stage not in MANIFEST_STAGES:
         raise ValueError(f"Unsupported manifest stage: {stage}")
@@ -1046,11 +1080,12 @@ def update_product_manifest(
             if item.get("artifactId")
         }
         previous = artifacts.get(artifact_id, {})
-        effective_stage = (
-            "indexed"
-            if previous.get("stage") == "indexed" and stage != "indexed"
-            else stage
-        )
+        if replace_existing:
+            effective_stage = stage
+        elif previous.get("stage") == "indexed" and stage != "indexed":
+            effective_stage = "indexed"
+        else:
+            effective_stage = stage
         stage_history = list(previous.get("stageHistory") or [])
         transition = {"stage": stage, "at": now}
         if error:
@@ -1061,9 +1096,11 @@ def update_product_manifest(
         # hardened (for example, replacing legacy Investing Ideas leaf rows
         # with one typed position event per security), so do not preserve a
         # stale, larger count once validation/indexing succeeds.
+        # An operator replacement replay (replace_existing) also resets the
+        # count so a superseded parser's larger total cannot survive reindex.
         effective_event_count = (
             int(event_count)
-            if stage in {"validated", "indexed"}
+            if replace_existing or stage in {"validated", "indexed"}
             else max(int(previous.get("eventCount", 0)), int(event_count))
         )
         artifact = {
@@ -1146,6 +1183,10 @@ def update_product_manifest(
             "updatedAt": now,
             "version": version + 1,
         }
+        if existing.get("reclassifiedArtifacts"):
+            item["reclassifiedArtifacts"] = deepcopy(
+                existing["reclassifiedArtifacts"]
+            )
         try:
             kwargs: Dict[str, Any] = {"Item": item}
             if existing:
@@ -1168,12 +1209,194 @@ def update_product_manifest(
     raise RuntimeError(f"Unable to update product manifest for {market_date}/{product_id}")
 
 
+def reclassify_manifest_artifact(
+    snapshot: Dict[str, Any],
+    dynamodb: Any,
+    *,
+    source_product_id: str,
+    content_sha256: str,
+) -> Dict[str, Any]:
+    """Move one active manifest artifact only after its target is indexed.
+
+    The source artifact and its complete stage history remain in the optional
+    audit collection. Active counts and checksums intentionally exclude that
+    audit evidence.
+    """
+    target_product_id = str(
+        snapshot.get("snapshotType") or snapshot.get("reportType") or "unknown"
+    )
+    if source_product_id == target_product_id:
+        raise ValueError("Manifest reclassification requires distinct products")
+    known_products = set(product_ids())
+    if source_product_id not in known_products or target_product_id not in known_products:
+        raise ValueError("Manifest reclassification requires registered products")
+
+    market_date = str(snapshot.get("date") or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", market_date):
+        raise ValueError("Manifest reclassification requires a valid market date")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(content_sha256 or "")):
+        raise ValueError("Manifest reclassification requires an exact content hash")
+
+    table = dynamodb.Table(PRODUCT_MANIFEST_TABLE)
+    artifact_id = _artifact_id(snapshot, content_sha256)
+    target_key = {"marketDate": market_date, "productKey": target_product_id}
+    target_manifest = table.get_item(
+        Key=target_key,
+        ConsistentRead=True,
+    ).get("Item") or {}
+    target_artifact = next(
+        (
+            item
+            for item in target_manifest.get("artifacts", [])
+            if str(item.get("artifactId") or "") == artifact_id
+        ),
+        None,
+    )
+    if (
+        not target_artifact
+        or target_artifact.get("stage") != "indexed"
+        or target_artifact.get("contentSha256") != content_sha256
+    ):
+        raise RuntimeError(
+            "Target manifest does not contain the indexed reclassification artifact"
+        )
+
+    source_key = {"marketDate": market_date, "productKey": source_product_id}
+    reclassification_id = hashlib.sha256(
+        "|".join(
+            (
+                market_date,
+                source_product_id,
+                target_product_id,
+                artifact_id,
+                content_sha256,
+            )
+        ).encode("utf-8")
+    ).hexdigest()
+
+    for _ in range(MAX_MANIFEST_WRITE_RETRIES):
+        existing = table.get_item(
+            Key=source_key,
+            ConsistentRead=True,
+        ).get("Item") or {}
+        if not existing:
+            raise RuntimeError("Source manifest is missing during reclassification")
+        version = int(existing.get("version", 0))
+        audits = deepcopy(existing.get("reclassifiedArtifacts") or [])
+        prior_audit = next(
+            (
+                item
+                for item in audits
+                if item.get("reclassificationId") == reclassification_id
+            ),
+            None,
+        )
+        artifacts = [
+            deepcopy(item) for item in existing.get("artifacts", [])
+        ]
+        source_artifact = next(
+            (
+                item
+                for item in artifacts
+                if str(item.get("artifactId") or "") == artifact_id
+            ),
+            None,
+        )
+        if source_artifact is None:
+            if prior_audit is not None:
+                return existing
+            raise RuntimeError("Source manifest artifact is missing during reclassification")
+        if source_artifact.get("contentSha256") != content_sha256:
+            raise RuntimeError("Source manifest content hash changed before reclassification")
+
+        now = datetime.now(timezone.utc).isoformat()
+        audits.append(
+            {
+                "reclassificationId": reclassification_id,
+                "artifactId": artifact_id,
+                "contentSha256": content_sha256,
+                "sourceProductKey": source_product_id,
+                "targetProductKey": target_product_id,
+                "reclassifiedAt": now,
+                "targetManifestVersion": int(target_manifest.get("version", 0)),
+                "targetManifestChecksum": target_manifest.get("manifestChecksum"),
+                "sourceArtifact": deepcopy(source_artifact),
+            }
+        )
+        active_artifacts = sorted(
+            (
+                item
+                for item in artifacts
+                if str(item.get("artifactId") or "") != artifact_id
+            ),
+            key=lambda item: str(item.get("artifactId") or ""),
+        )
+        counts = {
+            "receivedCount": len(active_artifacts),
+            "parsedCount": sum(
+                item.get("stage") in {"parsed", "validated", "indexed"}
+                for item in active_artifacts
+            ),
+            "validatedCount": sum(
+                item.get("stage") in {"validated", "indexed"}
+                for item in active_artifacts
+            ),
+            "indexedCount": sum(
+                item.get("stage") == "indexed" for item in active_artifacts
+            ),
+            "failedCount": sum(
+                item.get("stage") == "failed" for item in active_artifacts
+            ),
+        }
+        state = (
+            "failed"
+            if counts["failedCount"]
+            else "indexed"
+            if counts["indexedCount"] == counts["receivedCount"]
+            else "validated"
+            if counts["validatedCount"] == counts["receivedCount"]
+            else "parsed"
+            if counts["parsedCount"] == counts["receivedCount"]
+            else "received"
+        )
+        replacement = {
+            **existing,
+            **source_key,
+            "state": state,
+            **counts,
+            "entityEventCount": sum(
+                int(item.get("eventCount", 0)) for item in active_artifacts
+            ),
+            "manifestChecksum": _manifest_checksum(active_artifacts),
+            "artifacts": active_artifacts,
+            "reclassifiedArtifacts": audits,
+            "parserVersion": PARSER_VERSION,
+            "updatedAt": now,
+            "version": version + 1,
+        }
+        try:
+            table.put_item(
+                Item=replacement,
+                ConditionExpression="#version = :expectedVersion",
+                ExpressionAttributeNames={"#version": "version"},
+                ExpressionAttributeValues={":expectedVersion": version},
+            )
+            return replacement
+        except ClientError as write_error:
+            if not _conditional_failure(write_error):
+                raise
+    raise RuntimeError(
+        f"Unable to reclassify manifest artifact for {market_date}/{source_product_id}"
+    )
+
+
 def persist_snapshot_intelligence(
     snapshot: Dict[str, Any],
     dynamodb: Any,
     *,
     content_sha256: Optional[str] = None,
     finalize: bool = True,
+    replace_existing: bool = False,
 ) -> int:
     events = build_entity_events(snapshot, content_sha256=content_sha256)
     product_id = str(
@@ -1192,6 +1415,7 @@ def persist_snapshot_intelligence(
         dynamodb,
         stage="received",
         content_sha256=content_sha256,
+        replace_existing=replace_existing,
     )
     update_product_manifest(
         snapshot,

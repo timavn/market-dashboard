@@ -704,8 +704,8 @@ def reconcile_alert_lifecycle(
                 transition=event_type,
                 observed_at=observed_at,
             )
-            # Opening is dashboard-only. Email begins only after the root has
-            # survived the bounded escalation observation count.
+            # Opening is dashboard-only. Publication begins only after the root
+            # survives the bounded escalation observation count.
             transitions.append({"eventType": event_type, "errorCode": error_code})
             next_active[error_code] = {
                 "openedAt": observed_at,

@@ -298,6 +298,108 @@ class ResearchIntelligenceTests(unittest.TestCase):
         }
         self.assertEqual(len(event_keys), len(database.events.items))
 
+    def test_reclassification_preserves_failure_audit_after_target_is_indexed(self):
+        database = FakeDynamoDb()
+        content_sha256 = "f" * 64
+        source = snapshot(
+            "signal-strength",
+            "bjri-alert",
+            {"added": [], "removed": []},
+        )
+        target = snapshot(
+            "real-time-alert",
+            "bjri-alert",
+            {
+                "alert": {
+                    "ticker": "BJRI",
+                    "action": "BUY",
+                    "side": "long",
+                },
+                "alerts": [
+                    {"ticker": "BJRI", "action": "BUY", "side": "long"}
+                ],
+            },
+        )
+        intelligence.persist_snapshot_failure(
+            source,
+            database,
+            content_sha256=content_sha256,
+            error="original signal-strength parse failure",
+        )
+        intelligence.persist_snapshot_intelligence(
+            target,
+            database,
+            content_sha256=content_sha256,
+        )
+
+        moved = intelligence.reclassify_manifest_artifact(
+            target,
+            database,
+            source_product_id="signal-strength",
+            content_sha256=content_sha256,
+        )
+
+        self.assertEqual(moved["artifacts"], [])
+        self.assertEqual(moved["failedCount"], 0)
+        self.assertEqual(moved["manifestChecksum"], intelligence._manifest_checksum([]))
+        self.assertEqual(len(moved["reclassifiedArtifacts"]), 1)
+        audit = moved["reclassifiedArtifacts"][0]
+        self.assertEqual(audit["targetProductKey"], "real-time-alert")
+        self.assertEqual(audit["sourceArtifact"]["stage"], "failed")
+        self.assertEqual(
+            audit["sourceArtifact"]["error"],
+            "original signal-strength parse failure",
+        )
+        self.assertEqual(
+            database.manifests.items[("2026-07-23", "real-time-alert")]
+            ["artifacts"][0]["stage"],
+            "indexed",
+        )
+
+        version = moved["version"]
+        replayed = intelligence.reclassify_manifest_artifact(
+            target,
+            database,
+            source_product_id="signal-strength",
+            content_sha256=content_sha256,
+        )
+        self.assertEqual(replayed["version"], version)
+        self.assertEqual(len(replayed["reclassifiedArtifacts"]), 1)
+
+    def test_reclassification_rejects_an_unindexed_target(self):
+        database = FakeDynamoDb()
+        content_sha256 = "9" * 64
+        source = snapshot(
+            "signal-strength",
+            "bjri-unindexed",
+            {"added": [], "removed": []},
+        )
+        target = snapshot(
+            "real-time-alert",
+            "bjri-unindexed",
+            {"alert": {"ticker": "BJRI", "action": "BUY"}},
+        )
+        intelligence.persist_snapshot_failure(
+            source,
+            database,
+            content_sha256=content_sha256,
+            error="original failure",
+        )
+        intelligence.persist_snapshot_intelligence(
+            target,
+            database,
+            content_sha256=content_sha256,
+            finalize=False,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Target manifest"):
+            intelligence.reclassify_manifest_artifact(
+                target,
+                database,
+                source_product_id="signal-strength",
+                content_sha256=content_sha256,
+            )
+
     def test_zero_references_is_indexed_not_a_parse_failure(self):
         database = FakeDynamoDb()
         item = snapshot(
@@ -434,6 +536,7 @@ class ResearchIntelligenceTests(unittest.TestCase):
             event for event in events if event["entityKey"] == "ticker#ORCL"
         ]
 
+        self.assertEqual(len(events), 1)
         self.assertTrue(oracle_events)
         self.assertTrue(all(event["signalValue"] == "BULLISH" for event in oracle_events))
         self.assertTrue(all(event["direction"] == "positive" for event in oracle_events))
@@ -461,6 +564,11 @@ class ResearchIntelligenceTests(unittest.TestCase):
                     }
                 },
             },
+            {
+                "bodyText": (
+                    "CRYPTO QUANT IMAGE BEARISH VIEW LARGER BTC charts and OCR labels"
+                )
+            },
         )
 
         events = intelligence.build_entity_events(
@@ -469,6 +577,8 @@ class ResearchIntelligenceTests(unittest.TestCase):
         )
         by_key = {event["entityKey"]: event for event in events}
 
+        self.assertEqual(set(by_key), {"ticker#BTC", "ticker#IBIT"})
+        self.assertEqual(len(events), 2)
         self.assertEqual(by_key["ticker#BTC"]["signalValue"], "BULLISH")
         self.assertEqual(by_key["ticker#IBIT"]["signalValue"], "BEARISH")
         self.assertNotIn("ticker#CRYPTOS", by_key)
@@ -552,6 +662,49 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertIsInstance(stored["signalValue"]["prevClose"], Decimal)
         self.assertIsInstance(stored["riskRange"]["lrr"], Decimal)
         self.assertIsInstance(stored["riskRange"]["hrr"], Decimal)
+
+    def test_parser_replacement_resets_manifest_event_count_before_reindex(self):
+        database = FakeDynamoDb()
+        item = snapshot(
+            "bitcoin-trend-tracker",
+            "crypto-replacement",
+            {"cryptos": {"BTC": {"trend": "BEARISH"}}},
+        )
+        content_sha256 = "c" * 64
+        database.manifests.items[("2026-07-23", "bitcoin-trend-tracker")] = {
+            "marketDate": "2026-07-23",
+            "productKey": "bitcoin-trend-tracker",
+            "version": 1,
+            "state": "indexed",
+            "artifacts": [
+                {
+                    "artifactId": content_sha256,
+                    "contentSha256": content_sha256,
+                    "sourceMessageId": "crypto-replacement",
+                    "stage": "indexed",
+                    "eventCount": 160,
+                    "parserVersion": "security-intelligence-v3-tracker-contract",
+                    "stageHistory": [{"stage": "indexed", "at": "before"}],
+                }
+            ],
+        }
+
+        manifest = intelligence.update_product_manifest(
+            item,
+            database,
+            stage="received",
+            content_sha256=content_sha256,
+            replace_existing=True,
+        )
+
+        artifact = manifest["artifacts"][0]
+        self.assertEqual(artifact["stage"], "received")
+        self.assertEqual(artifact["eventCount"], 0)
+        self.assertEqual(artifact["parserVersion"], intelligence.PARSER_VERSION)
+        self.assertEqual(
+            [transition["stage"] for transition in artifact["stageHistory"]],
+            ["indexed", "received"],
+        )
 
     def test_content_hash_deduplicates_replayed_publication_across_messages(self):
         first = snapshot(

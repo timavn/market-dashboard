@@ -54,6 +54,7 @@ from research_intelligence import (
     persist_snapshot_intelligence,
     product_definition,
     product_ids,
+    reclassify_manifest_artifact,
     report_rules,
 )
 
@@ -105,7 +106,7 @@ GMAIL_API_ROOT = "https://gmail.googleapis.com/gmail/v1"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
-MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "inflation-nowcast", "hedgai-signals"}
+MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "top-3-things", "inflation-nowcast", "hedgai-signals"}
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
 MATERIALIZED_DATA_VERSION = "gmail-materialized-v12-hedgai-signals"
 MARKET_STRUCTURE_ASSET_PREFIX = "hedgeye-email/assets/market-structure/"
@@ -117,9 +118,11 @@ HTML_TEXTRACT_REPORT_TYPES = frozenset({
     "bitcoin-trend-tracker",
     "inflation-nowcast",
 })
-RESEARCH_PARSER_VERSION = "research-event-ledger-v2"
+RESEARCH_PARSER_VERSION = "research-event-ledger-v3-tracker-contract"
 MATERIALIZATION_WRITE_RETRIES = 3
 MATERIALIZATION_MAX_ATTEMPTS = 3
+OPERATOR_REPLAY_SOURCE = "operator-quarantine-replay"
+OPERATOR_REPLAY_MAX_MESSAGES = 8
 IMMUTABLE_ARTIFACT_EVIDENCE_FIELDS = (
     "s3Bucket",
     "s3Key",
@@ -237,6 +240,18 @@ class GmailInvocationBudgetYield(RuntimeError):
     def __init__(self, error_code: str) -> None:
         super().__init__(error_code)
         self.error_code = error_code
+
+
+class GmailOperatorReplayError(RuntimeError):
+    """An operator replay event or active queue is outside the bounded contract."""
+
+    error_code = "GMAIL_OPERATOR_REPLAY_INVALID"
+
+
+class ImmutableArtifactDriftError(RuntimeError):
+    """Archived S3 bytes no longer match the immutable ledger evidence."""
+
+    error_code = "GMAIL_IMMUTABLE_ARTIFACT_DRIFT"
 
 
 REPORT_RULES = report_rules()
@@ -521,6 +536,14 @@ def _queue_batch_id(
         "pollMode": poll_mode,
         "forceBackfill": force_backfill,
     }
+    if poll_mode == "operator_replay":
+        payload["operatorReplayContract"] = ":".join(
+            (
+                MATERIALIZED_DATA_VERSION,
+                RESEARCH_PARSER_VERSION,
+                SECURITY_INTELLIGENCE_PARSER_VERSION,
+            )
+        )
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:24]
@@ -635,6 +658,35 @@ def persist_discovered_message_queue(
                 f"Durable Gmail message queue write failed: {type(err).__name__}"
             ) from err
     return batch_id
+
+
+def operator_terminal_batch_matches(
+    queue_items: Iterable[Dict[str, Any]],
+    message_ids: Iterable[str],
+) -> bool:
+    """Return true only for an exact, fully terminal operator batch."""
+    rows = list(queue_items)
+    expected = {str(value) for value in message_ids if str(value)}
+    return bool(rows) and bool(expected) and all(
+        str(row.get("status") or "") in MESSAGE_QUEUE_TERMINAL_STATUSES
+        and str(row.get("gmailMessageId") or "") in expected
+        for row in rows
+    ) and {
+        str(row.get("gmailMessageId") or "") for row in rows
+    } == expected
+
+
+def operator_batch_requires_contract_rotation(
+    active_batch_id: str,
+    current_batch_id: str,
+    queue_items: Iterable[Dict[str, Any]],
+    message_ids: Iterable[str],
+) -> bool:
+    return (
+        bool(active_batch_id)
+        and active_batch_id != current_batch_id
+        and operator_terminal_batch_matches(queue_items, message_ids)
+    )
 
 
 def read_message_queue(table: Any, batch_id: str) -> List[Dict[str, Any]]:
@@ -1116,7 +1168,7 @@ def infer_report_type(filename: str, subject: str) -> str:
     # Real-Time Alerts can mention a refreshed SPX Risk Range in the subject.
     # Classify the alert before the broader Risk Range matcher so the RTA
     # parser persists the alert and its refreshed range together.
-    if re.search(r"real[- ]time alert", str(subject or ""), re.IGNORECASE):
+    if re.search(r"\breal[- ]time alert\b", str(subject or ""), re.IGNORECASE):
         return "real-time-alert"
     if global_quads_eligible(subject) and not re.search(r"the macro show|macro show", subject, re.I):
         return "global-quads"
@@ -2130,6 +2182,14 @@ def _compute_materialized_data_version(item: Dict[str, Any]) -> str:
     return f"{MATERIALIZED_DATA_VERSION}:{hashlib.sha256(encoded).hexdigest()}"
 
 
+def _snapshot_recency_key(snapshot: Dict[str, Any]) -> Tuple[str, str]:
+    """Order daily editions by immutable Gmail receipt time, then message ID."""
+    return (
+        str(snapshot.get("scrapedAt") or ""),
+        str(snapshot.get("gmailMessageId") or ""),
+    )
+
+
 def _inflation_forecast_scenarios(forecast: Dict[str, Any]) -> Optional[Tuple[Any, Any, Any]]:
     scenarios = forecast.get("scenarios")
     if isinstance(scenarios, dict):
@@ -2250,7 +2310,7 @@ def _merge_materialized_snapshot(
     existing_sources = _snapshot_source_message_ids(current)
     incoming_sources = _snapshot_source_message_ids(candidate)
 
-    incoming_is_latest = str(candidate.get("scrapedAt") or "") >= str(current.get("scrapedAt") or "")
+    incoming_is_latest = _snapshot_recency_key(candidate) >= _snapshot_recency_key(current)
     merged = deepcopy(candidate if not current or incoming_is_latest else current)
     merged["date"] = candidate["date"]
     merged["snapshotType"] = candidate["snapshotType"]
@@ -2270,6 +2330,19 @@ def _merge_materialized_snapshot(
         )
         merged["itemCount"] = len(merged["data"].get("rows") or [])
         merged["changeCount"] = len(merged["data"].get("changes") or [])
+    elif candidate["snapshotType"] == "top-3-things":
+        items = (merged.get("data") or {}).get("items") or []
+        if (
+            len(items) != 3
+            or [item.get("rank") for item in items] != [1, 2, 3]
+            or any(
+                not str(item.get("title") or "").strip()
+                or not str(item.get("body") or "").strip()
+                for item in items
+            )
+        ):
+            raise ValueError("Top 3 Things materialization requires exactly three ranked items")
+        merged["itemCount"] = 3
     elif candidate["snapshotType"] == "inflation-nowcast":
         latest = candidate if not current or incoming_is_latest else current
         merged["data"] = deepcopy(latest.get("data") or {})
@@ -2320,7 +2393,7 @@ def _merge_materialized_snapshot(
 def materialize_email_snapshot(
     snapshot: Dict[str, Any], db: Any
 ) -> Tuple[Dict[str, Any], bool]:
-    """Idempotently merge an RTA/ETF email into its daily materialized snapshot."""
+    """Idempotently merge versioned email products into daily snapshots."""
     snapshot = validate_research_ranges(snapshot)
     if snapshot.get("snapshotType") not in MATERIALIZED_SNAPSHOT_TYPES:
         save_snapshot_to_dynamodb(snapshot, db)
@@ -2669,6 +2742,7 @@ def backfill_html_snapshot(
     mime_type: str,
     received_at: datetime,
     ledger_item: Optional[Dict[str, Any]] = None,
+    replace_entity_projection: bool = False,
 ) -> bool:
     if attachment_id.startswith("message-body-") is False or mime_type != "text/html":
         return False
@@ -2693,12 +2767,25 @@ def backfill_html_snapshot(
         and not is_investing_ideas_change
     ):
         return False
-    attempt_count = _materialization_attempt_count(item) + 1
+    attempt_count = (
+        _materialization_attempt_count(item) + 1
+        if item.get("materializationAttemptVersion") == MATERIALIZED_DATA_VERSION
+        else 1
+    )
 
     snapshot: Optional[Dict[str, Any]] = None
     try:
         obj = s3.get_object(Bucket=item["s3Bucket"], Key=item["s3Key"])
-        html_body = obj["Body"].read().decode("utf-8", errors="replace")
+        archived_body = obj["Body"].read()
+        expected_sha256 = str(item.get("contentSha256") or "")
+        if (
+            not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
+            or hashlib.sha256(archived_body).hexdigest() != expected_sha256
+        ):
+            raise ImmutableArtifactDriftError(
+                "Archived Gmail HTML does not match its ledger content hash"
+            )
+        html_body = archived_body.decode("utf-8", errors="replace")
         snapshot = parse_email_with_global_quads(
             report_type=report_type,
             html_body=html_body,
@@ -2747,6 +2834,7 @@ def backfill_html_snapshot(
             dynamodb,
             content_sha256=item.get("contentSha256"),
             finalize=False,
+            replace_existing=replace_entity_projection,
         )
         materialized, _ = materialize_email_snapshot(snapshot, dynamodb)
         entity_projection_status = (
@@ -2764,6 +2852,19 @@ def backfill_html_snapshot(
                 content_sha256=item.get("contentSha256"),
                 event_count=entity_event_count,
             )
+            source_product_id = str(
+                item.get("reportType") or item.get("snapshotType") or ""
+            )
+            if (
+                source_product_id in RESEARCH_EVENT_SNAPSHOT_TYPES
+                and source_product_id != snapshot["snapshotType"]
+            ):
+                reclassify_manifest_artifact(
+                    snapshot,
+                    dynamodb,
+                    source_product_id=source_product_id,
+                    content_sha256=str(item.get("contentSha256") or ""),
+                )
         materialization_extra = {
             "reportType": snapshot["reportType"],
             "snapshotType": snapshot["snapshotType"],
@@ -2834,7 +2935,7 @@ def _should_backfill_materialized_snapshot(
 ) -> bool:
     status = str(item.get("status") or "")
     if status not in {"STORED", "DUPLICATE", "INDEXED"} and not (
-        allow_version_upgrade and status == "UNSUPPORTED"
+        allow_version_upgrade and status in {"ERROR", "UNSUPPORTED"}
     ):
         return False
     if not str(item.get("attachmentId") or "").startswith("message-body-"):
@@ -2868,6 +2969,12 @@ def _should_backfill_materialized_snapshot(
         # Parser-version migrations are explicit, metered repair work. A
         # scheduled poll must never turn a deployment into a historical replay.
         return allow_version_upgrade
+    if allow_version_upgrade and (
+        item.get("researchParserVersion") != RESEARCH_PARSER_VERSION
+        or item.get("securityIntelligenceParserVersion")
+        != SECURITY_INTELLIGENCE_PARSER_VERSION
+    ):
+        return True
     return (
         item.get("materializationStatus") == "ERROR"
         and _materialization_attempt_count(item) < MATERIALIZATION_MAX_ATTEMPTS
@@ -3225,6 +3332,71 @@ def process_message(
 
     require_work_budget()
     ledger_items = get_message_ledger_items(table, message_id)
+    if allow_version_backfill:
+        attachment_items = [
+            item
+            for item in ledger_items
+            if item.get("attachmentId") != MESSAGE_LEDGER_ATTACHMENT_ID
+        ]
+        representative = next(iter(attachment_items or ledger_items), {})
+        result = {
+            "messageId": message_id,
+            "subject": representative.get("subject", ""),
+            "sender": representative.get("sender", ""),
+            "attachmentCount": len(attachment_items),
+            "stored": [],
+            "skipped": [],
+        }
+        for item in attachment_items:
+            require_work_budget()
+            filename = str(item.get("filename") or "")
+            if not _should_backfill_materialized_snapshot(
+                item,
+                allow_version_upgrade=True,
+            ):
+                result["skipped"].append(
+                    {"filename": filename, "detail": "not-version-replay-eligible"}
+                )
+                continue
+            report_type = str(item.get("reportType") or "unknown")
+            inferred_report_type = infer_report_type(
+                filename,
+                str(item.get("subject") or ""),
+            )
+            if inferred_report_type != "unknown":
+                report_type = inferred_report_type
+            backfilled = backfill_html_snapshot(
+                table=table,
+                message_id=message_id,
+                attachment_id=str(item["attachmentId"]),
+                report_type=report_type,
+                mime_type=str(item.get("mimeType") or ""),
+                received_at=_parse_ledger_datetime(item),
+                ledger_item=item,
+                replace_entity_projection=True,
+            )
+            if backfilled:
+                result["stored"].append(
+                    {"filename": filename, "detail": "snapshot-backfilled"}
+                )
+
+        if not result["stored"]:
+            raise GmailOperatorReplayError(
+                "Operator replay found no version-eligible immutable artifact"
+            )
+        refreshed_items = get_message_ledger_items(table, message_id)
+        if attachment_records_are_terminal(refreshed_items):
+            mark_message_processed(
+                table,
+                message_id=message_id,
+                headers={
+                    "subject": representative.get("subject", ""),
+                    "from": representative.get("sender", ""),
+                },
+                attachment_count=len(attachment_items),
+            )
+        return result
+
     if message_is_fully_processed(ledger_items):
         attachment_items = [
             item
@@ -3285,6 +3457,7 @@ def process_message(
                     mime_type=item.get("mimeType", ""),
                     received_at=_parse_ledger_datetime(item),
                     ledger_item=item,
+                    replace_entity_projection=allow_version_backfill,
                 )
                 if backfilled:
                     result["stored"].append(
@@ -3411,6 +3584,36 @@ def prepare_build_recovery(
     return selected, updated
 
 
+def operator_replay_message_ids(event: Dict[str, Any]) -> List[str]:
+    """Validate the narrow immutable-artifact version replay event."""
+    allowed_keys = {
+        "source",
+        "messageIds",
+        "forceBackfill",
+        "materializationVersion",
+    }
+    if set(event) != allowed_keys:
+        raise GmailOperatorReplayError("Operator replay event fields are invalid")
+    if event.get("source") != OPERATOR_REPLAY_SOURCE:
+        raise GmailOperatorReplayError("Operator replay source is invalid")
+    if event.get("forceBackfill") is not True:
+        raise GmailOperatorReplayError("Operator replay requires forceBackfill=true")
+    if event.get("materializationVersion") != MATERIALIZED_DATA_VERSION:
+        raise GmailOperatorReplayError("Operator replay materialization version is invalid")
+    raw_message_ids = event.get("messageIds")
+    if not isinstance(raw_message_ids, list):
+        raise GmailOperatorReplayError("Operator replay message IDs must be a list")
+    message_ids = [str(value) for value in raw_message_ids]
+    if (
+        not message_ids
+        or len(message_ids) > OPERATOR_REPLAY_MAX_MESSAGES
+        or len(set(message_ids)) != len(message_ids)
+        or any(not re.fullmatch(r"[0-9a-f]{16,32}", value) for value in message_ids)
+    ):
+        raise GmailOperatorReplayError("Operator replay message IDs are invalid")
+    return message_ids
+
+
 def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, Any]:
     """Poll Gmail with cursoring, auth circuit-breaking, and an unconditional heartbeat."""
     monotonic_started_at = time.monotonic()
@@ -3464,6 +3667,40 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             "body": json.dumps(response_body),
         }
 
+    operator_replay_requested = trigger_source == OPERATOR_REPLAY_SOURCE
+    operator_replay_ids: List[str] = []
+    if operator_replay_requested:
+        try:
+            operator_replay_ids = operator_replay_message_ids(event)
+        except GmailOperatorReplayError as err:
+            return heartbeat_response(
+                status_code=400,
+                body={
+                    "status": "ERROR",
+                    "errorCode": err.error_code,
+                    "pollMode": "rejected",
+                    "messageCount": 0,
+                    "errorCount": 1,
+                },
+                heartbeat_status="error",
+                error_code=err.error_code,
+                detail=safe_error_detail(err),
+            )
+    elif event.get("materializationVersion") is not None:
+        return heartbeat_response(
+            status_code=400,
+            body={
+                "status": "ERROR",
+                "errorCode": GmailOperatorReplayError.error_code,
+                "pollMode": "rejected",
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code=GmailOperatorReplayError.error_code,
+            detail="Materialization version replay requires the operator replay contract.",
+        )
+
     if trigger_source == "aws-scheduler" and schedule_id != GMAIL_SCHEDULE_ID:
         return heartbeat_response(
             status_code=400,
@@ -3477,6 +3714,21 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             heartbeat_status="error",
             error_code="GMAIL_SCHEDULE_ID_MISMATCH",
             detail="Invocation did not identify the configured Gmail Scheduler job.",
+        )
+
+    if trigger_source == "aws-scheduler" and event.get("forceBackfill") is True:
+        return heartbeat_response(
+            status_code=400,
+            body={
+                "status": "ERROR",
+                "errorCode": GmailOperatorReplayError.error_code,
+                "pollMode": "rejected",
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code=GmailOperatorReplayError.error_code,
+            detail="Scheduled Gmail invocations cannot request force backfill.",
         )
 
     # The force flag is privileged because it bypasses an open auth circuit.
@@ -3601,6 +3853,25 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
         trigger_source == "aws-scheduler"
         and schedule_id == GMAIL_SCHEDULE_ID
     )
+    if (
+        scheduled_invocation
+        and state.get("activeBatchId")
+        and state.get("pendingPollMode") == "operator_replay"
+    ):
+        return heartbeat_response(
+            status_code=409,
+            body={
+                "status": "ERROR",
+                "errorCode": "GMAIL_OPERATOR_REPLAY_REQUIRES_OPERATOR",
+                "pollMode": "operator_replay",
+                "messageCount": 0,
+                "errorCount": 1,
+            },
+            heartbeat_status="error",
+            error_code="GMAIL_OPERATOR_REPLAY_REQUIRES_OPERATOR",
+            detail="An operator replay batch cannot be resumed by Scheduler.",
+            heartbeat_secret_version=secret_version,
+        )
     if (
         scheduled_invocation
         and state.get("errorCode") == "GMAIL_HISTORY_CURSOR_EXPIRED"
@@ -3850,6 +4121,45 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
     ))
     build_recovery_message_ids: List[str] = []
     if (
+        operator_replay_requested
+        and active_batch_id
+        and poll_mode == "operator_replay"
+    ):
+        try:
+            prior_operator_queue = read_message_queue(table, active_batch_id)
+        except Exception as err:
+            return queue_failure_response(err, poll_mode)
+        current_operator_batch_id = _queue_batch_id(
+            (),
+            cursor_before=(
+                str(cursor_before) if cursor_before is not None else None
+            ),
+            pending_history_id=(
+                str(pending_history_id)
+                if pending_history_id is not None
+                else None
+            ),
+            poll_mode="operator_replay",
+            force_backfill=True,
+        )
+        if operator_batch_requires_contract_rotation(
+            active_batch_id,
+            current_operator_batch_id,
+            prior_operator_queue,
+            operator_replay_ids,
+        ):
+            # A prior parser contract completed this exact batch before an
+            # outer acceptance check requested a newer version. Point the
+            # invocation at a contract-versioned batch without broadening its
+            # receipted message scope.
+            active_batch_id = ""
+            pending_history_id = None
+            pending_force_backfill = True
+            poll_mode = "operator_replay"
+            discovered_count = 0
+            discovery_status = ""
+            discovery_in_progress = False
+    if (
         scheduled_invocation
         and not active_batch_id
         and not explicit_message_ids
@@ -3936,10 +4246,14 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
         label_id = None
         if explicit_message_ids:
             poll_mode = (
-                "build_recovery:"
-                + hashlib.sha256(BUILD_VERSION.encode("utf-8")).hexdigest()[:12]
-                if build_recovery_message_ids
-                else "explicit"
+                "operator_replay"
+                if operator_replay_requested
+                else (
+                    "build_recovery:"
+                    + hashlib.sha256(BUILD_VERSION.encode("utf-8")).hexdigest()[:12]
+                    if build_recovery_message_ids
+                    else "explicit"
+                )
             )
         elif cursor_before and not pending_force_backfill:
             label_budget = gmail_call_budget_reason(
@@ -4283,6 +4597,27 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
     except Exception as err:
         return queue_failure_response(err, poll_mode)
 
+    if operator_replay_requested:
+        active_queue_ids = {
+            str(item.get("gmailMessageId") or "")
+            for item in queue_items
+            if str(item.get("status") or "") in MESSAGE_QUEUE_ACTIVE_STATUSES
+        }
+        if (
+            active_queue_ids != set(operator_replay_ids)
+            and not operator_terminal_batch_matches(
+                queue_items,
+                operator_replay_ids,
+            )
+        ):
+            return queue_failure_response(
+                GmailOperatorReplayError(
+                    "The active Gmail batch does not match the operator replay receipt"
+                ),
+                "operator_replay",
+            )
+        pending_force_backfill = True
+
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     successful_message_ids = set()
@@ -4322,7 +4657,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
                     monotonic_started_at=monotonic_started_at,
                 ),
             }
-            if pending_force_backfill:
+            if pending_force_backfill and operator_replay_requested:
                 process_kwargs["allow_version_backfill"] = True
             result = process_message(
                 access_token,
@@ -4601,7 +4936,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
         }
 
     canonical_verification = None
-    if pending_force_backfill:
+    if pending_force_backfill and not operator_replay_requested:
         try:
             canonical_verification = verify_research_event_ledger(dynamodb)
             if not canonical_verification["verified"]:

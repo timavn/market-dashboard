@@ -420,10 +420,9 @@ def inspect_heartbeats(
                 component=f"heartbeat:{service_id}",
             )
             continue
-        # The worker owns readiness/root-cause notifications. Re-emitting its
-        # heartbeat error code from this watchdog created duplicate emails
-        # (for example, two SYSTEM_READINESS_REQUEST_TIMEOUT incidents). The
-        # watchdog remains responsible for missing, stale, and provenance
+        # The worker owns readiness/root-cause publications. Re-emitting its
+        # heartbeat error code from this watchdog created duplicate incidents.
+        # The watchdog remains responsible for missing, stale, and provenance
         # failures above; the dashboard retains the worker status here.
     return results
 
@@ -1006,7 +1005,7 @@ def write_watchdog_alert(
                 transition=event_type,
                 observed_at=now,
             )
-            # Opening is dashboard-only. Email begins only after escalation.
+            # Opening is dashboard-only. Publication begins after escalation.
             transitions.append({"eventType": event_type, "errorCode": error_code})
             next_active[error_code] = {
                 "component": component,

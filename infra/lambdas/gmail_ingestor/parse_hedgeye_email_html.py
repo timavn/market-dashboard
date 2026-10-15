@@ -12,6 +12,7 @@ import math
 import os
 import re
 import struct
+import unicodedata
 import urllib.parse
 import urllib.request
 import zlib
@@ -827,7 +828,9 @@ def _textract_tables(textract_response: Dict[str, Any]) -> List[List[List[str]]]
                             value_parts.append(str(word.get("Text") or ""))
                 row_index = int(cell.get("RowIndex") or 0)
                 column_index = int(cell.get("ColumnIndex") or 0)
-                cells_by_row.setdefault(row_index, {})[column_index] = " ".join(value_parts).strip()
+                cells_by_row.setdefault(row_index, {})[column_index] = " ".join(
+                    value_parts
+                ).strip()
         rows: List[List[str]] = []
         for row_index in sorted(cells_by_row):
             row_cells = cells_by_row[row_index]
@@ -1022,6 +1025,17 @@ def _parse_tracker_number(value: Any, *, field: str, ticker: str) -> Decimal:
     return parsed
 
 
+def _normalize_tracker_trend(value: Any, *, ticker: str) -> str:
+    """Normalize OCR separators while rejecting anything but a known trend."""
+    normalized = unicodedata.normalize("NFKC", str(value or "")).strip().upper()
+    if re.search(r"[^A-Z\s._/-]", normalized):
+        raise ValueError(f"Tracker row {ticker} has invalid trend")
+    letters_only = re.sub(r"[\s._/-]+", "", normalized)
+    if letters_only not in TRACKER_TRENDS:
+        raise ValueError(f"Tracker row {ticker} has invalid trend")
+    return letters_only
+
+
 def _parse_tracker_outbucket_marker(
     value: Any,
     *,
@@ -1038,7 +1052,8 @@ def _parse_tracker_outbucket_marker(
     month = int(match.group(1))
     day = int(match.group(2))
     try:
-        # Validate the published partial date without inventing its year.
+        # A leap year accepts every valid month/day pair without inferring the
+        # publication year from the partial date printed in the chart.
         datetime(2000, month, day)
     except ValueError as error:
         raise ValueError(
@@ -1076,25 +1091,33 @@ def _parse_tracker_table(
             raise ValueError(f"Tracker table contains duplicate ticker {ticker}")
 
         raw_values = {
-            field: row[columns[field]] if columns[field] < len(row) else ""
+            field: (
+                row[columns[field]] if columns[field] < len(row) else ""
+            )
             for field in required_fields
             if field != "ticker"
         }
+
         def add_explicit_trade(record):
             if "trade" not in columns:
                 return
             raw_trade = row[columns["trade"]] if columns["trade"] < len(row) else ""
-            trade = str(raw_trade).strip().upper()
-            if trade not in TRACKER_TRENDS:
+            try:
+                # Apply the same OCR-separator normalization as Trend, but an
+                # unrecognized Trade cell is simply not published as a signal.
+                trade = _normalize_tracker_trend(raw_trade, ticker=ticker)
+            except ValueError:
                 return
             record["trade"] = trade
             record["signalProvenance"] = {"field": "trade", "method": "explicit-field",
                                           "sourceField": f"tracker.{ticker}.Trade",
                                           "sourceText": f"{ticker}: Trade {raw_trade}"}
 
-        trend = str(raw_values.get("trend") or "").strip().upper()
-        if "trend" in required_fields and trend not in TRACKER_TRENDS:
-            raise ValueError(f"Tracker row {ticker} has invalid trend")
+        trend = (
+            _normalize_tracker_trend(raw_values.get("trend"), ticker=ticker)
+            if "trend" in required_fields
+            else ""
+        )
 
         buy_is_outbucket, buy_status_date = _parse_tracker_outbucket_marker(
             raw_values.get("buyTrade"),
@@ -1109,9 +1132,7 @@ def _parse_tracker_table(
         is_outbucket_row = buy_is_outbucket or sell_is_outbucket
         if is_outbucket_row:
             if not allow_outbucket_rows:
-                raise ValueError(
-                    f"Tracker row {ticker} has an unsupported outbucket range"
-                )
+                raise ValueError(f"Tracker row {ticker} has an unsupported outbucket range")
             if not (buy_is_outbucket and sell_is_outbucket):
                 raise ValueError(f"Tracker row {ticker} has a partial outbucket range")
             if buy_status_date != sell_status_date:
@@ -1545,13 +1566,9 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
 
         ticker = _normalize_ticker(_strip_tags(cells[ticker_index]))
         # A header row can contain a side-like label but is not a position.
-        if not ticker:
+        if not re.fullmatch(r"[A-Z][A-Z0-9./-]{0,9}", ticker):
             return None
-        required_indexes = (
-            previous_close_index,
-            low_index,
-            high_index,
-        )
+        required_indexes = (previous_close_index, low_index, high_index)
         if any(index >= len(cells) for index in required_indexes):
             raise ValueError(
                 f"Investing Ideas row for {ticker} is missing required risk-range cells"
@@ -1560,7 +1577,14 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
         previous_close = _parse_etf_money(_strip_tags(cells[previous_close_index]))
         low_end = _parse_etf_money(_strip_tags(cells[low_index]))
         high_end = _parse_etf_money(_strip_tags(cells[high_index]))
-        if previous_close is None or low_end is None or high_end is None:
+        if (
+            previous_close is None
+            or low_end is None
+            or high_end is None
+            or previous_close <= 0
+            or low_end <= 0
+            or high_end <= 0
+        ):
             raise ValueError(f"Investing Ideas row for {ticker} has invalid numeric fields")
         if low_end >= high_end:
             raise ValueError(f"Investing Ideas row for {ticker} has an invalid LRR/HRR range")
@@ -1575,8 +1599,6 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
             "originalName": ticker,
         }
 
-    rows: List[Dict[str, Any]] = []
-    seen: Dict[str, Dict[str, Any]] = {}
     def direct_cells(row_body: str) -> List[str]:
         token_pattern = re.compile(
             r"<(?P<closing>/)?(?P<tag>td|th)\b[^>]*>",
@@ -1611,21 +1633,22 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
         parsed: List[Tuple[str, str, List[str]]] = []
         for opening in class_open_pattern.finditer(source):
             depth = 0
-            end: Optional[int] = None
+            closing_start: Optional[int] = None
             for token in token_pattern.finditer(source, opening.start()):
                 if token.group("closing"):
                     depth -= 1
                     if depth == 0:
-                        end = token.end()
+                        closing_start = token.start()
                         break
                 else:
                     depth += 1
-            if end is None:
-                continue
-            row_body = source[opening.end():token.start()]
+            if closing_start is None:
+                raise ValueError("Investing Ideas table contains an unclosed position row")
+            row_body = source[opening.end():closing_start]
             cells = direct_cells(row_body)
-            if cells:
-                parsed.append((opening.group("attrs") or "", row_body, cells))
+            if not cells:
+                raise ValueError("Investing Ideas table contains an empty position row")
+            parsed.append((opening.group("attrs") or "", row_body, cells))
         return parsed
 
     def simple_rows(source: str) -> List[Tuple[str, str, List[str]]]:
@@ -1651,6 +1674,8 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
                     parsed.append((match.group("attrs"), row_body, cells))
         return parsed
 
+    rows: List[Dict[str, Any]] = []
+    seen: Dict[str, Dict[str, Any]] = {}
     parsed_rows = class_rows(html_body) or simple_rows(html_body)
     if not parsed_rows:
         return rows
@@ -1658,7 +1683,7 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
     header_row = next(
         (
             cells
-            for attrs, row_body, cells in parsed_rows
+            for _attrs, row_body, cells in parsed_rows
             if "<th" in row_body.lower()
             or any(
                 header in {
@@ -1695,7 +1720,7 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
         )
     )
 
-    for attrs, row_body, cells in parsed_rows:
+    for attrs, _row_body, cells in parsed_rows:
         attrs_lower = attrs.lower()
         class_side = None
         if re.search(r"\bclass\s*=\s*[\"'][^\"']*\blong\b", attrs_lower):
@@ -1703,11 +1728,16 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
         elif re.search(r"\bclass\s*=\s*[\"'][^\"']*\bshort\b", attrs_lower):
             class_side = "Short"
 
+        # A repeated header row (same normalized labels) is never a position.
+        is_header = header_row is not None and (
+            cells == header_row
+            or [normalized_header(cell) for cell in cells] == headers
+        )
         if class_side:
             parsed = parse_row(cells, class_side)
-        elif header_indexes_complete and not (
-            header_row is not None and cells == header_row
-        ):
+            if parsed is None and not is_header:
+                raise ValueError("Investing Ideas table contains an invalid classified row")
+        elif header_indexes_complete and not is_header:
             parsed = parse_row(
                 cells,
                 None,
@@ -1717,6 +1747,10 @@ def _extract_investing_ideas_table(html_body: str) -> List[Dict[str, Any]]:
                 low_index=int(low_index),
                 high_index=int(high_index),
             )
+            # Fail closed on any non-blank row that cannot be mapped; blank
+            # spacer rows in the named-header layout carry no position.
+            if parsed is None and any(_strip_tags(cell).strip() for cell in cells):
+                raise ValueError("Investing Ideas table contains an invalid data row")
         else:
             parsed = None
 
@@ -1856,12 +1890,13 @@ def _extract_top_three_items(
     if not markers:
         return [], None
 
-    marker = markers[-1]
-    section = text[marker.end():]
-    numbered_markers = list(
-        re.finditer(r"(?m)^\s*([1-3])\s*[).]\s+", section)
-    )
-    if [int(match.group(1)) for match in numbered_markers[:3]] == [1, 2, 3]:
+    for marker in reversed(markers):
+        section = text[marker.end():]
+        numbered_markers = list(
+            re.finditer(r"(?m)^\s*([1-3])\s*[).]\s+", section)
+        )
+        if [int(match.group(1)) for match in numbered_markers[:3]] != [1, 2, 3]:
+            continue
         items: List[Dict[str, Any]] = []
         for index, item_marker in enumerate(numbered_markers[:3]):
             end = (
@@ -2303,7 +2338,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
 
     normalized = re.sub(r"^[*\s]+", "", headline).strip()
     inline_match = re.search(
-        r"\b(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL(?:\s*-\s*(SHORTING|COVERING|BUYING|SELLING))?\s+([A-Z][A-Z0-9./-]{1,9})\b",
+        r"\b(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL(?:\s*-\s*(SHORTING|COVERING|BUYING|SELLING))?\s+([A-Z][A-Z0-9./-]{0,9})\b",
         normalized,
         re.IGNORECASE,
     )
@@ -2358,7 +2393,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
             name = paren_match.group(1).strip()
             ticker = paren_match.group(2).upper()
         else:
-            ticker_match = re.search(r"\b([A-Z][A-Z0-9./-]{1,9})\b", target)
+            ticker_match = re.search(r"\b([A-Z][A-Z0-9./-]{0,9})\b", target)
             if ticker_match and target == ticker_match.group(1):
                 ticker = ticker_match.group(1).upper()
                 name = ticker
@@ -2374,7 +2409,7 @@ def _parse_real_time_alert(headline: Optional[str], text: str, html_body: str) -
             "analyst": analyst,
         }, text)
 
-    simple_match = re.search(r"^(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL\s+([A-Z][A-Z0-9./-]{1,9})$", normalized, re.IGNORECASE)
+    simple_match = re.search(r"^(BUY|SELL-SOME|SELL|COVER)\s+SIGNAL\s+([A-Z][A-Z0-9./-]{0,9})$", normalized, re.IGNORECASE)
     if simple_match:
         action = simple_match.group(1).upper()
         ticker = simple_match.group(2).upper()
@@ -3263,11 +3298,13 @@ def parse_html_snapshot(
 
     if report_type == "investing-ideas":
         positions = _extract_investing_ideas_table(html_body)
+        long_summary = _extract_section_text(text, "Long", ["Short", "LEVELS"])
+        short_summary = _extract_section_text(text, "Short", ["LEVELS"])
         headline_longs = _extract_symbols(
-            _extract_section_text(text, "Long", ["Short", "LEVELS"])
+            re.split(r"\n\s*\n", long_summary, maxsplit=1)[0]
         )
         headline_shorts = _extract_symbols(
-            _extract_section_text(text, "Short", ["LEVELS"])
+            re.split(r"\n\s*\n", short_summary, maxsplit=1)[0]
         )
         if not positions and not headline_longs and not headline_shorts:
             return None
@@ -3279,15 +3316,25 @@ def parse_html_snapshot(
                 "Investing Ideas publication is missing a complete ticker/side/previous-close/LRR/HRR table"
             )
 
-        position_tickers = {row["ticker"] for row in positions}
-        headline_tickers = set(headline_longs) | set(headline_shorts)
-        if headline_tickers - position_tickers:
-            missing = ", ".join(sorted(headline_tickers - position_tickers))
+        table_longs = [
+            row["ticker"] for row in positions if row["side"] == "Long"
+        ]
+        table_shorts = [
+            row["ticker"] for row in positions if row["side"] == "Short"
+        ]
+        missing_longs = sorted(set(headline_longs) - set(table_longs))
+        if missing_longs:
             raise ValueError(
-                f"Investing Ideas table is missing headline position row(s): {missing}"
+                "Investing Ideas long summary does not match the position table: "
+                + ", ".join(missing_longs)
             )
-        longs = [row["ticker"] for row in positions if row.get("side") == "Long"]
-        shorts = [row["ticker"] for row in positions if row.get("side") == "Short"]
+        missing_shorts = sorted(set(headline_shorts) - set(table_shorts))
+        if missing_shorts:
+            raise ValueError(
+                "Investing Ideas short summary does not match the position table: "
+                + ", ".join(missing_shorts)
+            )
+
         snapshot = _base_snapshot(
             snapshot_type="investing-ideas",
             report_type=report_type,
@@ -3297,12 +3344,12 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
-        snapshot["positionCount"] = len(longs) + len(shorts)
-        snapshot["longCount"] = len(longs)
-        snapshot["shortCount"] = len(shorts)
+        snapshot["positionCount"] = len(positions)
+        snapshot["longCount"] = len(table_longs)
+        snapshot["shortCount"] = len(table_shorts)
         snapshot["data"] = {
-            "longs": longs,
-            "shorts": shorts,
+            "longs": table_longs,
+            "shorts": table_shorts,
             "positions": positions,
         }
         return snapshot
@@ -3341,6 +3388,26 @@ def parse_html_snapshot(
         snapshot["data"] = levels
         snapshot["trendChanges"] = _extract_trend_changes_from_html(text)
         return validate_research_ranges(snapshot)
+
+    if report_type == "top-3-things":
+        items, intro = _extract_top_three_items(html_body, text)
+        if len(items) != 3:
+            return None
+        snapshot = _base_snapshot(
+            snapshot_type="top-3-things",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        snapshot["itemCount"] = len(items)
+        snapshot["data"] = {"items": items}
+        if intro:
+            snapshot["data"]["intro"] = intro
+            snapshot["article"]["summary"] = intro
+        return snapshot
 
     if report_type == "top-3-things":
         items, intro = _extract_top_three_items(html_body, text)
@@ -3709,8 +3776,22 @@ def parse_html_snapshot(
         return snapshot
 
     if report_type == "real-time-alert":
-        headline = _extract_headline(html_body, text) or subject
+        body_headline = _extract_headline(html_body, text)
+        subject_headline = str(subject or "").strip() or None
+        headline = (
+            subject_headline
+            if subject_headline
+            and re.search(
+                r"\breal[- ]time alert\b",
+                subject_headline,
+                re.IGNORECASE,
+            )
+            else body_headline or subject_headline
+        )
         alert = _extract_real_time_alert(headline, text, html_body)
+        if not alert and body_headline and body_headline != headline:
+            headline = body_headline
+            alert = _extract_real_time_alert(headline, text, html_body)
         if not alert:
             return None
         snapshot = _base_snapshot(

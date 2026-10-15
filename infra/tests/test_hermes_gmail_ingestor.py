@@ -574,8 +574,39 @@ def etf_full_book_snapshot(message_id: str, scraped_at: str) -> dict:
     }
 
 
+def top_three_snapshot(message_id: str, scraped_at: str, label: str) -> dict:
+    return {
+        "date": "2026-08-17",
+        "snapshotType": "top-3-things",
+        "scrapedAt": scraped_at,
+        "publishedAt": "2026-08-17T00:00:00+00:00",
+        "source": "gmail-html",
+        "htmlSource": f"message-{message_id}.html",
+        "gmailMessageId": message_id,
+        "article": {"headline": f"Top 3 Things {label}"},
+        "reportType": "top-3-things",
+        "itemCount": 3,
+        "data": {
+            "items": [
+                {"rank": 1, "title": f"{label} One", "body": "First item."},
+                {"rank": 2, "title": f"{label} Two", "body": "Second item."},
+                {"rank": 3, "title": f"{label} Three", "body": "Third item."},
+            ],
+        },
+    }
+
+
 class HermesGmailIngestorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.metadata_patcher = patch.object(
+            ingestor,
+            "get_message_metadata",
+            return_value={"payload": {"headers": []}},
+        )
+        self.metadata_patcher.start()
+
     def tearDown(self) -> None:
+        self.metadata_patcher.stop()
         ingestor.clear_oauth_secret_cache()
 
     def test_oauth_secret_is_cached_for_warm_invocations(self):
@@ -2576,6 +2607,99 @@ class HermesGmailIngestorTests(unittest.TestCase):
             },
         )
 
+    def test_august_17_investing_ideas_materializes_all_fourteen_positions(self):
+        html_body = (
+            GMAIL_FIXTURE_DIR / "investing-ideas-2026-08-17-sanitized.html"
+        ).read_text(encoding="utf-8")
+
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="investing-ideas",
+            html_body=html_body,
+            received_at=datetime(2026, 8, 17, 13, 0, tzinfo=timezone.utc),
+            s3_key="investing-ideas/2026-08-17-sanitized.html",
+            message_id="sanitized-investing-ideas-2026-08-17",
+            subject="Investing Ideas Newsletter: August 17, 2026",
+        )
+
+        self.assertEqual(snapshot["positionCount"], 14)
+        self.assertEqual(snapshot["longCount"], 12)
+        self.assertEqual(snapshot["shortCount"], 2)
+        self.assertEqual(
+            snapshot["data"]["longs"],
+            [
+                "DDOG", "LLY", "CZR", "SBUX", "KMX", "TXG",
+                "PCAR", "RCL", "AMZN", "PVH", "DT", "EXPGY",
+            ],
+        )
+        self.assertEqual(snapshot["data"]["shorts"], ["WING", "WMT"])
+
+    def test_investing_ideas_rejects_partial_mismatched_and_duplicate_books(self):
+        cases = (
+            (
+                "partial",
+                "<p>Long: DDOG</p><table><tr class='long'>"
+                "<td>DDOG</td><td>$140</td><td>$125</td></tr></table>",
+            ),
+            (
+                "summary-mismatch",
+                "<p>Long: LLY</p><table><tr class='long'>"
+                "<td>DDOG</td><td>$140</td><td>$125</td><td>$152</td>"
+                "</tr></table>",
+            ),
+            (
+                "duplicate",
+                "<table><tr class='long'><td>DDOG</td><td>$140</td>"
+                "<td>$125</td><td>$152</td></tr><tr class='short'>"
+                "<td>DDOG</td><td>$140</td><td>$125</td><td>$152</td>"
+                "</tr></table>",
+            ),
+        )
+        for name, html_body in cases:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                ingestor.parse_html_snapshot(
+                    report_type="investing-ideas",
+                    html_body=html_body,
+                    received_at=datetime(2026, 8, 17, 13, 0, tzinfo=timezone.utc),
+                    s3_key=f"investing-ideas/{name}.html",
+                    message_id=f"sanitized-{name}",
+                    subject="Investing Ideas Newsletter: August 17, 2026",
+                )
+
+    def test_real_time_alert_priority_and_single_letter_subject_are_strict(self):
+        bjri_subject = (
+            "Real-Time Alert: BUY Signal: BJRI (Signal Strength Stock)"
+        )
+        self.assertEqual(
+            ingestor.infer_report_type("message-body.html", bjri_subject),
+            "real-time-alert",
+        )
+
+        visa_subject = (
+            "Real-Time Alert: Sell-SOME Signal "
+            "(consistency and discipline): V -KM"
+        )
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="real-time-alert",
+            html_body="<h1>SELL SIGNAL WRONG</h1><p>SELL SIGNAL V $364.78</p>",
+            received_at=datetime(2026, 8, 14, 15, 0, tzinfo=timezone.utc),
+            s3_key="real-time-alert/visa-sanitized.html",
+            message_id="sanitized-visa-alert",
+            subject=visa_subject,
+        )
+        self.assertEqual(snapshot["data"]["alert"]["ticker"], "V")
+        self.assertEqual(snapshot["data"]["alert"]["action"], "SELL-SOME")
+        self.assertEqual(snapshot["data"]["headline"], visa_subject)
+
+        ambiguous = ingestor.parse_html_snapshot(
+            report_type="real-time-alert",
+            html_body="<h1>Real-Time Alert: portfolio note</h1>",
+            received_at=datetime(2026, 8, 14, 15, 0, tzinfo=timezone.utc),
+            s3_key="real-time-alert/ambiguous.html",
+            message_id="sanitized-ambiguous-alert",
+            subject="Real-Time Alert: portfolio note",
+        )
+        self.assertIsNone(ambiguous)
+
     def test_market_situation_report_is_classified_and_materialized_as_structured_signals(self):
         subject = (
             "MARKET SITUATION REPORT: July 30th 2026 | "
@@ -3420,6 +3544,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
         finalize.assert_called_once()
 
     def test_forced_tracker_html_backfill_passes_textract_and_indexes_valid_events(self):
+        archived_html = b"<html><body>Bitcoin Trend Tracker</body></html>"
         legacy_item = {
             "messageId": "bitcoin-backfill",
             "attachmentId": "message-body-html-0",
@@ -3430,7 +3555,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
             "subject": "Bitcoin Trend Tracker",
             "s3Bucket": "research",
             "s3Key": "crypto-quant/message.html",
-            "contentSha256": "a" * 64,
+            "contentSha256": hashlib.sha256(archived_html).hexdigest(),
             "materializationAttemptVersion": "gmail-materialized-v4-canonical-verification",
             "materializationStatus": "PARSED",
         }
@@ -3440,7 +3565,7 @@ class HermesGmailIngestorTests(unittest.TestCase):
         ))
         table = FakeLedgerTable([legacy_item])
         body = MagicMock()
-        body.read.return_value = b"<html><body>Bitcoin Trend Tracker</body></html>"
+        body.read.return_value = archived_html
         s3_client = MagicMock()
         s3_client.get_object.return_value = {"Body": body}
         tracker_snapshot = {
@@ -3475,7 +3600,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
             ingestor, "materialize_email_snapshot", return_value=({}, True)
         ), patch.object(
             ingestor, "finalize_snapshot_intelligence"
-        ) as finalize:
+        ) as finalize, patch.object(
+            ingestor, "reclassify_manifest_artifact"
+        ) as reclassify:
             materialized = ingestor.backfill_html_snapshot(
                 table=table,
                 message_id="bitcoin-backfill",
@@ -3493,6 +3620,13 @@ class HermesGmailIngestorTests(unittest.TestCase):
             "INDEXED",
         )
         finalize.assert_called_once()
+        # The legacy crypto-quant manifest artifact moves to the indexed
+        # bitcoin-trend-tracker product only after finalization.
+        reclassify.assert_called_once()
+        self.assertEqual(
+            reclassify.call_args.kwargs["source_product_id"],
+            "crypto-quant",
+        )
 
     def test_explicit_version_backfill_reclassifies_previously_unknown_market_situation_email(self):
         legacy_item = {
@@ -3623,6 +3757,140 @@ class HermesGmailIngestorTests(unittest.TestCase):
                 {"rank": 3, "title": "VOLATILITY", "body": "VIX signaled lower lows."},
             ],
         )
+
+    def test_top_three_classification_preserves_product_precedence(self):
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "THE MACRO SHOW: August 17th - Access Show, Slide Deck & Top 3 Things",
+            ),
+            "top-3-things",
+        )
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "THE MACRO SHOW: Summary Notes & Replay | Monday, August 17th, 2026",
+            ),
+            "the-macro-show",
+        )
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "KM's Top 3 Things (Rates/KOSPI/Volatility)",
+            ),
+            "top-3-things",
+        )
+        self.assertEqual(
+            ingestor.infer_report_type(
+                "message-body.html",
+                "EARLY LOOK: [COMPLIMENTARY] Top 3 Things | USD/Gold/VIX",
+            ),
+            "early-look",
+        )
+
+    def test_top_three_reclassification_requires_explicit_version_backfill(self):
+        legacy_item = {
+            "status": "INDEXED",
+            "attachmentId": "message-body-html-1",
+            "mimeType": "text/html",
+            "filename": "message-body.html",
+            "subject": "THE MACRO SHOW: August 17th - Access Show, Slide Deck & Top 3 Things",
+            "reportType": "the-macro-show",
+            "snapshotType": "the-macro-show",
+            "s3Bucket": "research",
+            "s3Key": "messages/top-three.html",
+            "materializationAttemptVersion": "gmail-materialized-v7-market-structure-archive",
+            "materializationStatus": "INDEXED",
+        }
+
+        self.assertFalse(
+            ingestor._should_backfill_materialized_snapshot(
+                legacy_item,
+                allow_version_upgrade=False,
+            )
+        )
+        self.assertTrue(
+            ingestor._should_backfill_materialized_snapshot(
+                legacy_item,
+                allow_version_upgrade=True,
+            )
+        )
+
+    def test_top_three_parser_preserves_numbered_macro_show_items(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="top-3-things",
+            html_body="""
+                <html><head><meta type="hedgeye-headline"
+                  content="August 17th - Access Show, Slide Deck &amp; Top 3 Things"></head>
+                <body>
+                  <div>08/17/2026 08:41 AM EDT</div>
+                  <p>Hedgeye's top 3 things</p>
+                  <p>SPY was down small on decelerating volume Friday.</p>
+                  <p>1) USD – Dollar Index is making fresh two-month lows.</p>
+                  <p>2) GOLD – Gold has the cleanest inverse correlation to USD.</p>
+                  <p>3) ATHs (all-time highs) – A Top 3 Things repeat; RSP and IWM printed new highs.</p>
+                  <p>VIEW LINK</p>
+                </body></html>
+            """,
+            received_at=datetime(2026, 8, 17, 12, 42, tzinfo=timezone.utc),
+            s3_key="sanitized/top-three-macro.html",
+            message_id="top-three-macro",
+            subject="THE MACRO SHOW: August 17th - Access Show, Slide Deck & Top 3 Things",
+        )
+
+        self.assertEqual(snapshot["snapshotType"], "top-3-things")
+        self.assertEqual(snapshot["itemCount"], 3)
+        self.assertEqual(
+            snapshot["data"]["items"],
+            [
+                {"rank": 1, "title": "USD", "body": "Dollar Index is making fresh two-month lows."},
+                {"rank": 2, "title": "GOLD", "body": "Gold has the cleanest inverse correlation to USD."},
+                {"rank": 3, "title": "ATHs (all-time highs)", "body": "A Top 3 Things repeat; RSP and IWM printed new highs."},
+            ],
+        )
+        self.assertEqual(
+            snapshot["data"]["intro"],
+            "SPY was down small on decelerating volume Friday.",
+        )
+
+    def test_top_three_parser_supports_standalone_ordered_list_and_rejects_partial(self):
+        valid = ingestor.parse_html_snapshot(
+            report_type="top-3-things",
+            html_body="""
+                <html><body>
+                  <div>08/13/2026 07:05 AM EDT</div>
+                  <h1>KM's Top 3 Things (Rates/KOSPI/Volatility)</h1>
+                  <p>Top 3 Things today:</p>
+                  <ol>
+                    <li><b>RATES –</b> The yield curve steepened.</li>
+                    <li><b>KOSPI –</b> The signal improved.</li>
+                    <li><b>VOLATILITY –</b> VIX signaled lower lows.</li>
+                  </ol>
+                </body></html>
+            """,
+            received_at=datetime(2026, 8, 13, 11, 5, tzinfo=timezone.utc),
+            s3_key="sanitized/top-three-km.html",
+            message_id="top-three-km",
+            subject="KM's Top 3 Things (Rates/KOSPI/Volatility)",
+        )
+        partial = ingestor.parse_html_snapshot(
+            report_type="top-3-things",
+            html_body="""
+                <html><body><p>Top 3 Things today:</p><ol>
+                  <li>USD – First item.</li><li>GOLD – Second item.</li>
+                </ol></body></html>
+            """,
+            received_at=datetime(2026, 8, 13, 11, 5, tzinfo=timezone.utc),
+            s3_key="sanitized/top-three-partial.html",
+            message_id="top-three-partial",
+            subject="KM's Top 3 Things",
+        )
+
+        self.assertEqual(
+            [item["title"] for item in valid["data"]["items"]],
+            ["RATES", "KOSPI", "VOLATILITY"],
+        )
+        self.assertIsNone(partial)
 
     def test_article_only_call_and_macro_show_emails_materialize_without_inventing_positions(self):
         cases = (
@@ -4564,6 +4832,48 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertTrue(merged["dataVersion"].startswith(f"{ingestor.MATERIALIZED_DATA_VERSION}:"))
         self.assertIn("materializedAt", merged)
 
+    def test_top_three_materialization_is_latest_wins_and_idempotent(self):
+        table = FakeSnapshotTable()
+        db = FakeDynamoDb(table)
+        later = top_three_snapshot(
+            "message-later",
+            "2026-08-17T12:42:12+00:00",
+            "Later",
+        )
+        earlier = top_three_snapshot(
+            "message-earlier",
+            "2026-08-17T11:07:04+00:00",
+            "Earlier",
+        )
+
+        ingestor.materialize_email_snapshot(later, db)
+        merged, changed = ingestor.materialize_email_snapshot(earlier, db)
+        repeated, repeated_changed = ingestor.materialize_email_snapshot(earlier, db)
+
+        self.assertTrue(changed)
+        self.assertFalse(repeated_changed)
+        self.assertEqual(merged["gmailMessageId"], "message-later")
+        self.assertEqual(merged["data"]["items"][0]["title"], "Later One")
+        self.assertEqual(
+            set(merged["sourceMessageIds"]),
+            {"message-earlier", "message-later"},
+        )
+        self.assertEqual(repeated["dataVersion"], merged["dataVersion"])
+
+    def test_top_three_materialization_rejects_invalid_rank_contract(self):
+        table = FakeSnapshotTable()
+        db = FakeDynamoDb(table)
+        invalid = top_three_snapshot(
+            "message-invalid",
+            "2026-08-17T12:42:12+00:00",
+            "Invalid",
+        )
+        invalid["data"]["items"][2]["rank"] = 4
+
+        with self.assertRaisesRegex(ValueError, "exactly three ranked items"):
+            ingestor.materialize_email_snapshot(invalid, db)
+        self.assertEqual(table.put_count, 0)
+
     def test_etf_materialization_keeps_latest_action_for_position(self):
         table = FakeSnapshotTable()
         db = FakeDynamoDb(table)
@@ -5278,6 +5588,9 @@ class HermesGmailIngestorTests(unittest.TestCase):
                     "sender": "sender@example.com",
                     "s3Bucket": "test-bucket",
                     "s3Key": "hedgeye-email/messages/rta.html",
+                    "contentSha256": hashlib.sha256(
+                        b"<html><body>broken parser input</body></html>"
+                    ).hexdigest(),
                     "createdAt": "2026-07-15T10:00:00+00:00",
                     "updatedAt": "2026-07-15T10:00:00+00:00",
                     "receivedAt": "2026-07-15T10:00:00+00:00",
@@ -5402,6 +5715,284 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(
             migration_result["stored"],
             [{"filename": "message-body.html", "detail": "snapshot-backfilled"}],
+        )
+
+    def test_current_materialization_with_older_entity_parser_requires_operator_replay(self):
+        item = {
+            "status": "INDEXED",
+            "attachmentId": "message-body-html-0",
+            "mimeType": "text/html",
+            "filename": "message-body.html",
+            "subject": "Crypto Quant",
+            "reportType": "crypto-quant",
+            "snapshotType": "bitcoin-trend-tracker",
+            "s3Bucket": "test-bucket",
+            "s3Key": "immutable/crypto.html",
+            "materializationAttemptVersion": ingestor.MATERIALIZED_DATA_VERSION,
+            "materializationStatus": "INDEXED",
+            "researchParserVersion": ingestor.RESEARCH_PARSER_VERSION,
+            "securityIntelligenceParserVersion": (
+                "security-intelligence-v3-tracker-contract"
+            ),
+        }
+
+        self.assertFalse(
+            ingestor._should_backfill_materialized_snapshot(
+                item,
+                allow_version_upgrade=False,
+            )
+        )
+        self.assertTrue(
+            ingestor._should_backfill_materialized_snapshot(
+                item,
+                allow_version_upgrade=True,
+            )
+        )
+
+    def test_operator_batch_identity_and_terminal_rotation_are_parser_versioned(self):
+        kwargs = {
+            "cursor_before": "history-1",
+            "pending_history_id": None,
+            "poll_mode": "operator_replay",
+            "force_backfill": True,
+        }
+        current_batch = ingestor._queue_batch_id((), **kwargs)
+        with patch.object(
+            ingestor,
+            "SECURITY_INTELLIGENCE_PARSER_VERSION",
+            "security-intelligence-v3-tracker-contract",
+        ):
+            prior_batch = ingestor._queue_batch_id((), **kwargs)
+
+        queue = [
+            {
+                "gmailMessageId": "abcdef0123456789",
+                "status": "COMPLETED",
+            }
+        ]
+        self.assertNotEqual(current_batch, prior_batch)
+        self.assertTrue(
+            ingestor.operator_batch_requires_contract_rotation(
+                prior_batch,
+                current_batch,
+                queue,
+                ["abcdef0123456789"],
+            )
+        )
+        self.assertFalse(
+            ingestor.operator_batch_requires_contract_rotation(
+                current_batch,
+                current_batch,
+                queue,
+                ["abcdef0123456789"],
+            )
+        )
+        self.assertFalse(
+            ingestor.operator_terminal_batch_matches(
+                [*queue, {"gmailMessageId": "extra", "status": "COMPLETED"}],
+                ["abcdef0123456789"],
+            )
+        )
+
+    def test_operator_version_replay_uses_only_immutable_ledger_html(self):
+        message_id = "abcdef0123456789"
+        table = FakeLedgerTable(
+            [
+                {
+                    "messageId": message_id,
+                    "attachmentId": "message-body-html-0",
+                    "status": "ERROR",
+                    "filename": "message-body.html",
+                    "mimeType": "text/html",
+                    "reportType": "momo-tracker",
+                    "subject": "MOMO Trend Tracker",
+                    "sender": "sender@example.com",
+                    "s3Bucket": "test-bucket",
+                    "s3Key": "immutable/momo.html",
+                    "contentSha256": "a" * 64,
+                    "receivedAt": "2026-08-13T10:00:00+00:00",
+                    "materializationAttemptVersion": "gmail-materialized-v7-market-structure-archive",
+                    "materializationAttemptCount": 3,
+                    "materializationStatus": "ERROR",
+                }
+            ]
+        )
+
+        with patch.object(
+            ingestor, "backfill_html_snapshot", return_value=True
+        ) as backfill, patch.object(
+            ingestor, "get_message_metadata"
+        ) as get_metadata, patch.object(
+            ingestor, "get_message"
+        ) as get_message:
+            result = ingestor.process_message(
+                "token",
+                "me",
+                message_id,
+                table,
+                allow_version_backfill=True,
+            )
+
+        self.assertEqual(
+            result["stored"],
+            [{"filename": "message-body.html", "detail": "snapshot-backfilled"}],
+        )
+        backfill.assert_called_once()
+        self.assertTrue(backfill.call_args.kwargs["replace_entity_projection"])
+        get_metadata.assert_not_called()
+        get_message.assert_not_called()
+
+    def test_operator_replay_rejects_arbitrary_ids_and_wrong_versions(self):
+        valid = {
+            "source": ingestor.OPERATOR_REPLAY_SOURCE,
+            "messageIds": ["abcdef0123456789"],
+            "forceBackfill": True,
+            "materializationVersion": ingestor.MATERIALIZED_DATA_VERSION,
+        }
+        self.assertEqual(
+            ingestor.operator_replay_message_ids(valid),
+            ["abcdef0123456789"],
+        )
+        invalid_events = (
+            {**valid, "messageIds": ["operator-supplied-id"]},
+            {**valid, "materializationVersion": "wrong-version"},
+            {**valid, "unexpected": True},
+            {**valid, "messageIds": ["abcdef0123456789"] * 2},
+        )
+        for event in invalid_events:
+            with self.subTest(event=event), self.assertRaises(
+                ingestor.GmailOperatorReplayError
+            ):
+                ingestor.operator_replay_message_ids(event)
+
+    def test_scheduled_invocation_cannot_request_force_backfill(self):
+        database = FakeRuntimeDynamoDb(FakeLedgerTable())
+        with patch.object(ingestor, "dynamodb", database), patch.object(
+            ingestor, "cloudwatch", MagicMock()
+        ), patch.object(ingestor, "load_oauth_secret") as load_secret:
+            response = ingestor.lambda_handler(
+                {
+                    "source": "aws-scheduler",
+                    "scheduleId": ingestor.GMAIL_SCHEDULE_ID,
+                    "forceBackfill": True,
+                },
+                None,
+            )
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(
+            json.loads(response["body"])["errorCode"],
+            "GMAIL_OPERATOR_REPLAY_INVALID",
+        )
+        load_secret.assert_not_called()
+
+    def test_archived_source_hash_drift_fails_before_parser_execution(self):
+        message_id = "abcdef0123456789"
+        item = {
+            "messageId": message_id,
+            "attachmentId": "message-body-html-0",
+            "status": "ERROR",
+            "filename": "message-body.html",
+            "mimeType": "text/html",
+            "reportType": "real-time-alert",
+            "subject": "Real-Time Alert: BUY Signal: SPY",
+            "s3Bucket": "test-bucket",
+            "s3Key": "immutable/rta.html",
+            "contentSha256": hashlib.sha256(b"original").hexdigest(),
+            "receivedAt": "2026-08-13T10:00:00+00:00",
+            "materializationAttemptVersion": "gmail-materialized-v7-market-structure-archive",
+            "materializationAttemptCount": 3,
+            "materializationStatus": "ERROR",
+        }
+        table = FakeLedgerTable([item])
+        body = MagicMock()
+        body.read.return_value = b"changed"
+        s3_client = MagicMock()
+        s3_client.get_object.return_value = {"Body": body}
+
+        with patch.object(ingestor, "s3", s3_client), patch.object(
+            ingestor, "parse_html_snapshot"
+        ) as parser, patch.object(
+            ingestor, "persist_snapshot_failure"
+        ):
+            with self.assertRaises(ingestor.RetryableResearchMaterializationError):
+                ingestor.backfill_html_snapshot(
+                    table=table,
+                    message_id=message_id,
+                    attachment_id="message-body-html-0",
+                    report_type="real-time-alert",
+                    mime_type="text/html",
+                    received_at=datetime(2026, 8, 13, 10, tzinfo=timezone.utc),
+                    ledger_item=item,
+                )
+
+        parser.assert_not_called()
+        failed = table.items[(message_id, "message-body-html-0")]
+        self.assertEqual(failed["errorCode"], "GMAIL_IMMUTABLE_ARTIFACT_DRIFT")
+
+    def test_retry_reclassifies_from_original_report_after_target_snapshot_was_recorded(self):
+        message_id = "abcdef0123456789"
+        archived_body = b"<html><body>Crypto Quant tracker</body></html>"
+        item = {
+            "messageId": message_id,
+            "attachmentId": "message-body-html-0",
+            "status": "ERROR",
+            "filename": "message-body.html",
+            "mimeType": "text/html",
+            "reportType": "crypto-quant",
+            "snapshotType": "bitcoin-trend-tracker",
+            "subject": "Crypto Quant",
+            "s3Bucket": "test-bucket",
+            "s3Key": "immutable/crypto.html",
+            "contentSha256": hashlib.sha256(archived_body).hexdigest(),
+            "receivedAt": "2026-08-13T10:00:00+00:00",
+            "materializationAttemptVersion": ingestor.MATERIALIZED_DATA_VERSION,
+            "materializationAttemptCount": 1,
+            "materializationStatus": "ERROR",
+        }
+        table = FakeLedgerTable([item])
+        body = MagicMock()
+        body.read.return_value = archived_body
+        s3_client = MagicMock()
+        s3_client.get_object.return_value = {"Body": body}
+        snapshot = {
+            "date": "2026-08-13",
+            "reportType": "crypto-quant",
+            "snapshotType": "bitcoin-trend-tracker",
+            "source": "gmail",
+        }
+
+        with patch.object(ingestor, "s3", s3_client), patch.object(
+            ingestor, "dynamodb", MagicMock()
+        ), patch.object(
+            ingestor, "parse_html_snapshot", return_value=snapshot
+        ), patch.object(
+            ingestor, "persist_research_event_ledger", return_value=0
+        ), patch.object(
+            ingestor, "persist_snapshot_intelligence", return_value=1
+        ), patch.object(
+            ingestor, "materialize_email_snapshot", return_value=({}, False)
+        ), patch.object(
+            ingestor, "finalize_snapshot_intelligence"
+        ), patch.object(
+            ingestor, "reclassify_manifest_artifact"
+        ) as reclassify:
+            backfilled = ingestor.backfill_html_snapshot(
+                table=table,
+                message_id=message_id,
+                attachment_id="message-body-html-0",
+                report_type="crypto-quant",
+                mime_type="text/html",
+                received_at=datetime(2026, 8, 13, 10, tzinfo=timezone.utc),
+                ledger_item=item,
+                replace_entity_projection=True,
+            )
+
+        self.assertTrue(backfilled)
+        reclassify.assert_called_once()
+        self.assertEqual(
+            reclassify.call_args.kwargs["source_product_id"],
+            "crypto-quant",
         )
 
     def test_textract_content_claim_is_shared_by_content_hash(self):
