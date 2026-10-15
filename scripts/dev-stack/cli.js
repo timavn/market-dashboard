@@ -663,8 +663,18 @@ function pathIsInRoot(candidate) {
   const relative = path.relative(root, path.resolve(candidate));
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
+// `ps -o command=` prints arguments unquoted, so a checkout under a path with
+// spaces (for example the tested-release export in "Application Support")
+// would split every repository path. Protect the repository root first.
+function commandTokens(commandText) {
+  const text = String(commandText || '');
+  if (!/\s/.test(root)) return text.split(/\s+/).filter(Boolean);
+  const marker = '\u0000REPO_ROOT\u0000';
+  return text.split(root).join(marker).split(/\s+/).filter(Boolean)
+    .map((token) => token.split(marker).join(root));
+}
 function hasExactBridgeCommandSignature(commandText, cwd) {
-  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const tokens = commandTokens(commandText);
   const executableName = path.basename(tokens[0] || '');
   if (!['node', 'nodejs'].includes(executableName)) return false;
   const entrypoint = tokens[1] || '';
@@ -676,7 +686,7 @@ function hasExactBridgeCommandSignature(commandText, cwd) {
   return resolvedEntrypoint === bridgeScriptPath;
 }
 function hasExactControllerCommandSignature(commandText, cwd) {
-  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const tokens = commandTokens(commandText);
   const executableName = path.basename(tokens[0] || '');
   if (!['node', 'nodejs'].includes(executableName)) return false;
   const entrypoint = tokens[1] || '';
@@ -687,7 +697,7 @@ function hasExactControllerCommandSignature(commandText, cwd) {
   return path.resolve(cwd, entrypoint) === controllerScriptPath;
 }
 function hasExactSidecarCommandSignature(commandText, cwd) {
-  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const tokens = commandTokens(commandText);
   const resolvedCwd = cwd ? path.resolve(cwd) : '';
   const portIndex = tokens.indexOf('--port');
   const hasUvicorn = tokens.some((token) => path.basename(token) === 'uvicorn')
@@ -704,7 +714,7 @@ function hasManagedSidecarRuntime(commandText, cwd, environment = '') {
       || String(environment || '').includes(`IBKR_SIDECAR_RUNTIME_ROOT=${sidecarRuntimeDir}`));
 }
 function hasExactAnalystSidecarCommandSignature(commandText, cwd) {
-  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const tokens = commandTokens(commandText);
   const resolvedCwd = cwd ? path.resolve(cwd) : '';
   const portIndex = tokens.indexOf('--port');
   const hasUvicorn = tokens.some((token) => path.basename(token) === 'uvicorn')
@@ -716,7 +726,7 @@ function hasExactAnalystSidecarCommandSignature(commandText, cwd) {
     && tokens[portIndex + 1] === String(services.analystSidecar.port);
 }
 function hasExactAnalystHermesCommandSignature(commandText, cwd) {
-  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const tokens = commandTokens(commandText);
   const resolvedCwd = cwd ? path.resolve(cwd) : '';
   const portIndex = tokens.indexOf('--port');
   const usesAnalystBinary = tokens.includes(analystBinPath)
@@ -731,7 +741,7 @@ function hasExactAnalystHermesCommandSignature(commandText, cwd) {
     && tokens[portIndex + 1] === String(services.analystHermes.port);
 }
 function hasExactAnalystHermesRuntimeSignature(commandText) {
-  const tokens = String(commandText || '').split(/\s+/).filter(Boolean);
+  const tokens = commandTokens(commandText);
   const portIndex = tokens.indexOf('--port');
   const hostIndex = tokens.indexOf('--host');
   const profileIndex = tokens.indexOf('-p');
@@ -778,7 +788,7 @@ function isRecoverableOrphanedAnalystHermes({
 }
 function hasExpectedDashboardSignature(commandText, cwd) {
   const cmd = String(commandText || '');
-  const tokens = cmd.split(/\s+/).filter(Boolean);
+  const tokens = commandTokens(cmd);
   const resolvedCwd = cwd ? path.resolve(cwd) : '';
   const cliPath = path.join(root, 'scripts/dev-stack/cli.js');
   const cracoRoot = `${path.join(root, 'node_modules/@craco/craco')}${path.sep}`;
