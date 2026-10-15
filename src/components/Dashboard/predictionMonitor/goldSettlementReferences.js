@@ -1,7 +1,7 @@
 import { FORBIDDEN_GOLD_CONTEXT_PROVENANCE } from './goldContextValidation';
 import { chartSessionParts } from './riskRangeChartSessions';
 import { buildSettlementIdentityViewModel } from './settlementIdentity';
-import { isPythResolverSymbol } from '../../../services/predictionMarketTest/resolverIdentities.cjs';
+import { isPythResolverSymbol } from '../../../utils/resolverIdentities.cjs';
 
 const GOLD_SETTLEMENT_SOURCE = 'kalshi_finalized_expiration_value';
 

@@ -3,7 +3,8 @@
 const path = require('node:path');
 const { parseSync, traverse } = require('@babel/core');
 
-const moduleId = (filename) => path.posix.normalize(filename).replace(/\.(?:jsx?|cjs|mjs)$/, '');
+// `.cjs` stays part of the identity: `x.js` re-exporting its `x.cjs` twin is not a self-import.
+const moduleId = (filename) => path.posix.normalize(filename).replace(/\.(?:jsx?|mjs)$/, '');
 const isService = (target) => target.startsWith('src/services/');
 const isHook = (target) => target.startsWith('src/hooks/');
 const isUi = (target) => /^(?:react(?:-dom|-markdown)?|recharts|lucide-react|framer-motion|@tremor\/react|@heroicons\/react)(?:\/|$)/.test(target);
