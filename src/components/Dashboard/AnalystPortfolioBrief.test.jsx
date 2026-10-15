@@ -867,7 +867,8 @@ test('Portfolio Review sections use content height and right-aligned datelines i
       expect(report.querySelector('.portfolio-review-section-controls')).toBeNull();
       report.querySelectorAll('.portfolio-review-section-state').forEach(state => expect(state.textContent).not.toBe(''));
       const emptyPosition = report.querySelector('.portfolio-position-placeholder td');
-      if (emptyPosition) expect(window.getComputedStyle(emptyPosition).height).not.toBe('300px');
+      // An empty-positions placeholder, when shown, must not reserve blank report height.
+      expect(emptyPosition ? window.getComputedStyle(emptyPosition).height : 'auto').not.toBe('300px');
     };
     assertCompact();
     rerender(<PortfolioReviewPlaceholder message={{ id: 'compact-review', created_at: asOf }} loading={false} deferred historical />);

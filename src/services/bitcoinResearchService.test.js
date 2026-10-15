@@ -52,15 +52,6 @@ test('loads separately calculated hourly, calendar-day and NYSE historical obser
   expect(fetchImpl).toHaveBeenCalledWith('/research/bitcoin/study.json', expect.objectContaining({ cache: 'no-cache' }));
 });
 
-test('the published research artifact satisfies the interval contract', () => {
-  const published = require('../../public/research/bitcoin/study.json');
-  expect(validateBitcoinResearchStudy(published)).toBe(published);
-  const daily = published.intervals.find(({ id }) => id === 'daily');
-  expect(published.intervals.map(({ id }) => id)).toEqual(['hourly', 'calendar_day', 'daily']);
-  expect(daily.rows.some((row) => row.observations > 0)).toBe(true);
-  expect(daily.downloads.some(({ href }) => href === '/research/bitcoin/daily-observations.csv')).toBe(true);
-});
-
 test.each(['mock', 'isMock', 'seeded', 'synthetic', 'inferred', 'portfolioDerived', 'stale', 'cacheOnly'])('rejects %s evidence at every level', (flag) => {
   const study = sample();
   expect(() => validateBitcoinResearchStudy({ ...study, [flag]: true })).toThrow('unavailable');

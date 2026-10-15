@@ -1,0 +1,10 @@
+{
+  "sp500": { "instrumentId": "hedgai:SPY", "sourceTicker": "SPY", "marketId": "sp500", "fit": "proxy", "label": "S&P 500 · source-listed SPY proxy" },
+  "nasdaq100": { "instrumentId": "hedgai:QQQ", "sourceTicker": "QQQ", "marketId": "nasdaq100", "fit": "proxy", "label": "Nasdaq-100 · source-listed QQQ proxy" },
+  "gold": { "instrumentId": "hedgai:GLD", "sourceTicker": "GLD", "marketId": "gold", "fit": "proxy", "label": "Gold · source-listed GLD proxy" },
+  "silver": { "instrumentId": "hedgai:SLV", "sourceTicker": "SLV", "marketId": "silver", "fit": "proxy", "label": "Silver · source-listed SLV proxy" },
+  "bitcoin": { "instrumentId": "hedgai:IBIT", "sourceTicker": "IBIT", "marketId": "bitcoin", "fit": "proxy", "label": "Bitcoin · source-listed IBIT proxy" },
+  "wti": { "instrumentId": "hedgai:USO", "sourceTicker": "USO", "marketId": "wti", "fit": "proxy", "label": "WTI crude oil · source-listed USO proxy" },
+  "brent": { "instrumentId": "hedgai:BNO", "sourceTicker": "BNO", "marketId": "brent", "fit": "proxy", "label": "Brent crude oil · source-listed BNO proxy" },
+  "russell2000": { "instrumentId": "hedgai:IWM", "sourceTicker": "IWM", "marketId": "russell2000", "fit": "proxy", "label": "Russell 2000 · source-listed IWM proxy" }
+}

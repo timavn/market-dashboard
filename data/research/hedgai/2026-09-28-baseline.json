@@ -1,0 +1,2349 @@
+{
+  "version": 1,
+  "product": "hedgai-signals",
+  "baselineDate": "2026-09-28",
+  "metricsDate": "2026-09-28",
+  "publishedAt": "2026-09-28T12:43:00Z",
+  "publicationId": "hedgai:187742",
+  "sourceUrl": "https://app.hedgeye.com/feed_items/187742",
+  "includedPublicationIds": [
+    "hedgai:187742"
+  ],
+  "dateEvidence": "User confirmed all eight images belong to the Sep 28, 2026 publication; email publication time is 08:43 ET.",
+  "provenance": {
+    "sourceType": "reviewed-screenshot",
+    "reviewed": true,
+    "method": "visual-source-comparison",
+    "reviewedAt": "2026-09-28T20:37:33Z",
+    "expectedRowCount": 47,
+    "expectedSourceCount": 8,
+    "rowsHash": "5b41fadc03d48a73cf45fd93687a693082f9031132d7c2b94171dd26a102f2d0",
+    "capturedAt": null
+  },
+  "rows": [
+    {
+      "instrumentId": "hedgai:QQQ",
+      "sourceLabel": "NASDAQ 100",
+      "ticker": "QQQ",
+      "group": "top",
+      "position": "Short",
+      "initiatedAt": "2026-09-21",
+      "modelThreshold": 1,
+      "zScores": [
+        -1.6,
+        -1.77,
+        -1.75,
+        -1.72
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.63,
+          "winLoss": 1,
+          "signals": 46
+        },
+        "buy": {
+          "battingAverage": 0.81,
+          "winLoss": 2.75,
+          "signals": 21
+        },
+        "short": {
+          "battingAverage": 0.48,
+          "winLoss": 0.68,
+          "signals": 25
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": [
+        {
+          "marketId": "nasdaq100",
+          "instrumentId": "hedgai:QQQ",
+          "matchType": "proxy",
+          "label": "QQQ ETF proxy",
+          "sourceLabel": "NASDAQ 100",
+          "ticker": "QQQ"
+        }
+      ]
+    },
+    {
+      "instrumentId": "hedgai:NVDA",
+      "sourceLabel": "NVIDIA",
+      "ticker": "NVDA",
+      "group": "top",
+      "position": "Short",
+      "initiatedAt": "2026-09-08",
+      "modelThreshold": 0.7,
+      "zScores": [
+        -1.13,
+        -1.46,
+        -1.86,
+        -2.17
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.548,
+          "winLoss": 1.77,
+          "signals": 42
+        },
+        "buy": {
+          "battingAverage": 0.625,
+          "winLoss": 2.68,
+          "signals": 24
+        },
+        "short": {
+          "battingAverage": 0.444,
+          "winLoss": 1.29,
+          "signals": 18
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:TSLA",
+      "sourceLabel": "Tesla",
+      "ticker": "TSLA",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 0.8,
+      "zScores": [
+        0.71,
+        0.4,
+        0.16,
+        -0.25
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.526,
+          "winLoss": 1.09,
+          "signals": 57
+        },
+        "buy": {
+          "battingAverage": 0.48,
+          "winLoss": 1.27,
+          "signals": 25
+        },
+        "short": {
+          "battingAverage": 0.562,
+          "winLoss": 0.97,
+          "signals": 32
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:META",
+      "sourceLabel": "Meta Platforms",
+      "ticker": "META",
+      "group": "top",
+      "position": "Buy",
+      "initiatedAt": "2026-09-14",
+      "modelThreshold": 0.8,
+      "zScores": [
+        1.03,
+        1.22,
+        1.32,
+        1.36
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.478,
+          "winLoss": 0.98,
+          "signals": 46
+        },
+        "buy": {
+          "battingAverage": 0.5,
+          "winLoss": 1.82,
+          "signals": 26
+        },
+        "short": {
+          "battingAverage": 0.45,
+          "winLoss": 0.26,
+          "signals": 20
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:NFLX",
+      "sourceLabel": "Netflix",
+      "ticker": "NFLX",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        -0.34,
+        -0.46,
+        -0.37,
+        -0.07
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.704,
+          "winLoss": 0.68,
+          "signals": 27
+        },
+        "buy": {
+          "battingAverage": 0.667,
+          "winLoss": 1.26,
+          "signals": 12
+        },
+        "short": {
+          "battingAverage": 0.733,
+          "winLoss": 0.35,
+          "signals": 15
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLB",
+      "sourceLabel": "Materials $XLB",
+      "ticker": "XLB",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.57,
+        0.67,
+        0.83,
+        0.91
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.677,
+          "winLoss": 1.03,
+          "signals": 31
+        },
+        "buy": {
+          "battingAverage": 0.786,
+          "winLoss": 0.66,
+          "signals": 14
+        },
+        "short": {
+          "battingAverage": 0.588,
+          "winLoss": 1.4,
+          "signals": 17
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLE",
+      "sourceLabel": "Energy $XLE",
+      "ticker": "XLE",
+      "group": "top",
+      "position": "Buy",
+      "initiatedAt": "2026-08-20",
+      "modelThreshold": 0.9,
+      "zScores": [
+        1,
+        1.1,
+        1.18,
+        1.33
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.618,
+          "winLoss": 0.73,
+          "signals": 34
+        },
+        "buy": {
+          "battingAverage": 0.875,
+          "winLoss": 0.64,
+          "signals": 16
+        },
+        "short": {
+          "battingAverage": 0.389,
+          "winLoss": 0.85,
+          "signals": 18
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLP",
+      "sourceLabel": "Consumer Staples $XLP",
+      "ticker": "XLP",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        -0.57,
+        0.15,
+        0.2,
+        0.47
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.617,
+          "winLoss": 0.9,
+          "signals": 47
+        },
+        "buy": {
+          "battingAverage": 0.8,
+          "winLoss": 2.6,
+          "signals": 20
+        },
+        "short": {
+          "battingAverage": 0.481,
+          "winLoss": 0.63,
+          "signals": 27
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XRT",
+      "sourceLabel": "Retail $XRT",
+      "ticker": "XRT",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 0.9,
+      "zScores": [
+        0.38,
+        0.37,
+        0.36,
+        0.35
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.543,
+          "winLoss": 1,
+          "signals": 46
+        },
+        "buy": {
+          "battingAverage": 0.643,
+          "winLoss": 1.34,
+          "signals": 28
+        },
+        "short": {
+          "battingAverage": 0.389,
+          "winLoss": 1.13,
+          "signals": 18
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:USO",
+      "sourceLabel": "WTI Crude Oil",
+      "ticker": "USO",
+      "group": "top",
+      "position": "Short",
+      "initiatedAt": "2026-08-28",
+      "modelThreshold": 1,
+      "zScores": [
+        -1.8,
+        -1.8,
+        -2.03,
+        -2.39
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.564,
+          "winLoss": 0.74,
+          "signals": 39
+        },
+        "buy": {
+          "battingAverage": 0.565,
+          "winLoss": 0.89,
+          "signals": 23
+        },
+        "short": {
+          "battingAverage": 0.562,
+          "winLoss": 0.63,
+          "signals": 16
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": [
+        {
+          "marketId": "wti",
+          "instrumentId": "hedgai:USO",
+          "matchType": "proxy",
+          "label": "USO ETF proxy",
+          "sourceLabel": "WTI Crude Oil",
+          "ticker": "USO"
+        }
+      ]
+    },
+    {
+      "instrumentId": "hedgai:SLX",
+      "sourceLabel": "Steel",
+      "ticker": "SLX",
+      "group": "top",
+      "position": "Short",
+      "initiatedAt": "2026-08-26",
+      "modelThreshold": 1,
+      "zScores": [
+        -2.12,
+        -2.12,
+        -2.12,
+        -2.12
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.636,
+          "winLoss": 1.13,
+          "signals": 66
+        },
+        "buy": {
+          "battingAverage": 0.611,
+          "winLoss": 1.52,
+          "signals": 36
+        },
+        "short": {
+          "battingAverage": 0.667,
+          "winLoss": 0.79,
+          "signals": 30
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:GLD",
+      "sourceLabel": "Gold",
+      "ticker": "GLD",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.23,
+        0.76,
+        0.88,
+        0.77
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.579,
+          "winLoss": 1.44,
+          "signals": 19
+        },
+        "buy": {
+          "battingAverage": 0.636,
+          "winLoss": 1.28,
+          "signals": 11
+        },
+        "short": {
+          "battingAverage": 0.5,
+          "winLoss": 1.59,
+          "signals": 8
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": [
+        {
+          "marketId": "gold",
+          "instrumentId": "hedgai:GLD",
+          "matchType": "proxy",
+          "label": "GLD ETF proxy",
+          "sourceLabel": "Gold",
+          "ticker": "GLD"
+        }
+      ]
+    },
+    {
+      "instrumentId": "hedgai:URA",
+      "sourceLabel": "Uranium $URA",
+      "ticker": "URA",
+      "group": "top",
+      "position": "Buy",
+      "initiatedAt": "2026-09-21",
+      "modelThreshold": 0.6,
+      "zScores": [
+        1.92,
+        2.5,
+        3.49,
+        2.35
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.474,
+          "winLoss": 0.71,
+          "signals": 38
+        },
+        "buy": {
+          "battingAverage": 0.5,
+          "winLoss": 1.1,
+          "signals": 20
+        },
+        "short": {
+          "battingAverage": 0.444,
+          "winLoss": 0.5,
+          "signals": 18
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:CANE",
+      "sourceLabel": "Sugar",
+      "ticker": "CANE",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 0.9,
+      "zScores": [
+        -0.31,
+        -0.83,
+        -1.23,
+        -1.34
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.467,
+          "winLoss": 1.63,
+          "signals": 30
+        },
+        "buy": {
+          "battingAverage": 0.143,
+          "winLoss": 3.47,
+          "signals": 14
+        },
+        "short": {
+          "battingAverage": 0.75,
+          "winLoss": 1.74,
+          "signals": 16
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:YCS",
+      "sourceLabel": "US Dollar To Yen Cross",
+      "ticker": "YCS",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.71,
+        0.65,
+        0.92,
+        1.33
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.482,
+          "winLoss": 1.95,
+          "signals": 56
+        },
+        "buy": {
+          "battingAverage": 0.467,
+          "winLoss": 2.09,
+          "signals": 30
+        },
+        "short": {
+          "battingAverage": 0.5,
+          "winLoss": 1.8,
+          "signals": 26
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:FXC",
+      "sourceLabel": "Canadian Dollar To US Dollar Cross",
+      "ticker": "FXC",
+      "group": "top",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 0.6,
+      "zScores": [
+        0.23,
+        0.07,
+        -0.41,
+        -0.26
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.522,
+          "winLoss": 1.56,
+          "signals": 67
+        },
+        "buy": {
+          "battingAverage": 0.353,
+          "winLoss": 1.92,
+          "signals": 34
+        },
+        "short": {
+          "battingAverage": 0.697,
+          "winLoss": 1.23,
+          "signals": 33
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa",
+        "hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:PFIX",
+      "sourceLabel": "UST 30yr Yield",
+      "ticker": "PFIX",
+      "group": "top",
+      "position": "Buy",
+      "initiatedAt": "2026-09-28",
+      "modelThreshold": 1,
+      "zScores": [
+        1.06,
+        0.67,
+        0.19,
+        0.37
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.444,
+          "winLoss": 1.05,
+          "signals": 45
+        },
+        "buy": {
+          "battingAverage": 0.485,
+          "winLoss": 0.85,
+          "signals": 33
+        },
+        "short": {
+          "battingAverage": 0.333,
+          "winLoss": 1.82,
+          "signals": 12
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa",
+        "hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:UJB",
+      "sourceLabel": "High Yield Corp Bond $HYG",
+      "ticker": "UJB",
+      "group": "top",
+      "position": "Buy",
+      "initiatedAt": "2026-09-24",
+      "modelThreshold": 1,
+      "zScores": [
+        1.14,
+        1.19,
+        1.01,
+        0.53
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.636,
+          "winLoss": 1.31,
+          "signals": 44
+        },
+        "buy": {
+          "battingAverage": 0.812,
+          "winLoss": 1.11,
+          "signals": 16
+        },
+        "short": {
+          "battingAverage": 0.536,
+          "winLoss": 1.27,
+          "signals": 28
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa",
+        "hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:SPY",
+      "sourceLabel": "S&P 500",
+      "ticker": "SPY",
+      "group": "need-more-data",
+      "position": "Buy",
+      "initiatedAt": "2026-09-11",
+      "modelThreshold": 0.9,
+      "zScores": [
+        1.15,
+        1.39,
+        1.63,
+        1.89
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.417,
+          "winLoss": 0.85,
+          "signals": 36
+        },
+        "buy": {
+          "battingAverage": 0.6,
+          "winLoss": 1.33,
+          "signals": 20
+        },
+        "short": {
+          "battingAverage": 0.188,
+          "winLoss": 0.26,
+          "signals": 16
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": [
+        {
+          "marketId": "sp500",
+          "instrumentId": "hedgai:SPY",
+          "matchType": "proxy",
+          "label": "SPY ETF proxy",
+          "sourceLabel": "S&P 500",
+          "ticker": "SPY"
+        }
+      ]
+    },
+    {
+      "instrumentId": "hedgai:IWM",
+      "sourceLabel": "Russell 2000",
+      "ticker": "IWM",
+      "group": "need-more-data",
+      "position": "Buy",
+      "initiatedAt": "2026-09-16",
+      "modelThreshold": 0.9,
+      "zScores": [
+        0.92,
+        1.01,
+        1.09,
+        1.23
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.548,
+          "winLoss": 0.83,
+          "signals": 31
+        },
+        "buy": {
+          "battingAverage": 0.6,
+          "winLoss": 0.9,
+          "signals": 15
+        },
+        "short": {
+          "battingAverage": 0.5,
+          "winLoss": 0.72,
+          "signals": 16
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:AAPL",
+      "sourceLabel": "Apple",
+      "ticker": "AAPL",
+      "group": "need-more-data",
+      "position": "Short",
+      "initiatedAt": "2026-09-23",
+      "modelThreshold": 0.8,
+      "zScores": [
+        -0.93,
+        -0.91,
+        -0.87,
+        -0.82
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.478,
+          "winLoss": 0.81,
+          "signals": 23
+        },
+        "buy": {
+          "battingAverage": 0.636,
+          "winLoss": 0.94,
+          "signals": 11
+        },
+        "short": {
+          "battingAverage": 0.333,
+          "winLoss": 0.55,
+          "signals": 12
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:MSFT",
+      "sourceLabel": "Microsoft",
+      "ticker": "MSFT",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.58,
+        -0.06,
+        0.17,
+        0.37
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.5,
+          "winLoss": 0.74,
+          "signals": 28
+        },
+        "buy": {
+          "battingAverage": 0.467,
+          "winLoss": 0.87,
+          "signals": 15
+        },
+        "short": {
+          "battingAverage": 0.538,
+          "winLoss": 0.6,
+          "signals": 13
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:GOOGL",
+      "sourceLabel": "Google",
+      "ticker": "GOOGL",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.67,
+        0.21,
+        -0.02,
+        -0.09
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.533,
+          "winLoss": 0.94,
+          "signals": 30
+        },
+        "buy": {
+          "battingAverage": 0.5,
+          "winLoss": 0.97,
+          "signals": 16
+        },
+        "short": {
+          "battingAverage": 0.571,
+          "winLoss": 0.89,
+          "signals": 14
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:AMZN",
+      "sourceLabel": "Amazon",
+      "ticker": "AMZN",
+      "group": "need-more-data",
+      "position": "Short",
+      "initiatedAt": "2026-09-16",
+      "modelThreshold": 1,
+      "zScores": [
+        -1.73,
+        -1.79,
+        -1.73,
+        -1.62
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.433,
+          "winLoss": 1.33,
+          "signals": 30
+        },
+        "buy": {
+          "battingAverage": 0.571,
+          "winLoss": 1.6,
+          "signals": 14
+        },
+        "short": {
+          "battingAverage": 0.312,
+          "winLoss": 0.73,
+          "signals": 16
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLF",
+      "sourceLabel": "Financials $XLF",
+      "ticker": "XLF",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 0.7,
+      "zScores": [
+        0.66,
+        0.6,
+        0.59,
+        0.53
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.531,
+          "winLoss": 1.19,
+          "signals": 32
+        },
+        "buy": {
+          "battingAverage": 0.722,
+          "winLoss": 1.4,
+          "signals": 18
+        },
+        "short": {
+          "battingAverage": 0.286,
+          "winLoss": 1.14,
+          "signals": 14
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLI",
+      "sourceLabel": "Industrials $XLI",
+      "ticker": "XLI",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 0.8,
+      "zScores": [
+        -0.19,
+        -0.54,
+        -0.89,
+        -0.98
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.385,
+          "winLoss": 1.31,
+          "signals": 13
+        },
+        "buy": {
+          "battingAverage": 0.333,
+          "winLoss": 2.21,
+          "signals": 9
+        },
+        "short": {
+          "battingAverage": 0.5,
+          "winLoss": 0.31,
+          "signals": 4
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLK",
+      "sourceLabel": "Technology $XLK",
+      "ticker": "XLK",
+      "group": "need-more-data",
+      "position": "Short",
+      "initiatedAt": "2026-09-17",
+      "modelThreshold": 1,
+      "zScores": [
+        -1.21,
+        -1.34,
+        -1.74,
+        -1.98
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.441,
+          "winLoss": 1.1,
+          "signals": 34
+        },
+        "buy": {
+          "battingAverage": 0.529,
+          "winLoss": 0.75,
+          "signals": 17
+        },
+        "short": {
+          "battingAverage": 0.353,
+          "winLoss": 1.65,
+          "signals": 17
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLU",
+      "sourceLabel": "Utilities $XLU",
+      "ticker": "XLU",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 0.9,
+      "zScores": [
+        0.47,
+        0.54,
+        -0.17,
+        -0.92
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.475,
+          "winLoss": 1.4,
+          "signals": 40
+        },
+        "buy": {
+          "battingAverage": 0.579,
+          "winLoss": 2.07,
+          "signals": 19
+        },
+        "short": {
+          "battingAverage": 0.381,
+          "winLoss": 0.94,
+          "signals": 21
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLV",
+      "sourceLabel": "Health Care $XLV",
+      "ticker": "XLV",
+      "group": "need-more-data",
+      "position": "Buy",
+      "initiatedAt": "2026-09-25",
+      "modelThreshold": 0.9,
+      "zScores": [
+        2.12,
+        1.46,
+        0.51,
+        -0.09
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.51,
+          "winLoss": 0.52,
+          "signals": 51
+        },
+        "buy": {
+          "battingAverage": 0.52,
+          "winLoss": 0.68,
+          "signals": 25
+        },
+        "short": {
+          "battingAverage": 0.5,
+          "winLoss": 0.44,
+          "signals": 26
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:XLY",
+      "sourceLabel": "Consumer Discretionary $XLY",
+      "ticker": "XLY",
+      "group": "need-more-data",
+      "position": "Buy",
+      "initiatedAt": "2026-09-15",
+      "modelThreshold": 0.5,
+      "zScores": [
+        1.69,
+        1.96,
+        1.94,
+        1.92
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.557,
+          "winLoss": 0.74,
+          "signals": 61
+        },
+        "buy": {
+          "battingAverage": 0.68,
+          "winLoss": 1.09,
+          "signals": 25
+        },
+        "short": {
+          "battingAverage": 0.472,
+          "winLoss": 0.54,
+          "signals": 36
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:CNYA",
+      "sourceLabel": "China (Shanghai Composite)",
+      "ticker": "CNYA",
+      "group": "need-more-data",
+      "position": "Buy",
+      "initiatedAt": "2026-09-25",
+      "modelThreshold": 1,
+      "zScores": [
+        1.18,
+        1.18,
+        0.95,
+        0.86
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.346,
+          "winLoss": 0.65,
+          "signals": 26
+        },
+        "buy": {
+          "battingAverage": 0.357,
+          "winLoss": 0.45,
+          "signals": 14
+        },
+        "short": {
+          "battingAverage": 0.333,
+          "winLoss": 0.87,
+          "signals": 12
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:IBIT",
+      "sourceLabel": "Bitcoin",
+      "ticker": "IBIT",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.95,
+        0.77,
+        0.73,
+        0.66
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.357,
+          "winLoss": 0.87,
+          "signals": 28
+        },
+        "buy": {
+          "battingAverage": 0.471,
+          "winLoss": 0.84,
+          "signals": 17
+        },
+        "short": {
+          "battingAverage": 0.182,
+          "winLoss": 1.07,
+          "signals": 11
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": [
+        {
+          "marketId": "bitcoin",
+          "instrumentId": "hedgai:IBIT",
+          "matchType": "proxy",
+          "label": "IBIT ETF proxy",
+          "sourceLabel": "Bitcoin",
+          "ticker": "IBIT"
+        }
+      ]
+    },
+    {
+      "instrumentId": "hedgai:BNO",
+      "sourceLabel": "Brent Crude Oil",
+      "ticker": "BNO",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        -0.58,
+        -0.78,
+        -0.92,
+        -1.01
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.409,
+          "winLoss": 0.5,
+          "signals": 22
+        },
+        "buy": {
+          "battingAverage": 0.333,
+          "winLoss": 0.15,
+          "signals": 6
+        },
+        "short": {
+          "battingAverage": 0.438,
+          "winLoss": 0.59,
+          "signals": 16
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a"
+      ],
+      "marketMatches": [
+        {
+          "marketId": "brent",
+          "instrumentId": "hedgai:BNO",
+          "matchType": "proxy",
+          "label": "BNO ETF proxy",
+          "sourceLabel": "Brent Crude Oil",
+          "ticker": "BNO"
+        }
+      ]
+    },
+    {
+      "instrumentId": "hedgai:UNG",
+      "sourceLabel": "Natural Gas Futures",
+      "ticker": "UNG",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        -0.09,
+        -0.09,
+        0.17,
+        0.55
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.684,
+          "winLoss": 1.79,
+          "signals": 19
+        },
+        "buy": {
+          "battingAverage": 0.636,
+          "winLoss": 3.2,
+          "signals": 11
+        },
+        "short": {
+          "battingAverage": 0.75,
+          "winLoss": 0.67,
+          "signals": 8
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:CPER",
+      "sourceLabel": "Copper Futures",
+      "ticker": "CPER",
+      "group": "need-more-data",
+      "position": "Short",
+      "initiatedAt": "2026-09-25",
+      "modelThreshold": 1,
+      "zScores": [
+        -1.21,
+        -1.21,
+        -0.93,
+        -0.75
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.308,
+          "winLoss": 0.95,
+          "signals": 26
+        },
+        "buy": {
+          "battingAverage": 0.091,
+          "winLoss": 0.89,
+          "signals": 11
+        },
+        "short": {
+          "battingAverage": 0.467,
+          "winLoss": 0.87,
+          "signals": 15
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:LIT",
+      "sourceLabel": "Lithium $LIT",
+      "ticker": "LIT",
+      "group": "need-more-data",
+      "position": "Buy",
+      "initiatedAt": "2026-09-23",
+      "modelThreshold": 1,
+      "zScores": [
+        1.12,
+        1.11,
+        1.35,
+        1.28
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.356,
+          "winLoss": 0.99,
+          "signals": 45
+        },
+        "buy": {
+          "battingAverage": 0.44,
+          "winLoss": 1.04,
+          "signals": 25
+        },
+        "short": {
+          "battingAverage": 0.25,
+          "winLoss": 0.88,
+          "signals": 20
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:PALL",
+      "sourceLabel": "Palladium",
+      "ticker": "PALL",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        -0.04,
+        1,
+        1.71,
+        2.5
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.515,
+          "winLoss": 1.33,
+          "signals": 33
+        },
+        "buy": {
+          "battingAverage": 0.632,
+          "winLoss": 2.81,
+          "signals": 19
+        },
+        "short": {
+          "battingAverage": 0.357,
+          "winLoss": 0.7,
+          "signals": 14
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:PPLT",
+      "sourceLabel": "Platinum",
+      "ticker": "PPLT",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        -0.72,
+        -1.77,
+        -1.33,
+        -0.79
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.576,
+          "winLoss": 1.12,
+          "signals": 33
+        },
+        "buy": {
+          "battingAverage": 0.478,
+          "winLoss": 1.83,
+          "signals": 23
+        },
+        "short": {
+          "battingAverage": 0.8,
+          "winLoss": 0.3,
+          "signals": 10
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:SLV",
+      "sourceLabel": "Silver",
+      "ticker": "SLV",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.18,
+        0.18,
+        0.13,
+        0.08
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.538,
+          "winLoss": 0.62,
+          "signals": 39
+        },
+        "buy": {
+          "battingAverage": 0.647,
+          "winLoss": 0.76,
+          "signals": 17
+        },
+        "short": {
+          "battingAverage": 0.455,
+          "winLoss": 0.43,
+          "signals": 22
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": [
+        {
+          "marketId": "silver",
+          "instrumentId": "hedgai:SLV",
+          "matchType": "proxy",
+          "label": "SLV ETF proxy",
+          "sourceLabel": "Silver",
+          "ticker": "SLV"
+        }
+      ]
+    },
+    {
+      "instrumentId": "hedgai:CORN",
+      "sourceLabel": "Corn Futures",
+      "ticker": "CORN",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 0.5,
+      "zScores": [
+        -0.31,
+        -0.31,
+        -0.19,
+        0
+      ],
+      "zScoreSourceText": [
+        "-0.31",
+        "-0.31",
+        "-0.19",
+        "-0.00"
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.449,
+          "winLoss": 1.14,
+          "signals": 69
+        },
+        "buy": {
+          "battingAverage": 0.486,
+          "winLoss": 1.23,
+          "signals": 37
+        },
+        "short": {
+          "battingAverage": 0.406,
+          "winLoss": 0.94,
+          "signals": 32
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:SOYB",
+      "sourceLabel": "Soybean Futures",
+      "ticker": "SOYB",
+      "group": "need-more-data",
+      "position": "Short",
+      "initiatedAt": "2026-09-17",
+      "modelThreshold": 0.9,
+      "zScores": [
+        -1.11,
+        -1.11,
+        -1.89,
+        -2.55
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.412,
+          "winLoss": 0.65,
+          "signals": 17
+        },
+        "buy": {
+          "battingAverage": 0.5,
+          "winLoss": 2.95,
+          "signals": 10
+        },
+        "short": {
+          "battingAverage": 0.286,
+          "winLoss": 0.18,
+          "signals": 7
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:WEAT",
+      "sourceLabel": "Wheat",
+      "ticker": "WEAT",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        -0.4,
+        -0.4,
+        -0.4,
+        -0.4
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.562,
+          "winLoss": 2.07,
+          "signals": 16
+        },
+        "buy": {
+          "battingAverage": 0.545,
+          "winLoss": 2.44,
+          "signals": 11
+        },
+        "short": {
+          "battingAverage": 0.6,
+          "winLoss": 1.09,
+          "signals": 5
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:UUP",
+      "sourceLabel": "US Dollar",
+      "ticker": "UUP",
+      "group": "need-more-data",
+      "position": "Short",
+      "initiatedAt": "2026-09-28",
+      "modelThreshold": 1,
+      "zScores": [
+        -1.3,
+        -0.57,
+        0.31,
+        0.68
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.421,
+          "winLoss": 0.7,
+          "signals": 57
+        },
+        "buy": {
+          "battingAverage": 0.452,
+          "winLoss": 0.86,
+          "signals": 31
+        },
+        "short": {
+          "battingAverage": 0.385,
+          "winLoss": 0.52,
+          "signals": 26
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:ULE",
+      "sourceLabel": "Euro To US Dollar Cross",
+      "ticker": "ULE",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        -0.85,
+        -0.66,
+        -0.44,
+        -0.09
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.44,
+          "winLoss": 1.16,
+          "signals": 25
+        },
+        "buy": {
+          "battingAverage": 0.455,
+          "winLoss": 0.68,
+          "signals": 11
+        },
+        "short": {
+          "battingAverage": 0.429,
+          "winLoss": 1.74,
+          "signals": 14
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:FXB",
+      "sourceLabel": "British Pound To US Dollar Cross",
+      "ticker": "FXB",
+      "group": "need-more-data",
+      "position": "Buy",
+      "initiatedAt": "2026-09-23",
+      "modelThreshold": 0.8,
+      "zScores": [
+        1.34,
+        1.27,
+        1.15,
+        0.9
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.523,
+          "winLoss": 1.66,
+          "signals": 44
+        },
+        "buy": {
+          "battingAverage": 0.571,
+          "winLoss": 1.85,
+          "signals": 28
+        },
+        "short": {
+          "battingAverage": 0.438,
+          "winLoss": 1.4,
+          "signals": 16
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:SHY",
+      "sourceLabel": "UST 2yr Yield",
+      "ticker": "SHY",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.02,
+        0.29,
+        0.47,
+        0.62
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.464,
+          "winLoss": 2.63,
+          "signals": 28
+        },
+        "buy": {
+          "battingAverage": 0.444,
+          "winLoss": 2.46,
+          "signals": 9
+        },
+        "short": {
+          "battingAverage": 0.474,
+          "winLoss": 3,
+          "signals": 19
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    },
+    {
+      "instrumentId": "hedgai:UST",
+      "sourceLabel": "UST 10yr Yield",
+      "ticker": "UST",
+      "group": "need-more-data",
+      "position": "Wait",
+      "initiatedAt": null,
+      "modelThreshold": 1,
+      "zScores": [
+        0.75,
+        1.04,
+        1.28,
+        1.35
+      ],
+      "zScoreOrder": "as-published-left-to-right; column dates not supplied",
+      "metrics": {
+        "combined": {
+          "battingAverage": 0.4,
+          "winLoss": 1.09,
+          "signals": 25
+        },
+        "buy": {
+          "battingAverage": 0.455,
+          "winLoss": 1.02,
+          "signals": 11
+        },
+        "short": {
+          "battingAverage": 0.357,
+          "winLoss": 1.24,
+          "signals": 14
+        }
+      },
+      "sourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "positionSourceIds": [
+        "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42"
+      ],
+      "metricsSourceIds": [
+        "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+      ],
+      "marketMatches": []
+    }
+  ],
+  "sources": [
+    {
+      "artifactPath": "data/research/hedgai/sources/01-top-signals-remaining.png",
+      "title": "HedgAI Signals — top signals remaining — Sep 28, 2026",
+      "sourceType": "reviewed-screenshot",
+      "publicationDate": "2026-09-28",
+      "publishedAt": "2026-09-28T12:43:00Z",
+      "publicationId": "hedgai:187742",
+      "review": {
+        "method": "visual-source-comparison",
+        "reviewedBy": "Codex with independently transcribed source comparison",
+        "reviewedAt": "2026-09-28T20:37:33Z"
+      },
+      "imageSha256": "821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa",
+      "id": "hedgai-image-821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa",
+      "sourceUrl": "/api/research/hedgai/source/hedgai-image-821147c109a9d8e85818fcb198568854560d805767dfcce3da5e34c21dfe1afa",
+      "publishedAtBasis": "Associated edition time from email; not the screenshot capture time.",
+      "capturedAt": null
+    },
+    {
+      "artifactPath": "data/research/hedgai/sources/02-top-signals.png",
+      "title": "HedgAI Signals — top signals — Sep 28, 2026",
+      "sourceType": "reviewed-screenshot",
+      "publicationDate": "2026-09-28",
+      "publishedAt": "2026-09-28T12:43:00Z",
+      "publicationId": "hedgai:187742",
+      "review": {
+        "method": "visual-source-comparison",
+        "reviewedBy": "Codex with independently transcribed source comparison",
+        "reviewedAt": "2026-09-28T20:37:33Z"
+      },
+      "imageSha256": "33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+      "id": "hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+      "sourceUrl": "/api/research/hedgai/source/hedgai-image-33f715ba48e155ed3be3cf53e97b4de6f2ddec66620af2217025895e64f0fd82",
+      "publishedAtBasis": "Associated edition time from email; not the screenshot capture time.",
+      "capturedAt": null
+    },
+    {
+      "artifactPath": "data/research/hedgai/sources/03-need-more-data-signals.png",
+      "title": "HedgAI Signals — need more data signals — Sep 28, 2026",
+      "sourceType": "reviewed-screenshot",
+      "publicationDate": "2026-09-28",
+      "publishedAt": "2026-09-28T12:43:00Z",
+      "publicationId": "hedgai:187742",
+      "review": {
+        "method": "visual-source-comparison",
+        "reviewedBy": "Codex with independently transcribed source comparison",
+        "reviewedAt": "2026-09-28T20:37:33Z"
+      },
+      "imageSha256": "724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+      "id": "hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+      "sourceUrl": "/api/research/hedgai/source/hedgai-image-724ce0f2a9be8006de2b6de314c446253823a58516405ce42fbea43606544cd9",
+      "publishedAtBasis": "Associated edition time from email; not the screenshot capture time.",
+      "capturedAt": null
+    },
+    {
+      "artifactPath": "data/research/hedgai/sources/04-need-more-data-signals-remaining.png",
+      "title": "HedgAI Signals — need more data signals remaining — Sep 28, 2026",
+      "sourceType": "reviewed-screenshot",
+      "publicationDate": "2026-09-28",
+      "publishedAt": "2026-09-28T12:43:00Z",
+      "publicationId": "hedgai:187742",
+      "review": {
+        "method": "visual-source-comparison",
+        "reviewedBy": "Codex with independently transcribed source comparison",
+        "reviewedAt": "2026-09-28T20:37:33Z"
+      },
+      "imageSha256": "ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+      "id": "hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+      "sourceUrl": "/api/research/hedgai/source/hedgai-image-ef481f3b241fd700c9c1cbe7d679c1b7ba7b4a5308301e3a4f0e009bfa6a3c42",
+      "publishedAtBasis": "Associated edition time from email; not the screenshot capture time.",
+      "capturedAt": null
+    },
+    {
+      "artifactPath": "data/research/hedgai/sources/05-top-metrics.png",
+      "title": "HedgAI Signals — top metrics — Sep 28, 2026",
+      "sourceType": "reviewed-screenshot",
+      "publicationDate": "2026-09-28",
+      "publishedAt": "2026-09-28T12:43:00Z",
+      "publicationId": "hedgai:187742",
+      "review": {
+        "method": "visual-source-comparison",
+        "reviewedBy": "Codex with independently transcribed source comparison",
+        "reviewedAt": "2026-09-28T20:37:33Z"
+      },
+      "imageSha256": "f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7",
+      "id": "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7",
+      "sourceUrl": "/api/research/hedgai/source/hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7",
+      "publishedAtBasis": "Associated edition time from email; not the screenshot capture time.",
+      "capturedAt": null
+    },
+    {
+      "artifactPath": "data/research/hedgai/sources/06-top-metrics-remaining.png",
+      "title": "HedgAI Signals — top metrics remaining — Sep 28, 2026",
+      "sourceType": "reviewed-screenshot",
+      "publicationDate": "2026-09-28",
+      "publishedAt": "2026-09-28T12:43:00Z",
+      "publicationId": "hedgai:187742",
+      "review": {
+        "method": "visual-source-comparison",
+        "reviewedBy": "Codex with independently transcribed source comparison",
+        "reviewedAt": "2026-09-28T20:37:33Z"
+      },
+      "imageSha256": "c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50",
+      "id": "hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50",
+      "sourceUrl": "/api/research/hedgai/source/hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50",
+      "publishedAtBasis": "Associated edition time from email; not the screenshot capture time.",
+      "capturedAt": null
+    },
+    {
+      "artifactPath": "data/research/hedgai/sources/07-need-more-data-metrics.png",
+      "title": "HedgAI Signals — need more data metrics — Sep 28, 2026",
+      "sourceType": "reviewed-screenshot",
+      "publicationDate": "2026-09-28",
+      "publishedAt": "2026-09-28T12:43:00Z",
+      "publicationId": "hedgai:187742",
+      "review": {
+        "method": "visual-source-comparison",
+        "reviewedBy": "Codex with independently transcribed source comparison",
+        "reviewedAt": "2026-09-28T20:37:33Z"
+      },
+      "imageSha256": "9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a",
+      "id": "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a",
+      "sourceUrl": "/api/research/hedgai/source/hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a",
+      "publishedAtBasis": "Associated edition time from email; not the screenshot capture time.",
+      "capturedAt": null
+    },
+    {
+      "artifactPath": "data/research/hedgai/sources/08-need-more-data-metrics-remaining.png",
+      "title": "HedgAI Signals — need more data metrics remaining — Sep 28, 2026",
+      "sourceType": "reviewed-screenshot",
+      "publicationDate": "2026-09-28",
+      "publishedAt": "2026-09-28T12:43:00Z",
+      "publicationId": "hedgai:187742",
+      "review": {
+        "method": "visual-source-comparison",
+        "reviewedBy": "Codex with independently transcribed source comparison",
+        "reviewedAt": "2026-09-28T20:37:33Z"
+      },
+      "imageSha256": "fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909",
+      "id": "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909",
+      "sourceUrl": "/api/research/hedgai/source/hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909",
+      "publishedAtBasis": "Associated edition time from email; not the screenshot capture time.",
+      "capturedAt": null
+    }
+  ],
+  "sourceQuality": {
+    "issues": [
+      {
+        "code": "summary-scope-ambiguous",
+        "message": "Publisher footer totals and batting averages match buy-only history, although labeled total signals and average batting rate. Full source values are retained; no combined aggregate is substituted.",
+        "blocking": false,
+        "sourceIds": [
+          "hedgai-image-f7e582f551bad4ace00a754d90387dd0b89a894de6dac11f61461290ca1932f7",
+          "hedgai-image-c0c718eba01bffbef647b4550476405ae4a9126c0cfdb83764348a88a9612d50",
+          "hedgai-image-9004074371297629bf9c1ebda4cc94e363fe63201dda3519bcfd185acbfbb30a",
+          "hedgai-image-fbb12d6a817588891d26539c38e25efb0293f964a9b60b4af3a0a4f3dabad909"
+        ]
+      }
+    ],
+    "publisherSummary": [
+      {
+        "group": "top",
+        "totalSignals": 403,
+        "averageBattingRate": 0.578,
+        "averageWinLoss": 1.34
+      },
+      {
+        "group": "need-more-data",
+        "totalSignals": 495,
+        "averageBattingRate": 0.521,
+        "averageWinLoss": 1.28
+      }
+    ]
+  },
+  "publishedAtBasis": "Associated edition publication time from the Sep 28 email (08:43 ET); screenshot capture time was not supplied.",
+  "methodology": {
+    "sourceUrl": "https://app.hedgeye.com/insights/140796-hedgai-signals",
+    "verifiedAt": "2026-09-28",
+    "typicalHoldingTradingDays": {
+      "min": 3,
+      "max": 10
+    },
+    "modelTrainingTargetTradingDays": 15,
+    "automaticExpiry": false,
+    "interpretation": "Historical signal performance is not a probability for a native prediction contract."
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "kind": "forecast",
+  "sourceId": "hedgeye",
+  "quarter": "2026-Q3",
+  "metric": "U.S. real GDP",
+  "unit": "percent_qoq_saar",
+  "value": 4.02,
+  "modelType": "Hedgeye US GDP Growth Nowcast",
+  "publishedAt": "2026-08-31T14:21:00.000Z",
+  "targetStage": null,
+  "surveyIdentity": null,
+  "sourceUrl": "https://app.hedgeye.com/feed_items/186614",
+  "verifiedAt": "2026-09-09T19:21:31.000Z",
+  "reviewedAt": "2026-09-09T19:21:31.000Z",
+  "latestPublicationConfirmed": false,
+  "evidence": "Reviewed Gmail publication: Quads/GIP Update: Updated 3Q26 Macro Themes Mid-Quarter, August 31, 2026 at 10:21 a.m. EDT. The US real-GDP discussion separately identifies Q3 YoY growth as 2.03%. Its stated Q3 GDP QoQ SAAR estimate is 4.02%, described with the US GDP Growth Nowcast table. No BEA reading target is specified."
+}
