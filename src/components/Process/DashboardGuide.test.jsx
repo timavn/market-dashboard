@@ -55,7 +55,7 @@ describe('DashboardGuide', () => {
     expect(guide).toHaveTextContent(/UUP is an exchange-traded dollar proxy/i);
     expect(guide).toHaveTextContent(/sample SD\[ln\(Pₜ ÷ Pₜ₋₁\)\] × √252 × 100/i);
     expect(guide).toHaveTextContent(/Investable: <8 · Chop: 8–<14 · Uninvestable: ≥14/i);
-    expect(guide).toHaveTextContent(/52 and 156 weekly observations/i);
+    expect(guide).toHaveTextContent(/52 and 156 consecutive reporting observations/i);
     expect(guide).toHaveTextContent(/current observation is included/i);
     expect(guide).toHaveTextContent(/renormalizes across finite components/i);
     expect(guide).toHaveTextContent(/All average windows exclude the current observation/i);

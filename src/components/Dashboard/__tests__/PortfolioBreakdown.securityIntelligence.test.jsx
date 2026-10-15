@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import '@testing-library/jest-dom';
 import PortfolioBreakdown, { calculateLeveragedProductsFitScale } from '../PortfolioBreakdown';
 import PersistentSurface from '../../common/PersistentSurface';
+import { formatDelayedDataTimestamp } from '../DelayedDataMarker';
 import { MarketDataService } from '../../../services/api/marketDataService';
 import { getLeveragedProducts } from '../../../constants/leveragedProductCatalog';
 import { expectedSizingSession } from '../../../utils/volatilitySizingBand.cjs';
@@ -2224,6 +2225,7 @@ describe('market context presentation callbacks', () => {
         asOf: '2026-09-10T17:57:00.000Z',
         lastVerifiedAt: '2026-09-10T17:58:00.000Z',
         retainedUntil: '2026-09-10T18:28:00.000Z',
+        source: 'cboe',
         sourceLabel: 'Cboe delayed',
         quoteMode: 'delayed',
       },
@@ -2248,11 +2250,11 @@ describe('market context presentation callbacks', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for TLT' }));
     const goldCells = within(screen.getByLabelText('Research intelligence for GLD')).getByLabelText('GLD market context').children;
     const marker = await within(goldCells[2]).findByRole('button', { name: /Refresh delayed · last verified/ });
-    const originalTime = new Intl.DateTimeFormat('en-US', {
-      year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
-    }).format(new Date('2026-09-10T17:58:00.000Z'));
+    // The shared D marker shows the original verification time in 24-hour form.
+    const originalTime = formatDelayedDataTimestamp('2026-09-10T17:58:00.000Z', 'refresh-delayed');
+    expect(originalTime).toMatch(/Sep 10, 2026, \d{2}:58 /);
     expect(marker).toHaveAttribute('data-data-status', 'refresh-delayed');
-    expect(marker).toHaveAccessibleName(expect.stringContaining(`Updated ${originalTime}`));
+    expect(marker).toHaveAccessibleName(expect.stringContaining(originalTime));
     expect(within(goldCells[3]).getByText('0.00')).toHaveClass('is-muted');
     const ratesCells = within(screen.getByLabelText('Research intelligence for TLT')).getByLabelText('TLT market context').children;
     expect(ratesCells[2]).toHaveTextContent('MOVE 81.50D');
@@ -2925,6 +2927,7 @@ test('keeps a retained volatility reference visible with explicit refresh-delaye
       asOf: new Date(now - 2 * 60 * 1000).toISOString(),
       lastVerifiedAt: new Date(now - 60 * 1000).toISOString(),
       retainedUntil: new Date(now + 29 * 60 * 1000).toISOString(),
+      source: 'cboe',
       sourceLabel: 'Cboe delayed',
       quoteMode: 'delayed',
     },

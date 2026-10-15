@@ -35,7 +35,9 @@ test('Predictive Sources keeps label, date and status aligned through queued, re
     const captured = JSON.stringify(sources);
     view.rerender(<AnalystReviewSources reviewKind="prediction-markets-review" sources={sources} />);
     assertColumns();
-    expect(screen.getByText('IB Gateway').closest('li')).toHaveTextContent('Connected');
+    // The setup board has no IB Gateway/holdings/balance dependency (AGENTS.md).
+    expect(screen.queryByText('IB Gateway')).not.toBeInTheDocument();
+    expect(screen.getByText('Kalshi contracts').closest('li')).toHaveTextContent(/Ready$/);
     expect(JSON.stringify(sources)).toBe(captured);
     view.rerender(<AnalystReviewSources reviewKind="prediction-markets-review" sources={{ state: 'failed', items: items.map(item => ({ ...item, status: 'unavailable' })) }} />);
     assertColumns();
@@ -737,16 +739,17 @@ test('paused, optional and settled not-due sources stay visible without counting
   expect(screen.getAllByRole('listitem')).toHaveLength(5);
 });
 
-test('the paused alpha-code scan keeps its Predictive place as Pending without counting against readiness', () => {
+test('a saved pre-board Predictive capture keeps its paused alpha-code scan as Pending without counting against readiness', () => {
   const roster = pendingReviewSourceItems('prediction-markets-review');
   const labels = () => screen.getAllByRole('listitem').map(row => row.querySelector('.analyst-review-source-label').textContent);
   const view = render(<AnalystReviewSources reviewKind="prediction-markets-review" loading phase="Gathering sources…" />);
-  expect(labels().indexOf('Alpha codes')).toBe(labels().indexOf('Monthly Inflation Nowcast') + 1);
-  const items = roster.map(item => item.id === 'alphaCodes'
-    ? { ...item, status: 'pending', diagnostic: { code: 'SOURCE_PAUSED' } }
-    : { ...item, status: 'ready', observedAt: '2026-10-08T16:05:00Z' });
+  // The setup board no longer uses alpha codes (AGENTS.md); only a saved
+  // pre-board capture still carries the paused row, after the current roster.
+  expect(labels()).not.toContain('Alpha codes');
+  const items = [...roster.map(item => ({ ...item, status: 'ready', observedAt: '2026-10-08T16:05:00Z' })),
+    { id: 'alphaCodes', label: 'Alpha codes', status: 'pending', observedAt: null, diagnostic: { code: 'SOURCE_PAUSED' } }];
   view.rerender(<AnalystReviewSources reviewKind="prediction-markets-review" sources={{ basis: 'review', state: 'succeeded', items }} />);
-  expect(labels().indexOf('Alpha codes')).toBe(labels().indexOf('Monthly Inflation Nowcast') + 1);
+  expect(labels()).toEqual([...roster.map(item => item.label), 'Alpha codes']);
   const alpha = screen.getByText('Alpha codes').closest('li');
   expect(alpha).toHaveTextContent(/Pending$/);
   expect(within(alpha).queryByRole('button')).not.toBeInTheDocument();

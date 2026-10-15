@@ -76,9 +76,12 @@ describe('Dollar informational quote retention', () => {
       marketData={{ currencies: partial }} onDashboardStatusChange={onDashboardStatusChange}
     />);
     const swiss = dollarRow('USD/CHF');
+    // Retained period returns carry the shared D marker with their original history date.
     expect(within(swiss).getAllByRole('cell').map((cell) => cell.textContent)).toEqual([
-      'USD/CHF', '0.820D', '1.23%', '1.93%', '0.24%', '2.90%', '3.47%', '3.04%', '2.53%',
+      'USD/CHF', '0.820D', '1.23%', '1.93%D', '0.24%D', '2.90%D', '3.47%D', '3.04%D', '2.53%D',
     ]);
+    expect(within(swiss).getAllByRole('cell')[3])
+      .toHaveAttribute('title', expect.stringMatching(/Last verified historical return · Sep 11, 2026/));
     expect(within(swiss).getByRole('button', { name: /last verified 2026-09-11T20:00:00.000Z/ }))
       .toHaveAttribute('data-data-status', 'refresh-delayed');
 

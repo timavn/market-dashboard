@@ -7,6 +7,18 @@ const {tmpdir}=require('node:os');
 const path=require('node:path');
 const express=require('express');
 const {createAnalystWorkspace}=require('./analystWorkspace.cjs');
+// Every request in this file closes its connection. A pooled keep-alive socket
+// arms a native (global) setTimeout in Node's fetch client. When a fixture's
+// server closes, the client socket is torn down asynchronously, often during
+// the next test; if that test mocks setTimeout, the client's clearTimeout is
+// the mock and the real timer survives. It later fires against a collected
+// parser ("Cannot destructure property 'socket' of 'parser.deref(...)'") and
+// fails this file at file level. Without keep-alive no such timer exists.
+const fetch=(input,init={})=>{
+ const headers=new Headers(init.headers);
+ headers.set('Connection','close');
+ return globalThis.fetch(input,{...init,headers});
+};
 // Existing provider fixtures describe captured runs. Expose the sidecar's
 // compact status route separately, with the identity captured at run creation.
 const reviewTransports=new WeakMap();

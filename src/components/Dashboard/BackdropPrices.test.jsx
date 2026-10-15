@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import ExceptionFirstRadar from './ExceptionFirstRadar';
 import { markRetainedReference } from '../../utils/marketQuoteReference.cjs';
+import { formatDelayedDataTimestamp } from './DelayedDataMarker';
 
 jest.mock('./GlobalMarketDayCycleHeader', () => () => null);
 jest.mock('./MarketPulseRibbon', () => () => null);
@@ -19,6 +20,10 @@ jest.mock('./RadarReferencePanels', () => ({
 
 const OBSERVED_AT = '2026-09-14T18:59:00.000Z';
 const NOW = Date.parse('2026-09-14T19:00:00.000Z');
+// Provenance shows the original observation time in the shared 24-hour display format.
+const observedLabel = (value, status = 'delayed') => formatDelayedDataTimestamp(value, status)
+  .replace(/^(?:Updated|Observation) /, '');
+const OBSERVED_LABEL = observedLabel(OBSERVED_AT);
 const DELAYED_QUOTE = {
   availability: 'delayed',
   source: 'yahoo',
@@ -37,12 +42,12 @@ const LIVE_QUOTE = {
 };
 const OFFLINE_PROVIDER = { ibkr: { connected: false, status: 'offline' } };
 const CENTER_CARDS = [
-  { id: 'us', label: 'US', asset: 'S&P 500', symbol: 'SPX', price: 6421.35, formatted: '6,421.35' },
-  { id: 'europe', label: 'Europe', asset: 'STOXX Europe 600', symbol: 'STOXX600', price: 550.27, formatted: '550.27' },
-  { id: 'asia', label: 'Asia', asset: 'Nikkei 225', symbol: 'N225', price: 42500.25, formatted: '42,500.25' },
-  { id: 'commodities', label: 'Commodities', asset: 'CRB Index', symbol: 'CRB', price: 309.62, formatted: '309.62' },
+  { id: 'us', label: 'US', asset: 'S&P 500', symbol: 'SPX', price: 6421.35, formatted: '6,421' },
+  { id: 'europe', label: 'Europe', asset: 'STOXX Europe 600', symbol: 'STOXX600', price: 550.27, formatted: '550' },
+  { id: 'asia', label: 'Asia', asset: 'Nikkei 225', symbol: 'N225', price: 42500.25, formatted: '42,500' },
+  { id: 'commodities', label: 'Commodities', asset: 'CRB Index', symbol: 'CRB', price: 309.62, formatted: '310' },
   { id: 'rates', label: 'Rates', asset: 'UST 2Y', symbol: 'UST2Y', price: 3.614, formatted: '3.614' },
-  { id: 'crypto', label: 'Crypto', asset: 'Bitcoin/USD', symbol: 'BTC', price: 104532.16, formatted: '104,532.16' },
+  { id: 'crypto', label: 'Crypto', asset: 'Bitcoin/USD', symbol: 'BTC', price: 104532.16, formatted: '104,532' },
 ];
 
 describe('compact market-card prices with provider provenance', () => {
@@ -61,27 +66,29 @@ describe('compact market-card prices with provider provenance', () => {
     expect(cells.slice(0, 3).map((cell) => cell.textContent))
       .toEqual([card.asset, `${card.formatted}D`, '1.25%']);
     expect(cells[1]).toHaveAttribute('data-quote-status', 'delayed');
-    expect(cells[1]).toHaveAttribute('title', `Yahoo Finance · delayed · as of ${OBSERVED_AT}`);
-    expect(within(cells[1]).getByRole('button', { name: /Delayed quote/ }))
-      .toHaveAttribute('aria-label', expect.stringContaining(OBSERVED_AT));
+    expect(cells[1]).toHaveAttribute('title', `${card.price} · Yahoo Finance · Delayed · ${OBSERVED_LABEL}`);
+    expect(within(cells[1]).getByRole('button', { name: `Yahoo Finance · Delayed · ${OBSERVED_LABEL}` }))
+      .toHaveTextContent('D');
   });
 
   test('keeps a verified overview price and its original time after the provider disconnects', () => {
     const { rerender } = render(<ExceptionFirstRadar
       marketData={{ us: [LIVE_QUOTE] }} providerStatus={{ ibkr: { connected: true } }}
     />);
-    const livePrice = screen.getByRole('cell', { name: /^S&P 500 price 6,421.35\./ });
+    const livePrice = screen.getByRole('cell', { name: /^S&P 500 price 6,421\./ });
     expect(livePrice).toHaveAttribute('data-quote-status', 'live');
     expect(within(livePrice).queryByRole('button')).not.toBeInTheDocument();
 
     rerender(<ExceptionFirstRadar marketData={{ us: [LIVE_QUOTE] }} providerStatus={OFFLINE_PROVIDER} />);
 
-    const retainedPrice = screen.getByRole('cell', { name: /^S&P 500 price 6,421.35\./ });
-    expect(retainedPrice).toHaveTextContent('6,421.35D');
+    const retainedPrice = screen.getByRole('cell', { name: /^S&P 500 price 6,421\./ });
+    expect(retainedPrice).toHaveTextContent('6,421D');
     expect(retainedPrice).toHaveAttribute('data-quote-status', 'refresh-delayed');
-    expect(retainedPrice).toHaveAttribute('title', `IBKR · refresh-delayed · as of ${OBSERVED_AT}`);
-    expect(within(retainedPrice).getByRole('button', { name: /Refresh delayed · last verified/ }))
-      .toHaveAttribute('aria-label', expect.stringContaining(OBSERVED_AT));
+    expect(retainedPrice).toHaveAttribute('title',
+      `6421.35 · IBKR · Refresh delayed · ${observedLabel(OBSERVED_AT, 'refresh-delayed')}`);
+    expect(within(retainedPrice).getByRole('button', {
+      name: `IBKR · Refresh delayed · ${observedLabel(OBSERVED_AT, 'refresh-delayed')}`,
+    })).toHaveTextContent('D');
   });
 
   test('shows an explicitly retained provider observation as dated reference after a failed refresh', () => {
@@ -89,12 +96,13 @@ describe('compact market-card prices with provider provenance', () => {
     const retained = markRetainedReference(originalQuote, 'provider_refresh_unavailable', NOW);
     render(<ExceptionFirstRadar marketData={{ us: [retained] }} providerStatus={OFFLINE_PROVIDER} />);
 
-    const price = screen.getByRole('cell', { name: /^S&P 500 price 6,421.35\./ });
+    const originalLabel = observedLabel(originalQuote.quoteAsOf, 'refresh-delayed');
+    const price = screen.getByRole('cell', { name: /^S&P 500 price 6,421\./ });
     expect(price).toHaveAttribute('data-quote-status', 'refresh-delayed');
-    expect(price).toHaveTextContent('6,421.35D');
-    expect(price).toHaveAttribute('title', expect.stringContaining(originalQuote.quoteAsOf));
-    expect(within(price).getByRole('button', { name: /Refresh delayed · last verified/ }))
-      .toHaveAttribute('aria-label', expect.stringContaining(originalQuote.quoteAsOf));
+    expect(price).toHaveTextContent('6,421D');
+    expect(price).toHaveAttribute('title', `6421.35 · IBKR · Refresh delayed · ${originalLabel}`);
+    expect(within(price).getByRole('button', { name: `IBKR · Refresh delayed · ${originalLabel}` }))
+      .toHaveTextContent('D');
   });
 
   test.each([

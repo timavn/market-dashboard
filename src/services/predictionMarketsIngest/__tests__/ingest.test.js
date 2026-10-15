@@ -792,6 +792,8 @@ describe('IBKR CPI payload forwarding', () => {
 
   test('discover route returns diagnostics without forcing a quote refresh', async () => {
     jest.resetModules();
+    const { CPIY_RULES_URL } = jest.requireActual('../../predictionMarketTest/cpiForecastExReviewService.cjs');
+    const OFFICIAL_RELEASE_AT = '2099-12-31T12:30:00.000Z';
     const fetchIBKREvents = jest.fn();
     const discoverIbkrEventContracts = jest.fn().mockResolvedValue({
       ok: true,
@@ -807,19 +809,24 @@ describe('IBKR CPI payload forwarding', () => {
         releaseKey: 'KXCPIYOY#2026-07',
         authority: 'PredictionMarketCatalogV2',
       },
-      catalog_contracts: [{
-        conId: 7001,
-        api_raw_id: '7001',
+      // Native CPIY YES/NO pair matching the official ForecastEx inventory line.
+      catalog_contracts: ['YES', 'NO'].map((side, index) => ({
+        conId: 7001 + index,
+        api_raw_id: String(7001 + index),
         venue: 'ForecastEx',
         releaseKey: 'KXCPIYOY#2026-07',
         catalog_source: 'ibkr_contract_details',
         exchange: 'FORECASTX',
-        tradingClass: 'KXCPIYOY',
+        symbol: 'CPIY',
+        tradingClass: 'CPIY',
+        secType: 'OPT',
+        right: side === 'YES' ? 'C' : 'P',
+        localSymbol: `CPIY_0726_3.9_${side}`,
         lastTradeDateOrContractMonth: '20991231',
         strike: 3.9,
-        quote_side: 'YES',
+        quote_side: side,
         tradable_in_ibkr: true,
-      }],
+      })),
       cpi_discovery: {
         releaseKey: 'KXCPIYOY#2026-07',
         targetStrikes: [3.9],
@@ -876,6 +883,7 @@ describe('IBKR CPI payload forwarding', () => {
       getCurrentCpiRelease: jest.fn().mockResolvedValue({
         releaseKey: 'KXCPIYOY#2026-07',
         reportMonth: '2026-07',
+        releaseAt: OFFICIAL_RELEASE_AT,
         cpi: {
           releaseKey: 'KXCPIYOY#2026-07',
           metric: 'Headline CPI YoY',
@@ -888,6 +896,28 @@ describe('IBKR CPI payload forwarding', () => {
         request: { cpi: { targetStrikes: [3.9] } },
       }),
       releaseKeyForEvent: jest.fn((event) => event.releaseKey || null),
+    }));
+    // The reconciler verifies discovered contracts against the official
+    // ForecastEx CPIY inventory before promotion; serve that inventory locally.
+    jest.doMock('../../predictionMarketTest/publicSources.cjs', () => ({
+      ...jest.requireActual('../../predictionMarketTest/publicSources.cjs'),
+      createPublicSources: () => ({
+        getForecastExContracts: jest.fn(async () => ({
+          provider: 'forecastex_public_contracts',
+          productId: 'CPIY',
+          fetchedAt: new Date().toISOString(),
+          lines: [{
+            contractId: 'CPIY_0726_3.9',
+            productId: 'CPIY',
+            strike: 3.9,
+            question: 'Will the year-over-year change in the US Consumer Price Index exceed 3.9% in July 2026?',
+            rulesUrl: CPIY_RULES_URL,
+            lastTradeDate: OFFICIAL_RELEASE_AT,
+            expirationDate: OFFICIAL_RELEASE_AT,
+            payoutDate: OFFICIAL_RELEASE_AT,
+          }],
+        })),
+      }),
     }));
     const router = require('../../../routes/predictionMarketsIngest');
     const layer = router.stack.find((entry) => entry.route?.path === '/discover/ibkr');

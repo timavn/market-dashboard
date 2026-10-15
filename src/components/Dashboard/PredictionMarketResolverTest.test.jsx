@@ -2627,7 +2627,7 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     const momoHeaders = within(momoTable).getAllByRole('columnheader');
     expect(momoHeaders.map((header) => header.textContent)).toEqual([
       '#', 'TICKER', 'MKT CAP', 'S&P %', 'BUY TRADE', 'SPOT', 'DAY %',
-      'SELL TRADE', 'UPSIDE', 'DOWNSIDE', 'TREND',
+      'SELL TRADE', 'UPSIDE', 'DOWNSIDE', 'Ti / Te',
     ]);
     expect(within(momoTable).getAllByRole('row')).toHaveLength(13);
     expect(within(momoTable).getAllByRole('rowheader').map((row) => row.textContent)).toEqual([
@@ -2898,9 +2898,10 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
 
     const panel = await screen.findByTestId('sp500-momo-tracker');
     await within(panel).findByText('NVDA');
+    // The MOMO table's HedgAI Tick column runs its own 5-minute poll on start.
     const refreshContributors = startVisibilityAwarePolling.mock.calls
       .map(([options]) => options)
-      .find(({ intervalMs }) => intervalMs === 5 * 60_000)?.poll;
+      .find(({ intervalMs, pollOnStart }) => intervalMs === 5 * 60_000 && !pollOnStart)?.poll;
     expect(refreshContributors).toEqual(expect.any(Function));
     await act(async () => {
       await refreshContributors();
@@ -4074,7 +4075,10 @@ describe('PredictionMarketResolverTest SPX monitor', () => {
     expect(startVisibilityAwarePolling).toHaveBeenCalledWith(expect.objectContaining({
       intervalMs: 5_000,
     }));
-    expect(startVisibilityAwarePolling.mock.calls[0][0].pollOnStart).not.toBe(true);
+    // The SP500 MOMO table's HedgAI Tick poll registers first with pollOnStart.
+    expect(startVisibilityAwarePolling.mock.calls
+      .map(([options]) => options)
+      .find(({ intervalMs }) => intervalMs === 5_000).pollOnStart).not.toBe(true);
 
     view.rerender(
       <PersistentSurface active={false}>

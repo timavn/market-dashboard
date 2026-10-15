@@ -66,7 +66,7 @@ describe('process document and rule registry', () => {
         type: 'guide',
         parentId: 'the-process',
         editable: true,
-        version: '0.1',
+        version: '0.2',
       }),
     );
     expect(getProcessDocumentByRoute('#/process/principles')).toBeNull();

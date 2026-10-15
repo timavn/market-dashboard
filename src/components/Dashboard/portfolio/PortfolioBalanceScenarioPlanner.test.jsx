@@ -431,7 +431,7 @@ describe('PortfolioBalanceScenarioPlanner', () => {
     expect(MarketDataService.getIbkrInterestValidationStatus).toHaveBeenCalledTimes(calls);
   });
 
-  test('opens the verified interest ledger beside the Balance card and restores focus on close', async () => {
+  test('opens the verified interest ledger in a centered window and restores focus on close', async () => {
     usePortfolioBalance.mockReturnValue({
       status: 'live',
       snapshot: liveSnapshot(),
@@ -447,7 +447,8 @@ describe('PortfolioBalanceScenarioPlanner', () => {
     fireEvent.click(openButton);
 
     const ledger = await screen.findByRole('dialog', { name: 'IBKR Interest Ledger' });
-    expect(ledger).toHaveAttribute('data-placement');
+    expect(ledger.parentElement).toHaveClass('dashboard-interest-ledger-host');
+    expect(ledger).not.toHaveAttribute('data-placement');
     expect(await within(ledger).findByText('Rate math is fully reproduced.')).toBeInTheDocument();
     expect(MarketDataService.getIbkrInterestValidationLedger).toHaveBeenCalledWith({
       account: 'U1',

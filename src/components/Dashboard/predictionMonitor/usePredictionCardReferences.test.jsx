@@ -118,7 +118,8 @@ describe('MOMO reference lifecycle', () => {
     const contributors = { status: 'available', rows: contributorTickers.map((ticker) => ({ ticker })) };
     const { result } = renderHook(useMomoTrackerReference, { initialProps: { ...momoProps, contributors } });
     await flush();
-    expect(MarketDataService.getQuotes).toHaveBeenCalledWith([...contributorTickers.filter((ticker) => ticker !== 'GOOG'), 'SNOW']);
+    // MOMO additions come only from a current publication; none is fixed in code.
+    expect(MarketDataService.getQuotes).toHaveBeenCalledWith(contributorTickers.filter((ticker) => ticker !== 'GOOG'));
     expect(result.current.snapshot).toBeNull();
     expect(result.current.spots.MSFT.status).toBe('live');
     MarketDataService.getQuotes.mockRejectedValueOnce(new Error('offline'));
@@ -126,7 +127,7 @@ describe('MOMO reference lifecycle', () => {
     expect(result.current.spots).toEqual({});
   });
 
-  test('loads SNOW research and independently polls its quote once alongside the top ten', async () => {
+  test('loads SNOW research and independently polls each current MOMO addition once alongside the top ten', async () => {
     const published = publication();
     published.data.SNOW = published.data.SNDK;
     delete published.data.SNDK;
@@ -135,14 +136,17 @@ describe('MOMO reference lifecycle', () => {
       ...quotes(), SNOW: { ...quotes().MSFT, symbol: 'SNOW', last: 326.5 },
     }));
     const contributors = { status: 'available', rows: [{ ticker: 'MSFT' }, { ticker: 'GOOG' }] };
+    // Every current-publication company outside the displayed roster is a MOMO
+    // addition (GOOGL represents Alphabet once GOOG is excluded).
+    const additions = ['AAPL', 'AMZN', 'META', 'GOOGL', 'NFLX', 'TSLA', 'NVDA', 'SNOW'];
     const { result, rerender } = renderHook(useMomoTrackerReference, { initialProps: { ...momoProps, contributors } });
     await flush();
     expect(result.current.snapshot.rows.find((row) => row.ticker === 'SNOW')).toMatchObject({ trend: 'BULLISH' });
-    expect(MarketDataService.getQuotes).toHaveBeenLastCalledWith(['MSFT', 'SNOW']);
+    expect(MarketDataService.getQuotes).toHaveBeenLastCalledWith(['MSFT', ...additions]);
     expect(result.current.spots.SNOW).toMatchObject({ status: 'live', price: 326.5 });
     rerender({ ...momoProps, contributors: { ...contributors, rows: [...contributors.rows, { ticker: 'SNOW' }] } });
     await advance(15_000);
-    expect(MarketDataService.getQuotes).toHaveBeenLastCalledWith(['MSFT', 'SNOW']);
+    expect(MarketDataService.getQuotes).toHaveBeenLastCalledWith(['MSFT', 'SNOW', ...additions.filter((ticker) => ticker !== 'SNOW')]);
     MarketDataService.getQuotes.mockRejectedValueOnce(new Error('offline'));
     await advance(15_000);
     expect(result.current.spots).toEqual({});

@@ -478,7 +478,7 @@ function getPerpetualFuturesItem(navigation, label) {
 }
 
 function getDockItem(navigation = screen.getByTestId('dashboard-top-navigation'), label) {
-  const research = ['X.com', 'TL;DR', 'Process', 'Dashboard Guide', 'PCA Guide', 'Bitcoin Research'];
+  const research = ['X.com', 'Process', 'Dashboard Guide', 'PCA Guide', 'Bitcoin Research'];
   const portfolio = ['Portfolio', 'PCA', 'Balance', 'Contract P&L'];
   const group = research.includes(label) ? 'Research' : portfolio.includes(label) ? 'Portfolio' : null;
   if (!group) return within(navigation).getByRole('button', { name: label, exact: true });
@@ -1812,7 +1812,7 @@ test('centers The Analyst while an individual market monitor stays open', async 
     expect(within(navigation).queryByText('PRIMARY')).not.toBeInTheDocument();
     expect(within(navigation).queryByText('UTILITY')).not.toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-rail-navigation')).not.toBeInTheDocument();
-    ['X.com', 'TL;DR', 'Process', 'Dashboard Guide', 'PCA Guide', 'Portfolio', 'PCA',
+    ['X.com', 'Process', 'Dashboard Guide', 'PCA Guide', 'Portfolio', 'PCA',
       'Balance', 'Contract P&L', 'Prediction Markets', 'Perpetual Futures', 'Systems', 'The Analyst']
       .forEach((label) => expect(getDockItem(navigation, label))
         .toBeInTheDocument());
@@ -1837,7 +1837,7 @@ test('centers The Analyst while an individual market monitor stays open', async 
 
     const navigation = await screen.findByTestId('dashboard-top-navigation');
     expect(within(navigation).getByRole('button', { name: /^Systems/ })).toBeInTheDocument();
-    ['TL;DR', 'Process', 'Dashboard Guide', 'PCA Guide', 'Portfolio', 'Balance', 'Prediction Markets', 'Perpetual Futures']
+    ['The Analyst', 'Process', 'Dashboard Guide', 'PCA Guide', 'Portfolio', 'Balance', 'Prediction Markets', 'Perpetual Futures']
       .forEach((label) => expect(getDockItem(navigation, label)).toBeInTheDocument());
     expect(within(navigation).queryByRole('button', { name: 'Market Structure' }))
       .not.toBeInTheDocument();
@@ -2215,7 +2215,7 @@ test('centers The Analyst while an individual market monitor stays open', async 
       />,
     );
 
-    const tldrButton = () => getDockItem(undefined, 'TL;DR');
+    const xButton = () => getDockItem(undefined, 'X.com');
     const processButton = () => getDockItem(undefined, 'Process');
     const dashboardGuideButton = () => getDockItem(undefined, 'Dashboard Guide');
     const exposureGuideButton = () => getDockItem(undefined, 'PCA Guide');
@@ -2223,7 +2223,8 @@ test('centers The Analyst while an individual market monitor stays open', async 
     getDockItem(navigation, 'Process');
     const buttons = within(screen.getByRole('menu', { name: 'Research' })).getAllByRole('menuitem');
 
-    expect(buttons[buttons.indexOf(tldrButton()) + 1]).toBe(processButton());
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).not.toContain('TL;DR');
+    expect(buttons[buttons.indexOf(xButton()) + 1]).toBe(processButton());
     expect(buttons[buttons.indexOf(processButton()) + 1]).toBe(dashboardGuideButton());
     expect(buttons[buttons.indexOf(dashboardGuideButton()) + 1]).toBe(exposureGuideButton());
     expect(within(navigation).queryByRole('button', { name: 'Market Structure' }))
@@ -2450,29 +2451,32 @@ test('centers The Analyst while an individual market monitor stays open', async 
     expect(screen.getByTestId('dashboard-main-canvas')).not.toHaveAttribute('aria-hidden');
   });
 
-  test('opens the Process explainer and the replacement TL;DR reader', async () => {
+  test('opens the Process explainer and The Analyst that replaced the TL;DR reader', async () => {
     const onOpenWhitePaper = jest.fn();
     render(<PortfolioDashboard onOpenWhitePaper={onOpenWhitePaper} />);
 
     fireEvent.click(getDockItem(undefined, 'Process'));
     expect(onOpenWhitePaper).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(getDockItem(undefined, 'TL;DR'));
-    expect(await screen.findByTestId('mock-morning-tldr')).toBeInTheDocument();
-    expect(screen.getByText('Morning TL;DR')).toBeInTheDocument();
+    getDockItem(undefined, 'Process');
+    expect(within(screen.getByRole('menu', { name: 'Research' }))
+      .queryByRole('menuitem', { name: 'TL;DR' })).not.toBeInTheDocument();
+    fireEvent.click(getDockItem(undefined, 'The Analyst'));
+    expect(await screen.findByTestId('mock-analyst-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-morning-tldr')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Open Notes')).not.toBeInTheDocument();
   });
 
-  test('keeps the bottom dock while TL;DR is open', async () => {
+  test('keeps the bottom dock while The Analyst is open', async () => {
     render(<PortfolioDashboard />);
 
-    fireEvent.click(getDockItem(undefined, 'TL;DR'));
-    expect(await screen.findByTestId('mock-morning-tldr')).toBeInTheDocument();
+    fireEvent.click(getDockItem(undefined, 'The Analyst'));
+    expect(await screen.findByTestId('mock-analyst-panel')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('dashboard-shell')).toHaveStyle({
       '--dashboard-rail-visible-width': '0px',
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close TL;DR' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close The Analyst' }));
     await waitFor(() => expect(screen.getByTestId('dashboard-shell')).toHaveStyle({
       '--dashboard-rail-visible-width': '0px',
     }));
@@ -2483,16 +2487,16 @@ test('centers The Analyst while an individual market monitor stays open', async 
 
     const navigation = await screen.findByTestId('dashboard-top-navigation');
     const portfolioButton = () => getDockItem(navigation, 'Portfolio');
-    const tldrButton = () => getDockItem(navigation, 'TL;DR');
+    const bitcoinResearchButton = () => getDockItem(navigation, 'Bitcoin Research');
 
     fireEvent.click(portfolioButton());
     expect(await screen.findByText('Portfolio Breakdown')).toBeInTheDocument();
     expect(portfolioButton()).toHaveClass('is-active');
 
-    fireEvent.click(tldrButton());
-    expect(await screen.findByTestId('mock-morning-tldr')).toBeInTheDocument();
+    fireEvent.click(bitcoinResearchButton());
+    expect(await screen.findByText('Bitcoin historical entry study')).toBeInTheDocument();
     expect(portfolioButton()).toHaveClass('is-active');
-    expect(tldrButton()).toHaveClass('is-active');
+    expect(bitcoinResearchButton()).toHaveClass('is-active');
   });
 
   test('keeps Portfolio and Prediction Markets open through Process visits until their menu selections close them', async () => {
@@ -2610,34 +2614,34 @@ test('centers The Analyst while an individual market monitor stays open', async 
     expect(screen.getByTestId('prediction-market-surface-silver')).not.toBeVisible();
   });
 
-  test('uses the Research label for its menu and preserves the reader until TL;DR is selected', async () => {
+  test('uses the Research label for its menu and preserves the reader until Bitcoin Research is selected', async () => {
     render(<PortfolioDashboard />);
     const navigation = screen.getByTestId('dashboard-top-navigation');
     const researchToggle = within(navigation).getByRole('button', { name: 'Research', exact: true });
 
     fireEvent.click(researchToggle);
     expect(screen.getByRole('menu', { name: 'Research' })).toBeVisible();
-    expect(screen.queryByTestId('mock-morning-tldr')).not.toBeInTheDocument();
+    expect(screen.queryByText('Bitcoin historical entry study')).not.toBeInTheDocument();
     expect(researchToggle).toHaveAttribute('aria-pressed', 'false');
     expect(researchToggle).not.toHaveAttribute('data-navigation-item-id');
-    fireEvent.click(getDockItem(navigation, 'TL;DR'));
-    expect(await screen.findByTestId('mock-morning-tldr')).toBeVisible();
+    fireEvent.click(getDockItem(navigation, 'Bitcoin Research'));
+    expect(await screen.findByText('Bitcoin historical entry study')).toBeVisible();
     expect(researchToggle).toHaveAttribute('aria-pressed', 'true');
     expect(researchToggle).toHaveTextContent(/^Research$/);
     expect(screen.queryByRole('menu', { name: 'Research' })).not.toBeInTheDocument();
 
     fireEvent.click(researchToggle);
     expect(screen.getByRole('menu', { name: 'Research' })).toBeVisible();
-    expect(screen.getByTestId('mock-morning-tldr')).toBeVisible();
+    expect(screen.getByText('Bitcoin historical entry study')).toBeVisible();
     fireEvent.click(researchToggle);
     expect(screen.queryByRole('menu', { name: 'Research' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('mock-morning-tldr')).toBeVisible();
+    expect(screen.getByText('Bitcoin historical entry study')).toBeVisible();
 
-    fireEvent.click(getDockItem(navigation, 'TL;DR'));
-    expect(screen.getByTestId('mock-morning-tldr')).not.toBeVisible();
+    fireEvent.click(getDockItem(navigation, 'Bitcoin Research'));
+    expect(screen.getByText('Bitcoin historical entry study')).not.toBeVisible();
     expect(researchToggle).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(getDockItem(navigation, 'TL;DR'));
-    expect(screen.getByTestId('mock-morning-tldr')).toBeVisible();
+    fireEvent.click(getDockItem(navigation, 'Bitcoin Research'));
+    expect(screen.getByText('Bitcoin historical entry study')).toBeVisible();
   });
 
   test('keeps Process open when grouped dock labels only open their menus', async () => {
