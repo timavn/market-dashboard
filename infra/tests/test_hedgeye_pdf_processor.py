@@ -415,7 +415,7 @@ class PdfProcessorTests(unittest.TestCase):
             mock.patch.object(processor, "_manifest_snapshot", manifest),
             mock.patch.object(processor, "_mark_ledger"),
         ):
-            with self.assertRaisesRegex(ValueError, "no published Trade signals"):
+            with self.assertRaisesRegex(ValueError, "no published Trade or Trend signals"):
                 processor._process_job(
                     {
                         "bucket": "raw-artifacts",

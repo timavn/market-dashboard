@@ -190,6 +190,24 @@ INFLATION_PRODUCT = {
     "cadence": "weekly",
     "maxPublicationAgeDays": 7,
 }
+
+
+def research_product_definitions() -> list:
+    """Registry products, with the Analyst's weekly Inflation Nowcast freshness.
+
+    The shared registry lists inflation-nowcast as event-driven for the
+    dashboard's publication-day coverage. The Analyst judges it by its weekly
+    newsletter cadence, so its definition overrides the registry entry once
+    instead of appearing twice.
+    """
+    products = []
+    for product in REGISTRY.get("products", []):
+        if isinstance(product, dict) and product.get("id") == INFLATION_PRODUCT["id"]:
+            continue
+        products.append(product)
+    registry_entry = next((product for product in REGISTRY.get("products", [])
+                           if isinstance(product, dict) and product.get("id") == INFLATION_PRODUCT["id"]), {})
+    return [*products, {**registry_entry, **INFLATION_PRODUCT}]
 SERVICE_TOKEN = os.environ.get("ANALYST_SERVICE_TOKEN", "")
 API_BASE_URL = os.environ.get(
     "MARKET_DASHBOARD_API_BASE", "http://127.0.0.1:3001"
@@ -462,7 +480,7 @@ def research_coverage(
         if isinstance(row, dict) and row.get("product")
     }
     products = []
-    for product in [*REGISTRY.get("products", []), INFLATION_PRODUCT]:
+    for product in research_product_definitions():
         product_id = str(product["id"])
         row = latest.get(product_id)
         upstream = feed_by_product.get(product_id, {})
@@ -4670,7 +4688,7 @@ async def get_review_v2_sources_route(request: Request) -> JSONResponse:
             raise ReviewRunError("REVIEW_NOT_FOUND", "Review run was not found.", status_code=404)
         sources = await asyncio.to_thread(
             review_sources, run, review_run_v2_store,
-            research_products=[*REGISTRY.get("products", []), INFLATION_PRODUCT],
+            research_products=research_product_definitions(),
             prediction_universe=PREDICTIVE_REVIEW_UNIVERSE,
         )
         return JSONResponse({"ok": True, **sources}, headers={"Cache-Control": "no-store"})

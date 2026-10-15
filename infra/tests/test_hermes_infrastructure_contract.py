@@ -876,6 +876,10 @@ class HermesInfrastructureContractTests(unittest.TestCase):
             {
                 "GLOBAL_QUADS_INGEST_ENABLED": "0",
                 "GLOBAL_QUADS_PUBLISH_ENABLED": "0",
+                # PDF indexing emits the Analyst change journal (analyst_change_journal.py
+                # is copied into the package by aws/lambda/Makefile).
+                "ANALYST_CHANGE_JOURNAL_ENABLED": "1",
+                "RESEARCH_EVENT_LEDGER_TABLE": {"tag": "Ref", "value": "ResearchEventLedgerV2"},
                 "HERMES_LEDGER_TABLE": {"tag": "Ref", "value": "GmailLedgerTableName"},
                 "HEDGEYE_DAILY_SNAPSHOT_TABLE": {
                     "tag": "Ref",
@@ -922,6 +926,11 @@ class HermesInfrastructureContractTests(unittest.TestCase):
                             "${AWS::AccountId}:table/${GmailLedgerTableName}"
                         ),
                     },
+                    sort_keys=True,
+                ),
+                # Written by the Analyst change journal after PDF indexing.
+                json.dumps(
+                    {"tag": "GetAtt", "value": "ResearchEventLedgerV2.Arn"},
                     sort_keys=True,
                 ),
                 json.dumps(

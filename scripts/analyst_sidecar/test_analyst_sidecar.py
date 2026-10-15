@@ -744,10 +744,8 @@ class CoverageTests(TempIndexTestCase):
 
 class BriefingPacketTests(TempIndexTestCase):
     def test_market_situation_report_leads_a_compact_cited_packet(self):
-        product_ids = [
-            *[product["id"] for product in analyst_app.REGISTRY["products"]],
-            analyst_app.INFLATION_PRODUCT["id"],
-        ]
+        product_ids = [product["id"] for product in analyst_app.research_product_definitions()]
+        self.assertEqual(len(product_ids), len(set(product_ids)))
         self.index.upsert_documents([
             self.document(
                 document_id=f"doc_briefing_{product_id}",

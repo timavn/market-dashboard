@@ -437,12 +437,14 @@ def _validate_product_data(product_id: str, data: Any) -> None:
         ):
             raise ValueError("early-look parser extracted no supplemental LRR/HRR records")
 
-    elif rule == "published_trade_signals":
+    elif rule in {"published_trade_signals", "published_tracker_rows"}:
+        # Trackers publish Trend (and sometimes Trade) per row; the registry's
+        # "published_tracker_rows" rule accepts either published reading.
         if not any(
             _tracker_signal(record) for record in _iter_security_records(data)
         ):
             raise ValueError(
-                f"{product_id} parser extracted no published Trade signals"
+                f"{product_id} parser extracted no published Trade or Trend signals"
             )
     elif rule == "portfolio_rankings":
         rankings = data.get("rankings") if isinstance(data, dict) else None
