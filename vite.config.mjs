@@ -13,6 +13,8 @@ export const PUBLIC_SETTINGS = Object.freeze([
   'REACT_APP_SECURITY_INTELLIGENCE_V2_ENABLED',
 ]);
 
+const SECRET_PATH_PATTERN = /(?:^|\/)\.env(?:\..*)?$|\.(?:crt|pem|key)$|(?:^|\/)\.git(?:\/|$)/i;
+
 function localBoundary() {
   const install = (server) => {
     // Install before the proxy/static middleware. Connect has a plain Node
@@ -23,6 +25,16 @@ function localBoundary() {
       res.statusCode = verdict.statusCode;
       res.setHeader('Cache-Control', 'no-store');
       res.end('Local dashboard access required');
+    });
+    // Secret and key paths are refused outright. fs.deny only applies when the
+    // file exists; without this, a missing /.env fell through to the SPA page.
+    server.middlewares.use((req, res, next) => {
+      let pathname = '/';
+      try { pathname = decodeURIComponent(new URL(req.url || '/', 'http://localhost').pathname); } catch { /* malformed: refuse below */ pathname = '/.env'; }
+      if (!SECRET_PATH_PATTERN.test(pathname)) return next();
+      res.statusCode = 403;
+      res.setHeader('Cache-Control', 'no-store');
+      res.end('Forbidden');
     });
     server.httpServer?.prependListener('upgrade', (req, socket) => {
       if (!localTrust.validateLocalRequest(req).ok) {
