@@ -349,11 +349,6 @@
     {
       "id": "inflation-nowcast",
       "label": "Monthly Inflation Nowcast",
-      "dashboardConsumer": {
-        "kind": "published-book",
-        "path": "/api/hedgeye/inflation-nowcast/history",
-        "label": "Inflation nowcast"
-      },
       "cadence": "event_driven",
       "matchTerms": [
         "monthly inflation nowcast"

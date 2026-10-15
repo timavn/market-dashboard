@@ -17,18 +17,20 @@ const evidence = () => ({
   indexed: [{ product: 'risk-ranges', publication_date: '2026-09-14', document_id: 'document-1',
     content_hash: 'document-content-1', source_uri: 's3://research/risk-ranges/2026-09-14.pdf', indexed_at: indexTime }],
 });
-const first = input => automatedSourceReadiness(input, now)[0];
+// Rows follow registry order; the fixture product is looked up by id.
+const riskRow = rows => rows.find(row => row.id === 'risk-ranges');
+const first = input => riskRow(automatedSourceReadiness(input, now));
 
 test('daily source roster requires dated provider and local index evidence and preserves actual source times', () => {
   const input = evidence();
   const result = automatedSourceReadiness(input, now);
   assert.deepEqual(result.map(row => row.id), registry.products.map(row => row.id));
-  assert.deepEqual(result[0], {
+  assert.deepEqual(riskRow(result), {
     id: 'risk-ranges', label: 'Risk Ranges', publicationDate: '2026-09-14', observedAt: providerTime,
     indexedAt: indexTime, updatedAt: indexTime, usableForDay: true, status: 'ready', reason: null,
     sourceUri: input.indexed[0].source_uri, sourceIds: ['gmail-message-1', input.indexed[0].source_uri], evidenceHash: 'validated-revision-1',
   });
-  assert.ok(result.slice(1).every(row => !row.usableForDay && row.updatedAt === null));
+  assert.ok(result.filter(row => row.id !== 'risk-ranges').every(row => !row.usableForDay && row.updatedAt === null));
   const daily = dailyReadiness(input, now);
   assert.equal(daily.checkedAt, now.toISOString());
   assert.equal(daily.date, '2026-09-14');
@@ -112,8 +114,8 @@ test('source availability guard does not alter the existing daily review gate', 
   assert.deepEqual(failed.required, before.required);
   assert.equal(failed.ready, before.ready);
   assert.equal(failed.fingerprint, before.fingerprint);
-  assert.equal(before.automatedSources[0].usableForDay, true);
-  assert.equal(failed.automatedSources[0].usableForDay, false);
+  assert.equal(riskRow(before.automatedSources).usableForDay, true);
+  assert.equal(riskRow(failed.automatedSources).usableForDay, false);
 });
 
 test('daily API drops source readiness after a feed failure and restores it after successful refresh', async t => {
@@ -140,11 +142,11 @@ test('daily API drops source readiness after a feed failure and restores it afte
     return response.json();
   };
   await daily.tick();
-  assert.equal((await read()).automatedSources[0].usableForDay, true);
+  assert.equal(riskRow((await read()).automatedSources).usableForDay, true);
   offline = true;
   await daily.tick();
-  assert.equal((await read()).automatedSources[0].usableForDay, false);
+  assert.equal(riskRow((await read()).automatedSources).usableForDay, false);
   offline = false;
   await daily.tick();
-  assert.equal((await read()).automatedSources[0].usableForDay, true);
+  assert.equal(riskRow((await read()).automatedSources).usableForDay, true);
 });

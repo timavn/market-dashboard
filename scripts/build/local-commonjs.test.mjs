@@ -56,7 +56,9 @@ test('editing an actual watched CommonJS dependency sends HMR and serves the new
   fs.writeFileSync(path.join(fixture, 'src/main.js'), 'import { value } from "./calculation.cjs"; export { value }; if (import.meta.hot) import.meta.hot.accept("./calculation.cjs", () => {});');
   const server = await createServer({ root: fixture, configFile: false, logLevel: 'silent',
     plugins: [localCommonjs(fixture)], optimizeDeps: { noDiscovery: true, include: [] },
-    server: { host: '127.0.0.1', port: 0, strictPort: true, cors: false },
+    // Poll so the test exercises the CommonJS HMR wiring, not the host's file-event
+    // service (directory fs.watch events are not delivered on this macOS host).
+    server: { host: '127.0.0.1', port: 0, strictPort: true, cors: false, watch: { usePolling: true, interval: 50 } },
   });
   let socket;
   t.after(async () => { socket?.terminate(); await server.close(); fs.rmSync(fixture, { recursive: true, force: true }); });

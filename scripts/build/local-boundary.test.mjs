@@ -78,7 +78,9 @@ test('real Vite HTTP and WS proxy preserve Origin and deny hostile authorities b
       { Origin: 'https://attacker.example' }, { Origin: 'null' },
       { Host: `attacker.example:${port}`, 'X-Forwarded-Host': `localhost:${port}`, 'X-Forwarded-For': '127.0.0.1' },
       { Host: `127.1:${port}` }, { 'Sec-Fetch-Site': 'cross-site' },
-      { Origin: allowedOrigin, 'Sec-Fetch-Site': 'cross-site' },
+      // localhost -> 127.0.0.1 is the one trusted cross-site alias pair; the same
+      // host labelled cross-site is still rejected.
+      { Origin: 'http://127.0.0.1:3000', 'Sec-Fetch-Site': 'cross-site' },
     ]) {
       const before = received.length;
       assert.equal((await get(port, '/api/health', headers)).status, 403);
