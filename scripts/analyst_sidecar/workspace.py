@@ -329,6 +329,11 @@ class WorkspaceStore:
                 # Absence from today's shortlist is not a verified thesis reversal.
                 if payload.get('kind') in ('opportunity', 'market'):
                     verified = False
+                # A contrary instruction on a held position stays in front of the
+                # PM until a complete scan shows it is closed or no longer opposed.
+                if (not verified and payload.get('severity') == 'action-required'
+                        and payload.get('kind') == 'portfolio' and row['state'] == 'open'):
+                    continue
                 state = 'resolved' if verified else 'unavailable'
                 # Loss of evidence cannot turn an already-resolved issue back into an outage.
                 if row['state'] == 'resolved' and state == 'unavailable':
@@ -356,6 +361,8 @@ class WorkspaceStore:
             if affected_reviews:
                 finding['affectedReviews'] = affected_reviews
             if old and not material:
+                if old_payload.get('kept'):
+                    finding['kept'] = old_payload['kept']
                 finding['publicationTime'] = old_payload.get('publicationTime') or finding.get('publicationTime')
                 finding['presentation'] = dict(finding['presentation'])
                 finding['presentation']['date'] = finding.get('sourceReportDate') or (old_payload.get('presentation') or {}).get('date') or finding['presentation'].get('date')
@@ -1291,10 +1298,23 @@ class WorkspaceStore:
             if operation == 'attention-publish':
                 return self.publish_attention(db, p)
             if operation == 'finding-read':
+                current = db.execute('SELECT payload FROM findings WHERE id=?', (p['id'],)).fetchone()
+                current_payload = json.loads(current['payload']) if current else {}
                 if p.get('materialRevision') is not None:
-                    current = db.execute('SELECT payload FROM findings WHERE id=?', (p['id'],)).fetchone()
-                    if not current or json.loads(current['payload']).get('materialRevision') != p['materialRevision']:
+                    if not current or current_payload.get('materialRevision') != p['materialRevision']:
                         return {'ok': True, 'acknowledged': False}
+                if current_payload.get('severity') == 'action-required':
+                    # Reading an urgent instruction never clears it. Keeping the
+                    # position is an explicit decision recorded with its reason.
+                    reason = p.get('keptReason')
+                    if not p.get('acknowledge') or not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
+                        return {'ok': True, 'acknowledged': False, 'reasonRequired': True}
+                    if p.get('fingerprint') is not None and db.execute('SELECT fingerprint FROM findings WHERE id=?', (p['id'],)).fetchone()['fingerprint'] != p['fingerprint']:
+                        return {'ok': True, 'acknowledged': False}
+                    kept = {**current_payload, 'kept': {'reason': reason.strip(), 'at': now(), 'materialRevision': current_payload.get('materialRevision')}}
+                    db.execute('UPDATE findings SET unread=0,acknowledged_at=?,payload=? WHERE id=?', (now(), json.dumps(kept), p['id']))
+                    self.event(db, 'inbox')
+                    return {'ok': True, 'acknowledged': True}
                 changed = db.execute('UPDATE findings SET unread=0,acknowledged_at=CASE WHEN ? THEN ? ELSE acknowledged_at END WHERE id=? AND (? IS NULL OR fingerprint=?)',
                                      (bool(p.get('acknowledge')), now(), p['id'], p.get('fingerprint'), p.get('fingerprint'))).rowcount
                 self.event(db, 'inbox')

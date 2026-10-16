@@ -685,3 +685,18 @@ test('keeps group labels and active state scoped while opening menus without tog
   expect(screen.getByRole('menu', { name: 'Perpetual Futures' })).toBeInTheDocument();
   for (const item of items) expect(item.onSelect).not.toHaveBeenCalled();
 });
+
+test('an action-required finding turns the analyst red and opening it does not clear that', () => {
+  const onSelect = jest.fn();
+  render(<DashboardTopNavigation items={[{ id: 'analyst', label: 'The Analyst', group: 'utility', onSelect }]} />);
+  const analyst = screen.getByRole('button', { name: 'The Analyst', exact: true });
+  const urgent = { id: 'snow', unread: 1, payload: { severity: 'action-required' } };
+  announceAnalystInbox({ findings: [urgent, { id: 'ordinary', unread: 1, payload: {} }], unread: 2 });
+  expect(analyst).toHaveClass('has-action-required');
+  expect(analyst).not.toHaveClass('has-notification');
+  expect(analyst).toHaveAccessibleDescription('1 position needs immediate action');
+  fireEvent.click(analyst);
+  expect(analyst).toHaveClass('has-action-required');
+  announceAnalystInbox({ findings: [{ ...urgent, unread: 0 }], unread: 0 });
+  expect(analyst).not.toHaveClass('has-action-required');
+});

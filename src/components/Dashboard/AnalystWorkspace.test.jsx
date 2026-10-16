@@ -631,7 +631,7 @@ test('inbox shows the named source signal and preserves acknowledgment and citat
   expect(within(inbox).queryByRole('listitem')).not.toBeInTheDocument();
   expect(within(inbox).getByText('Bullish', { exact: true })).toHaveClass('analyst-inbox-signal--positive');
   expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-    type: 'analyst-inbox', detail: { findings: [alert], unread: 1 },
+    type: 'analyst-inbox', detail: { findings: [alert], unread: 1, actionRequired: 0 },
   }));
   expect(screen.getByRole('button', { name: 'Inbox', exact: true })).toHaveTextContent('Inbox (1)');
   expect(api.request.mock.calls.some(([path]) => path === '/monitor')).toBe(false);

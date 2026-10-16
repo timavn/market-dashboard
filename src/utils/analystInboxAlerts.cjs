@@ -13,6 +13,8 @@ function publicationTime(event) {
 }
 const hasProvenance = event => Boolean(event.sourceMessageId || event.sourceEventId || event.eventKey);
 const isUnread = finding => finding.unread === true || finding.unread === 1;
+// Contrary instructions on held positions; separate from ordinary unread alerts.
+const isActionRequired = finding => payloadOf(finding).severity === 'action-required';
 const SUPPRESSED_OPERATIONAL_IDS = new Set([
   'attention:operations:gmail.ingestion',
   'attention:operations:research-verification',
@@ -308,7 +310,9 @@ const attentionPriority = finding => {
   return [0, 1, 2].includes(priority) ? priority : 2;
 };
 const attentionTime = finding => Date.parse(payloadOf(finding).publicationTime || finding?.publicationTime) || 0;
-const compareAttention = (a, b) => attentionPriority(a) - attentionPriority(b)
+// Undecided contrary instructions lead; a kept one returns to ordinary order.
+const urgent = finding => isActionRequired(finding) && isUnread(finding);
+const compareAttention = (a, b) => Number(urgent(b)) - Number(urgent(a)) || attentionPriority(a) - attentionPriority(b)
   || attentionTime(b) - attentionTime(a) || String(a.id || '').localeCompare(String(b.id || ''));
 
 function attentionEvidenceFreshness(finding, now = Date.now()) {
@@ -336,7 +340,9 @@ function activeAttentionFinding(finding, now = Date.now()) {
   // rows. Only an evidenced discrepancy in the publication merits an alert.
   return isAttentionFinding(finding) && (finding.state || payload.state) === 'open'
     && !suppressedAnalystInboxFinding(finding)
-    && (!(payload.kind === 'portfolio' || payload.requiresFreshHoldings) || freshness.holdings)
+    // An urgent instruction stays visible through a holdings outage, marked with
+    // its last verification time, rather than disappearing until reconnection.
+    && (!(payload.kind === 'portfolio' || payload.requiresFreshHoldings) || freshness.holdings || isActionRequired(finding))
     && (!payload.requiresFreshBalance || freshness.balance)
     && typeof presentation?.subject === 'string' && presentation.subject.trim()
     && Array.isArray(presentation.rows) && presentation.rows.some(row => row?.label && row?.text);
@@ -346,8 +352,9 @@ function buildAnalystInbox(rawResult = {}, now = new Date()) {
   const rows = Array.isArray(rawResult?.findings) ? rawResult.findings : [];
   const attention = rows.filter(finding => activeAttentionFinding(finding, now));
   if (rawResult?.attentionVersion === 1) {
-    const findings = attention.sort(compareAttention);
-    return { ...rawResult, findings, unread: findings.filter(isUnread).length };
+    const findings = attention.sort(compareAttention).map(finding => isActionRequired(finding) && payloadOf(finding).kind === 'portfolio'
+      && !attentionEvidenceFreshness(finding, now).holdings ? { ...finding, holdingsStale: true } : finding);
+    return { ...rawResult, findings, unread: findings.filter(isUnread).length, actionRequired: findings.filter(urgent).length };
   }
   const groups = new Map();
   const actionPositions = new Map();
@@ -375,4 +382,4 @@ function buildAnalystInbox(rawResult = {}, now = new Date()) {
   return { ...rawResult, findings: projected, unread: projected.filter(isUnread).length };
 }
 
-module.exports = { buildAnalystInbox, isAttentionFinding, activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, suppressedAnalystInboxFinding };
+module.exports = { buildAnalystInbox, isActionRequired, isAttentionFinding, activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, suppressedAnalystInboxFinding };

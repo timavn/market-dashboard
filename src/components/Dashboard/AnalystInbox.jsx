@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { describeAnalystFinding } from '../../utils/analystFindingPresentation.cjs';
-import { activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, isAttentionFinding } from '../../utils/analystInboxAlerts.cjs';
+import { activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, isActionRequired, isAttentionFinding } from '../../utils/analystInboxAlerts.cjs';
 import './AnalystInbox.css';
 
 const DIRECTION_TONES = { long: 'positive', longs: 'positive', bullish: 'positive', short: 'negative', shorts: 'negative', bearish: 'negative', neutral: 'neutral' };
@@ -28,6 +28,30 @@ function publicationLabel(value) {
   }).format(date);
 }
 
+// An urgent instruction remains visible during a holdings outage; say which
+// verification it rests on instead of presenting the position as current.
+function staleHoldingLabel(payload) {
+  const side = payload.quantity > 0 ? 'Long' : payload.quantity < 0 ? 'Short' : 'Not held';
+  const at = new Date(payload.holdingsVerifiedAt);
+  return Number.isFinite(at.getTime())
+    ? `${side} (last verified ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(at)}; holdings currently unavailable)`
+    : `${side} (holdings currently unavailable)`;
+}
+
+function KeepPosition({ onKeep }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  if (!open) return <button className="analyst-inbox-keep" type="button" onClick={() => setOpen(true)}>Keep position…</button>;
+  return <form className="analyst-inbox-keep-form" onSubmit={event => { event.preventDefault(); if (reason.trim()) onKeep(reason.trim()); }}>
+    <label>
+      <span className="sr-only">Reason for keeping the position</span>
+      <input autoFocus maxLength={500} value={reason} placeholder="Why keep it?" onChange={event => setReason(event.target.value)} />
+    </label>
+    <button type="submit" disabled={!reason.trim()}>Keep</button>
+    <button type="button" onClick={() => { setOpen(false); setReason(''); }}>Cancel</button>
+  </form>;
+}
+
 function attentionContent(finding, now) {
   if (!activeAttentionFinding(finding, now)) return null;
   const payload = finding.payload || finding;
@@ -37,6 +61,7 @@ function attentionContent(finding, now) {
   const rows = presentation.rows.filter(row => typeof row?.label === 'string' && typeof row.text === 'string'
     && row.label.trim() && row.text.trim() && (!row.requiresFreshHoldings || freshHoldings))
     .map(row => {
+      if (row.label === 'Current position' && !freshHoldings && finding.holdingsStale) return { ...row, text: staleHoldingLabel(payload) };
       if (row.label === 'Current position') return { ...row, text: !freshHoldings ? 'Unavailable' : holding.currentPosition.label === 'Closed' ? 'Not held' : holding.currentPosition.label };
       if (row.label === 'Position size') return { ...row, text: freshHoldings && holding.currentHolding?.label || 'Unavailable' };
       return row;
@@ -59,16 +84,22 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       && !['resolved', 'unavailable'].includes(finding.state || finding.payload?.state))
     .sort((a, b) => attentionPriority(a.finding) - attentionPriority(b.finding)
       || (b.content.sortTime || Date.parse(b.content.publicationDate) || 0) - (a.content.sortTime || Date.parse(a.content.publicationDate) || 0));
+  const urgent = alerts.filter(({ finding }) => isActionRequired(finding));
+  const ordinary = alerts.filter(({ finding }) => !isActionRequired(finding));
 
   return <section className="analyst-inbox" aria-label="Portfolio inbox">
     {error && <p className="analyst-inbox-error" role="alert">{error}</p>}
     {!alerts.length && <p className="analyst-inbox-empty">No new items requiring attention.</p>}
-    {alerts.map(({ finding, content, modern }) => {
+    {urgent.length > 0 && <h2 className="analyst-inbox-urgent-heading">Action required</h2>}
+    {[...urgent, ...ordinary].map(({ finding, content, modern }, index) => {
       const payload = finding.payload || finding;
       const date = publicationLabel(content.publicationDate);
       const updateParts = content.updateParts || [{ text: content.headline, tone: content.tone }];
       const contextLines = [content.detail, ...(content.sourceContext || [])].filter(Boolean);
-      return <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}`} key={finding.id}>
+      const required = isActionRequired(finding);
+      return <React.Fragment key={finding.id}>
+      {!required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Other items</h2>}
+      <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}`}>
         <header className="analyst-inbox-heading">
           <h3 className="analyst-inbox-symbol">{modern ? content.subject : finding.symbol || payload.symbol}</h3>
           {date && <time dateTime={content.publicationDate}>{date}</time>}
@@ -118,10 +149,14 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
                 : payload.citation && <button type="button" onClick={() => onCitation(payload.citation)}>View source</button>}
             </div>
           </div>
-          {Boolean(finding.unread) && <button className="analyst-inbox-acknowledge" type="button" onClick={() => modern
-            ? onAcknowledge(finding.id, payload.fingerprint || finding.fingerprint, payload.materialRevision ?? finding.materialRevision) : onAcknowledge(finding.id)}>Acknowledge</button>}
+          {required && <p className="analyst-inbox-clears">Clears when the position is closed.</p>}
+          {Boolean(finding.unread) && (required
+            ? <KeepPosition onKeep={reason => onAcknowledge(finding.id, payload.fingerprint || finding.fingerprint, payload.materialRevision ?? finding.materialRevision, reason)} />
+            : <button className="analyst-inbox-acknowledge" type="button" onClick={() => modern
+              ? onAcknowledge(finding.id, payload.fingerprint || finding.fingerprint, payload.materialRevision ?? finding.materialRevision) : onAcknowledge(finding.id)}>Acknowledge</button>)}
         </footer>
-      </article>;
+      </article>
+      </React.Fragment>;
     })}
   </section>;
 }

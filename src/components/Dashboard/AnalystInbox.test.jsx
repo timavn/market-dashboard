@@ -454,3 +454,21 @@ test('shows a restored alert with a retryable acknowledgment after a save error'
   fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
   expect(onAcknowledge).toHaveBeenCalledWith('amzn');
 });
+
+test('action-required items are pinned first and can only be kept with a reason', () => {
+  const onAcknowledge = jest.fn();
+  const urgent = attention('snow', { kind: 'operational', severity: 'action-required', fingerprint: 'snow-fp', materialRevision: 2,
+    publicationTime: '2026-09-21T15:30:00Z',
+    presentation: { subject: 'SNOW', date: '2026-09-21', rows: [{ label: 'Action', text: 'Investing Ideas removed SNOW from its Long list — exit the Long position' }], sourceLinks: [] } });
+  render(<AnalystInbox findings={[attention('gateway'), urgent]} onCitation={jest.fn()} onAcknowledge={onAcknowledge} />);
+  const headings = screen.getAllByRole('heading').map(heading => heading.textContent);
+  expect(headings.slice(0, 3)).toEqual(['Action required', 'SNOW', 'Other items']);
+  const card = screen.getByRole('heading', { name: 'SNOW' }).closest('article');
+  expect(within(card).queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument();
+  fireEvent.click(within(card).getByRole('button', { name: 'Keep position…' }));
+  const keep = within(card).getByRole('button', { name: 'Keep' });
+  expect(keep).toBeDisabled();
+  fireEvent.change(within(card).getByRole('textbox', { name: 'Reason for keeping the position' }), { target: { value: 'Hedged until earnings' } });
+  fireEvent.click(keep);
+  expect(onAcknowledge).toHaveBeenCalledWith('snow', 'snow-fp', 2, 'Hedged until earnings');
+});

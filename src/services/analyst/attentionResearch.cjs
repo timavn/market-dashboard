@@ -34,10 +34,14 @@ function positionRows(state) {
   return [row('Current position', state.quantity > 0 ? 'Long' : state.quantity < 0 ? 'Short' : 'Not held'),
     ...(state.currentHolding ? [row('Position size', `${state.currentHolding.weightPct.toFixed(2)}%`)] : [])];
 }
-function finding({ key, material, symbol, kind, action, publishedAt, rows, sourceLinks, state = {}, priority = 1 }) {
+// A source instruction that opposes a held position needs an immediate decision.
+// It is shown apart from ordinary findings and is never cleared by reading it.
+const ACTION_REQUIRED = 'action-required';
+function finding({ key, material, symbol, kind, action, publishedAt, rows, sourceLinks, state = {}, priority = 1, severity = null }) {
   const id = `attention:${kind}:${hash(key).slice(0, 28)}`;
-  return { attentionVersion: 1, id, sourceId: id, symbol, action, state: 'open', kind, priority,
-    publicationTime: new Date(publishedAt).toISOString(), fingerprint: hash(material), ...state,
+  // Escalation is a material change, so an already-read finding becomes unread.
+  return { attentionVersion: 1, id, sourceId: id, symbol, action, state: 'open', kind, priority, ...(severity ? { severity } : {}),
+    publicationTime: new Date(publishedAt).toISOString(), fingerprint: hash(severity ? [material, severity] : material), ...state,
     presentation: { subject: symbol, date: String(publishedAt).slice(0, 10), rows,
       sourceLinks: sourceLinks.filter(link => linked(link.citation)).filter((link, i, all) => all.findIndex(other => (other.citation.id || other.citation.sourceUri) === (link.citation.id || link.citation.sourceUri)) === i) } };
 }
@@ -76,49 +80,122 @@ function portfolioFindings(context, now, verified) {
     else explanation = 'The verified position exceeds the process MAX after the existing beta and ATR limits. Review the excess exposure.';
     const rows = [...positionRows(state), row('Action', rule.action === 'EXIT' ? `Exit the ${side} position under the process` : 'Reduce position size under the process'), row('Context', explanation)];
     for (const key of ['trade', 'trend']) if (holding[key]) rows.push(row(key === 'trade' ? 'Trade' : 'Trend', holding[key][0] + holding[key].slice(1).toLowerCase()));
+    // A published Trade or Trend against the held side contradicts the position.
+    // Risk-cap and MAX breaches are sizing reviews, not a contrary source.
+    const severity = ['TRADE_BREAK', 'TREND_BREAK'].includes(rule.rule) ? ACTION_REQUIRED : null;
     output.push(finding({ key: [symbol, candidate.heldSide, 'portfolio-rule'], material: [symbol, candidate.heldSide, rule.rule, rule.action, rule.trade, rule.trend],
-      symbol, kind: 'portfolio', priority: 0, action: rule.action.toLowerCase(), publishedAt, rows, sourceLinks: sources, state: { ...state, rule: { rule: rule.rule, action: rule.action, status: rule.status } } }));
+      symbol, kind: 'portfolio', priority: 0, severity, action: rule.action.toLowerCase(), publishedAt, rows, sourceLinks: sources, state: { ...state, rule: { rule: rule.rule, action: rule.action, status: rule.status } } }));
   }
   return output;
 }
 const ACTIONS = { SELL: ['Long', 'Sell'], 'SELL-SOME': ['Long', 'Sell some'], 'SELL-PARTIAL': ['Long', 'Sell some'], TRIM: ['Long', 'Sell some'], REDUCE: ['Long', 'Reduce'], EXIT: ['Long', 'Exit'], 'SELL-ALL': ['Long', 'Sell all'], COVER: ['Short', 'Cover'], 'COVER-SOME': ['Short', 'Cover some'], 'COVER-SHORT': ['Short', 'Cover'], 'BUY-TO-COVER': ['Short', 'Cover'] };
+const SIDES = { LONG: 'Long', SHORT: 'Short' };
+// New positions name the side they establish; a typed ADD carries its own side.
+const OPENS = { ADD: null, BUY: 'Long', 'BUY-SOME': 'Long', 'INITIATE-LONG': 'Long', SHORT: 'Short', 'SHORT-SELL': 'Short', 'SELL-SHORT': 'Short', 'INITIATE-SHORT': 'Short', 'ADD-SHORT': 'Short' };
+// Roster removals and side-typed position changes are complete instructions, so
+// unlike a generic Sell headline they need no report prose to establish scope.
+function typedChange(event, evidence) {
+  if (event.eventType === 'signal_strength_removed') return { action: 'REMOVE', side: 'Long' }; // Signal Strength lists bullish signals only.
+  let source = {};
+  try {
+    const parsed = JSON.parse(event.excerpt);
+    if (parsed && !Array.isArray(parsed) && symbolOf(parsed.ticker || parsed.symbol) === symbolOf(event.entityId)) source = parsed;
+  } catch { /* A headline excerpt carries no typed side. */ }
+  const side = SIDES[String(event.positionSide || source.side || source.positionSide || '').trim().toUpperCase()] || null;
+  if (['REMOVE', 'ROSTER-REMOVAL'].includes(evidence.action)) return { action: 'REMOVE', side };
+  if (!Object.hasOwn(OPENS, evidence.action)) return null;
+  const opened = OPENS[evidence.action] || side;
+  return opened ? { action: 'OPEN', side: opened } : null;
+}
+// A removal without a stated side still applies to whichever side is held:
+// a missed exit costs more than a removal reviewed and kept.
+const contradicts = (change, held) => change.action === 'REMOVE' ? !change.side || change.side === held : change.side !== held;
+function sourceInstruction(event, now) {
+  if (event.qualityStatus !== 'validated' || invalid(event) || !dated(event.publishedAt, now)
+    || !event.sourceMessageId || !['security', 'ticker', 'equity', 'etf'].includes(String(event.entityType).toLowerCase())) return null;
+  const evidence = sourceActionEvidence(event);
+  const exit = ACTIONS[evidence.action] || null;
+  const change = exit ? null : typedChange(event, evidence);
+  if (!exit && !change) return null;
+  const actionKey = exit ? evidence.action : change.action === 'REMOVE' ? 'REMOVE' : `OPEN-${change.side.toUpperCase()}`;
+  return { symbol: symbolOf(event.entityId), event, evidence, exit, change, actionKey };
+}
+function publishedRange(event) {
+  const value = event.riskRange || (event.value && typeof event.value === 'object' ? event.value : {});
+  const low = Number(value.lrr ?? value.riskRangeLow);
+  const high = Number(value.hrr ?? value.riskRangeHigh);
+  return Number.isFinite(low) && Number.isFinite(high) && low > 0 && low < high ? `${low}–${high}` : null;
+}
 function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
   if (!verified) return [];
+  // The latest instruction per security and product decides; a later re-add
+  // from the same product supersedes its earlier removal.
   const latest = new Map();
   for (const event of context.events || []) {
-    if (event.qualityStatus !== 'validated' || invalid(event) || !dated(event.publishedAt, now)
-      || !event.sourceMessageId || !['security', 'ticker', 'equity', 'etf'].includes(String(event.entityType).toLowerCase())) continue;
-    const symbol = symbolOf(event.entityId);
-    const evidence = sourceActionEvidence(event);
-    const action = ACTIONS[evidence.action];
+    const instruction = sourceInstruction(event, now);
     // A generic alert headline cannot establish full versus partial action.
     // Require its exact report body/subject or an explicit partial typed action.
-    if (!action || !evidence.report) continue;
-    const conditionId = `attention:portfolio:${hash([symbol, 'source-action', event.productKey, evidence.action]).slice(0, 28)}`;
+    if (!instruction || (instruction.exit && !instruction.evidence.report)) continue;
+    const { symbol, actionKey } = instruction;
+    const conditionId = `attention:portfolio:${hash([symbol, 'source-action', event.productKey, actionKey]).slice(0, 28)}`;
     const existing = (context.previousAttention || []).find(item => item.id === conditionId && !['resolved', 'superseded'].includes(item.state));
     if (String(event.marketDate || event.publishedAt).slice(0, 10) !== context.marketDate && !existing) continue;
-    const previous = latest.get(symbol);
-    if (!previous || time(previous.event.publishedAt) < time(event.publishedAt)) latest.set(symbol, { event, evidence, action });
+    const slot = `${symbol}\u0000${event.productKey}`;
+    const previous = latest.get(slot);
+    if (!previous || time(previous.event.publishedAt) < time(event.publishedAt)) latest.set(slot, instruction);
   }
   const output = [];
-  for (const [symbol, { event, evidence, action }] of latest) {
+  for (const { symbol, event, evidence, exit, change, actionKey } of latest.values()) {
     if (conflicts.some(item => item.symbol === symbol)) continue;
     const state = holdingState(context.holdings, symbol, true, now);
-    if (!state.quantity || action[0] !== (state.quantity > 0 ? 'Long' : 'Short')) continue;
-    const partial = /some|Reduce/.test(action[1]);
+    if (!state.quantity) continue;
+    const held = state.quantity > 0 ? 'Long' : 'Short';
+    if (exit ? exit[0] !== held : !contradicts(change, held)) continue;
+    const partial = exit && /some|Reduce/.test(exit[1]);
     const directive = evidence.instruction || '';
     const contextLines = describeAnalystFinding({ event, ...state }, [], now.getTime(), sentenceMemo).sourceContext || [];
-    if (!contextLines.length) continue;
+    if (exit && !contextLines.length) continue;
     if (partial && number(event.targetQuantity) !== null && Math.abs(state.quantity) <= Math.abs(event.targetQuantity)) continue;
-    const rows = [...positionRows(state), row('Action', `${action[1]} — review the ${action[0]} position`)];
-    rows.push(row('Context', contextLines.join(' ')));
+    const product = event.productLabel || 'The source';
+    const actionText = exit ? `${exit[1]} — review the ${exit[0]} position`
+      : change.action === 'REMOVE' ? `${product} removed ${symbol}${change.side ? ` from its ${change.side} list` : ' (side not stated)'} — exit the ${held} position`
+        : `${product} is now ${change.side} — opposes the ${held} position`;
+    const range = publishedRange(event);
+    const headline = text(event.excerpt).startsWith('{') ? '' : text(event.excerpt);
+    const rows = [...positionRows(state), row('Action', actionText)];
+    if (range) rows.push(row('Published range', range));
+    if (contextLines.length || headline) rows.push(row('Context', contextLines.length ? contextLines.join(' ') : headline));
     const citation = { id: evidence.report?.citationId || `cite_${hash(event.sourceMessageId).slice(0, 24)}`, title: evidence.report?.title || event.productLabel,
       product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`,
       excerpt: directive || evidence.report?.bodyText || event.excerpt };
-    output.push(finding({ key: [symbol, 'source-action', event.productKey, evidence.action], material: [evidence.action, text(directive), contextLines],
-      symbol, kind: 'portfolio', action: evidence.action.toLowerCase(), publishedAt: event.publishedAt, rows, sourceLinks: [{ label: event.productLabel || 'Source', citation }], state: { ...state, event } }));
+    output.push(finding({ key: [symbol, 'source-action', event.productKey, actionKey],
+      material: exit ? [evidence.action, text(directive), contextLines] : [actionKey, change.side, range, headline],
+      symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: exit ? evidence.action.toLowerCase() : change.action === 'REMOVE' ? 'remove' : 'opposing position',
+      publishedAt: event.publishedAt, rows, sourceLinks: [{ label: event.productLabel || 'Source', citation }], state: { ...state, event } }));
   }
   return output;
+}
+// Without verified holdings, today's exits and removals cannot be matched to the
+// book. Surface them as one urgent check instead of silently waiting.
+function unverifiedInstructionFindings(context, now, verified) {
+  if (verified || !context.marketDate) return [];
+  const pending = new Map();
+  for (const event of context.events || []) {
+    const instruction = sourceInstruction(event, now);
+    if (!instruction || instruction.change?.action === 'OPEN'
+      || String(event.marketDate || event.publishedAt).slice(0, 10) !== context.marketDate) continue;
+    if (!pending.has(instruction.symbol)) pending.set(instruction.symbol, instruction);
+  }
+  if (!pending.size) return [];
+  const symbols = [...pending.keys()].sort();
+  const events = [...pending.values()].map(item => item.event);
+  const publishedAt = events.map(event => event.publishedAt).sort((a, b) => time(a) - time(b)).at(-1);
+  const sourceLinks = events.map(event => ({ label: event.productLabel || 'Source', citation: { id: `cite_${hash(event.sourceMessageId).slice(0, 24)}`, title: event.productLabel,
+    product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`, excerpt: event.excerpt } }));
+  return [finding({ key: ['unverified-instructions', context.marketDate], material: symbols, symbol: 'Holdings check', kind: 'operational', priority: 0, severity: ACTION_REQUIRED,
+    action: 'verify holdings', publishedAt, sourceLinks, state: { assessmentChannel: 'research' },
+    rows: [row('Action', `Confirm whether you hold ${symbols.join(', ')}`),
+      row('Context', `Exit or removal instructions were published today for ${symbols.join(', ')} while current holdings could not be verified.`)] })];
 }
 const DIRECT = new Set(['direct', 'direct_alias']);
 const validReference = (reference, now) => reference && !invalid(reference) && reference.qualityStatus === 'indexed' && DIRECT.has(reference.matchType) && dated(reference.publishedAt || reference.marketDate, now) && reference.sourceUrl;
@@ -304,7 +381,7 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   const diagnostics = [...(context.diagnostics || [])];
   if (!verified) diagnostics.push({ component: 'holdings', status: 'unavailable' });
   const portfolio = portfolioFindings(context, now, verified);
-  const actions = sourceActionFindings(context, now, verified, portfolio, sentenceMemo);
+  const actions = [...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...unverifiedInstructionFindings(context, now, verified)];
   const opportunities = opportunityFindings(context, now, verified, portfolio, sentenceMemo);
   const markets = marketFindings(context, now, sentenceMemo);
   const accounts = accountFindings(context, now);

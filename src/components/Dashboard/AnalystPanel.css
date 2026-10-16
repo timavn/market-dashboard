@@ -669,6 +669,12 @@
   background: #edf6ff;
   box-shadow: inset 0 0 0 1px #71b7ee88, inset 0 0 14px #3c9df533, 0 0 8px #3093ec2b;
 }
+.analyst-panel-v2 .analyst-sidebar-footer button.has-action-required,
+.analyst-panel-v2 .analyst-sidebar-footer button.has-action-required:hover:not(:disabled) {
+  color: #a61b1b;
+  background: #fdecec;
+  box-shadow: inset 0 0 0 1px #d64545aa, inset 0 0 14px #e0444433, 0 0 8px #d6333333;
+}
 .analyst-panel-v2 .analyst-conversation-search:focus-within {
   color: #405066;
   border-color: #64748b;

@@ -232,5 +232,27 @@ class AttentionWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.row()['id'], old['id'])
 
 
+    def test_action_required_needs_a_kept_reason_and_survives_holdings_outage(self):
+        urgent = {**finding(), 'severity': 'action-required'}
+        self.publish([urgent], ['portfolio'])
+        self.assertEqual(self.store.dispatch('finding-read', {'id': urgent['id']})['acknowledged'], False)
+        result = self.store.dispatch('finding-read', {'id': urgent['id'], 'acknowledge': True, 'fingerprint': 'same'})
+        self.assertEqual(result, {'ok': True, 'acknowledged': False, 'reasonRequired': True})
+        self.assertEqual(self.row()['unread'], 1)
+        # An incomplete scan (holdings unavailable) does not hide the instruction.
+        self.publish([], [])
+        self.assertEqual(self.row()['state'], 'open')
+        self.assertEqual(self.row()['unread'], 1)
+        kept = self.store.dispatch('finding-read', {'id': urgent['id'], 'acknowledge': True, 'fingerprint': 'same',
+                                                     'keptReason': 'Hedged with puts until earnings'})
+        self.assertTrue(kept['acknowledged'])
+        self.publish([urgent], ['portfolio'])
+        self.assertEqual(self.row()['unread'], 0)
+        self.assertEqual(self.row()['payload']['kept']['reason'], 'Hedged with puts until earnings')
+        # A complete scan without the instruction (position closed) resolves it.
+        self.publish([], ['portfolio'])
+        self.assertEqual(self.row()['state'], 'resolved')
+
+
 if __name__ == '__main__':
     unittest.main()

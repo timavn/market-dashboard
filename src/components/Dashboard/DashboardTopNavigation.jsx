@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { analystWorkspaceApi } from '../../services/analyst/analystClient';
 import useDockNotification from '../../hooks/useDockNotification';
 import { synchronizeProcessDrafts } from '../../utils/processDocumentDrafts';
+import { isActionRequired } from '../../utils/analystInboxAlerts.cjs';
 import MarketEventsQuickReference from './MarketEventsQuickReference';
 import './DashboardTopNavigation.css';
 
@@ -15,6 +16,10 @@ const orderBySection = (items) => [...new Set(items.map((item) => item.sectionLa
 const inboxNotificationIds = (result) => result.findings
   .filter((finding) => (finding?.unread === true || finding?.unread === 1) && typeof finding.id === 'string')
   .map((finding) => finding.id);
+// Undecided instructions that oppose a held position. Unlike the blue
+// notification, opening the Analyst does not clear them.
+const actionRequiredCount = (result) => result.findings
+  .filter((finding) => (finding?.unread === true || finding?.unread === 1) && isActionRequired(finding)).length;
 
 const DashboardTopNavigation = ({
   items,
@@ -24,6 +29,7 @@ const DashboardTopNavigation = ({
   onItemIntent,
 }) => {
   const [analystNotificationIds, setAnalystNotificationIds] = useState([]);
+  const [analystActionRequired, setAnalystActionRequired] = useState(0);
   const analystNotification = useDockNotification({ channel: 'analyst', notificationIds: analystNotificationIds });
   const [menuOpen, setMenuOpen] = useState(null);
   const [menuPosition, setMenuPosition] = useState({ bottom: 0, left: 0 });
@@ -64,6 +70,7 @@ const DashboardTopNavigation = ({
         const result = await analystWorkspaceApi.request('/inbox');
         if (!closed && requestRevision === revision && Array.isArray(result?.findings)) {
           setAnalystNotificationIds(inboxNotificationIds(result));
+          setAnalystActionRequired(actionRequiredCount(result));
         }
       } catch { /* Keep the pending notification visible during an outage. */ }
       finally { pending = false; }
@@ -73,6 +80,7 @@ const DashboardTopNavigation = ({
       if (Array.isArray(event.detail?.findings)) {
         revision += 1;
         setAnalystNotificationIds(inboxNotificationIds(event.detail));
+        setAnalystActionRequired(actionRequiredCount(event.detail));
       } else {
         refresh();
       }
@@ -196,7 +204,8 @@ const DashboardTopNavigation = ({
     const indicatorDescription = indicatorTone && typeof item.indicatorDescription === 'string'
       ? item.indicatorDescription.trim() : '';
     const descriptionId = indicatorDescription ? `${menuId}-${item.id}-research` : undefined;
-    const hasNotification = item.id === 'analyst' && analystNotification.hasNotification;
+    const actionRequired = item.id === 'analyst' ? analystActionRequired : 0;
+    const hasNotification = item.id === 'analyst' && (actionRequired > 0 || analystNotification.hasNotification);
     const notificationDescriptionId = hasNotification ? `${menuId}-analyst-notification` : undefined;
     const optionIndex = inMenu ? openMenuItems.findIndex((option) => option.id === item.id) : -1;
     const checkboxItem = inMenu && menuOpen !== 'research';
@@ -222,7 +231,7 @@ const DashboardTopNavigation = ({
         data-process-toggle={item.isProcessToggle ? 'true' : undefined}
         data-readiness-status={item.id === 'system' ? systemReadinessStatus : undefined}
         data-indicator-tone={indicatorTone || undefined}
-        className={`dashboard-top-navigation__item${inMenu ? ' dashboard-top-navigation__menu-item' : ''}${isActive ? ' is-active' : ''}${hasNotification ? ' has-notification' : ''}`}
+        className={`dashboard-top-navigation__item${inMenu ? ' dashboard-top-navigation__menu-item' : ''}${isActive ? ' is-active' : ''}${actionRequired > 0 ? ' has-action-required' : hasNotification ? ' has-notification' : ''}`}
         onPointerEnter={() => onItemIntent?.(item.id)}
         onFocus={() => {
           if (inMenu) activeOptionRef.current = optionIndex;
@@ -235,7 +244,9 @@ const DashboardTopNavigation = ({
         }}
       >
         <span>{item.label}</span>
-        {hasNotification && <span id={notificationDescriptionId} className="sr-only">New analyst messages</span>}
+        {actionRequired > 0 && <span aria-hidden="true" className="dashboard-top-navigation__action-count">{actionRequired}</span>}
+        {hasNotification && <span id={notificationDescriptionId} className="sr-only">{actionRequired > 0
+          ? `${actionRequired} ${actionRequired === 1 ? 'position needs' : 'positions need'} immediate action` : 'New analyst messages'}</span>}
         {inMenu && <span aria-hidden="true" className="dashboard-top-navigation__selection">{isActive ? '✓' : ''}</span>}
         {item.id === 'system' && <span className="sr-only">System status: {systemReadinessStatus}</span>}
         {indicatorDescription && <span id={descriptionId} className="sr-only">{indicatorDescription}</span>}

@@ -229,3 +229,66 @@ test('source actions share exact report segmentation within the scan without sha
   assert.ok(findings[0].presentation.rows.find(row => row.label === 'Context').text.startsWith(lines[1]));
   assert.ok(findings[1].presentation.rows.find(row => row.label === 'Context').text.startsWith(lines[2]));
 });
+function changeEvent(symbol, action, side, overrides = {}) {
+  return { entityType: 'security', entityId: symbol, qualityStatus: 'validated', productKey: 'investing-ideas', productLabel: 'Investing Ideas', eventType: 'position_action',
+    action, positionSide: side, sourceMessageId: `msg${symbol}0001`, sourceUrl: url, marketDate: '2026-09-22', publishedAt: '2026-09-22T12:00:00Z',
+    excerpt: `3 Changes: Remove ${symbol}`, value: { lrr: 336, hrr: 375 }, ...overrides };
+}
+test('a typed removal of a held side is action-required without report prose', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: 10 }, { symbol: 'WING', quantity: -5 }, { symbol: 'DELL', quantity: -3 }];
+  ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG'), changeEvent('WING', 'REMOVE', 'SHORT'), changeEvent('DELL', 'REMOVE', 'LONG')];
+  const findings = evaluateResearchAttention(ctx, NOW).findings;
+  // DELL is held Short; removing it from the Long list does not oppose the book.
+  assert.deepEqual(findings.map(item => item.symbol).sort(), ['SNOW', 'WING']);
+  for (const finding of findings) {
+    assert.equal(finding.severity, 'action-required'); assert.equal(finding.priority, 0); assert.equal(finding.kind, 'portfolio');
+    assert.equal(finding.presentation.rows.find(row => row.label === 'Published range').text, '336–375');
+  }
+  assert.match(findings.find(item => item.symbol === 'WING').presentation.rows.find(row => row.label === 'Action').text, /removed WING from its Short list — exit the Short position/);
+});
+test('a removal without a stated side still flags the held position', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: -10 }];
+  ctx.events = [changeEvent('SNOW', 'REMOVE', undefined)];
+  const [finding] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.equal(finding.severity, 'action-required');
+  assert.match(finding.presentation.rows.find(row => row.label === 'Action').text, /side not stated/);
+});
+test('ETF Pro and Real-Time Alert openings on the opposite side oppose the holding; aligned adds are silent', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLE', quantity: 10 }, { symbol: 'XLU', quantity: 10 }, { symbol: 'TSLA', quantity: -4 }];
+  ctx.events = [changeEvent('XLE', 'ADD', 'SHORT', { productKey: 'etf-pro', productLabel: 'ETF Pro' }), changeEvent('XLU', 'ADD', 'LONG', { productKey: 'etf-pro', productLabel: 'ETF Pro' }),
+    changeEvent('TSLA', 'BUY', undefined, { productKey: 'real-time-alert', productLabel: 'Real-Time Alert' })];
+  const findings = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual(findings.map(item => item.symbol).sort(), ['TSLA', 'XLE']);
+  assert.match(findings.find(item => item.symbol === 'XLE').presentation.rows.find(row => row.label === 'Action').text, /ETF Pro is now Short — opposes the Long position/);
+});
+test('Signal Strength removals apply to held longs only', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'NVDA', quantity: 10 }, { symbol: 'AMD', quantity: -10 }];
+  const removal = symbol => changeEvent(symbol, undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', eventType: 'signal_strength_removed', excerpt: symbol });
+  ctx.events = [removal('NVDA'), removal('AMD')];
+  assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings.map(item => item.symbol), ['NVDA']);
+});
+test('a later re-add from the same product supersedes its removal', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: 10 }];
+  ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG'), changeEvent('SNOW', 'ADD', 'LONG', { publishedAt: '2026-09-22T14:00:00Z' })];
+  assert.equal(evaluateResearchAttention(ctx, NOW).findings.length, 0);
+});
+test('Trade and Trend breaks are action-required; sizing breaches are not', () => {
+  const ctx = context(); addHolding(ctx);
+  const [finding] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.equal(finding.severity, 'action-required');
+  // Aligned signals with weight above MAX are a sizing review, not a contrary source.
+  const sizing = context(); addHolding(sizing);
+  Object.assign(sizing.holdings.ruleHoldings[0], { trade: 'BULLISH', trend: 'BULLISH', weightPct: 40 });
+  sizing.holdings.currentHoldings[0].currentHolding.weightPct = 40;
+  for (const item of evaluateResearchAttention(sizing, NOW).findings) assert.equal(item.severity, undefined);
+});
+test('unverified holdings turn today’s exits and removals into one urgent holdings check', () => {
+  const ctx = context(); ctx.holdings.liveVerified = false;
+  ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG'), changeEvent('WING', 'REMOVE', 'SHORT'), changeEvent('XLE', 'ADD', 'SHORT', { productKey: 'etf-pro' })];
+  const urgent = evaluateResearchAttention(ctx, NOW).findings.filter(item => item.severity === 'action-required');
+  assert.equal(urgent.length, 1);
+  assert.equal(urgent[0].kind, 'operational'); assert.equal(urgent[0].assessmentChannel, 'research');
+  assert.match(urgent[0].presentation.rows[0].text, /SNOW, WING/);
+  ctx.holdings.liveVerified = true;
+  assert.equal(evaluateResearchAttention(ctx, NOW).findings.some(item => item.kind === 'operational'), false);
+});

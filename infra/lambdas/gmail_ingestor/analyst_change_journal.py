@@ -10,13 +10,20 @@ def emit_change(snapshot, dynamodb, manifest, events, content_sha256=None):
     if os.environ.get('ANALYST_CHANGE_JOURNAL_ENABLED', '0') != '1':
         return
     events = list(events)
+    # Position instructions are journaled as typed actions so the Analyst can
+    # match them against held positions; Investing Ideas "N Changes" emails
+    # carry their side and range from the email body.
+    labels = {'real-time-alert': 'Real-Time Alert', 'investing-ideas': 'Investing Ideas'}
     for alert in (snapshot.get('data') or {}).get('alerts', []):
-        if snapshot.get('snapshotType') != 'real-time-alert' or not alert.get('ticker'):
+        product = snapshot.get('snapshotType')
+        if product not in labels or not alert.get('ticker'):
             continue
         events.append({
             'entityType': 'security', 'entityId': alert['ticker'], 'qualityStatus': 'validated',
-            'productKey': 'real-time-alert', 'productLabel': 'Real-Time Alert', 'eventType': 'position_action',
+            'productKey': product, 'productLabel': labels[product], 'eventType': 'position_action',
             'fieldPath': 'data.alert.action', 'action': alert.get('action'), 'positionSide': alert.get('side'),
+            **({'riskRange': {'lrr': alert['riskRangeLow'], 'hrr': alert['riskRangeHigh']}}
+               if alert.get('riskRangeLow') is not None and alert.get('riskRangeHigh') is not None else {}),
             'sourceEventId': snapshot.get('gmailMessageId') or content_sha256,
             'sourceMessageId': snapshot.get('gmailMessageId'), 'contentSha256': content_sha256,
             'marketDate': snapshot.get('date'), 'publishedAt': snapshot.get('publishedAt') or snapshot.get('receivedAt') or snapshot.get('scrapedAt'),

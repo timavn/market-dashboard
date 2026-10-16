@@ -30,6 +30,24 @@ class IngestionGuardTests(unittest.TestCase):
             self.assertEqual(changes[0]['entityEvents'][0]['action'], 'SELL-SOME')
             emit_change(snapshot, table, {}, [], 'hash2')
             self.assertEqual(len([k for k in table.items if k[0] == 'analyst-change']), 2)
+    def test_investing_ideas_changes_are_journaled_as_typed_side_actions(self):
+        table = FakeTable()
+        snapshot = {'snapshotType': 'investing-ideas', 'gmailMessageId': 'changes', 'date': '2026-10-16',
+                    'publishedAt': '2026-10-16T16:23:00Z', 'data': {'alerts': [
+                        {'ticker': 'SNOW', 'action': 'REMOVE', 'side': 'long', 'riskRangeLow': 336.0, 'riskRangeHigh': 375.0,
+                         'headline': '3 Changes: Remove SNOW, DELL, WING'},
+                        {'ticker': 'WING', 'action': 'REMOVE', 'side': 'short', 'riskRangeLow': 97.74, 'riskRangeHigh': 126.0,
+                         'headline': '3 Changes: Remove SNOW, DELL, WING'}]}}
+        with patch.dict(os.environ, {'ANALYST_CHANGE_JOURNAL_ENABLED': '1'}):
+            emit_change(snapshot, table, {}, [], 'hash1')
+        [change] = [v for k, v in table.items.items() if k[0] == 'analyst-change']
+        events = {event['entityId']: event for event in change['entityEvents']}
+        self.assertEqual(events['WING']['productKey'], 'investing-ideas')
+        self.assertEqual(events['WING']['action'], 'REMOVE')
+        self.assertEqual(events['WING']['positionSide'], 'short')
+        self.assertEqual(events['SNOW']['riskRange'], {'lrr': Decimal('336.0'), 'hrr': Decimal('375.0')})
+        self.assertEqual(events['SNOW']['sourceMessageId'], 'changes')
+
     def test_parsed_correction_with_same_source_hash_and_events_is_journaled_once(self):
         table = FakeTable()
         snapshot = {

@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import { analystWorkspaceApi as api } from '../services/analyst/analystClient';
 import { reuseAnalystEvidence } from '../services/analyst/analystEvidenceIdentity';
+import { isActionRequired } from '../utils/analystInboxAlerts.cjs';
 
-const emptyInbox = { findings: [], unread: 0 };
+const emptyInbox = { findings: [], unread: 0, actionRequired: 0 };
 const isRead = finding => finding.unread === 0 || finding.unread === false;
 const fingerprintOf = finding => finding?.payload?.fingerprint || finding?.fingerprint || null;
 const materialRevisionOf = finding => finding?.payload?.materialRevision ?? finding?.materialRevision ?? null;
@@ -22,7 +23,9 @@ export default function useAnalystInbox() {
     // Keep research evidence for saved reviews; only remove it from the unread queue.
     const findings = snapshot.current.findings.map(finding => pending.current.has(revisionKey(finding.id, fingerprintOf(finding), materialRevisionOf(finding)))
       ? { ...finding, unread: 0 } : finding);
-    const next = reuseAnalystEvidence(published.current, { ...snapshot.current, findings, unread: findings.filter(finding => Boolean(finding.unread)).length });
+    const next = reuseAnalystEvidence(published.current, { ...snapshot.current, findings,
+      unread: findings.filter(finding => Boolean(finding.unread)).length,
+      actionRequired: findings.filter(finding => Boolean(finding.unread) && isActionRequired(finding)).length });
     if (next === published.current) return;
     published.current = next;
     setInbox(next);
@@ -63,7 +66,8 @@ export default function useAnalystInbox() {
     return entry.promise;
   }, [publish]);
 
-  const acknowledge = useCallback(async (id, displayedFingerprint, displayedMaterialRevision) => {
+  // An action-required finding is only acknowledged with the reason for keeping the position.
+  const acknowledge = useCallback(async (id, displayedFingerprint, displayedMaterialRevision, keptReason) => {
     const current = snapshot.current.findings.find(finding => finding.id === id);
     const fingerprint = displayedFingerprint || fingerprintOf(current);
     const materialRevision = displayedMaterialRevision ?? materialRevisionOf(current);
@@ -75,7 +79,8 @@ export default function useAnalystInbox() {
     publish();
     try {
       const result = await api.request(`/inbox/${encodeURIComponent(id)}/read`, { acknowledge: true,
-        ...(fingerprint ? { fingerprint } : {}), ...(materialRevision !== null ? { materialRevision } : {}) });
+        ...(fingerprint ? { fingerprint } : {}), ...(materialRevision !== null ? { materialRevision } : {}),
+        ...(keptReason ? { keptReason } : {}) });
       if (result?.acknowledged === false) {
         await loadInbox({ invalidate: true });
         return;

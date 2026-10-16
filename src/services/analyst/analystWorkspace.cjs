@@ -413,7 +413,7 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
   }
   // Build per request: evidence freshness is evaluated at each reader's time.
   router.get('/inbox', route(async (_req, res) => res.json(buildAnalystInbox(await readInbox()))));
-  router.post('/inbox/:id/read', route(async (req, res) => res.json(await call('finding-read', { id: req.params.id, acknowledge: req.body.acknowledge, fingerprint: req.body.fingerprint, materialRevision: req.body.materialRevision }))));
+  router.post('/inbox/:id/read', route(async (req, res) => res.json(await call('finding-read', { id: req.params.id, acknowledge: req.body.acknowledge, fingerprint: req.body.fingerprint, materialRevision: req.body.materialRevision, keptReason: req.body.keptReason }))));
   router.get('/process', route(async (_req, res) => res.json(await call('process'))));
   router.put('/process', route(async (req, res) => res.json(await call('process', { document: req.body.document }))));
   router.get('/events', route(async (req, res) => {

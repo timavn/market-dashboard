@@ -441,3 +441,22 @@ test('a report’s partial-sale instruction also qualifies its generic SELL scal
   assert.equal(distinct.findings.length, 2, 'an explicit full sale is not overridden by a partial-sale instruction');
   assert.deepEqual(new Set(distinct.findings.map(row => row.action)), new Set(['trim', 'exit']));
 });
+
+test('action-required findings sort first, count separately, and survive stale holdings', () => {
+  const now = new Date('2026-10-16T16:30:00Z');
+  const base = (id, extra) => ({ id, state: 'open', unread: 1, payload: { attentionVersion: 1, state: 'open', kind: 'portfolio', priority: 0, symbol: id,
+    holdingsVerified: true, holdingsVerifiedAt: '2026-10-16T16:29:50Z', quantity: 10, publicationTime: '2026-10-16T16:23:00Z',
+    presentation: { subject: id, rows: [{ label: 'Action', text: 'Review' }] }, ...extra } });
+  const inbox = buildAnalystInbox({ attentionVersion: 1, findings: [
+    base('ORDINARY', { publicationTime: '2026-10-16T16:29:00Z' }),
+    base('SNOW', { severity: 'action-required' }),
+    base('WING', { severity: 'action-required', holdingsVerifiedAt: '2026-10-16T15:00:00Z' }),
+    base('STALE', { holdingsVerifiedAt: '2026-10-16T15:00:00Z' }),
+    { ...base('KEPT', { severity: 'action-required' }), unread: 0 },
+  ] }, now);
+  assert.deepEqual(inbox.findings.map(finding => finding.id), ['SNOW', 'WING', 'ORDINARY', 'KEPT']);
+  assert.equal(inbox.actionRequired, 2);
+  assert.equal(inbox.unread, 3);
+  assert.equal(inbox.findings.find(finding => finding.id === 'WING').holdingsStale, true);
+  assert.equal(inbox.findings.find(finding => finding.id === 'SNOW').holdingsStale, undefined);
+});

@@ -2436,9 +2436,50 @@ def _extract_real_time_alert(headline: Optional[str], text: str, html_body: str)
     return None
 
 
-def _extract_position_change_alerts(headline: Optional[str]) -> List[Dict[str, Any]]:
+_POSITION_CHANGE_BODY_TOKEN = re.compile(
+    r"\bWe have\s+(ADDED|REMOVED)\b"
+    r"|^\s*(Long|Short)s?\s*:"
+    r"|\b([A-Z][A-Z0-9./-]{0,9})\s*\(\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*\)",
+    re.MULTILINE,
+)
+
+
+def _extract_position_change_body(text: str) -> Dict[str, Dict[str, Any]]:
+    """Read the side and range of each change from the email body.
+
+    The subject ("3 Changes: Remove SNOW, DELL, WING") never states the side;
+    the body lists each ticker under its "We have ADDED/REMOVED" block and its
+    "Long:" or "Short:" heading, followed by the published risk range.
+    """
+    changes: Dict[str, Dict[str, Any]] = {}
+    action: Optional[str] = None
+    side: Optional[str] = None
+    for match in _POSITION_CHANGE_BODY_TOKEN.finditer(text or ""):
+        if match.group(1):
+            action = "ADD" if match.group(1).upper() == "ADDED" else "REMOVE"
+            side = None
+        elif match.group(2):
+            side = match.group(2).lower()
+        elif action and side:
+            low, high = float(match.group(4)), float(match.group(5))
+            if not 0 < low < high:
+                continue
+            changes.setdefault(match.group(3).upper(), {
+                "action": action,
+                "side": side,
+                "riskRangeLow": low,
+                "riskRangeHigh": high,
+            })
+    return changes
+
+
+def _extract_position_change_alerts(
+    headline: Optional[str],
+    body_text: str = "",
+) -> List[Dict[str, Any]]:
     if not headline:
         return []
+    body = _extract_position_change_body(body_text)
     normalized = re.sub(r"\s+", " ", headline).strip()
     match = re.search(r"\b\d+\s+Changes?:\s*(.+)$", normalized, re.IGNORECASE)
     if not match:
@@ -2457,17 +2498,39 @@ def _extract_position_change_alerts(headline: Optional[str]) -> List[Dict[str, A
                 continue
             ticker = continuation.group(1).upper()
         action = active_action
+        detail = body.get(ticker) or {}
+        # Never assume a side: a removed short is the opposite instruction to a
+        # removed long. Only the body's Long/Short heading establishes it.
+        side = detail.get("side") if detail.get("action") == action else None
         alerts.append({
             "headline": normalized,
             "signalFamily": "Position Changes",
             "signalPhrase": clause,
             "action": action,
-            "side": "long",
+            "side": side,
             "context": "position-change",
             "ticker": ticker,
             "name": ticker,
             "analyst": None,
+            **({"riskRangeLow": detail["riskRangeLow"], "riskRangeHigh": detail["riskRangeHigh"]} if side else {}),
         })
+    # A long subject can be truncated; the body still lists every change.
+    listed = {alert["ticker"] for alert in alerts}
+    for ticker, detail in body.items():
+        if alerts and ticker not in listed:
+            alerts.append({
+                "headline": normalized,
+                "signalFamily": "Position Changes",
+                "signalPhrase": f"{detail['action'].title()} {ticker}",
+                "action": detail["action"],
+                "side": detail["side"],
+                "context": "position-change",
+                "ticker": ticker,
+                "name": ticker,
+                "analyst": None,
+                "riskRangeLow": detail["riskRangeLow"],
+                "riskRangeHigh": detail["riskRangeHigh"],
+            })
     return alerts
 
 
@@ -3813,7 +3876,7 @@ def parse_html_snapshot(
 
     if report_type == "unknown":
         headline = _extract_headline(html_body, text) or subject
-        alerts = _extract_position_change_alerts(headline)
+        alerts = _extract_position_change_alerts(headline, text)
         if alerts:
             snapshot = _base_snapshot(
                 snapshot_type="investing-ideas",

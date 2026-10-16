@@ -154,6 +154,39 @@
   z-index: 1;
 }
 
+/* An instruction opposing a held position. Stays until the position is closed
+   or kept with a reason; opening the Analyst does not clear it. */
+.dashboard-top-navigation .dashboard-top-navigation__item.has-action-required {
+  background: #fdecec;
+  color: #a61b1b;
+  box-shadow: inset 0 0 0 1px #d64545aa, inset 0 0 14px #e0444433, 0 0 9px #d6333344;
+  z-index: 1;
+  animation: dashboard-top-navigation-action-required 1.6s ease-in-out infinite;
+}
+
+.dashboard-top-navigation__action-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #b42318;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@keyframes dashboard-top-navigation-action-required {
+  50% { box-shadow: inset 0 0 0 1px #d64545, inset 0 0 16px #e0444455, 0 0 13px #d6333366; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-top-navigation .dashboard-top-navigation__item.has-action-required { animation: none; }
+}
+
 @media (max-width: 900px) {
   .dashboard-top-navigation .dashboard-top-navigation__item {
     padding-inline: 8px;

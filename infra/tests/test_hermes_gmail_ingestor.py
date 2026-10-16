@@ -2479,6 +2479,42 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertFalse(snapshot["data"]["checkpointAvailable"])
         self.assertEqual([row["ticker"] for row in snapshot["data"]["alerts"]], ["SXT", "SJM", "GTLB"])
 
+    def test_investing_ideas_changes_take_each_side_and_range_from_the_body(self):
+        html_body = """
+            <h1>3 Changes: Remove SNOW, DELL, WING</h1>
+            <div><p>We have <strong>REMOVED</strong> the following from <em>Investing Ideas</em>:</p>
+            <p>Long:</p><ul><li><a>SNOW</a> (336.0 - 375.0)</li><li><a>DELL</a> (540.0 - 601.0)</li></ul></div>
+            <p><em>These positions have stopped out on our #VASP (Volatility Adjusted Signaling Process).</em></p>
+            <div><p>We have <strong>REMOVED</strong> the following from <em>Investing Ideas</em>:</p>
+            <p>Short:</p><ul><li><a>WING</a> (97.74 - 126.0)</li></ul></div>
+        """
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="unknown",
+            html_body=html_body,
+            received_at=datetime(2026, 10, 16, 16, 23, tzinfo=timezone.utc),
+            s3_key="gmail/unknown/changes.html",
+            message_id="snow-dell-wing",
+            subject="3 Changes: Remove SNOW, DELL, WING",
+        )
+
+        alerts = {row["ticker"]: row for row in snapshot["data"]["alerts"]}
+        self.assertEqual(list(alerts), ["SNOW", "DELL", "WING"])
+        self.assertEqual({ticker: row["side"] for ticker, row in alerts.items()},
+                         {"SNOW": "long", "DELL": "long", "WING": "short"})
+        self.assertEqual({row["action"] for row in alerts.values()}, {"REMOVE"})
+        self.assertEqual((float(alerts["WING"]["riskRangeLow"]), float(alerts["WING"]["riskRangeHigh"])), (97.74, 126.0))
+
+    def test_investing_ideas_changes_never_assume_a_side_the_body_omits(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="unknown",
+            html_body="<html><body><h1>3 Changes: Remove SXT, SJM, Add GTLB</h1></body></html>",
+            received_at=datetime(2026, 7, 16, 19, 21, 55, tzinfo=timezone.utc),
+            s3_key="gmail/unknown/changes.html",
+            message_id="sxt-remove",
+            subject="3 Changes: Remove SXT, SJM, Add GTLB",
+        )
+        self.assertEqual({row["side"] for row in snapshot["data"]["alerts"]}, {None})
+
     def test_investing_ideas_newsletter_materializes_its_long_short_table(self):
         html_body = """
             <h1>Investing Ideas Newsletter: August 03, 2026</h1>
