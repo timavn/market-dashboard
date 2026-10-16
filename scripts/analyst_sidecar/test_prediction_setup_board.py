@@ -100,6 +100,52 @@ class SetupBoardRenderTests(unittest.TestCase):
                       "ASOF(N/A;Sep 28,HedgAI;,;Oct 9,Risk Ranges) |", report)
         self.assertIn("Gold price withheld: GC=F returned 41.5, inconsistent with its Risk Range.", report)
 
+    def test_morning_research_adds_alpha_code_column_and_research_block(self):
+        data = board()
+        data["research"] = {"version": 1, "marketDate": "2026-10-16", "products": [
+            {"key": "top-3-things", "label": "Top 3 Things", "status": "read", "publishedAt": "2026-10-16T12:31:00.000Z"},
+            {"key": "the-macro-show", "label": "The Macro Show", "status": "read", "publishedAt": "2026-10-16T14:55:00.000Z"},
+            {"key": "etf-pro", "label": "ETF Pro", "status": "missing"}]}
+        excerpt = "UST 2yr holding TRADE/TREND Signal Supports (TREND all the way down at 4.40%)"
+        data["rows"][3]["research"] = {"findings": [
+            {"product": "top-3-things", "productLabel": "Top 3 Things", "kind": "trendLevel", "level": 4.4, "unit": "%", "fit": "exact",
+             "excerpt": excerpt},
+            {"product": "top-3-things", "productLabel": "Top 3 Things", "kind": "signal", "trade": "Bullish", "trend": "Bullish",
+             "fit": "exact", "excerpt": excerpt},
+            # The board's own Risk Range repeated by a product adds nothing.
+            {"product": "top-3-things", "productLabel": "Top 3 Things", "kind": "riskRange", "low": 4.73, "high": 4.96, "unit": "%"}]}
+        data["rows"][0]["research"] = {"alphaCode": {"trade": 4180, "trend": 4120, "approximate": True, "productLabel": "The Macro Show",
+                                                     "unit": None},
+                                       "findings": [{"product": "the-macro-show", "productLabel": "The Macro Show", "kind": "alphaCode",
+                                                     "trade": 4180, "trend": 4120, "approximate": True, "fit": "exact", "excerpt": "Gold …"},
+                                                    {"product": "etf-pro", "productLabel": "ETF Pro", "kind": "position", "side": "Long",
+                                                     "fit": "proxy", "instrumentLabel": "GLD"}]}
+        data["usd"]["research"] = {"findings": []}
+        report = render_setup_board(data)
+        self.assertIn("| Market | Tick | Trade | Trend | Alpha Code | Price and Risk Range | As of (PT) |", report)
+        # Gold 4216.3 sits above both levels; UST 2Y has only a Trend level.
+        self.assertIn("| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | ALPHA(4,180;4,120;above;above;;1;The Macro Show) |", report)
+        self.assertIn("| BIAS(Bullish;;) | ALPHA(;4.40;;above;%;0;Top 3 Things) |", report)
+        self.assertIn("| WTI | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | N/A |", report)
+        metals = json.loads(report.split("## Metals", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
+        self.assertEqual(metals["markets"][0], {"market": "US Dollar"})
+        self.assertEqual(metals["markets"][1]["items"], [
+            {"product": "The Macro Show", "time": "07:55", "facts": [{"text": "Alpha Code ~4,180 / 4,120", "tone": "key"}], "quotes": ["Gold …"]},
+            {"product": "ETF Pro", "facts": [{"text": "Long GLD", "tone": "positive"}]}])
+        rates = json.loads(report.split("## Rates", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
+        self.assertEqual(rates["markets"], [{"market": "UST 2Y", "items": [{"product": "Top 3 Things", "time": "05:31", "facts": [
+            {"text": "Trend level 4.40%", "tone": "key"}, {"text": "Trade Bullish", "tone": "positive"},
+            {"text": "Trend Bullish", "tone": "positive"}], "quotes": [excerpt]}]}])
+        # The US Dollar's research appears with the first section only.
+        self.assertNotIn('"market":"US Dollar"', report.split("## Crypto", 1)[1])
+        self.assertIn("Research read for Oct 16: Top 3 Things 05:31, The Macro Show 07:55. Not published yet: ETF Pro.", report)
+
+    def test_boards_without_morning_research_keep_their_layout(self):
+        report = render_setup_board(board())
+        self.assertNotIn("Alpha Code", report)
+        self.assertNotIn("analyst-research", report)
+        self.assertNotIn("Research read", report)
+
     def test_cpi_lists_every_nowcast_month_with_its_kalshi_event_or_na(self):
         report = render_setup_board({"rows": [{"id": "cpi", "label": "CPI YoY", "group": "inflation",
             "events": [{"eventTicker": "KXCPIYOY-26SEP"}], "forecasts": [

@@ -1,5 +1,6 @@
 const UNIVERSE = require('../constants/predictionMarketUniverse.json');
 const { canonicalTradeResearch } = require('../utils/canonicalTradeResearch.cjs');
+const { PRODUCTS: MORNING_PRODUCTS, PROXY_TICKERS, buildMorningResearch } = require('./predictionMorningResearch.cjs');
 
 // One row per tracked Kalshi market: Hedgeye Tick/Trade/Trend, the verified
 // underlying price, its Risk Range position, and the rule-based setup. Line
@@ -18,6 +19,44 @@ const direction = (value) => {
   const text = String(value || '').toUpperCase();
   return ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(text) ? text : null;
 };
+
+// Hedgeye emails print their send time ("10/15/2026 07:37 AM EDT"); imported
+// publishedAt values are midnight placeholders. Mirrors daily_research_rollup.publication_time.
+const PUB_LINE = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?:\s*([AP]M))?\s+(EDT|EST|ET|PDT|PST|PT|UTC|GMT)\b/i;
+const ZONES = { ET: 'America/New_York', EDT: 'America/New_York', EST: 'America/New_York',
+  PT: 'America/Los_Angeles', PDT: 'America/Los_Angeles', PST: 'America/Los_Angeles' };
+
+function zonedInstant(parts, zone) {
+  const wall = Date.UTC(...parts);
+  if (!zone) return new Date(wall);
+  // The zone's offset at that wall time, applied twice to settle across a DST edge.
+  const offset = (at) => {
+    const local = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23',
+      year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+      .formatToParts(new Date(at)).map(({ type, value }) => [type, Number(value)]));
+    return Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second) - at;
+  };
+  const first = wall - offset(wall);
+  return new Date(wall - offset(first));
+}
+
+/** The research email's own send time, or null when only a date is known. */
+function emailPublishedAt(snapshot) {
+  const line = String(snapshot?.article?.bodyText || '').match(PUB_LINE);
+  if (line) {
+    const [, month, day, year, clock, minute, meridiem, zone] = line;
+    let hour = Number(clock);
+    if (meridiem) hour = (hour % 12) + (meridiem.toUpperCase() === 'PM' ? 12 : 0);
+    const instant = zonedInstant([Number(year), Number(month) - 1, Number(day), hour, Number(minute)],
+      ZONES[zone.toUpperCase()]);
+    return Number.isNaN(instant.getTime()) ? null : instant.toISOString();
+  }
+  for (const value of [snapshot?.article?.publishedAt, snapshot?.publishedAt]) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed) && new Date(parsed).toISOString().slice(11, 19) !== '00:00:00') return value;
+  }
+  return null;
+}
 
 function riskRangeReading(market, { riskRanges, cryptoQuant }) {
   const spec = market.hedgeye.riskRange;
@@ -209,8 +248,37 @@ function cpiForecasts(nowcast, currentEvent, eventsBySeries) {
     eventTicker: listed.get(month) || null }));
 }
 
+/**
+ * What the market date's Hedgeye products say about each market, checked
+ * against the live prices on this board. Saved boards without morning
+ * products keep their original shape.
+ */
+function morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, marketDate }) {
+  if (!morningSnapshots) return null;
+  const references = {};
+  const prices = {};
+  for (const row of rows) {
+    const value = row.price?.value ?? (row.range ? (row.range.low + row.range.high) / 2 : null);
+    if (Number.isFinite(value)) references[row.id] = value;
+    if (Number.isFinite(row.price?.value)) prices[row.id] = row.price.value;
+    if (row.id === 'nasdaq100' && Number.isFinite(row.rangePrice?.value)) references.compq = row.rangePrice.value;
+  }
+  if (Number.isFinite(usd?.value)) {
+    references.usd = usd.value;
+    prices.usd = usd.value;
+  }
+  for (const ticker of PROXY_TICKERS) {
+    const value = finite(quotes?.[ticker]?.price);
+    if (value !== null) references[ticker] = value;
+  }
+  const riskRangeTickers = Object.fromEntries(UNIVERSE.markets.filter((market) => market.hedgeye.riskRange?.product === 'risk-ranges')
+    .map((market) => [market.hedgeye.riskRange.ticker, market.id]).concat([[UNIVERSE.usd.riskRangeTicker, 'usd']]));
+  return buildMorningResearch({ snapshots: { ...morningSnapshots, 'crypto-quant': morningSnapshots['crypto-quant'] || cryptoQuant },
+    marketDate, references, prices, riskRangeTickers, publishedAt: emailPublishedAt });
+}
+
 function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations,
-  usdPeriods, eventsBySeries,
+  usdPeriods, eventsBySeries, morningSnapshots,
   marketDate, asOf = new Date().toISOString() } = {}) {
   const rows = UNIVERSE.markets.map((market) => {
     const events = selectEvents(market, eventsBySeries);
@@ -242,9 +310,17 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       tick, trade, trend, setup: evaluateSetup({ trend, tick, trade, position }),
     };
   });
+  const usd = usdReading({ quotes, riskRanges, securityIntelligence, usdPeriods, hedgai, marketDate });
+  const research = morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, marketDate });
+  if (research) {
+    for (const row of rows) row.research = research.markets[row.id] || { findings: [] };
+    if (usd) usd.research = research.markets.usd || { findings: [] };
+  }
   return { version: 1, asOf, marketDate: marketDate || null, rule: UNIVERSE.setupRule, sizing: UNIVERSE.sizing,
     sections: UNIVERSE.sections,
-    usd: usdReading({ quotes, riskRanges, securityIntelligence, usdPeriods, hedgai, marketDate }),
+    usd,
+    ...(research ? { research: { version: research.version, marketDate: research.marketDate, products: research.products } } : {}),
+
     sources: {
       riskRanges: riskRanges?.manifest?.publicationDate || null,
       cryptoQuant: cryptoQuant?.date || null,
@@ -256,19 +332,20 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
 
 const seriesNames = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
   Array.isArray(market.kalshi.series) ? market.kalshi.series : [market.kalshi.series]))];
+// ETF prices check levels the research prints for a market's proxy (QQQ, GLD, SPY …).
 const priceSymbols = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
-  [market.price?.symbol, market.hedgeye.riskRange?.priceSymbol]).concat(UNIVERSE.usd.symbol).filter(Boolean))];
+  [market.price?.symbol, market.hedgeye.riskRange?.priceSymbol]).concat(UNIVERSE.usd.symbol, PROXY_TICKERS).filter(Boolean))];
 const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.hedgeye.trade?.ticker)
   .concat(UNIVERSE.usd.tradeTicker).filter(Boolean))];
 
 /** Load every input independently; one failed source leaves its cells empty. */
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
-  loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, marketDateFor }) {
+  loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts, marketDateFor }) {
   return async function loadSetupBoard({ now = new Date() } = {}) {
     const marketDate = marketDateFor(now);
     const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
     const [riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations, usdPeriods,
-      events] = await Promise.all([
+      events, morning] = await Promise.all([
       settle(loadRiskRanges({ now })),
       settle(loadCryptoQuant()),
       settle(loadHedgai({ now })),
@@ -280,15 +357,21 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       settle(loadPeriodReturns ? loadPeriodReturns(UNIVERSE.usd.symbol) : Promise.resolve(null)),
       settle(Promise.all(seriesNames().map((name) => loadKalshiEvents(name)
         .then((list) => [name, list], () => [name, []])))),
+      settle(loadMorningProducts
+        ? loadMorningProducts({ marketDate, products: MORNING_PRODUCTS.map((product) => product.key).filter((key) => key !== 'crypto-quant') })
+        : Promise.resolve(null)),
     ]);
     const board = buildSetupBoard({
       riskRanges: riskRanges.value, cryptoQuant: cryptoQuant.value, hedgai: hedgai.value,
       securityIntelligence: securityIntelligence.value, nowcast: nowcast.value, quotes: quotes.value,
       volatility: volatility.value, usdCorrelations: usdCorrelations.value, usdPeriods: usdPeriods.value,
       eventsBySeries: Object.fromEntries(events.value || []), marketDate, asOf: now.toISOString(),
+      morningSnapshots: loadMorningProducts ? (morning.value || {}) : undefined,
     });
     board.sourceStatus = Object.fromEntries(Object.entries({ riskRanges, cryptoQuant, hedgai, securityIntelligence,
-      nowcast, quotes, volatility, usdCorrelations, kalshi: events }).map(([key, result]) => [key, result.error ? 'failed' : 'ready']));
+      nowcast, quotes, volatility, usdCorrelations, kalshi: events, ...(loadMorningProducts ? { morningResearch: morning } : {}) })
+      .map(([key, result]) => [key, result.error ? 'failed' : 'ready']));
+
     return board;
   };
 }
@@ -297,5 +380,5 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
 const extraCboeSeries = () => UNIVERSE.markets.map((market) => market.volatility)
   .filter((spec) => spec?.cboeSymbol).map((spec) => ({ name: spec.key, symbol: spec.cboeSymbol }));
 
-module.exports = { buildSetupBoard, extraCboeSeries, createSetupBoardLoader, evaluateSetup, eventSortKey, selectEvents,
+module.exports = { buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents,
   priceSymbols, seriesNames, tradeTickers };

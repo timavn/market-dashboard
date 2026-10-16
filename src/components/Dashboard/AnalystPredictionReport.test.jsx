@@ -209,3 +209,47 @@ test('the Dollar reference row and As of cells stack pull time with each signal 
   expect(container).not.toHaveTextContent(/ASOF\(|REF\(/);
 });
 
+
+test('Alpha Code cells stack Trade and Trend with the price above or below each, and the product', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Rates" />);
+  const { td: Cell, table: Table } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const cell = value => <Cell node={{ children: [{ type: 'text', value }] }}>{value}</Cell>;
+  const headers = ['Market', 'Tick', 'Trade', 'Trend', 'Alpha Code', 'Price and Risk Range', 'As of (PT)'];
+  const node = { children: [{ tagName: 'thead', children: [{ tagName: 'tr', children: headers.map(value => ({ tagName: 'th', children: [{ type: 'text', value }] })) }] }] };
+  const { container } = render(<Table node={node}><tbody><tr>
+    {cell('ALPHA(5.10;4.76;below;above;%;0;Top 3 Things)')}{cell('ALPHA(83,000;78,000;below;above;;1;The Macro Show)')}{cell('ALPHA(;4.40;;above;%;0;Top 3 Things)')}
+  </tr></tbody></Table>);
+  expect(container.querySelector('.analyst-table-frame')).toHaveClass('is-range-board', 'has-alpha');
+  const [ust10y, bitcoin, ust2y] = container.querySelectorAll('td');
+  expect([...ust10y.children].map(span => span.textContent)).toEqual(['Ta 5.10%▼', 'Te 4.76%▲', 'Top 3 Things']);
+  expect(ust10y).toHaveAttribute('title', 'Alpha Code · Trade 5.10% (price below) · Trend 4.76% (price above) · Top 3 Things');
+  expect(ust10y.querySelector('[aria-label="price below"]')).toHaveClass('analyst-process--negative');
+  expect([...bitcoin.children].map(span => span.textContent)).toEqual(['Ta ~83,000▼', 'Te ~78,000▲', 'The Macro Show']);
+  expect([...ust2y.children].map(span => span.textContent)).toEqual(['Ta N/A', 'Te 4.40%▲', 'Top 3 Things']);
+  expect(container).not.toHaveTextContent(/ALPHA\(/);
+});
+
+test('analyst-research blocks list each product’s facts with their source sentences and the quiet markets', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Crypto" />);
+  const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const research = { markets: [
+    { market: 'Bitcoin', items: [{ product: 'The Macro Show', time: '07:55', facts: [
+      { text: 'Alpha Code ~83,000 / 78,000', tone: 'key' }, { text: 'Trade Bearish', tone: 'negative' }, { text: 'Long', tone: 'positive' }],
+    quotes: ['Bitcoin held approximately $83,000 as trade support and $78,000 as trend support.'] }] },
+    { market: 'Ethereum' },
+  ] };
+  const node = { children: [{ tagName: 'code', properties: { className: ['language-analyst-research'] },
+    children: [{ type: 'text', value: JSON.stringify(research) }] }] };
+  render(<Pre node={node}><code>ignored</code></Pre>);
+  const section = screen.getByRole('region', { name: 'Morning research' });
+  expect(section).toHaveTextContent('BitcoinThe Macro Show07:55Alpha Code ~83,000 / 78,000Trade BearishLong');
+  expect(screen.getByText('Alpha Code ~83,000 / 78,000')).toHaveClass('is-key');
+  expect(screen.getByText('Trade Bearish')).toHaveClass('is-negative');
+  const source = screen.getByText('Source');
+  expect(source.parentElement).toHaveProperty('open', false);
+  fireEvent.click(source);
+  expect(screen.getByText(/as trade support/)).toBeVisible();
+  expect(screen.getByText('Not mentioned this morning: Ethereum')).toBeInTheDocument();
+});

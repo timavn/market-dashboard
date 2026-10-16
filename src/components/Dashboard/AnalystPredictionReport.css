@@ -140,6 +140,17 @@
 .analyst-prediction-report .is-range-board.has-setup col:nth-child(5) { width: 9%; }
 .analyst-prediction-report .is-range-board.has-setup col:nth-child(6) { width: 8%; }
 .analyst-prediction-report .is-range-board.has-setup col:nth-child(7) { width: 11%; }
+/* Boards with the morning's research add Alpha Code after Trend. */
+.analyst-prediction-report .is-range-board.has-alpha col:nth-child(1) { width: 11%; }
+.analyst-prediction-report .is-range-board.has-alpha col:nth-child(2),
+.analyst-prediction-report .is-range-board.has-alpha col:nth-child(3),
+.analyst-prediction-report .is-range-board.has-alpha col:nth-child(4) { width: 8%; }
+.analyst-prediction-report .is-range-board.has-alpha col:nth-child(5) { width: 12%; }
+.analyst-prediction-report .is-range-board.has-alpha col:nth-child(6) { width: 32%; }
+.analyst-prediction-report .is-range-board.has-alpha col:nth-child(7) { width: 21%; }
+.analyst-prediction-alpha-line { display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
+.analyst-prediction-alpha-line__value { font-weight: 500; }
+.analyst-prediction-alpha-line__relation { font-size: 9px; }
 /* Tick, Trade and Trend read as centered signal columns on the current board. */
 .analyst-panel-v2 .analyst-prediction-report .is-range-board:not(.has-setup) :is(th, td):is(:nth-child(2), :nth-child(3), :nth-child(4)) { text-align: center; }
 .analyst-prediction-stack { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -236,3 +247,34 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-drivers .analyst-corr--pos-light, .analyst-drivers .analyst-corr--pos-strong { color: var(--dashboard-positive, #059669); }
 .analyst-drivers :is(.analyst-corr--neg-strong, .analyst-corr--pos-strong) { padding: 0 3px; outline: 1px solid currentColor; outline-offset: -1px; }
 
+
+/* Morning research (AnalystPredictionResearch): per market, what each of this morning's products says. */
+.analyst-research { margin: 4px 0 10px; border: 1px solid var(--analyst-border, #dbe1e8); background: #fff; }
+.analyst-research__market { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 4px 8px; }
+.analyst-research__market + .analyst-research__market { border-top: 1px solid var(--analyst-border, #dbe1e8); }
+.analyst-research__name { font-weight: 500; color: var(--analyst-ink, #172033); line-height: 18px; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-research__items { margin: 0; padding: 0; list-style: none; }
+/* The report's Markdown list styles would otherwise make each row a list item. */
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown .analyst-research__item { margin: 0; padding: 0; display: grid; grid-template-columns: 132px minmax(0, 1fr) auto; column-gap: 8px; align-items: baseline; line-height: 18px; }
+.analyst-research__product { color: var(--dashboard-muted-text, #667085); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.analyst-research__time { margin-left: 5px; font-variant-numeric: tabular-nums; }
+.analyst-research__facts { display: flex; flex-wrap: wrap; column-gap: 10px; }
+.analyst-research__fact { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.analyst-research__fact.is-key { font-weight: 500; color: var(--portfolio-review-blue, #2563eb); }
+.analyst-research__fact.is-positive { color: var(--dashboard-positive, #059669); }
+.analyst-research__fact.is-negative { color: var(--dashboard-negative, #dc2626); }
+.analyst-research__source { grid-column: 3; justify-self: end; }
+.analyst-research__source > summary { cursor: pointer; color: var(--dashboard-muted-text, #667085); list-style: none; }
+.analyst-research__source > summary::-webkit-details-marker { display: none; }
+.analyst-research__source[open] { grid-column: 1 / -1; justify-self: stretch; }
+.analyst-research__source[open] > summary { text-align: right; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-research__source blockquote {
+  margin: 2px 0 4px; padding: 2px 8px; border-left: 2px solid var(--analyst-border, #c9d1db); color: var(--analyst-ink, #172033); white-space: normal;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-markdown .analyst-research__quiet { margin: 0; padding: 4px 8px; color: var(--dashboard-muted-text, #667085); }
+.analyst-research__market + .analyst-research__quiet { border-top: 1px solid var(--analyst-border, #dbe1e8); }
+@media (max-width: 640px) {
+  .analyst-research__market { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .analyst-panel-v2 .analyst-prediction-report .analyst-markdown .analyst-research__item { grid-template-columns: minmax(0, 1fr) auto; }
+  .analyst-research__product { grid-column: 1 / -1; }
+}

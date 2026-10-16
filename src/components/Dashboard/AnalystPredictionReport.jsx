@@ -3,6 +3,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import AnalystReportLink from './AnalystReportLink';
 import AnalystPredictionRangeBar, { parsePredictionRange, predictionRangeLabel } from './AnalystPredictionRangeBar';
 import AnalystPredictionDrivers, { parsePredictionDrivers } from './AnalystPredictionDrivers';
+import AnalystPredictionResearch, { parsePredictionResearch } from './AnalystPredictionResearch';
 import remarkGfm from 'remark-gfm';
 import { remarkAnalystProcessColors } from './analystProcessColors';
 import { predictionReportSources } from './analystPredictionSources';
@@ -19,6 +20,9 @@ const BIAS_TOKEN = /^BIAS\((Bullish|Bearish|Neutral|N\/A);([^;()]*);([^;()]*)\)$
 const MARKET_TOKEN = /^(MKT|REF)\(([^;()]+);([^;()]+)\)$/;
 // ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct)
 const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*)\)$/;
+// ALPHA(trade;trend;tradeRel;trendRel;unit;approximate;product): this morning's Alpha Code with the price above or below each level.
+const ALPHA_TOKEN = /^ALPHA\(([^;()]*);([^;()]*);(above|below|at|);(above|below|at|);(%?);([01]);([^;()]*)\)$/;
+const RELATION = { above: ['▲', 'analyst-process--positive', 'price above'], below: ['▼', 'analyst-process--negative', 'price below'], at: ['=', 'analyst-prediction-stack--muted', 'price at'] };
 // Two-digit days keep the right-aligned As of dates in one column: Sep 9 -> Sep 09.
 const padDay = date => date.replace(/^([A-Za-z]{3}) (\d)\b/, '$1 0$2');
 const BIAS_CLASS = { Bullish: 'analyst-process--positive', Bearish: 'analyst-process--negative' };
@@ -38,6 +42,22 @@ const MarkdownCell = ({ node, children }) => {
   if (market) return <td className={market[1] === 'REF' ? 'analyst-prediction-reference-cell' : undefined} title={`${market[2]} · ${market[3]}`}>
     <span className="analyst-prediction-stack">{market[2]}</span>
     <span className="analyst-prediction-stack analyst-prediction-stack--muted">{market[3]}</span></td>;
+  const alpha = text.match(ALPHA_TOKEN);
+  if (alpha) {
+    const [, trade, trend, tradeRel, trendRel, unit, approximate, product] = alpha;
+    const prefix = approximate === '1' ? '~' : '';
+    const lines = [['Ta', 'Trade', trade, tradeRel], ['Te', 'Trend', trend, trendRel]];
+    const label = ['Alpha Code', ...lines.map(([, name, value, relation]) => value
+      ? `${name} ${prefix}${value}${unit}${relation ? ` (${RELATION[relation][2]})` : ''}` : `${name} N/A`), product].filter(Boolean).join(' · ');
+    return <td className="analyst-prediction-alpha-cell" title={label}>
+      {lines.map(([key, , value, relation]) => <span key={key} className="analyst-prediction-stack analyst-prediction-alpha-line">
+        <span className="analyst-prediction-stack__key">{key}</span>{' '}
+        {value ? <span className="analyst-prediction-alpha-line__value">{prefix}{value}{unit}</span> : <span className="analyst-prediction-stack--muted">N/A</span>}
+        {value && relation && <span className={`analyst-prediction-alpha-line__relation ${RELATION[relation][1]}`} aria-label={RELATION[relation][2]}>{RELATION[relation][0]}</span>}
+      </span>)}
+      {product && <span className="analyst-prediction-stack analyst-prediction-stack--muted">{product}</span>}
+    </td>;
+  }
   const asOf = text.match(AS_OF_TOKEN);
   if (asOf) {
     const [, pulled, ...rest] = asOf;
@@ -70,6 +90,7 @@ const MarkdownTable = ({ children, node }) => {
   const tickComparison = headings.join('|') === 'Ticker|Security|Tick|Contribution|Initiated|Bull history|Bear history|Statistics date';
   // Setup boards: saved captures used separate Price/Risk Range/In range columns; current ones use one range bar.
   const rangeBoard = headings.some(label => /^Price and Risk Range$/i.test(label.trim()));
+  const alphaBoard = rangeBoard && headings.some(label => /^Alpha Code$/i.test(label.trim()));
   const setupBoard = rangeBoard || (headings.some(label => /^Setup$/i.test(label.trim()))
     && headings.some(label => /^In range$/i.test(label.trim())));
   const contractComparison = headings.some(label => /^Outcome$/i.test(label.trim()))
@@ -84,7 +105,7 @@ const MarkdownTable = ({ children, node }) => {
     if (/^Gross reward\/risk \(before fees\)$/i.test(label.trim())) return 'analyst-prediction-contract-payoff-col';
     return undefined;
   };
-  return <div className={`analyst-table-frame${dated ? ' has-dates' : ''}${tickers ? ' has-tickers' : ''}${securities ? ' has-securities' : ''}${labels ? ' has-labels' : ''}${tickComparison ? ' is-tick-comparison' : ''}${contractComparison ? ' is-contract-comparison' : ''}${setupBoard ? ' is-setup-board' : ''}${rangeBoard ? ' is-range-board' : ''}${rangeBoard && headings.some(label => /^Setup$/i.test(label.trim())) ? ' has-setup' : ''}`}>
+  return <div className={`analyst-table-frame${dated ? ' has-dates' : ''}${tickers ? ' has-tickers' : ''}${securities ? ' has-securities' : ''}${labels ? ' has-labels' : ''}${tickComparison ? ' is-tick-comparison' : ''}${contractComparison ? ' is-contract-comparison' : ''}${setupBoard ? ' is-setup-board' : ''}${rangeBoard ? ' is-range-board' : ''}${alphaBoard ? ' has-alpha' : ''}${rangeBoard && headings.some(label => /^Setup$/i.test(label.trim())) ? ' has-setup' : ''}`}>
     <table>{headings.length > 0 && <colgroup>{headings.map((label, index) => <col key={`${label}-${index}`} className={
       contractColumn(label) || (index === 0 && tickers ? 'analyst-prediction-ticker-col'
         : index === 1 && securities ? 'analyst-prediction-security-col'
@@ -94,12 +115,15 @@ const MarkdownTable = ({ children, node }) => {
     </colgroup>}{children}</table>
   </div>;
 };
-// ```analyst-drivers blocks carry a section's shared variables; other code blocks render normally.
+// ```analyst-drivers blocks carry a section's shared variables and ```analyst-research its
+// markets' morning research; other code blocks render normally.
 const MarkdownPre = ({ node, children }) => {
   const code = node?.children?.find(child => child.tagName === 'code');
   const classes = [].concat(code?.properties?.className || []);
   const drivers = classes.includes('language-analyst-drivers') ? parsePredictionDrivers(nodeText(code)) : null;
-  return drivers ? <AnalystPredictionDrivers drivers={drivers} /> : <pre>{children}</pre>;
+  if (drivers) return <AnalystPredictionDrivers drivers={drivers} />;
+  const research = classes.includes('language-analyst-research') ? parsePredictionResearch(nodeText(code)) : null;
+  return research ? <AnalystPredictionResearch research={research} /> : <pre>{children}</pre>;
 };
 const SourceButton = ({ group, onCitation, children }) => <button type="button" className="analyst-prediction-source"
   aria-label={`Source: ${group.label}`} title={group.source.title || group.label}

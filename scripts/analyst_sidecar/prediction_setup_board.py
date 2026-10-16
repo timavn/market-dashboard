@@ -211,6 +211,111 @@ def _range_cell(row: dict[str, Any]) -> str:
     return f"RR({low:.{decimals}f};{high:.{decimals}f};{value};{decimals};{unit})"
 
 
+def _level(value: Any, unit: str | None) -> str:
+    """A printed signal level: yields to two decimals, prices as published (83,000 · 92 · 6.45)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return ""
+    if unit == "%":
+        return f"{value:.2f}"
+    return f"{value:,.0f}" if abs(value) >= 1000 else f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
+def _alpha_cell(row: dict[str, Any]) -> str:
+    """Token the report UI stacks as Trade and Trend levels with the price above or below each.
+
+    ALPHA(trade;trend;tradeRel;trendRel;unit;approx;product)
+    """
+    research = row.get("research") or {}
+    code = research.get("alphaCode")
+    price = (row.get("price") or {}).get("value")
+    relation = lambda level: ("above" if price > level else "below" if price < level else "at") \
+        if isinstance(price, (int, float)) and isinstance(level, (int, float)) else ""
+    if not code:
+        # Without a full code, the highest-priority product's single Trade or Trend level for the market itself.
+        singles = [item for item in research.get("findings") or []
+                   if item.get("kind") in ("tradeLevel", "trendLevel") and item.get("fit") == "exact"]
+        trade = next((item for item in singles if item["kind"] == "tradeLevel"), None)
+        trend = next((item for item in singles if item["kind"] == "trendLevel"), None)
+        if not (trade or trend):
+            return "N/A"
+        first = trade or trend
+        code = {"trade": (trade or {}).get("level"), "trend": (trend or {}).get("level"), "unit": first.get("unit"),
+                "approximate": bool((trade or {}).get("approximate") or (trend or {}).get("approximate")),
+                "productLabel": first.get("productLabel")}
+    clean = lambda value: re.sub(r"[;()|]", " ", str(value or "")).strip()
+    unit = code.get("unit") or ""
+    return (f"ALPHA({_level(code.get('trade'), unit)};{_level(code.get('trend'), unit)};"
+            f"{relation(code.get('trade'))};{relation(code.get('trend'))};{unit};{1 if code.get('approximate') else 0};"
+            f"{clean(code.get('productLabel'))})")
+
+
+TONE = {"Bullish": "positive", "Bearish": "negative", "Long": "positive", "Short": "negative",
+        "positive": "positive", "negative": "negative"}
+
+
+def _fact_text(item: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Display facts for one finding; a range identical to the board's own Risk Range adds nothing."""
+    kind, unit = item.get("kind"), item.get("unit")
+    fmt = lambda value: f"{_level(value, unit)}{'%' if unit == '%' else ''}"
+    who = f"{item['instrumentLabel']} " if item.get("instrumentLabel") and item.get("instrumentLabel") != "spot" else ""
+    approx = "~" if item.get("approximate") else ""
+    if kind == "alphaCode":
+        return [{"text": f"{who}Alpha Code {approx}{fmt(item.get('trade'))} / {fmt(item.get('trend'))}", "tone": "key"}]
+    if kind in ("tradeLevel", "trendLevel"):
+        return [{"text": f"{who}{'Trade' if kind == 'tradeLevel' else 'Trend'} level {approx}{fmt(item.get('level'))}", "tone": "key"}]
+    if kind == "riskRange":
+        board_range = row.get("range") or {}
+        same_instrument = not item.get("instrument") or item.get("instrument") == board_range.get("ticker")
+        if same_instrument and board_range.get("low") == item.get("low") and board_range.get("high") == item.get("high"):
+            return []
+        spot = " (spot)" if item.get("instrumentLabel") == "spot" else ""
+        facts = [{"text": f"{who}Risk Range{spot} {fmt(item.get('low'))}–{fmt(item.get('high'))}", "tone": None}]
+        if item.get("trend"):
+            facts.append({"text": f"{who}Trend {item['trend']}", "tone": TONE.get(item["trend"])})
+        return facts
+    if kind == "signal":
+        return [{"text": f"{who}{label} {item[key]}", "tone": TONE.get(item[key])}
+                for key, label in (("trade", "Trade"), ("trend", "Trend")) if item.get(key)]
+    if kind == "position":
+        action = f"{item['action']} " if item.get("action") and item.get("action") not in ("Buy", "Short") else ""
+        target = f" {item['instrumentLabel']}" if item.get("instrumentLabel") else ""
+        inverse = " (inverse to yield)" if item.get("inverse") else ""
+        return [{"text": f"{action}{item.get('side')}{target}{inverse}", "tone": None if item.get("inverse") else TONE.get(item.get("side"))}]
+    if kind == "trendChange":
+        return [{"text": f"Trend changed {item.get('from') or 'N/A'} → {item.get('to') or 'N/A'}", "tone": TONE.get(item.get("to"))}]
+    if kind == "structure":
+        return [{"text": f"{signal['label']} {signal['value']}", "tone": TONE.get(signal.get("tone"))}
+                for signal in item.get("signals") or []]
+    return []
+
+
+def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Per market, what each of the morning's products says, in product priority order, with source sentences."""
+    research = board.get("research")
+    if not isinstance(research, dict):
+        return None
+    published = {product.get("label"): product.get("publishedAt") for product in research.get("products") or []}
+    markets = []
+    for row in rows:
+        items: dict[str, dict[str, Any]] = {}
+        for finding in (row.get("research") or {}).get("findings") or []:
+            facts = _fact_text(finding, row)
+            if not facts:
+                continue
+            label = finding.get("productLabel") or finding.get("product") or "Research"
+            when = _pacific(published.get(label)) if published.get(label) else None
+            item = items.setdefault(label, {"product": label, "time": when.rsplit(" ", 1)[-1] if when and ":" in when else when,
+                                            "facts": [], "quotes": []})
+            for fact in facts:
+                if fact not in item["facts"]:
+                    item["facts"].append(fact)
+            if finding.get("excerpt") and finding["excerpt"] not in item["quotes"]:
+                item["quotes"].append(finding["excerpt"])
+        clean = lambda item: {key: value for key, value in item.items() if value not in (None, [], "")}
+        markets.append({"market": row.get("label"), **({"items": [clean(item) for item in items.values()]} if items else {})})
+    return {"markets": markets} if markets else None
+
+
 def _dollar_row(usd: dict[str, Any] | None) -> dict[str, Any] | None:
     """The US Dollar Index laid out like a market row above each section's markets."""
     if not usd:
@@ -219,7 +324,7 @@ def _dollar_row(usd: dict[str, Any] | None) -> dict[str, Any] | None:
     return {"id": "usd", "label": "US Dollar", "reference": "DXY",
             "price": {"value": usd.get("value"), "asOf": usd.get("asOf")},
             "range": {"low": usd.get("low"), "high": usd.get("high"), "date": usd.get("rangeDate")} if has_range else {},
-            "tick": usd.get("tick"), "trade": usd.get("trade"), "trend": usd.get("trend")}
+            "tick": usd.get("tick"), "trade": usd.get("trade"), "trend": usd.get("trend"), "research": usd.get("research")}
 
 
 def _section_rows(board: dict[str, Any], rows: list[dict[str, Any]]) -> list[tuple[str, str, list[dict[str, Any]]]]:
@@ -232,6 +337,9 @@ def render_setup_board(board: dict[str, Any]) -> str:
     rows = [row for row in board.get("rows") or [] if isinstance(row, dict)]
     priced = [row for row in rows if row.get("id") != "cpi"]
     sources = board.get("sources") or {}
+    # Boards captured with the morning's products carry an Alpha Code column and research block.
+    with_research = isinstance(board.get("research"), dict)
+    dollar_research_shown = False
     lines = []
     for section_id, label, members in _section_rows(board, rows):
         if not members:
@@ -265,12 +373,13 @@ def render_setup_board(board: dict[str, Any]) -> str:
             price, tick, trade, risk_range = (row.get(key) or {} for key in ("price", "tick", "trade", "range"))
             trend_product = "Crypto Quant" if risk_range.get("product") == "crypto-quant" else "Risk Ranges"
             table.append([_market_cell(row), _bias_cell(tick.get("direction")), _bias_cell(trade.get("direction")),
-                          _bias_cell(row.get("trend")), _range_cell(row),
+                          _bias_cell(row.get("trend")), *([_alpha_cell(row)] if with_research else []), _range_cell(row),
                           _as_of_cell(price.get("asOf"), [
                               (tick.get("date"), f"HedgAI {tick.get('ticker') or ''}".strip() if tick else None),
                               (trade.get("date"), trade.get("source")),
                               (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)])])
-        lines += _table(["Market", "Tick", "Trade", "Trend", "Price and Risk Range", "As of (PT)"], table)
+        lines += _table(["Market", "Tick", "Trade", "Trend", *(["Alpha Code"] if with_research else []),
+                         "Price and Risk Range", "As of (PT)"], table)
         notes = []
         if any((row.get("price") or {}).get("fit") == "proxy" for row in members):
             notes.append("Prices are front-month futures; Kalshi settles on Pyth spot.")
@@ -289,9 +398,24 @@ def render_setup_board(board: dict[str, Any]) -> str:
             notes.append("Kalshi yield contracts pay if the daily Treasury yield reaches the line on any business day this month.")
         if notes:
             lines += [" ".join(notes), ""]
+        # The US Dollar's research appears once, with the first section that shows its row.
+        research_rows = ([dollar] if dollar and not dollar_research_shown else []) + members
+        dollar_research_shown = dollar_research_shown or bool(dollar)
+        block = _research_block(board, research_rows) if with_research else None
+        if block:
+            lines += ["```analyst-research", json.dumps(block, ensure_ascii=False, separators=(",", ":")), "```", ""]
 
     dated = [(label, _short_date(sources.get(key))) for key, label in (
         ("riskRanges", "Risk Ranges"), ("cryptoQuant", "Crypto Quant"), ("inflationNowcast", "Inflation Nowcast"))]
     named = [f"{label} {date}" for label, date in dated if date != DASH] + ["HedgAI Signals", "Cboe volatility indices", "Kalshi"]
     lines += ["Sources: " + ", ".join(named), ""]
+    if with_research:
+        products = board["research"].get("products") or []
+        clock = lambda value: _pacific(value).rsplit(" ", 1)[-1] if ":" in _pacific(value) else _pacific(value)
+        read = [f"{item.get('label')} {clock(item['publishedAt'])}" if item.get("publishedAt") else str(item.get("label"))
+                for item in products if item.get("status") == "read"]
+        missing = [str(item.get("label")) for item in products if item.get("status") != "read"]
+        day = _short_date(board["research"].get("marketDate"))
+        lines += [f"Research read for {day}: " + (", ".join(read) or "none") + "."
+                  + (f" Not published yet: {', '.join(missing)}." if missing else ""), ""]
     return "\n".join(lines).strip() + "\n"

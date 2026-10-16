@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSetupBoard, evaluateSetup, selectEvents } = require('./predictionSetupBoard.cjs');
+const { buildSetupBoard, createSetupBoardLoader, evaluateSetup, selectEvents } = require('./predictionSetupBoard.cjs');
 
 const rule = { bottomThird: 0.3333, topThird: 0.6667 };
 const tick = (direction) => ({ direction });
@@ -151,4 +151,58 @@ test('silver volatility comes from Cboe VXSLV alongside the dashboard volatility
   const silver = board.rows.find((row) => row.id === 'silver');
   assert.equal(silver.volatility.value, 37.33);
   assert.equal(silver.volatility.d15, -4.2);
+});
+
+test('attaches the market date’s Hedgeye research to each market and the US Dollar', () => {
+  const article = (bodyText) => ({ date: '2026-10-16', article: { bodyText } });
+  const board = buildSetupBoard({
+    riskRanges: { ranges: { UST10Y: { lrr: 5.06, hrr: 5.36, trend: 'BULLISH' }, DXY: { lrr: 101.3, hrr: 102.71, trend: 'BULLISH' } } },
+    quotes: { UST10Y: { price: 5.08 }, 'DX-Y.NYB': { price: 101.75 }, 'BTC-USD': { price: 81300 }, QQQ: { price: 718 } },
+    cryptoQuant: { date: '2026-10-15', data: { cryptos: { BTC: { buyTrade: 80000, sellTrade: 84000, trend: 'BULLISH' } } } },
+    morningSnapshots: {
+      'top-3-things': article('RATES – UST 10yr Alpha Code = 5.10/4.76\nUSD – US Dollar Index = Bullish TRADE and TREND'),
+      'the-macro-show': article('Bitcoin held approximately $83,000 as trade support and $78,000 as trend support.\nAlpha Code for QQQ = 721/705'),
+    },
+    marketDate: '2026-10-16',
+  });
+  const row = (id) => board.rows.find((item) => item.id === id);
+  assert.deepEqual({ ...row('ust10y').research.alphaCode, excerpt: undefined, publishedAt: undefined }, {
+    trade: 5.1, trend: 4.76, unit: '%', approximate: false, explicit: true, product: 'top-3-things', productLabel: 'Top 3 Things',
+    confirmedBy: [], publishedAt: undefined, priceVsTrade: 'below', priceVsTrend: 'above', excerpt: undefined, conflicts: [] });
+  assert.equal(row('bitcoin').research.alphaCode.trade, 83000);
+  // QQQ's code is checked against QQQ's own price and kept as a labelled proxy, never as NDX.
+  assert.equal(row('nasdaq100').research.alphaCode, undefined);
+  assert.equal(row('nasdaq100').research.findings[0].instrument, 'QQQ');
+  assert.deepEqual(row('gold').research, { findings: [] });
+  assert.equal(board.usd.research.findings[0].trade, 'Bullish');
+  // Yesterday's Crypto Quant is not this morning's product.
+  assert.equal(board.research.products.find((item) => item.key === 'crypto-quant').status, 'missing');
+  assert.equal(board.research.products.find((item) => item.key === 'top-3-things').status, 'read');
+});
+
+test('boards built without the morning products keep their original shape', () => {
+  const board = buildSetupBoard({ marketDate: '2026-10-16' });
+  assert.equal('research' in board, false);
+  assert.equal(board.rows.some((row) => 'research' in row), false);
+});
+
+test('the loader reads the market date’s products and reports them as their own source', async () => {
+  const requested = [];
+  const empty = () => Promise.resolve(null);
+  const load = createSetupBoardLoader({
+    loadRiskRanges: empty, loadCryptoQuant: empty, loadHedgai: empty, loadSecurityIntelligence: empty, loadNowcast: empty,
+    loadQuotes: (symbols) => { requested.push(...symbols); return Promise.resolve({}); },
+    loadVolatility: empty, loadUsdCorrelations: empty, loadKalshiEvents: () => Promise.resolve([]),
+    loadMorningProducts: ({ marketDate, products }) => {
+      requested.push(`${marketDate}:${products.join(',')}`);
+      return Promise.resolve({ 'top-3-things': { date: marketDate, article: { bodyText: 'UST 10yr Alpha Code = 5.10/4.76' } } });
+    },
+    marketDateFor: () => '2026-10-16',
+  });
+  const board = await load({ now: new Date('2026-10-16T15:00:00Z') });
+  assert.ok(requested.includes('2026-10-16:top-3-things,early-look,the-macro-show,the-call,real-time-alert,etf-pro,market-structure,risk-ranges'));
+  // ETF prices are requested so proxy levels can be checked.
+  assert.ok(requested.includes('QQQ') && requested.includes('GLD'));
+  assert.equal(board.sourceStatus.morningResearch, 'ready');
+  assert.equal(board.rows.find((row) => row.id === 'ust10y').research.findings[0].kind, 'alphaCode');
 });

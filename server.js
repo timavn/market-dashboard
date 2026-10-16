@@ -1316,6 +1316,11 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
   loadPeriodReturns: (symbol) => getPeriodReturnsCached(symbol),
   loadKalshiEvents: (series) => require('./src/services/predictionMarketsIngest/providers/kalshiClient')
     .kalshiFetch('/events', { series_ticker: series, status: 'open', limit: 200 }).then((body) => body?.events || []),
+  // The market date's Hedgeye products, read for Alpha Codes, levels, signals and positions.
+  // A product not yet published that morning is simply absent.
+  loadMorningProducts: async ({ marketDate, products }) => Object.fromEntries((await Promise.all(products.map((snapshotType) =>
+    dynamodb.get({ TableName: 'HedgeyeDailySnapshot', Key: { date: marketDate, snapshotType } }).promise()
+      .then((result) => (result.Item ? [snapshotType, result.Item] : null))))).filter(Boolean)),
   marketDateFor: (now) => defaultResearchMarketDate(now),
 });
 app.get('/api/prediction-markets/setup-board', async (_req, res) => {
