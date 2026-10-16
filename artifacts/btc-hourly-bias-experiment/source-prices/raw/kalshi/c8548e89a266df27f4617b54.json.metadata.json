@@ -1,0 +1,11 @@
+{
+  "url": "https://api.elections.kalshi.com/trade-api/v2/historical/cutoff",
+  "provider": "kalshi",
+  "retrievedAt": "2026-09-15T18:14:20Z",
+  "httpStatus": 200,
+  "httpDate": "Tue, 15 Sep 2026 18:14:21 GMT",
+  "sha256": "d7a667367024cf1984e0990faea3c794877486b0a48a47093d43e6014cff7fb9",
+  "rawResponse": "raw/kalshi/c8548e89a266df27f4617b54.json.gz",
+  "bodyBytes": 188,
+  "reusedArchive": false
+}

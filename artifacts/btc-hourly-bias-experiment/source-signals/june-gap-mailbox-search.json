@@ -1,0 +1,9 @@
+{
+  "query": "from:hedgeye.com after:2026/06/24 before:2026/06/27 {subject:crypto subject:bitcoin subject:btc}",
+  "result": {
+    "emails": [],
+    "next_page_token": null
+  },
+  "studyAsOf": "2026-09-15T18:10:12Z",
+  "exportCompletedAt": "2026-09-15T18:30:56.224874+00:00"
+}

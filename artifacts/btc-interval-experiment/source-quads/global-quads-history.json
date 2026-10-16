@@ -1,0 +1,5500 @@
+{
+  "source": "HedgeyeDailySnapshot/global-quads-history",
+  "rows": [
+    {
+      "candidate": {
+        "asOf": "2026-08-12",
+        "effectiveAt": "2026-08-12",
+        "group": "em",
+        "columns": [
+          {
+            "kind": "actual",
+            "id": "2024-Q2",
+            "label": "2Q24"
+          },
+          {
+            "id": "2024-Q3",
+            "label": "3Q24",
+            "kind": "actual"
+          },
+          {
+            "label": "4Q24",
+            "kind": "actual",
+            "id": "2024-Q4"
+          },
+          {
+            "kind": "actual",
+            "id": "2025-Q1",
+            "label": "1Q25"
+          },
+          {
+            "id": "2025-Q2",
+            "kind": "actual",
+            "label": "2Q25"
+          },
+          {
+            "id": "2025-Q3",
+            "label": "3Q25",
+            "kind": "actual"
+          },
+          {
+            "id": "2025-Q4",
+            "label": "4Q25",
+            "kind": "actual"
+          },
+          {
+            "id": "2026-Q1",
+            "kind": "actual",
+            "label": "1Q26"
+          },
+          {
+            "id": "2026-Q2",
+            "label": "2Q26",
+            "kind": "actual"
+          },
+          {
+            "kind": "estimate",
+            "id": "2026-Q3",
+            "label": "3Q26E"
+          },
+          {
+            "kind": "estimate",
+            "id": "2026-Q4",
+            "label": "4Q26E"
+          },
+          {
+            "kind": "estimate",
+            "id": "2027-Q1",
+            "label": "1Q27E"
+          },
+          {
+            "kind": "estimate",
+            "id": "2027-Q2",
+            "label": "2Q27E"
+          }
+        ],
+        "rows": [
+          {
+            "values": {
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              }
+            },
+            "country": "Argentina",
+            "aggregate": false
+          },
+          {
+            "country": "Brazil",
+            "values": {
+              "2024-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              }
+            },
+            "country": "Chile"
+          },
+          {
+            "values": {
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            },
+            "country": "China",
+            "aggregate": false
+          },
+          {
+            "country": "Colombia",
+            "aggregate": false,
+            "values": {
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              }
+            }
+          },
+          {
+            "country": "Czech Republic",
+            "aggregate": false,
+            "values": {
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              }
+            }
+          },
+          {
+            "values": {
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            },
+            "aggregate": false,
+            "country": "Greece"
+          },
+          {
+            "country": "Hong Kong",
+            "values": {
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "values": {
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              }
+            },
+            "country": "India",
+            "aggregate": false
+          },
+          {
+            "country": "Indonesia",
+            "values": {
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "values": {
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false,
+            "country": "Israel"
+          },
+          {
+            "country": "Malaysia",
+            "values": {
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            },
+            "country": "Mexico"
+          },
+          {
+            "country": "Peru",
+            "values": {
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "country": "Philippines",
+            "values": {
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            }
+          },
+          {
+            "values": {
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 3
+              }
+            },
+            "country": "Poland",
+            "aggregate": false
+          },
+          {
+            "country": "Russia",
+            "aggregate": false,
+            "values": {
+              "2024-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              }
+            }
+          },
+          {
+            "country": "Saudi Arabia",
+            "aggregate": false,
+            "values": {
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q3": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              }
+            }
+          },
+          {
+            "values": {
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              }
+            },
+            "country": "Singapore",
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              }
+            },
+            "country": "South Africa"
+          },
+          {
+            "country": "South Korea",
+            "aggregate": false,
+            "values": {
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              }
+            }
+          },
+          {
+            "values": {
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              }
+            },
+            "country": "Taiwan",
+            "aggregate": false
+          },
+          {
+            "country": "Thailand",
+            "values": {
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "country": "Turkey",
+            "aggregate": false,
+            "values": {
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 3
+              }
+            }
+          },
+          {
+            "country": "MODE/MEDIAN",
+            "aggregate": true,
+            "values": {
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            }
+          }
+        ],
+        "contentHash": "d62002441c48f9572c0a5ab3c9be057cb87c09b5f5e070dc07fe6c42578c17ed",
+        "parserVersion": "global-quads-screenshot-v1"
+      },
+      "date": "d62002441c48f9572c0a5ab3c9be057cb87c09b5f5e070dc07fe6c42578c17ed",
+      "source": {
+        "asOf": "2026-08-12",
+        "receivedAt": "2026-09-09T18:02:55.426635+00:00",
+        "s3Key": "hedgeye-email/assets/global-quads/cba3da3facefd04c2eda51f368a31f5ddb14992cb7f88374c18920bc683a1391.png",
+        "parserVersion": "global-quads-screenshot-v1",
+        "id": "cba3da3facefd04c2eda51f368a31f5ddb14992cb7f88374c18920bc683a1391",
+        "sourceTitle": "Hedgeye Q3 2026 mid-quarter presentation",
+        "publishedAt": null,
+        "verification": {
+          "reviewedAt": "2026-09-09T18:02:55.426635+00:00",
+          "checkedCells": 325,
+          "method": "visual-source-comparison",
+          "evidence": "Transcribed from the original screenshot, compared every cell to independent OCR, and visually resolved discrepancies. Quarter headers and the printed date were checked against the original.",
+          "reviewedBy": "Codex",
+          "contentHash": "d62002441c48f9572c0a5ab3c9be057cb87c09b5f5e070dc07fe6c42578c17ed"
+        },
+        "sourceType": "reviewed-screenshot"
+      },
+      "snapshotType": "global-quads-history"
+    },
+    {
+      "candidate": {
+        "group": "g20",
+        "asOf": "2026-08-12",
+        "effectiveAt": "2026-08-12",
+        "parserVersion": "global-quads-screenshot-v1",
+        "columns": [
+          {
+            "id": "2024-Q2",
+            "kind": "actual",
+            "label": "2Q24"
+          },
+          {
+            "label": "3Q24",
+            "id": "2024-Q3",
+            "kind": "actual"
+          },
+          {
+            "kind": "actual",
+            "id": "2024-Q4",
+            "label": "4Q24"
+          },
+          {
+            "kind": "actual",
+            "id": "2025-Q1",
+            "label": "1Q25"
+          },
+          {
+            "kind": "actual",
+            "id": "2025-Q2",
+            "label": "2Q25"
+          },
+          {
+            "label": "3Q25",
+            "kind": "actual",
+            "id": "2025-Q3"
+          },
+          {
+            "kind": "actual",
+            "id": "2025-Q4",
+            "label": "4Q25"
+          },
+          {
+            "kind": "actual",
+            "label": "1Q26",
+            "id": "2026-Q1"
+          },
+          {
+            "label": "2Q26",
+            "kind": "actual",
+            "id": "2026-Q2"
+          },
+          {
+            "kind": "estimate",
+            "id": "2026-Q3",
+            "label": "3Q26E"
+          },
+          {
+            "label": "4Q26E",
+            "id": "2026-Q4",
+            "kind": "estimate"
+          },
+          {
+            "id": "2027-Q1",
+            "kind": "estimate",
+            "label": "1Q27E"
+          },
+          {
+            "label": "2Q27E",
+            "id": "2027-Q2",
+            "kind": "estimate"
+          }
+        ],
+        "contentHash": "c34678c0a41c7913588ca7f184fd68fc1ae5729536f98fe83f0ef04719aa44a6",
+        "rows": [
+          {
+            "aggregate": false,
+            "values": {
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            },
+            "country": "Argentina"
+          },
+          {
+            "country": "Australia",
+            "aggregate": false,
+            "values": {
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              }
+            }
+          },
+          {
+            "aggregate": false,
+            "country": "Brazil",
+            "values": {
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              }
+            }
+          },
+          {
+            "country": "Canada",
+            "aggregate": false,
+            "values": {
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            }
+          },
+          {
+            "values": {
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false,
+            "country": "China"
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": null,
+                "kind": "actual"
+              }
+            },
+            "country": "Eurozone"
+          },
+          {
+            "country": "France",
+            "aggregate": false,
+            "values": {
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": null
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "quad": null,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 4
+              }
+            }
+          },
+          {
+            "values": {
+              "2027-Q2": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              }
+            },
+            "aggregate": false,
+            "country": "Germany"
+          },
+          {
+            "country": "India",
+            "aggregate": false,
+            "values": {
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "values": {
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false,
+            "country": "Indonesia"
+          },
+          {
+            "country": "Italy",
+            "values": {
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              }
+            },
+            "country": "Japan"
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              }
+            },
+            "country": "Mexico"
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              }
+            },
+            "country": "Russia"
+          },
+          {
+            "country": "South Africa",
+            "aggregate": false,
+            "values": {
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "country": "South Korea",
+            "aggregate": false,
+            "values": {
+              "2024-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "country": "Spain",
+            "values": {
+              "2024-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "country": "Turkey",
+            "values": {
+              "2024-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "country": "United Kingdom",
+            "aggregate": false,
+            "values": {
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              }
+            }
+          },
+          {
+            "aggregate": false,
+            "country": "United States",
+            "values": {
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "country": "MODE/MEDIAN",
+            "values": {
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              }
+            },
+            "aggregate": true
+          }
+        ]
+      },
+      "date": "c34678c0a41c7913588ca7f184fd68fc1ae5729536f98fe83f0ef04719aa44a6",
+      "source": {
+        "verification": {
+          "reviewedBy": "Codex",
+          "checkedCells": 273,
+          "contentHash": "c34678c0a41c7913588ca7f184fd68fc1ae5729536f98fe83f0ef04719aa44a6",
+          "method": "visual-source-comparison",
+          "evidence": "Transcribed from the original screenshot, compared every cell to independent OCR, and visually resolved discrepancies. Quarter headers and the printed date were checked against the original.",
+          "reviewedAt": "2026-09-09T18:02:55.426037+00:00"
+        },
+        "publishedAt": null,
+        "asOf": "2026-08-12",
+        "s3Key": "hedgeye-email/assets/global-quads/a48332e644bd82c622a546c15f020baf66f4be7b928913b828630159e960c348.png",
+        "parserVersion": "global-quads-screenshot-v1",
+        "sourceType": "reviewed-screenshot",
+        "sourceTitle": "Hedgeye Q3 2026 mid-quarter presentation",
+        "id": "a48332e644bd82c622a546c15f020baf66f4be7b928913b828630159e960c348",
+        "receivedAt": "2026-09-09T18:02:55.426037+00:00"
+      },
+      "snapshotType": "global-quads-history"
+    },
+    {
+      "candidate": {
+        "asOf": "2026-08-12",
+        "contentHash": "2887079adc38863aaced2ed93b81c1c893bbe14d6b88e04d3845e3f79d229ebb",
+        "parserVersion": "global-quads-screenshot-v1",
+        "rows": [
+          {
+            "values": {
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              }
+            },
+            "aggregate": false,
+            "country": "Argentina"
+          },
+          {
+            "values": {
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              }
+            },
+            "country": "Australia",
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              }
+            },
+            "country": "Austria"
+          },
+          {
+            "values": {
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": null
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              }
+            },
+            "country": "Belgium",
+            "aggregate": false
+          },
+          {
+            "values": {
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            },
+            "country": "Brazil",
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              }
+            },
+            "country": "Canada"
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              }
+            },
+            "country": "Chile"
+          },
+          {
+            "values": {
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            },
+            "country": "China",
+            "aggregate": false
+          },
+          {
+            "values": {
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              }
+            },
+            "country": "Colombia",
+            "aggregate": false
+          },
+          {
+            "values": {
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            },
+            "country": "Czech Republic",
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              }
+            },
+            "country": "Denmark"
+          },
+          {
+            "aggregate": false,
+            "country": "Emerging Markets",
+            "values": {
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 4
+              }
+            }
+          },
+          {
+            "country": "Eurozone",
+            "values": {
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": null
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "country": "Finland",
+            "values": {
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              }
+            }
+          },
+          {
+            "country": "France",
+            "aggregate": false,
+            "values": {
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "quad": null,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": null,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              }
+            }
+          },
+          {
+            "country": "Germany",
+            "values": {
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "country": "Greece",
+            "aggregate": false,
+            "values": {
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "values": {
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              }
+            },
+            "aggregate": false,
+            "country": "Hong Kong"
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              }
+            },
+            "country": "India"
+          },
+          {
+            "values": {
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              }
+            },
+            "country": "Indonesia",
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "country": "Ireland",
+            "values": {
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              }
+            }
+          },
+          {
+            "country": "Israel",
+            "aggregate": false,
+            "values": {
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q2": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              }
+            }
+          },
+          {
+            "aggregate": false,
+            "country": "Italy",
+            "values": {
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              }
+            }
+          },
+          {
+            "country": "Japan",
+            "values": {
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 3
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              }
+            },
+            "country": "Malaysia"
+          },
+          {
+            "aggregate": false,
+            "values": {
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            },
+            "country": "Mexico"
+          },
+          {
+            "values": {
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              }
+            },
+            "country": "Netherlands",
+            "aggregate": false
+          },
+          {
+            "country": "New Zealand",
+            "aggregate": false,
+            "values": {
+              "2025-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q4": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 3
+              }
+            }
+          },
+          {
+            "country": "Norway",
+            "aggregate": false,
+            "values": {
+              "2026-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 2
+              }
+            }
+          },
+          {
+            "country": "Peru",
+            "aggregate": false,
+            "values": {
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 1
+              }
+            }
+          },
+          {
+            "values": {
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              }
+            },
+            "country": "Philippines",
+            "aggregate": false
+          },
+          {
+            "country": "Poland",
+            "values": {
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "values": {
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              }
+            },
+            "aggregate": false,
+            "country": "Portugal"
+          },
+          {
+            "country": "Russia",
+            "aggregate": false,
+            "values": {
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "values": {
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q1": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 4
+              }
+            },
+            "country": "Singapore",
+            "aggregate": false
+          },
+          {
+            "aggregate": false,
+            "country": "Saudi Arabia",
+            "values": {
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              }
+            }
+          },
+          {
+            "country": "South Africa",
+            "aggregate": false,
+            "values": {
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 3
+              }
+            }
+          },
+          {
+            "aggregate": false,
+            "country": "South Korea",
+            "values": {
+              "2025-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q4": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 4
+              }
+            }
+          },
+          {
+            "country": "Spain",
+            "aggregate": false,
+            "values": {
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 2,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "values": {
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 3,
+                "kind": "estimate"
+              }
+            },
+            "aggregate": false,
+            "country": "Sweden"
+          },
+          {
+            "country": "Switzerland",
+            "aggregate": false,
+            "values": {
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 2
+              },
+              "2026-Q2": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "country": "Taiwan",
+            "values": {
+              "2026-Q3": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 3
+              },
+              "2024-Q3": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              }
+            },
+            "aggregate": false
+          },
+          {
+            "country": "Thailand",
+            "aggregate": false,
+            "values": {
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2025-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              }
+            }
+          },
+          {
+            "aggregate": false,
+            "country": "Turkey",
+            "values": {
+              "2026-Q4": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2027-Q2": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2026-Q3": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2024-Q4": {
+                "quad": 1,
+                "kind": "actual"
+              }
+            }
+          },
+          {
+            "country": "United Kingdom",
+            "aggregate": false,
+            "values": {
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2026-Q4": {
+                "quad": 4,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q2": {
+                "quad": 3,
+                "kind": "actual"
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2024-Q4": {
+                "quad": 2,
+                "kind": "actual"
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              }
+            }
+          },
+          {
+            "values": {
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q4": {
+                "quad": 2,
+                "kind": "estimate"
+              },
+              "2027-Q2": {
+                "quad": 1,
+                "kind": "estimate"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2024-Q3": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2025-Q1": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 1
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q1": {
+                "kind": "actual",
+                "quad": 1
+              }
+            },
+            "aggregate": false,
+            "country": "United States"
+          },
+          {
+            "values": {
+              "2024-Q4": {
+                "kind": "actual",
+                "quad": 2
+              },
+              "2026-Q1": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q2": {
+                "kind": "actual",
+                "quad": 3
+              },
+              "2027-Q1": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2026-Q4": {
+                "quad": 3,
+                "kind": "estimate"
+              },
+              "2025-Q2": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2025-Q4": {
+                "quad": 4,
+                "kind": "actual"
+              },
+              "2026-Q3": {
+                "kind": "estimate",
+                "quad": 4
+              },
+              "2024-Q3": {
+                "quad": 1,
+                "kind": "actual"
+              },
+              "2025-Q3": {
+                "kind": "actual",
+                "quad": 4
+              },
+              "2027-Q2": {
+                "kind": "estimate",
+                "quad": 1
+              },
+              "2025-Q1": {
+                "quad": 3,
+                "kind": "actual"
+              }
+            },
+            "aggregate": true,
+            "country": "MODE/MEAN"
+          }
+        ],
+        "effectiveAt": "2026-08-12",
+        "group": "global",
+        "columns": [
+          {
+            "id": "2024-Q3",
+            "label": "3Q24",
+            "kind": "actual"
+          },
+          {
+            "id": "2024-Q4",
+            "kind": "actual",
+            "label": "4Q24"
+          },
+          {
+            "kind": "actual",
+            "label": "1Q25",
+            "id": "2025-Q1"
+          },
+          {
+            "label": "2Q25",
+            "kind": "actual",
+            "id": "2025-Q2"
+          },
+          {
+            "id": "2025-Q3",
+            "kind": "actual",
+            "label": "3Q25"
+          },
+          {
+            "id": "2025-Q4",
+            "label": "4Q25",
+            "kind": "actual"
+          },
+          {
+            "id": "2026-Q1",
+            "kind": "actual",
+            "label": "1Q26"
+          },
+          {
+            "label": "2Q26",
+            "kind": "actual",
+            "id": "2026-Q2"
+          },
+          {
+            "label": "3Q26E",
+            "kind": "estimate",
+            "id": "2026-Q3"
+          },
+          {
+            "kind": "estimate",
+            "label": "4Q26E",
+            "id": "2026-Q4"
+          },
+          {
+            "id": "2027-Q1",
+            "kind": "estimate",
+            "label": "1Q27E"
+          },
+          {
+            "kind": "estimate",
+            "id": "2027-Q2",
+            "label": "2Q27E"
+          }
+        ]
+      },
+      "source": {
+        "sourceTitle": "Hedgeye Q3 2026 mid-quarter presentation",
+        "parserVersion": "global-quads-screenshot-v1",
+        "s3Key": "hedgeye-email/assets/global-quads/aded4dd5139cd562e67cb99fad23a8d54c09637e7c7f730fe3f08f337f411af5.png",
+        "asOf": "2026-08-12",
+        "sourceType": "reviewed-screenshot",
+        "receivedAt": "2026-09-09T18:02:55.426921+00:00",
+        "id": "aded4dd5139cd562e67cb99fad23a8d54c09637e7c7f730fe3f08f337f411af5",
+        "publishedAt": null,
+        "verification": {
+          "reviewedBy": "Codex",
+          "method": "visual-source-comparison",
+          "contentHash": "2887079adc38863aaced2ed93b81c1c893bbe14d6b88e04d3845e3f79d229ebb",
+          "checkedCells": 564,
+          "reviewedAt": "2026-09-09T18:02:55.426921+00:00",
+          "evidence": "Transcribed from the original screenshot, compared every cell to independent OCR, and visually resolved discrepancies. Quarter headers and the printed date were checked against the original."
+        }
+      },
+      "date": "2887079adc38863aaced2ed93b81c1c893bbe14d6b88e04d3845e3f79d229ebb",
+      "snapshotType": "global-quads-history"
+    }
+  ]
+}

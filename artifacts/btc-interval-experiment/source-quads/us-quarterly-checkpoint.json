@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "status": "verified",
+  "source": "hedgeye-published-global-quads",
+  "country": "United States",
+  "frequency": "quarterly",
+  "sourceAsOf": "2026-08-12",
+  "availableAt": "2026-09-09T18:02:55.426921Z",
+  "sources": [
+    {
+      "group": "g20",
+      "sourceAsOf": "2026-08-12",
+      "availableAt": "2026-09-09T18:02:55.426037Z",
+      "publishedAt": null,
+      "imageHash": "a48332e644bd82c622a546c15f020baf66f4be7b928913b828630159e960c348",
+      "contentHash": "c34678c0a41c7913588ca7f184fd68fc1ae5729536f98fe83f0ef04719aa44a6",
+      "sourceTitle": "Hedgeye Q3 2026 mid-quarter presentation"
+    },
+    {
+      "group": "global",
+      "sourceAsOf": "2026-08-12",
+      "availableAt": "2026-09-09T18:02:55.426921Z",
+      "publishedAt": null,
+      "imageHash": "aded4dd5139cd562e67cb99fad23a8d54c09637e7c7f730fe3f08f337f411af5",
+      "contentHash": "2887079adc38863aaced2ed93b81c1c893bbe14d6b88e04d3845e3f79d229ebb",
+      "sourceTitle": "Hedgeye Q3 2026 mid-quarter presentation"
+    }
+  ],
+  "quarters": [
+    {
+      "quarter": "2024-Q3",
+      "quad": 4,
+      "kind": "actual",
+      "periodStart": "2024-07-01T04:00:00Z",
+      "periodEnd": "2024-10-01T04:00:00Z"
+    },
+    {
+      "quarter": "2024-Q4",
+      "quad": 3,
+      "kind": "actual",
+      "periodStart": "2024-10-01T04:00:00Z",
+      "periodEnd": "2025-01-01T05:00:00Z"
+    },
+    {
+      "quarter": "2025-Q1",
+      "quad": 4,
+      "kind": "actual",
+      "periodStart": "2025-01-01T05:00:00Z",
+      "periodEnd": "2025-04-01T04:00:00Z"
+    },
+    {
+      "quarter": "2025-Q2",
+      "quad": 1,
+      "kind": "actual",
+      "periodStart": "2025-04-01T04:00:00Z",
+      "periodEnd": "2025-07-01T04:00:00Z"
+    },
+    {
+      "quarter": "2025-Q3",
+      "quad": 2,
+      "kind": "actual",
+      "periodStart": "2025-07-01T04:00:00Z",
+      "periodEnd": "2025-10-01T04:00:00Z"
+    },
+    {
+      "quarter": "2025-Q4",
+      "quad": 4,
+      "kind": "actual",
+      "periodStart": "2025-10-01T04:00:00Z",
+      "periodEnd": "2026-01-01T05:00:00Z"
+    },
+    {
+      "quarter": "2026-Q1",
+      "quad": 1,
+      "kind": "actual",
+      "periodStart": "2026-01-01T05:00:00Z",
+      "periodEnd": "2026-04-01T04:00:00Z"
+    },
+    {
+      "quarter": "2026-Q2",
+      "quad": 3,
+      "kind": "actual",
+      "periodStart": "2026-04-01T04:00:00Z",
+      "periodEnd": "2026-07-01T04:00:00Z"
+    },
+    {
+      "quarter": "2026-Q3",
+      "quad": 4,
+      "kind": "estimate",
+      "periodStart": "2026-07-01T04:00:00Z",
+      "periodEnd": "2026-10-01T04:00:00Z"
+    },
+    {
+      "quarter": "2026-Q4",
+      "quad": 2,
+      "kind": "estimate",
+      "periodStart": "2026-10-01T04:00:00Z",
+      "periodEnd": "2027-01-01T05:00:00Z"
+    },
+    {
+      "quarter": "2027-Q1",
+      "quad": 4,
+      "kind": "estimate",
+      "periodStart": "2027-01-01T05:00:00Z",
+      "periodEnd": "2027-04-01T04:00:00Z"
+    },
+    {
+      "quarter": "2027-Q2",
+      "quad": 1,
+      "kind": "estimate",
+      "periodStart": "2027-04-01T04:00:00Z",
+      "periodEnd": "2027-07-01T04:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "sourceMessageId": "1978d347135693b5",
+  "publicationAt": "2025-06-20T11:56:00Z",
+  "receivedAt": "2025-06-20T11:58:33Z",
+  "availableAt": "2025-06-20T11:58:33Z",
+  "reportDate": "2025-06-20",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:312:b0:87e:50e:b629 with SMTP id ay18csp846313uab;        Fri, 20 Jun 2025 04:58:34 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-150.sailthru.com (mta236-150.sailthru.com. [192.64.236.150])        by mx.google.com with ESMTPS id 6a1803df08f44-6fd09566914si18780416d6.306.2025.06.20.04.58.33        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Fri, 20 Jun 2025 04:58:33 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=Q+hhTplD;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=kl8+2Cs5;       spf=pass (google.com: domain of delivery_20250620075833.40372280.691@mx.sailthru.com designates 192.64.236.150 as permitted sender) smtp.mailfrom=delivery_20250620075833.40372280.691@mx.sailthru.com;       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay8.sailthru.cloud (10.55.75.62) by mta237-109.sailthru.com id hal6ei3791s4 for <timsmithaviation@gmail.com>; Fri, 20 Jun 2025 06:58:33 -0500 (envelope-from <delivery_20250620075833.40372280.691@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Fri, 20 Jun 2025 07:58:33 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250620075833.40372280.691@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+1%), \"NO DELAYS!\", \u20bfTC Staking (Kraken), RUJI Launch, Jump Comeback"
+    }
+  ],
+  "gmailInternalDate": "1750420713000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Trump_No_Delays.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_Staking.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Jump_Comeback.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Rujira_Live.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Rujira_Live_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Tether_PearPass.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Visa_Yellow_Card.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Cardone_capital.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Sis_VC.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/WoC_062025_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142106/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1978d347135693b5",
+  "htmlSha256": "995c8d4f512be5c78a00e509d3667e8f90149446897576083081cfb5bdea47d4",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/1978d347135693b5.json",
+  "rawGmailSha256": "f4d5a8e4e815d91cb419027c172a21321fd7076e61ec65825033ca2837e1f752",
+  "collectionSource": "gmail_connector_original_mime"
+}

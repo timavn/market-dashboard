@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "status": "excluded",
+  "reportDate": "2023-01-31",
+  "source": "Hedgeye Bitcoin Trend Tracker / Crypto Quant",
+  "sourceUrl": "https://app.hedgeye.com/feed_items/128291-crypto-quant-tc-0-5-eth-0-8-squeeze-over-eu-crypto-regulation?with_category=78-bitcoin-trend-tracker",
+  "title": "CRYPTO QUANT | \u20bfTC (+0.5%), ETH (+0.8%), Squeeze Over?, EU Crypto Regulation",
+  "publishedAt": "2023-01-31T11:33:00Z",
+  "publicationEvidence": {
+    "method": "authenticated-native-browser-original-article",
+    "printedTimestamp": "2023-01-31 06:33 EST",
+    "evidencePath": "publisher-followup.json"
+  },
+  "receivedAt": null,
+  "availableAt": null,
+  "reconstructedSignalsIncluded": 0,
+  "exclusionReason": "HISTORICAL_RECEIPT_NOT_VERIFIED",
+  "timingDecision": "The original article supplies a printed publication time. The original linked image version predates publication. Neither establishes the historical receipt required by the approved entry-timing policy. Current archive retrieval is collection evidence only and cannot become a historical receipt or availableAt.",
+  "image": {
+    "path": "2023-01-31-BTC_2.png",
+    "headersPath": "2023-01-31-BTC_2.headers.json",
+    "url": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/106081/large/BTC_2.png",
+    "sha256": "f874e424b6d9b0943e56b011f8341425bbdd36412afe2e8f78bf907185739005",
+    "byteLength": 12113,
+    "lastModifiedAt": "2023-01-31T11:25:43Z",
+    "versionId": "P_z_z01fr2977UZtGzXrAq2p_RoEz4EF",
+    "retrievedAt": "2026-09-15T23:25:39.279825Z"
+  },
+  "visualTranscription": {
+    "assetHeader": "BTC",
+    "trend": "BEARISH",
+    "lowerRange": 19282,
+    "upperRange": 24068,
+    "rangeLabels": [
+      "Buy Trade",
+      "Sell Trade"
+    ],
+    "reviewMethod": "direct-original-image-visual-transcription",
+    "reviewedAt": "2026-09-15T23:26:31.777508Z",
+    "imageSha256": "f874e424b6d9b0943e56b011f8341425bbdd36412afe2e8f78bf907185739005",
+    "valuesIncludedInStudy": false
+  },
+  "receiptEvidence": {
+    "path": "2023-01-31-receipt-search.json",
+    "messagesFound": 0,
+    "historicalReceiptVerified": false
+  },
+  "sourceAccess": {
+    "nativeAuthenticatedBrowser": "available",
+    "directArticleHttpStatus": 403,
+    "directArchiveHttpStatus": 403,
+    "directImageHttpStatus": 200,
+    "configuredSourceAdapter": "scripts/analyst_sidecar/finding_source_reports.py",
+    "adapterScope": "Original email indexed evidence, not a publisher research API; no additional historical receipt established."
+  },
+  "reviewedAt": "2026-09-15T23:26:31.777508Z"
+}

@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "status": "verified_historical",
+  "source": "Hedgeye original Crypto Quant / Bitcoin Trend Tracker reports",
+  "asOf": "2026-09-15T18:00:00Z",
+  "requestedStartDate": "2021-09-15",
+  "requestedEndDate": "2026-09-15",
+  "olderCandidateMessages": 395,
+  "actualOlderReports": 388,
+  "verifiedOlderReports": 385,
+  "excludedOlderReports": [
+    {
+      "date": "2022-02-08",
+      "reason": "Original BTC risk-range image returned HTTP 403."
+    },
+    {
+      "date": "2022-02-14",
+      "reason": "The original table has a blacked-out asset header; BTC identity is not verified."
+    },
+    {
+      "date": "2025-04-08",
+      "reason": "The original table has a blacked-out asset header; BTC identity is not verified."
+    }
+  ],
+  "reportVersions": 673,
+  "uniqueReportDates": 670,
+  "verifiedReports": 654,
+  "verifiedRangeReports": 654,
+  "visuallyReviewedReports": 130,
+  "firstVerifiedAt": "2021-09-15T10:58:50Z",
+  "lastVerifiedAt": "2026-09-15T11:08:18Z",
+  "interruptions": [
+    {
+      "startAt": "2022-02-08T11:28:39Z",
+      "endAt": "2022-02-09T11:26:35Z",
+      "affectedReportDates": 1,
+      "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+    },
+    {
+      "startAt": "2022-02-14T13:09:05Z",
+      "endAt": "2022-02-15T11:34:24Z",
+      "affectedReportDates": 1,
+      "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+    },
+    {
+      "startAt": "2022-10-05T04:00:00Z",
+      "endAt": "2024-12-16T12:17:56Z",
+      "affectedReportDates": 552,
+      "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY"
+    },
+    {
+      "startAt": "2025-01-15T05:00:00Z",
+      "endAt": "2025-02-05T11:50:06Z",
+      "affectedReportDates": 14,
+      "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY"
+    },
+    {
+      "startAt": "2025-04-08T13:06:17Z",
+      "endAt": "2025-04-09T12:44:03Z",
+      "affectedReportDates": 1,
+      "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+    },
+    {
+      "startAt": "2025-05-01T04:00:00Z",
+      "endAt": "2025-05-28T11:09:04Z",
+      "affectedReportDates": 18,
+      "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY"
+    },
+    {
+      "startAt": "2025-08-06T13:14:19Z",
+      "endAt": "2025-08-07T11:33:34Z",
+      "affectedReportDates": 1,
+      "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+    },
+    {
+      "startAt": "2025-10-06T11:10:55Z",
+      "endAt": "2025-10-07T10:42:03Z",
+      "affectedReportDates": 1,
+      "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+    },
+    {
+      "startAt": "2026-06-04T04:00:00Z",
+      "endAt": "2026-06-29T10:56:47Z",
+      "affectedReportDates": 16,
+      "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY;TRUSTED_RECEIPT_TIME_UNAVAILABLE"
+    }
+  ],
+  "publisherArchiveAccess": "Original article, date-filtered archive, and publisher search returned HTTP 403 from available access; no connected browser was available. This does not establish that the publisher lacks older reports.",
+  "timingConvention": "Availability is the later of exact original publication time and trusted Google receipt; unknown report days interrupt previous-state carry.",
+  "quadRecovery": {
+    "newActualQuarterStart": "2023-Q1",
+    "newActualQuarterEnd": "2025-Q1",
+    "existingLatestVintageActualQuarterStart": "2024-Q3",
+    "existingLatestVintageActualQuarterEnd": "2026-Q2",
+    "unverifiedEarlierQuarters": "2021-Q3 through 2022-Q4",
+    "basis": "Retrospective published actual-quarter classifications; forecast cells excluded."
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "checkedAt": "2026-09-15",
+  "method": "Read-only native Chrome UI inspection using the existing authenticated publisher session",
+  "scope": "Two exact URLs already recorded in source-signals/archive-audit/publisher-access.json, followed by the observed VIEW MORE BITCOIN TREND TRACKER link, its January 2023 month control, and one listed original report; no guessed URLs, source archive modifications, or bulk collection",
+  "httpAccess": "Earlier direct HTTP requests returned 403; this does not describe authenticated native-browser access",
+  "browserAccess": "Available through native Chrome app control; browser-specific computer-use provider unavailable",
+  "checks": [
+    {
+      "url": "https://app.hedgeye.com/insights/archives?month=2023-01-01&type=bitcoin-trend-tracker",
+      "result": "accessible",
+      "observedHeading": "More Insights",
+      "observedMonth": "January, 2023",
+      "observedScope": "Broad research archive; the type query did not visibly restrict the displayed archive to Bitcoin Trend Tracker",
+      "visibleListing": "The accessibility tree exposed the first 100 of 300 items; no Bitcoin, Crypto Quant, or Tracker report title was identified in those displayed items",
+      "gapTrackerVerified": false
+    },
+    {
+      "url": "https://app.hedgeye.com/feed_items/123014",
+      "result": "accessible",
+      "observedProduct": "BITCOIN TREND TRACKER",
+      "observedTitle": "CRYPTO QUANT | ₿TC (+1.8%), ETH (+1.8%), GBTC Discount = ATH, ₿TC Hashrate = ATH",
+      "observedPublicationTime": "2022-10-04 06:55 EDT",
+      "observedAuthor": "Christian Drake",
+      "observedContent": "Article content and original publisher chart links are visible without a login challenge or paywall",
+      "reportRole": "Existing October 4, 2022 boundary report; not a newly recovered report inside the later coverage gap",
+      "gapTrackerVerified": false,
+      "observedArchiveLink": "https://app.hedgeye.com/research_archives",
+      "observedArchiveLinkLabel": "VIEW MORE BITCOIN TREND TRACKER",
+      "observedArchiveLinkVisited": true
+    },
+    {
+      "url": "https://app.hedgeye.com/research_archives?with_category=78-bitcoin-trend-tracker&month=2023-01-01&type=",
+      "result": "accessible",
+      "navigation": "Clicked VIEW MORE BITCOIN TREND TRACKER on the known October 2022 original, then selected Jan, 2023 from the archive month dropdown",
+      "observedHeading": "Bitcoin Trend Tracker",
+      "observedMonth": "Jan, 2023",
+      "visibleListing": "20 dated CRYPTO QUANT reports from January 3 through January 31, 2023",
+      "gapTrackerVerified": true,
+      "firstListedReportUrl": "https://app.hedgeye.com/feed_items/128291-crypto-quant-tc-0-5-eth-0-8-squeeze-over-eu-crypto-regulation?with_category=78-bitcoin-trend-tracker"
+    },
+    {
+      "url": "https://app.hedgeye.com/feed_items/128291-crypto-quant-tc-0-5-eth-0-8-squeeze-over-eu-crypto-regulation?with_category=78-bitcoin-trend-tracker",
+      "result": "accessible",
+      "observedProduct": "BITCOIN TREND TRACKER",
+      "observedTitle": "CRYPTO QUANT | ₿TC (+0.5%), ETH (+0.8%), Squeeze Over?, EU Crypto Regulation",
+      "observedPublicationTime": "2023-01-31 06:33 EST",
+      "observedContent": "Original article body and publisher chart links are visible without a login challenge or paywall",
+      "gapTrackerVerified": true,
+      "observedChartLinks": [
+        "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/106081/large/BTC_1.png",
+        "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/106081/large/BTC_2.png",
+        "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/106081/large/GIP_Table.png"
+      ],
+      "chartValuesTranscribed": false,
+      "reportImportedIntoStudy": false
+    }
+  ],
+  "conclusion": "Authenticated native Chrome can view the product-specific January 2023 Bitcoin Trend Tracker archive and a January 31, 2023 original report with publisher chart links. The earlier broad archive URL was not the product archive. At least one actual report inside the mailbox coverage gap is accessible; direct HTTP 403 and incomplete mailbox coverage do not establish that this gap is unrecoverable. Further source collection and numerical verification remain necessary before expanding study coverage.",
+  "newGapOriginalsVerifiedAccessible": 1,
+  "newGapSourcesRecovered": 0,
+  "sealedSourceArchiveModified": false
+}

@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-09-15",
+  "browserAccess": "No browser is available from computer-use getBrowser URL selection",
+  "requests": [
+    {
+      "url": "https://app.hedgeye.com/feed_items/123014",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "url": "https://app.hedgeye.com/insights/archives?month=2023-01-01&type=bitcoin-trend-tracker",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    {
+      "url": "https://app.hedgeye.com/insights/search?q=CRYPTO+QUANT",
+      "error": "HTTP Error 403: Forbidden"
+    }
+  ]
+}

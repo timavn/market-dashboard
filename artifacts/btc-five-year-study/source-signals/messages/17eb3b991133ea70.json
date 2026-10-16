@@ -1,0 +1,54 @@
+{
+  "sourceMessageId": "17eb3b991133ea70",
+  "publicationAt": null,
+  "receivedAt": "2022-02-01T05:19:49Z",
+  "availableAt": null,
+  "reportDate": "2022-02-01",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a67:f9d9:0:0:0:0:0 with SMTP id c25csp611827vsq;        Mon, 31 Jan 2022 21:19:49 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from wrqvthcs.outbound-mail.sendgrid.net (wrqvthcs.outbound-mail.sendgrid.net. [149.72.112.198])        by mx.google.com with ESMTPS id n186si15472527pga.115.2022.01.31.21.19.49        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);        Mon, 31 Jan 2022 21:19:49 -0800 (PST)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@sendgrid.me header.s=smtpapi header.b=CxyRx1Db;       spf=pass (google.com: domain of bounces+651148-018b-timsmithaviation=gmail.com@sendgrid.net designates 149.72.112.198 as permitted sender) smtp.mailfrom=\"bounces+651148-018b-timsmithaviation=gmail.com@sendgrid.net\""
+    },
+    {
+      "name": "Received",
+      "value": "by filterdrecv-7bf5c69d5-m2pn4 with SMTP id filterdrecv-7bf5c69d5-m2pn4-1-61F8C2F4-18        2022-02-01 05:19:48.516224936 +0000 UTC m=+13157926.171859619"
+    },
+    {
+      "name": "Received",
+      "value": "from hedgeye.com (unknown) by ismtpd0143p1mdw1.sendgrid.net (SG) with ESMTP id 2s4f5v8WQZmRBP6700HVyQ for <timsmithaviation@gmail.com>; Tue, 01 Feb 2022 05:19:48.400 +0000 (UTC)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 01 Feb 2022 05:19:48 +0000 (UTC)"
+    },
+    {
+      "name": "From",
+      "value": "info@hedgeye.com"
+    },
+    {
+      "name": "Message-Id",
+      "value": "<61f8c2f42b504_539a1286ff8314115@cms.production.hedgeye.internal.tmail>"
+    },
+    {
+      "name": "Subject",
+      "value": "An Important Note About \"Bitcoin Trend Tracker\""
+    }
+  ],
+  "gmailInternalDate": "1643692788000",
+  "imageUrls": [],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/17eb3b991133ea70",
+  "htmlSha256": "4d95e24478599f5bdf4e04b94655d78665665c4ee8d8582aa57fc23a107e4d88",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/17eb3b991133ea70.json",
+  "rawGmailSha256": "ecdf266e1bcb34288eb684ec4291cc8419b3ad1e6c623448e8f8e84f07c782e5",
+  "collectionSource": "gmail_connector_original_mime"
+}

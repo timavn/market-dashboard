@@ -1,0 +1,40 @@
+{
+  "observedHours": 9944,
+  "expectedHours": 9954,
+  "missingCandleHours": 10,
+  "knownSignalHours": 9280,
+  "eligibleEntryHours": 9280,
+  "excludedHours": 664,
+  "unknownRangeHours": 0,
+  "unknownSignalHours": 664,
+  "exclusionCounts": {
+    "Unknown tracker signal": 664
+  },
+  "zoneHours": {
+    "middle": 3436,
+    "bottom": 2127,
+    "below": 806,
+    "top": 2295,
+    "above": 616
+  },
+  "trendHours": {
+    "BULLISH": 3240,
+    "BEARISH": 5080,
+    "NEUTRAL": 960
+  },
+  "freshUsdEntryHours": 6311,
+  "currentBullishStart": "2026-08-20T12:38:43Z",
+  "rangeDefinition": "Three equal price-width sections of the published lower-to-upper range, assigned from the hour's opening price.",
+  "missingIntervals": [
+    {
+      "startInclusive": "2025-10-25T16:00:00Z",
+      "endExclusive": "2025-10-25T21:00:00Z",
+      "hours": 5
+    },
+    {
+      "startInclusive": "2026-05-08T02:00:00Z",
+      "endExclusive": "2026-05-08T07:00:00Z",
+      "hours": 5
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "sourceMessageId": "197ac0f258539283",
+  "publicationAt": "2025-06-26T11:44:00Z",
+  "receivedAt": "2025-06-26T11:46:03Z",
+  "availableAt": "2025-06-26T11:46:03Z",
+  "reportDate": "2025-06-26",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:3c89:0:b0:87e:50e:b629 with SMTP id a9csp190623uax;        Thu, 26 Jun 2025 04:46:03 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta237-13.sailthru.com (mta237-13.sailthru.com. [192.64.237.13])        by mx.google.com with ESMTPS id d75a77b69052e-4a77a0e6bf7si152169021cf.598.2025.06.26.04.46.02        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Thu, 26 Jun 2025 04:46:03 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=JfScp8cf;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=ej0nqUIi;       spf=pass (google.com: domain of delivery_20250626074602.40452244.882@mx.sailthru.com designates 192.64.237.13 as permitted sender) smtp.mailfrom=delivery_20250626074602.40452244.882@mx.sailthru.com;       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay9.sailthru.cloud (10.55.62.145) by mta236-151.sailthru.com id hbkpfk3791ss for <timsmithaviation@gmail.com>; Thu, 26 Jun 2025 06:46:02 -0500 (envelope-from <delivery_20250626074602.40452244.882@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Thu, 26 Jun 2025 07:46:02 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250626074602.40452244.882@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-0.4%), ETH/ETHA = NEUTRAL, More BTC Reserves, ETH Staking > BTC Mining?"
+    }
+  ],
+  "gmailInternalDate": "1750938362000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070627.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070650.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070707.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070726.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070741.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070802.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070815.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_25_083751.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070829.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070848.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/MSTR.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070931.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/COIN.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_071008.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_071025.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_071044.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_072318.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_071827.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/m3.jpg",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_071942.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/HK.jpg",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_072444.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_071436.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_072130.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/RSA_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_072819.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/krak.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/glassnode_studio_btc_exchange_net_position_change__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/glassnode_studio_btc_number_of_transfers_from_whale_entities_to_exchanges__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/glassnode_studio_btc_percent_balance_on_exchanges.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/glassnode_studio_ethereum_whale_net_position_change_address_1k_to_10k_eth.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/glassnode_studio_eth_number_of_transactions_per_second.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/glassnode_studio_eth_eth_2_0_number_of_new_deposits.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/197ac0f258539283",
+  "htmlSha256": "4d909cbfdd0daceb2a4408ac032eb29bfcf33494e7b08a7e7273591fadeb8054",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/197ac0f258539283.json",
+  "rawGmailSha256": "727499e20658ce9f7f4051d035c1b8bcf321ff7c860df74cd9aa26fc784e806a",
+  "collectionSource": "gmail_connector_original_mime"
+}

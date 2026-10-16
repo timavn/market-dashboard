@@ -1,0 +1,593 @@
+--- parse_hedgeye_email_html.py
++++ parse_hedgeye_email_html.py
+@@ -19,6 +19,7 @@
+ from datetime import datetime, timezone
+ from decimal import Decimal
+ from html.parser import HTMLParser
++from zoneinfo import ZoneInfo
+ from typing import Any, Callable, Dict, List, Optional, Tuple
+ 
+ from boto3.dynamodb.types import TypeSerializer
+@@ -50,6 +51,22 @@
+ MARKET_SITUATION_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+ MARKET_SITUATION_CHART_MAX_COUNT = 12
+ MARKET_SITUATION_SCHEMA_VERSION = "market-structure-v4"
++INFLATION_NOWCAST_PARSER_VERSION = "inflation-nowcast-chart-v1"
++INFLATION_NOWCAST_METRIC = "Headline CPI YoY"
++INFLATION_NOWCAST_MONTH_NAMES = (
++    "January",
++    "February",
++    "March",
++    "April",
++    "May",
++    "June",
++    "July",
++    "August",
++    "September",
++    "October",
++    "November",
++    "December",
++)
+ MARKET_SITUATION_SIGNAL_ROWS = (
+     (
+         "spxGammaExposure",
+@@ -2168,6 +2185,221 @@
+     return changes
+ 
+ 
++def _inflation_month_id(value: str) -> Optional[str]:
++    match = re.search(
++        r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
++        r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
++        r"Dec(?:ember)?)[-\s/]*(\d{2}|20\d{2})\b",
++        str(value or ""),
++        re.IGNORECASE,
++    )
++    if not match:
++        return None
++    month_token = match.group(1)[:3].lower()
++    month_index = next(
++        (
++            index
++            for index, name in enumerate(INFLATION_NOWCAST_MONTH_NAMES)
++            if name[:3].lower() == month_token
++        ),
++        None,
++    )
++    if month_index is None:
++        return None
++    year = int(match.group(2))
++    if year < 100:
++        year += 2000
++    return f"{year:04d}-{month_index + 1:02d}"
++
++def _inflation_month_label(month_id: str) -> str:
++    year_text, month_text = month_id.split("-", 1)
++    return f"{INFLATION_NOWCAST_MONTH_NAMES[int(month_text) - 1]} {year_text}"
++
++def _inflation_release_at(text: str, report_month: str) -> Optional[str]:
++    report_year, report_month_number = map(int, report_month.split("-"))
++    month_pattern = "|".join(INFLATION_NOWCAST_MONTH_NAMES)
++    release_pattern = re.compile(
++        rf"\b({month_pattern})\s+CPI\s+Release\s+Date\s*:\s*"
++        rf"({month_pattern})\s+(\d{{1,2}})(?:st|nd|rd|th)?"
++        rf"(?:,?\s+(20\d{{2}}))?\b",
++        re.IGNORECASE,
++    )
++    for match in release_pattern.finditer(text):
++        report_name, release_name, day_text, explicit_year = match.groups()
++        report_index = next(
++            (
++                index
++                for index, name in enumerate(INFLATION_NOWCAST_MONTH_NAMES)
++                if name.lower() == report_name.lower()
++            ),
++            None,
++        )
++        if report_index is None or report_index + 1 != report_month_number:
++            continue
++        release_index = next(
++            (
++                index
++                for index, name in enumerate(INFLATION_NOWCAST_MONTH_NAMES)
++                if name.lower() == release_name.lower()
++            ),
++            None,
++        )
++        if release_index is None:
++            continue
++        release_month_number = release_index + 1
++        release_year = int(explicit_year) if explicit_year else report_year
++        if not explicit_year and release_month_number <= report_month_number:
++            release_year += 1
++        try:
++            eastern_release = datetime(
++                release_year,
++                release_month_number,
++                int(day_text),
++                8,
++                30,
++                tzinfo=ZoneInfo("America/New_York"),
++            )
++        except ValueError:
++            return None
++        return eastern_release.astimezone(timezone.utc).isoformat().replace(
++            "+00:00",
++            "Z",
++        )
++    return None
++
++def _inflation_ocr_lines(response: Dict[str, Any]) -> List[Dict[str, Any]]:
++    lines: List[Dict[str, Any]] = []
++    for block in response.get("Blocks") or []:
++        if block.get("BlockType") != "LINE" or not str(block.get("Text") or "").strip():
++            continue
++        box = (block.get("Geometry") or {}).get("BoundingBox") or {}
++        lines.append(
++            {
++                "text": str(block.get("Text") or "").strip(),
++                "left": float(box.get("Left") or 0),
++                "top": float(box.get("Top") or 0),
++            }
++        )
++    return sorted(lines, key=lambda line: (line["top"], line["left"]))
++
++def _inflation_report_month(lines: List[Dict[str, Any]]) -> Optional[str]:
++    month_ids = [
++        month_id
++        for line in lines
++        for month_id in [_inflation_month_id(line.get("text") or "")]
++        if month_id
++    ]
++    return max(month_ids) if month_ids else None
++
++def _inflation_scenarios(lines: List[Dict[str, Any]]) -> Optional[Dict[str, Decimal]]:
++    candidates: List[Dict[str, Any]] = []
++    for line in lines:
++        for raw_value in re.findall(
++            r"(?<![\d.])([-+]?\d+(?:\.\d{1,3})?)\s*%",
++            line.get("text") or "",
++        ):
++            value = Decimal(raw_value)
++            if value.is_finite() and Decimal("-5") <= value <= Decimal("15"):
++                candidates.append({**line, "value": value})
++    if len(candidates) < 3:
++        return None
++    # The forecast branches are the three right-most percentage labels in the
++    # chart. Historical point labels and y-axis ticks sit materially left of
++    # them. Geometry is required so OCR text alone can never invent a mapping.
++    rightmost = sorted(candidates, key=lambda item: item["left"], reverse=True)[:3]
++    if min(item["left"] for item in rightmost) < 0.55:
++        return None
++    ordered = sorted(rightmost, key=lambda item: item["top"])
++    upper, base, lower = (item["value"] for item in ordered)
++    if not lower < base < upper:
++        return None
++    return {"upper": upper, "base": base, "lower": lower}
++
++def _inflation_source(sender: Optional[str], message_id: str) -> Dict[str, Any]:
++    normalized_sender = str(sender or "").lower()
++    is_macro_pro = "sectorpro@hedgeye.com" in normalized_sender
++    return {
++        "kind": "gmail",
++        "messageId": message_id,
++        "product": "macro-pro" if is_macro_pro else "hedgeye-general",
++        "priority": 20 if is_macro_pro else 10,
++    }
++
++def _extract_inflation_forecast(
++    *,
++    chart: Dict[str, str],
++    email_text: str,
++    published_at: str,
++    message_id: str,
++    sender: Optional[str],
++    textract_client: Any,
++    image_fetcher: Optional[Callable[[str], bytes]],
++) -> Optional[Dict[str, Any]]:
++    payload = (image_fetcher or _fetch_market_situation_image)(chart["url"])
++    if hasattr(textract_client, "detect_document_text"):
++        response = textract_client.detect_document_text(Document={"Bytes": payload})
++    else:
++        response = textract_client.analyze_document(
++            Document={"Bytes": payload},
++            FeatureTypes=["TABLES"],
++        )
++    lines = _inflation_ocr_lines(response)
++    report_month = _inflation_report_month(lines)
++    scenarios = _inflation_scenarios(lines)
++    if not report_month or not scenarios:
++        return None
++    release_at = _inflation_release_at(email_text, report_month)
++    if not release_at:
++        return None
++    source = {
++        **_inflation_source(sender, message_id),
++        "chartUrl": chart["url"],
++        "chartSha256": hashlib.sha256(payload).hexdigest(),
++    }
++    return {
++        "reportMonth": report_month,
++        "forecastMonth": _inflation_month_label(report_month),
++        "metric": INFLATION_NOWCAST_METRIC,
++        "releaseAt": release_at,
++        "releaseDate": release_at[:10],
++        "publishedAt": published_at,
++        "scenarios": scenarios,
++        "source": source,
++        "selectionBasis": "publication_candidate",
++        "parserVersion": INFLATION_NOWCAST_PARSER_VERSION,
++    }
++
++def _select_operational_inflation_forecast(
++    forecasts: List[Dict[str, Any]],
++    published_at: str,
++) -> Optional[Dict[str, Any]]:
++    try:
++        publication_time = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
++    except (AttributeError, ValueError):
++        return None
++    eligible: List[Tuple[datetime, Dict[str, Any]]] = []
++    for forecast in forecasts:
++        try:
++            release_time = datetime.fromisoformat(
++                str(forecast.get("releaseAt") or "").replace("Z", "+00:00")
++            )
++        except ValueError:
++            continue
++        if publication_time < release_time:
++            eligible.append((release_time, forecast))
++    if not eligible:
++        return None
++    return min(eligible, key=lambda pair: pair[0])[1]
++
++def _inflation_legacy_scenarios(forecast: Dict[str, Any]) -> List[Dict[str, Any]]:
++    scenarios = forecast["scenarios"]
++    return [
++        {"key": "upside", "label": "Upside", "value": scenarios["upper"]},
++        {"key": "base", "label": "Base Case", "value": scenarios["base"]},
++        {"key": "downside", "label": "Downside", "value": scenarios["lower"]},
++    ]
++
++
+ def _base_snapshot(
+     *,
+     snapshot_type: str,
+@@ -2440,11 +2672,109 @@
+     s3_key: str,
+     message_id: str,
+     subject: Optional[str] = None,
++    sender: Optional[str] = None,
+     image_fetcher: Optional[Callable[[str], bytes]] = None,
+     chart_archiver: Optional[Callable[..., Dict[str, Any]]] = None,
+     textract_client: Any = None,
+ ) -> Optional[Dict[str, Any]]:
+     text = _strip_tags(html_body)
++
++    if report_type == "inflation-nowcast":
++        charts = _sanitized_chart_items(html_body)
++        if not charts or textract_client is None:
++            return None
++        snapshot = _base_snapshot(
++            snapshot_type="inflation-nowcast",
++            report_type=report_type,
++            html_body=html_body,
++            text=text,
++            received_at=received_at,
++            s3_key=s3_key,
++            message_id=message_id,
++        )
++        # Gmail's immutable internal timestamp is the cutoff authority. The
++        # newsletter body timestamp is minute-granular and older generic
++        # parsing intentionally discarded its time component, which could
++        # misclassify a post-8:30 release email as pre-release.
++        snapshot["date"] = received_at.astimezone(
++            ZoneInfo("America/New_York")
++        ).strftime("%Y-%m-%d")
++        snapshot["publishedAt"] = received_at.astimezone(timezone.utc).isoformat()
++        forecasts: List[Dict[str, Any]] = []
++        warnings: List[str] = []
++        for chart in charts:
++            try:
++                forecast = _extract_inflation_forecast(
++                    chart=chart,
++                    email_text=text,
++                    published_at=snapshot["publishedAt"],
++                    message_id=message_id,
++                    sender=sender,
++                    textract_client=textract_client,
++                    image_fetcher=image_fetcher,
++                )
++            except Exception as error:
++                warnings.append(f"{chart['name']}: {error}")
++                continue
++            if forecast:
++                forecasts.append(forecast)
++        deduped_forecasts: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
++        for forecast in forecasts:
++            scenarios = forecast["scenarios"]
++            identity = (
++                forecast["reportMonth"],
++                forecast["releaseAt"],
++                scenarios["upper"],
++                scenarios["base"],
++                scenarios["lower"],
++            )
++            deduped_forecasts[identity] = forecast
++        forecasts = sorted(
++            deduped_forecasts.values(),
++            key=lambda forecast: forecast["reportMonth"],
++        )
++        operational = _select_operational_inflation_forecast(
++            forecasts,
++            snapshot["publishedAt"],
++        )
++        if not forecasts or not operational:
++            return None
++        source = _inflation_source(sender, message_id)
++        snapshot["sourceProduct"] = source["product"]
++        snapshot["sourcePriority"] = source["priority"]
++        snapshot["itemCount"] = 3
++        snapshot["forecastCount"] = len(forecasts)
++        snapshot["chartCount"] = len(forecasts)
++        snapshot["parserVersion"] = INFLATION_NOWCAST_PARSER_VERSION
++        snapshot["data"] = {
++            "metric": INFLATION_NOWCAST_METRIC,
++            "forecastMonth": operational["forecastMonth"],
++            "reportMonth": operational["reportMonth"],
++            "releaseDate": operational["releaseDate"],
++            "releaseAt": operational["releaseAt"],
++            "scenarios": _inflation_legacy_scenarios(operational),
++            "forecasts": forecasts,
++        }
++        snapshot["article"]["headline"] = (
++            snapshot["article"].get("headline") or subject
++        )
++        snapshot["article"]["imageUrls"] = [
++            forecast["source"]["chartUrl"] for forecast in forecasts
++        ]
++        snapshot["article"]["charts"] = [
++            {
++                "name": _chart_name_from_url(forecast["source"]["chartUrl"]),
++                "url": forecast["source"]["chartUrl"],
++                "reportMonth": forecast["reportMonth"],
++                "sha256": forecast["source"]["chartSha256"],
++            }
++            for forecast in forecasts
++        ]
++        snapshot["article"].pop("bodyText", None)
++        snapshot["article"].pop("teaser", None)
++        if warnings:
++            snapshot["warnings"] = warnings[:10]
++        return snapshot
+ 
+     if report_type == "market-structure":
+         source_charts = []
+--- hermes_gmail_ingestor.py
++++ hermes_gmail_ingestor.py
+@@ -105,11 +105,12 @@
+ TOKEN_URL = "https://oauth2.googleapis.com/token"
+ MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
+ TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
+-MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "top-3-things"}
++MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "top-3-things", "inflation-nowcast"}
+ RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
+ MATERIALIZED_DATA_VERSION = "gmail-materialized-v11-top-three-things"
+ MARKET_STRUCTURE_ASSET_PREFIX = "hedgeye-email/assets/market-structure/"
+ HTML_TEXTRACT_REPORT_TYPES = frozenset({
++    "inflation-nowcast",
+     "signal-strength",
+     "momo-tracker",
+     "crypto-quant",
+@@ -1146,6 +1147,8 @@
+     if global_quads_eligible(subject) and not re.search(r"the macro show|macro show", subject, re.I):
+         return "global-quads"
+     haystack = f"{filename} {subject}".lower().replace("_", " ")
++    if "monthly inflation nowcast" in haystack:
++        return "inflation-nowcast"
+     for report_type, needles in REPORT_RULES:
+         if any(needle in haystack for needle in needles):
+             return report_type
+@@ -1230,7 +1233,7 @@
+             return False
+         report_type = str(item.get("reportType") or "")
+         if (
+-            report_type in RESEARCH_EVENT_SNAPSHOT_TYPES
++            report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"}
+             and str(item.get("attachmentId") or "").startswith("message-body-")
+             and item.get("materializationStatus") not in {
+                 "INDEXED",
+@@ -2102,6 +2105,115 @@
+     )
+ 
+ 
++def _inflation_forecast_scenarios(forecast: Dict[str, Any]) -> Optional[Tuple[Any, Any, Any]]:
++    scenarios = forecast.get("scenarios")
++    if isinstance(scenarios, dict):
++        values = (
++            scenarios.get("upper", scenarios.get("upside")),
++            scenarios.get("base", scenarios.get("baseCase")),
++            scenarios.get("lower", scenarios.get("downside")),
++        )
++    elif isinstance(scenarios, list):
++        by_key: Dict[str, Any] = {}
++        for index, scenario in enumerate(scenarios[:3]):
++            if not isinstance(scenario, dict):
++                continue
++            token = str(
++                scenario.get("key")
++                or scenario.get("label")
++                or scenario.get("name")
++                or ""
++            ).lower()
++            key = (
++                "upper"
++                if re.search(r"up|upper|bull|high", token)
++                else "lower"
++                if re.search(r"down|lower|bear|low", token)
++                else "base"
++                if re.search(r"base|central", token)
++                else ("upper", "base", "lower")[index]
++            )
++            by_key[key] = scenario.get(
++                "raw",
++                scenario.get("value", scenario.get("percent")),
++            )
++        values = (by_key.get("upper"), by_key.get("base"), by_key.get("lower"))
++    else:
++        return None
++    if any(value is None for value in values):
++        return None
++    try:
++        upper, base, lower = (Decimal(str(value)) for value in values)
++    except Exception:
++        return None
++    if not all(value.is_finite() for value in (upper, base, lower)):
++        return None
++    return (upper, base, lower) if lower < base < upper else None
++
++def _inflation_forecast_identity(forecast: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
++    report_month = str(
++        forecast.get("reportMonth") or forecast.get("reportMonthId") or ""
++    ).strip()
++    release_at = str(
++        forecast.get("releaseAt") or forecast.get("releaseDate") or ""
++    ).strip()
++    scenarios = _inflation_forecast_scenarios(forecast)
++    if not report_month or not release_at or not scenarios:
++        return None
++    chart_identity = str(
++        (forecast.get("source") or {}).get("chartSha256")
++        or (forecast.get("source") or {}).get("chartUrl")
++        or ""
++    )
++    return (report_month, release_at, *scenarios, chart_identity)
++
++def _prefer_inflation_forecast(
++    current: Dict[str, Any], incoming: Dict[str, Any]
++) -> Dict[str, Any]:
++    current_source = current.get("source") or {}
++    incoming_source = incoming.get("source") or {}
++    current_priority = int(current_source.get("priority") or 0)
++    incoming_priority = int(incoming_source.get("priority") or 0)
++    winner = incoming if incoming_priority > current_priority else current
++    source_ids = _ordered_unique(
++        [
++            *list(current.get("sourceMessageIds") or []),
++            current_source.get("messageId"),
++            *list(incoming.get("sourceMessageIds") or []),
++            incoming_source.get("messageId"),
++        ]
++    )
++    return {
++        **deepcopy(winner),
++        "sourceMessageIds": [source_id for source_id in source_ids if source_id],
++    }
++
++def _merge_inflation_forecasts(
++    existing: Optional[Dict[str, Any]], incoming: Dict[str, Any]
++) -> List[Dict[str, Any]]:
++    merged: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
++    for snapshot in (existing or {}, incoming):
++        forecasts = (snapshot.get("data") or {}).get("forecasts") or []
++        for forecast in forecasts:
++            if not isinstance(forecast, dict):
++                continue
++            identity = _inflation_forecast_identity(forecast)
++            if not identity:
++                continue
++            merged[identity] = (
++                _prefer_inflation_forecast(merged[identity], forecast)
++                if identity in merged
++                else deepcopy(forecast)
++            )
++    return sorted(
++        merged.values(),
++        key=lambda forecast: (
++            str(forecast.get("reportMonth") or ""),
++            str(forecast.get("publishedAt") or ""),
++        ),
++    )
++
++
+ def _merge_materialized_snapshot(
+     existing: Optional[Dict[str, Any]], incoming: Dict[str, Any]
+ ) -> Dict[str, Any]:
+@@ -2143,6 +2255,16 @@
+         ):
+             raise ValueError("Top 3 Things materialization requires exactly three ranked items")
+         merged["itemCount"] = 3
++
++    elif candidate["snapshotType"] == "inflation-nowcast":
++        latest = candidate if not current or incoming_is_latest else current
++        merged["data"] = deepcopy(latest.get("data") or {})
++        merged["data"]["forecasts"] = _merge_inflation_forecasts(
++            current,
++            candidate,
++        )
++        merged["forecastCount"] = len(merged["data"]["forecasts"])
++        merged["itemCount"] = 3 if merged["forecastCount"] else 0
+ 
+     merged["sourceMessageIds"] = sorted(
+         _ordered_unique([*existing_sources, *incoming_sources])
+@@ -2521,7 +2643,7 @@
+     )
+     if (
+         item.get("snapshotType")
+-        and report_type not in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "the-macro-show"}
++        and report_type not in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "the-macro-show", "inflation-nowcast"}
+         and not is_investing_ideas_change
+     ):
+         return False
+@@ -2551,6 +2673,7 @@
+             s3_key=item["s3Key"],
+             message_id=message_id,
+             subject=item.get("subject", ""),
++            sender=item.get("sender", ""),
+             chart_archiver=(
+                 archive_market_structure_chart
+                 if report_type == "market-structure"
+@@ -2561,7 +2684,7 @@
+             ),
+         )
+         if not snapshot:
+-            if report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
++            if report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"}:
+                 raise RetryableResearchMaterializationError(
+                     f"Research parser returned no {report_type} snapshot"
+                 )
+@@ -2652,7 +2775,7 @@
+         )
+         return True
+     except Exception as parse_err:
+-        if snapshot or report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
++        if snapshot or report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"}:
+             try:
+                 persist_snapshot_failure(
+                     snapshot or _manifest_stub(
+@@ -2711,7 +2834,7 @@
+         )
+         if inferred_report_type != "unknown":
+             report_type = inferred_report_type
+-    is_materializable = report_type in RESEARCH_EVENT_SNAPSHOT_TYPES or bool(
++    is_materializable = report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"} or bool(
+         re.search(r"\b\d+\s+Changes?:", subject, re.IGNORECASE)
+     )
+     if not is_materializable:
+@@ -2911,6 +3034,7 @@
+                     s3_key=s3_key,
+                     message_id=message_id,
+                     subject=subject,
++                    sender=headers.get("from", ""),
+                     chart_archiver=(
+                         archive_market_structure_chart
+                         if report_type == "market-structure"
+@@ -2989,7 +3113,7 @@
+                             "retryable": False,
+                         }
+                     )
+-                elif report_type in RESEARCH_EVENT_SNAPSHOT_TYPES:
++                elif report_type in {*RESEARCH_EVENT_SNAPSHOT_TYPES, "inflation-nowcast"}:
+                     raise RetryableResearchMaterializationError(
+                         f"Research parser returned no {report_type} snapshot"
+                     )

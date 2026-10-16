@@ -1,0 +1,54 @@
+{
+  "sourceMessageId": "194d1d23bd0d59d5",
+  "publicationAt": null,
+  "receivedAt": "2025-02-04T16:36:43Z",
+  "availableAt": null,
+  "reportDate": "2025-02-04",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:1585:b0:85c:4e4d:b5e7 with SMTP id ee5csp316536uab;        Tue, 4 Feb 2025 08:36:43 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from o3.ptr3960.hedgeye.com (o3.ptr3960.hedgeye.com. [159.183.214.173])        by mx.google.com with ESMTPS id 00721157ae682-6f9757dc278si23390367b3.71.2025.02.04.08.36.42        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);        Tue, 04 Feb 2025 08:36:43 -0800 (PST)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sg1 header.b=fkmfF16X;       dkim=pass header.i=@sendgrid.info header.s=smtpapi header.b=aTicRn5k;       spf=pass (google.com: domain of bounces+651148-018b-timsmithaviation=gmail.com@em7154.hedgeye.com designates 159.183.214.173 as permitted sender) smtp.mailfrom=\"bounces+651148-018b-timsmithaviation=gmail.com@em7154.hedgeye.com\";       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "by recvd-786d47b7ff-w5n7w with SMTP id recvd-786d47b7ff-w5n7w-1-67A2421A-30 2025-02-04 16:36:42.624151525 +0000 UTC m=+7067580.097346313"
+    },
+    {
+      "name": "Received",
+      "value": "from hedgeye.com (unknown) by geopod-ismtpd-8 (SG) with ESMTP id N5MzwCN8Rbyob_40iXUqxA for <timsmithaviation@gmail.com>; Tue, 04 Feb 2025 16:36:42.570 +0000 (UTC)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 04 Feb 2025 16:36:42 +0000 (UTC)"
+    },
+    {
+      "name": "From",
+      "value": "info@hedgeye.com"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<67a2421a65f72_11f137d0969f7@admin-worker-delayed-job-6bcffcc566-fqvt7.mail>"
+    },
+    {
+      "name": "Subject",
+      "value": "Welcome To Bitcoin Trend Tracker"
+    }
+  ],
+  "gmailInternalDate": "1738687002000",
+  "imageUrls": [],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/194d1d23bd0d59d5",
+  "htmlSha256": "e25b11a5aa20a90c9e64267a877a5b04f4ce5df71fefcc92a6a7444d53783da8",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/194d1d23bd0d59d5.json",
+  "rawGmailSha256": "f110730c6b4780301ffe7d93bf0be372d1fcf86bdbd99a4f3606e647ffa73964",
+  "collectionSource": "gmail_connector_original_mime"
+}

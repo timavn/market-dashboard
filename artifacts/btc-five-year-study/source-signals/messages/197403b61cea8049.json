@@ -1,0 +1,83 @@
+{
+  "sourceMessageId": "197403b61cea8049",
+  "publicationAt": "2025-06-05T13:14:00Z",
+  "receivedAt": "2025-06-05T13:15:22Z",
+  "availableAt": "2025-06-05T13:15:22Z",
+  "reportDate": "2025-06-05",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:386:b0:87e:50e:b629 with SMTP id az6csp231601uab;        Thu, 5 Jun 2025 06:15:23 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta238-18.sailthru.com (mta238-18.sailthru.com. [192.64.238.18])        by mx.google.com with ESMTPS id 6a1803df08f44-6fac6dac7cesi172181376d6.75.2025.06.05.06.15.22        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Thu, 05 Jun 2025 06:15:22 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=C1tCwRPG;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=kCvuTNol;       spf=pass (google.com: domain of delivery_20250605091504.40169508.83@mx.sailthru.com designates 192.64.238.18 as permitted sender) smtp.mailfrom=delivery_20250605091504.40169508.83@mx.sailthru.com;       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay7.sailthru.cloud (10.55.90.61) by nj10mta-226.sailthru.com id h86c6k3791sh for <timsmithaviation@gmail.com>; Thu, 5 Jun 2025 08:15:04 -0500 (envelope-from <delivery_20250605091504.40169508.83@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Thu, 5 Jun 2025 09:15:04 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250605091504.40169508.83@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+0.7%), SOL=BEARISH, CRCL IPO $7B Valuation, South Korea \u2764\ufe0f BTC?"
+    }
+  ],
+  "gmailInternalDate": "1749129304000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084318.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084356.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084417.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084433.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084446.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084506.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084517.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084533.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084548.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084601.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084615.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084629.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084644.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084659.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084715.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_085629.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_085659.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_085600.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_085715.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_085941.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_090028.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_085835.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_090257.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_090358.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_085730.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_090444.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_090433.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/glassnode_studio_btc_percent_of_supply_last_active_3_years_ago.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/glassnode_studio_sol_futures_open_interest.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/197403b61cea8049",
+  "htmlSha256": "2e0f1ec41fd94b4c2973af56475d413d0dfe7bfdd167e9a7438ed8de3faecdee",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/197403b61cea8049.json",
+  "rawGmailSha256": "e1654aea3c70ec43df5e64aac6a4421a30d42dffe6c7c9e5e08378e0779c44f7",
+  "collectionSource": "gmail_connector_original_mime"
+}

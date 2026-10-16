@@ -1,0 +1,62 @@
+{
+  "btcHours": 9944,
+  "knownSignalHours": 9280,
+  "indicatorEligibleHours": 6762,
+  "features": {
+    "btcHourly": {
+      "accepted": 9944,
+      "identicalDuplicates": 0,
+      "rejected": []
+    },
+    "usdHourly": {
+      "accepted": 7196,
+      "identicalDuplicates": 0,
+      "rejected": []
+    },
+    "usdDaily": {
+      "accepted": 555,
+      "identicalDuplicates": 0,
+      "rejected": []
+    },
+    "btcDaily": {
+      "accepted": 806,
+      "identicalDuplicates": 0,
+      "rejected": []
+    },
+    "pairedDailyObservations": 555,
+    "pairedHourlyReturns": 6690,
+    "targetRows": 9944,
+    "indicatorEligibleHours": 6762,
+    "featureCounts": {
+      "corr15Level": 9944,
+      "corr30Level": 9944,
+      "corr120Return": 9772,
+      "usdSessionMoveBp": 6762,
+      "usdHourMoveBp": 6691
+    },
+    "missingFeatureCounts": {
+      "corr15Level": 0,
+      "corr30Level": 0,
+      "corr120Return": 172,
+      "usdSessionMoveBp": 3182,
+      "usdHourMoveBp": 3253
+    },
+    "referencesOlderThan48Hours": 1454,
+    "exclusionCounts": {
+      "No DXY bar ending exactly one hour before BTC hour": 3182
+    },
+    "availabilityPolicy": "Daily observations use collector availability (next New York midnight for DXY; next UTC midnight for BTC) plus one hour. Full hourly bars use bar end plus one hour. No historical publication timestamps or exact official DXY closing times are asserted.",
+    "referenceAgeBasis": "Hours since completed daily reference became conservatively available, not hours since the final index tick.",
+    "priceLagHours": 1,
+    "dailyCorrelationBasis": "Aligned daily closing price levels; Pearson, full precision",
+    "returnCorrelationWindow": 120,
+    "returnCorrelationMaxAgeDays": 21
+  },
+  "bullishHourMoveCountsByMonth": {
+    "2025-10": 6,
+    "2026-04": 29,
+    "2026-05": 28,
+    "2026-08": 7,
+    "2026-09": 15
+  }
+}

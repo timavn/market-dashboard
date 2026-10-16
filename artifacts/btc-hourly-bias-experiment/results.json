@@ -1,0 +1,2876 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-09-15T18:10:12Z",
+  "cutoff": "2026-09-15T18:00:00Z",
+  "bootstrapReplicates": 10000,
+  "primary": [
+    {
+      "label": "Current bullish run",
+      "hours": 629,
+      "days": 27,
+      "up": 316,
+      "down": 313,
+      "unchanged": 0,
+      "upPct": 50.23847376788553,
+      "downPct": 49.76152623211447,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        47.10610932475884,
+        53.30212107959515
+      ],
+      "averageReturnPct": 0.011468840882790826,
+      "medianReturnPct": 0.0008114188005503564,
+      "limitedSample": false
+    },
+    {
+      "label": "All bullish periods",
+      "hours": 3240,
+      "days": 145,
+      "up": 1614,
+      "down": 1625,
+      "unchanged": 1,
+      "upPct": 49.81481481481482,
+      "downPct": 50.15432098765432,
+      "unchangedPct": 0.030864197530864196,
+      "upPct95Interval": [
+        48.41075239446691,
+        51.23460086574215
+      ],
+      "averageReturnPct": -0.004502063217069919,
+      "medianReturnPct": -0.0022165340325730476,
+      "limitedSample": false
+    },
+    {
+      "label": "Bearish periods",
+      "hours": 5080,
+      "days": 221,
+      "up": 2558,
+      "down": 2521,
+      "unchanged": 1,
+      "upPct": 50.35433070866142,
+      "downPct": 49.625984251968504,
+      "unchangedPct": 0.01968503937007874,
+      "upPct95Interval": [
+        49.14561446537795,
+        51.57902446546053
+      ],
+      "averageReturnPct": -0.0014334584789607039,
+      "medianReturnPct": 0.002295069725344323,
+      "limitedSample": false
+    },
+    {
+      "label": "Neutral periods",
+      "hours": 960,
+      "days": 50,
+      "up": 470,
+      "down": 490,
+      "unchanged": 0,
+      "upPct": 48.95833333333333,
+      "downPct": 51.041666666666664,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        46.47749253540922,
+        51.38761327297454
+      ],
+      "averageReturnPct": -0.007923572344965095,
+      "medianReturnPct": -0.005275102819679578,
+      "limitedSample": false
+    },
+    {
+      "label": "All known-signal hours",
+      "hours": 9280,
+      "days": 390,
+      "up": 4642,
+      "down": 4636,
+      "unchanged": 2,
+      "upPct": 50.021551724137936,
+      "downPct": 49.95689655172414,
+      "unchangedPct": 0.021551724137931036,
+      "upPct95Interval": [
+        49.16180078773033,
+        50.89402083580948
+      ],
+      "averageReturnPct": -0.003176215877973427,
+      "medianReturnPct": 6.639327724267119e-05,
+      "limitedSample": false
+    }
+  ],
+  "previousClose": [
+    {
+      "label": "Current bullish run · previous close",
+      "hours": 629,
+      "days": 27,
+      "up": 316,
+      "down": 313,
+      "unchanged": 0,
+      "upPct": 50.23847376788553,
+      "downPct": 49.76152623211447,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        47.21780604133545,
+        53.3554309471404
+      ],
+      "averageReturnPct": 0.011625078095977188,
+      "medianReturnPct": 0.0007985390342080123,
+      "limitedSample": false
+    },
+    {
+      "label": "All bullish periods · previous close",
+      "hours": 3239,
+      "days": 145,
+      "up": 1615,
+      "down": 1624,
+      "unchanged": 0,
+      "upPct": 49.86106823093547,
+      "downPct": 50.13893176906452,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        48.474669016157726,
+        51.305294255221895
+      ],
+      "averageReturnPct": -0.004392604234168068,
+      "medianReturnPct": -0.0021466031412953335,
+      "limitedSample": false
+    },
+    {
+      "label": "Bearish periods · previous close",
+      "hours": 5079,
+      "days": 221,
+      "up": 2559,
+      "down": 2520,
+      "unchanged": 0,
+      "upPct": 50.38393384524513,
+      "downPct": 49.616066154754876,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        49.119003073402816,
+        51.639356481617256
+      ],
+      "averageReturnPct": -0.0015046080782103236,
+      "medianReturnPct": 0.002481686635391611,
+      "limitedSample": false
+    },
+    {
+      "label": "Neutral periods · previous close",
+      "hours": 960,
+      "days": 50,
+      "up": 471,
+      "down": 489,
+      "unchanged": 0,
+      "upPct": 49.0625,
+      "downPct": 50.9375,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        46.59211721877986,
+        51.483300961675106
+      ],
+      "averageReturnPct": -0.008000025141701068,
+      "medianReturnPct": -0.005487484582095137,
+      "limitedSample": false
+    },
+    {
+      "label": "All known-signal hours · previous close",
+      "hours": 9278,
+      "days": 390,
+      "up": 4645,
+      "down": 4633,
+      "unchanged": 0,
+      "upPct": 50.064669109721926,
+      "downPct": 49.93533089027808,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        49.166379814560315,
+        50.95583709082914
+      ],
+      "averageReturnPct": -0.003184907704217897,
+      "medianReturnPct": 0.0001805169169477594,
+      "limitedSample": false
+    }
+  ],
+  "settlementChange": [
+    {
+      "label": "Current bullish run · settlement",
+      "hours": 612,
+      "days": 27,
+      "up": 305,
+      "down": 307,
+      "unchanged": 0,
+      "upPct": 49.83660130718954,
+      "downPct": 50.16339869281046,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        46.29906342020263,
+        53.333333333333336
+      ],
+      "averageReturnPct": 0.010788369055983314,
+      "medianReturnPct": -0.001604214672329407,
+      "limitedSample": false
+    },
+    {
+      "label": "All bullish periods · settlement",
+      "hours": 2588,
+      "days": 139,
+      "up": 1285,
+      "down": 1303,
+      "unchanged": 0,
+      "upPct": 49.652241112828435,
+      "downPct": 50.34775888717156,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        47.99519794330983,
+        51.34727416075774
+      ],
+      "averageReturnPct": -0.004934624921972956,
+      "medianReturnPct": -0.002154528531761457,
+      "limitedSample": false
+    },
+    {
+      "label": "Bearish periods · settlement",
+      "hours": 4289,
+      "days": 214,
+      "up": 2138,
+      "down": 2151,
+      "unchanged": 0,
+      "upPct": 49.84844952203311,
+      "downPct": 50.151550477966886,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        48.53699910133667,
+        51.170567235834454
+      ],
+      "averageReturnPct": -0.0025504164519589622,
+      "medianReturnPct": -0.00091885700972405,
+      "limitedSample": false
+    },
+    {
+      "label": "Neutral periods · settlement",
+      "hours": 616,
+      "days": 45,
+      "up": 312,
+      "down": 304,
+      "unchanged": 0,
+      "upPct": 50.649350649350644,
+      "downPct": 49.35064935064935,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        47.32701217088163,
+        54.13921154677225
+      ],
+      "averageReturnPct": 0.0018831040453002605,
+      "medianReturnPct": 0.004817551709823675,
+      "limitedSample": false
+    },
+    {
+      "label": "All known-signal hours · settlement",
+      "hours": 7493,
+      "days": 387,
+      "up": 3735,
+      "down": 3758,
+      "unchanged": 0,
+      "upPct": 49.8465234218604,
+      "downPct": 50.1534765781396,
+      "unchangedPct": 0.0,
+      "upPct95Interval": [
+        48.839675641366135,
+        50.86417247081529
+      ],
+      "averageReturnPct": -0.0030094159039921325,
+      "medianReturnPct": -0.0010326005876248878,
+      "limitedSample": false
+    }
+  ],
+  "byPacificHour": {
+    "Current bullish run": [
+      {
+        "label": "Current bullish run · 00:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 10,
+        "down": 16,
+        "unchanged": 0,
+        "upPct": 38.46153846153847,
+        "downPct": 61.53846153846154,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          19.230769230769234,
+          57.692307692307686
+        ],
+        "averageReturnPct": -0.07018072381135661,
+        "medianReturnPct": -0.104725512893733,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 01:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 15,
+        "down": 11,
+        "unchanged": 0,
+        "upPct": 57.692307692307686,
+        "downPct": 42.30769230769231,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          38.46153846153847,
+          76.92307692307693
+        ],
+        "averageReturnPct": 0.16720308142738358,
+        "medianReturnPct": 0.03569234494716911,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 02:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 9,
+        "down": 17,
+        "unchanged": 0,
+        "upPct": 34.61538461538461,
+        "downPct": 65.38461538461539,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          15.384615384615385,
+          53.84615384615385
+        ],
+        "averageReturnPct": -0.1399018135242787,
+        "medianReturnPct": -0.058287778382937194,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 03:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 13,
+        "down": 13,
+        "unchanged": 0,
+        "upPct": 50.0,
+        "downPct": 50.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          30.76923076923077,
+          69.23076923076923
+        ],
+        "averageReturnPct": 0.023238299393171576,
+        "medianReturnPct": 0.02239437819401835,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 04:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 15,
+        "down": 11,
+        "unchanged": 0,
+        "upPct": 57.692307692307686,
+        "downPct": 42.30769230769231,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          38.46153846153847,
+          76.92307692307693
+        ],
+        "averageReturnPct": 0.0036700848490603187,
+        "medianReturnPct": 0.02999089965487478,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 05:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 12,
+        "down": 14,
+        "unchanged": 0,
+        "upPct": 46.15384615384615,
+        "downPct": 53.84615384615385,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          26.923076923076923,
+          65.38461538461539
+        ],
+        "averageReturnPct": 0.0034624043618532055,
+        "medianReturnPct": -0.014719815292624228,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 06:00 PT",
+        "hours": 27,
+        "days": 27,
+        "up": 14,
+        "down": 13,
+        "unchanged": 0,
+        "upPct": 51.85185185185185,
+        "downPct": 48.148148148148145,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          33.33333333333333,
+          70.37037037037037
+        ],
+        "averageReturnPct": 0.03447148516578955,
+        "medianReturnPct": 0.041541924493038174,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 07:00 PT",
+        "hours": 27,
+        "days": 27,
+        "up": 16,
+        "down": 11,
+        "unchanged": 0,
+        "upPct": 59.25925925925925,
+        "downPct": 40.74074074074074,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          40.74074074074074,
+          77.77777777777779
+        ],
+        "averageReturnPct": 0.17143161302329354,
+        "medianReturnPct": 0.12774903887107225,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 08:00 PT",
+        "hours": 27,
+        "days": 27,
+        "up": 14,
+        "down": 13,
+        "unchanged": 0,
+        "upPct": 51.85185185185185,
+        "downPct": 48.148148148148145,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          33.33333333333333,
+          70.37037037037037
+        ],
+        "averageReturnPct": -0.011244709471083905,
+        "medianReturnPct": 0.0019475535290691681,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 09:00 PT",
+        "hours": 27,
+        "days": 27,
+        "up": 15,
+        "down": 12,
+        "unchanged": 0,
+        "upPct": 55.55555555555556,
+        "downPct": 44.44444444444444,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          37.03703703703704,
+          74.07407407407408
+        ],
+        "averageReturnPct": 0.06527945846471885,
+        "medianReturnPct": 0.08364292712395027,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 10:00 PT",
+        "hours": 27,
+        "days": 27,
+        "up": 15,
+        "down": 12,
+        "unchanged": 0,
+        "upPct": 55.55555555555556,
+        "downPct": 44.44444444444444,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          37.03703703703704,
+          74.07407407407408
+        ],
+        "averageReturnPct": 0.0059720054043429956,
+        "medianReturnPct": 0.0542995398194801,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 11:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 12,
+        "down": 14,
+        "unchanged": 0,
+        "upPct": 46.15384615384615,
+        "downPct": 53.84615384615385,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          26.923076923076923,
+          65.38461538461539
+        ],
+        "averageReturnPct": -0.056060627698209305,
+        "medianReturnPct": -0.00914592200536024,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 12:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 11,
+        "down": 15,
+        "unchanged": 0,
+        "upPct": 42.30769230769231,
+        "downPct": 57.692307692307686,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          23.076923076923077,
+          61.53846153846154
+        ],
+        "averageReturnPct": -0.014631330243856185,
+        "medianReturnPct": -0.03283259678887873,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 13:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 14,
+        "down": 12,
+        "unchanged": 0,
+        "upPct": 53.84615384615385,
+        "downPct": 46.15384615384615,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          34.61538461538461,
+          73.07692307692307
+        ],
+        "averageReturnPct": -0.010967255508419739,
+        "medianReturnPct": 0.0564208894265783,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 14:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 15,
+        "down": 11,
+        "unchanged": 0,
+        "upPct": 57.692307692307686,
+        "downPct": 42.30769230769231,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          38.46153846153847,
+          76.92307692307693
+        ],
+        "averageReturnPct": 0.05044756891259016,
+        "medianReturnPct": 0.04809794480405971,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 15:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 9,
+        "down": 17,
+        "unchanged": 0,
+        "upPct": 34.61538461538461,
+        "downPct": 65.38461538461539,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          15.384615384615385,
+          53.84615384615385
+        ],
+        "averageReturnPct": -0.11600153903423155,
+        "medianReturnPct": -0.0697081487416984,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 16:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 18,
+        "down": 8,
+        "unchanged": 0,
+        "upPct": 69.23076923076923,
+        "downPct": 30.76923076923077,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          50.0,
+          84.61538461538461
+        ],
+        "averageReturnPct": 0.04840994167155751,
+        "medianReturnPct": 0.09857260614640762,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 17:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 12,
+        "down": 14,
+        "unchanged": 0,
+        "upPct": 46.15384615384615,
+        "downPct": 53.84615384615385,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          26.923076923076923,
+          65.38461538461539
+        ],
+        "averageReturnPct": 0.0494714280132591,
+        "medianReturnPct": -0.027533083639785794,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 18:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 12,
+        "down": 14,
+        "unchanged": 0,
+        "upPct": 46.15384615384615,
+        "downPct": 53.84615384615385,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          26.923076923076923,
+          65.38461538461539
+        ],
+        "averageReturnPct": 0.0364381541195549,
+        "medianReturnPct": -0.01599950957520413,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 19:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 12,
+        "down": 14,
+        "unchanged": 0,
+        "upPct": 46.15384615384615,
+        "downPct": 53.84615384615385,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          26.923076923076923,
+          65.38461538461539
+        ],
+        "averageReturnPct": 0.05055440928873334,
+        "medianReturnPct": -0.02491351440824241,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 20:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 10,
+        "down": 16,
+        "unchanged": 0,
+        "upPct": 38.46153846153847,
+        "downPct": 61.53846153846154,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          19.230769230769234,
+          57.692307692307686
+        ],
+        "averageReturnPct": -0.046550039362908566,
+        "medianReturnPct": -0.032848634164689416,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 21:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 13,
+        "down": 13,
+        "unchanged": 0,
+        "upPct": 50.0,
+        "downPct": 50.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          30.76923076923077,
+          69.23076923076923
+        ],
+        "averageReturnPct": 0.018882152489175966,
+        "medianReturnPct": -0.008335215873950252,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 22:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 18,
+        "down": 8,
+        "unchanged": 0,
+        "upPct": 69.23076923076923,
+        "downPct": 30.76923076923077,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          50.0,
+          84.61538461538461
+        ],
+        "averageReturnPct": 0.04943951608995523,
+        "medianReturnPct": 0.09001014569591792,
+        "limitedSample": true
+      },
+      {
+        "label": "Current bullish run · 23:00 PT",
+        "hours": 26,
+        "days": 26,
+        "up": 12,
+        "down": 14,
+        "unchanged": 0,
+        "upPct": 46.15384615384615,
+        "downPct": 53.84615384615385,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          26.923076923076923,
+          65.38461538461539
+        ],
+        "averageReturnPct": -0.04560313853208115,
+        "medianReturnPct": -0.03333317245555745,
+        "limitedSample": true
+      }
+    ],
+    "All bullish periods": [
+      {
+        "label": "All bullish periods · 00:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 66,
+        "down": 69,
+        "unchanged": 0,
+        "upPct": 48.888888888888886,
+        "downPct": 51.11111111111111,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          40.74074074074074,
+          57.77777777777777
+        ],
+        "averageReturnPct": -0.027556987382565443,
+        "medianReturnPct": -0.006206312201306741,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 01:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 71,
+        "down": 64,
+        "unchanged": 0,
+        "upPct": 52.59259259259259,
+        "downPct": 47.40740740740741,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.44444444444444,
+          60.74074074074074
+        ],
+        "averageReturnPct": 0.05848839034904066,
+        "medianReturnPct": 0.0076076297097715795,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 02:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 57,
+        "down": 78,
+        "unchanged": 0,
+        "upPct": 42.22222222222222,
+        "downPct": 57.77777777777777,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          34.074074074074076,
+          50.37037037037037
+        ],
+        "averageReturnPct": -0.054744539826612044,
+        "medianReturnPct": -0.022987120433171082,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 03:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 65,
+        "down": 70,
+        "unchanged": 0,
+        "upPct": 48.148148148148145,
+        "downPct": 51.85185185185185,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          40.0,
+          56.2962962962963
+        ],
+        "averageReturnPct": -0.015777649089541816,
+        "medianReturnPct": -0.014607559222423738,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 04:00 PT",
+        "hours": 136,
+        "days": 136,
+        "up": 75,
+        "down": 61,
+        "unchanged": 0,
+        "upPct": 55.14705882352941,
+        "downPct": 44.85294117647059,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          47.05882352941176,
+          63.23529411764706
+        ],
+        "averageReturnPct": 0.020258291997266115,
+        "medianReturnPct": 0.025489785157195577,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 05:00 PT",
+        "hours": 134,
+        "days": 134,
+        "up": 70,
+        "down": 64,
+        "unchanged": 0,
+        "upPct": 52.23880597014925,
+        "downPct": 47.76119402985074,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.02985074626866,
+          60.447761194029844
+        ],
+        "averageReturnPct": 0.0030216550330742823,
+        "medianReturnPct": 0.010216015007336043,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 06:00 PT",
+        "hours": 136,
+        "days": 136,
+        "up": 58,
+        "down": 78,
+        "unchanged": 0,
+        "upPct": 42.64705882352941,
+        "downPct": 57.35294117647059,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          34.55882352941176,
+          50.73529411764706
+        ],
+        "averageReturnPct": -0.053169758586968374,
+        "medianReturnPct": -0.060044894466743104,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 07:00 PT",
+        "hours": 136,
+        "days": 136,
+        "up": 68,
+        "down": 68,
+        "unchanged": 0,
+        "upPct": 50.0,
+        "downPct": 50.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          41.911764705882355,
+          58.08823529411765
+        ],
+        "averageReturnPct": 0.02908335858280129,
+        "medianReturnPct": -0.01244133636335576,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 08:00 PT",
+        "hours": 136,
+        "days": 136,
+        "up": 68,
+        "down": 68,
+        "unchanged": 0,
+        "upPct": 50.0,
+        "downPct": 50.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          41.911764705882355,
+          58.82352941176471
+        ],
+        "averageReturnPct": -0.010065959192369356,
+        "medianReturnPct": -0.00021189645751928943,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 09:00 PT",
+        "hours": 136,
+        "days": 136,
+        "up": 62,
+        "down": 74,
+        "unchanged": 0,
+        "upPct": 45.588235294117645,
+        "downPct": 54.41176470588235,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          37.5,
+          53.67647058823529
+        ],
+        "averageReturnPct": -0.017368905526777376,
+        "medianReturnPct": -0.03374314788914812,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 10:00 PT",
+        "hours": 136,
+        "days": 136,
+        "up": 77,
+        "down": 59,
+        "unchanged": 0,
+        "upPct": 56.61764705882353,
+        "downPct": 43.38235294117647,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          48.529411764705884,
+          64.70588235294117
+        ],
+        "averageReturnPct": 0.01806175943246595,
+        "medianReturnPct": 0.04537440037097884,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 11:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 61,
+        "down": 74,
+        "unchanged": 0,
+        "upPct": 45.18518518518518,
+        "downPct": 54.81481481481482,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          37.03703703703704,
+          53.333333333333336
+        ],
+        "averageReturnPct": -0.0417556442510777,
+        "medianReturnPct": -0.032480683907232244,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 12:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 73,
+        "down": 62,
+        "unchanged": 0,
+        "upPct": 54.074074074074076,
+        "downPct": 45.925925925925924,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.925925925925924,
+          62.22222222222222
+        ],
+        "averageReturnPct": -0.004105641468236315,
+        "medianReturnPct": 0.013873376620487932,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 13:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 74,
+        "down": 61,
+        "unchanged": 0,
+        "upPct": 54.81481481481482,
+        "downPct": 45.18518518518518,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.925925925925924,
+          62.96296296296296
+        ],
+        "averageReturnPct": -0.0001734538998300051,
+        "medianReturnPct": 0.024427956146655383,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 14:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 69,
+        "down": 66,
+        "unchanged": 0,
+        "upPct": 51.11111111111111,
+        "downPct": 48.888888888888886,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          42.22222222222222,
+          59.25925925925925
+        ],
+        "averageReturnPct": -0.008044932502113689,
+        "medianReturnPct": 0.004319437020638972,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 15:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 72,
+        "down": 63,
+        "unchanged": 0,
+        "upPct": 53.333333333333336,
+        "downPct": 46.666666666666664,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.18518518518518,
+          61.48148148148148
+        ],
+        "averageReturnPct": 0.0013456499573527981,
+        "medianReturnPct": 0.01993353585909574,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 16:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 65,
+        "down": 70,
+        "unchanged": 0,
+        "upPct": 48.148148148148145,
+        "downPct": 51.85185185185185,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          40.0,
+          56.2962962962963
+        ],
+        "averageReturnPct": -0.046985446888827394,
+        "medianReturnPct": -0.006929190042226363,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 17:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 64,
+        "down": 71,
+        "unchanged": 0,
+        "upPct": 47.40740740740741,
+        "downPct": 52.59259259259259,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          39.25925925925926,
+          56.2962962962963
+        ],
+        "averageReturnPct": 0.0020209898967353894,
+        "medianReturnPct": -0.028405335849024382,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 18:00 PT",
+        "hours": 135,
+        "days": 135,
+        "up": 64,
+        "down": 70,
+        "unchanged": 1,
+        "upPct": 47.40740740740741,
+        "downPct": 51.85185185185185,
+        "unchangedPct": 0.7407407407407408,
+        "upPct95Interval": [
+          38.51851851851852,
+          55.55555555555556
+        ],
+        "averageReturnPct": -0.007578919765955927,
+        "medianReturnPct": -0.016101684841396402,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 19:00 PT",
+        "hours": 134,
+        "days": 134,
+        "up": 72,
+        "down": 62,
+        "unchanged": 0,
+        "upPct": 53.73134328358209,
+        "downPct": 46.26865671641791,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.52238805970149,
+          61.940298507462686
+        ],
+        "averageReturnPct": 0.04671789851680791,
+        "medianReturnPct": 0.015913779529863614,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 20:00 PT",
+        "hours": 134,
+        "days": 134,
+        "up": 57,
+        "down": 77,
+        "unchanged": 0,
+        "upPct": 42.53731343283582,
+        "downPct": 57.46268656716418,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          34.32835820895522,
+          50.74626865671642
+        ],
+        "averageReturnPct": -0.023282904081999903,
+        "medianReturnPct": -0.0351548313183625,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 21:00 PT",
+        "hours": 134,
+        "days": 134,
+        "up": 74,
+        "down": 60,
+        "unchanged": 0,
+        "upPct": 55.223880597014926,
+        "downPct": 44.776119402985074,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          47.01492537313433,
+          63.43283582089553
+        ],
+        "averageReturnPct": 0.02877304606015396,
+        "medianReturnPct": 0.02336159227794843,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 22:00 PT",
+        "hours": 134,
+        "days": 134,
+        "up": 72,
+        "down": 62,
+        "unchanged": 0,
+        "upPct": 53.73134328358209,
+        "downPct": 46.26865671641791,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.52238805970149,
+          61.940298507462686
+        ],
+        "averageReturnPct": 0.0066957568710689815,
+        "medianReturnPct": 0.014879384038146704,
+        "limitedSample": false
+      },
+      {
+        "label": "All bullish periods · 23:00 PT",
+        "hours": 134,
+        "days": 134,
+        "up": 60,
+        "down": 74,
+        "unchanged": 0,
+        "upPct": 44.776119402985074,
+        "downPct": 55.223880597014926,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          36.56716417910448,
+          52.98507462686567
+        ],
+        "averageReturnPct": -0.011433772232755764,
+        "medianReturnPct": -0.017671086455378626,
+        "limitedSample": false
+      }
+    ],
+    "Bearish periods": [
+      {
+        "label": "Bearish periods · 00:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 105,
+        "down": 106,
+        "unchanged": 0,
+        "upPct": 49.763033175355446,
+        "downPct": 50.23696682464455,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.127962085308056,
+          56.39810426540285
+        ],
+        "averageReturnPct": -0.004209008215108204,
+        "medianReturnPct": -0.003952774975024553,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 01:00 PT",
+        "hours": 212,
+        "days": 211,
+        "up": 109,
+        "down": 102,
+        "unchanged": 1,
+        "upPct": 51.41509433962265,
+        "downPct": 48.113207547169814,
+        "unchangedPct": 0.4716981132075472,
+        "upPct95Interval": [
+          44.81132075471698,
+          58.01886792452831
+        ],
+        "averageReturnPct": 0.007682927126786505,
+        "medianReturnPct": 0.009160571495470116,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 02:00 PT",
+        "hours": 210,
+        "days": 210,
+        "up": 108,
+        "down": 102,
+        "unchanged": 0,
+        "upPct": 51.42857142857142,
+        "downPct": 48.57142857142857,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.761904761904766,
+          58.0952380952381
+        ],
+        "averageReturnPct": -0.006900699493858763,
+        "medianReturnPct": 0.012756604098695945,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 03:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 114,
+        "down": 97,
+        "unchanged": 0,
+        "upPct": 54.02843601895735,
+        "downPct": 45.97156398104265,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          46.91943127962085,
+          60.66350710900474
+        ],
+        "averageReturnPct": 0.004140393767336036,
+        "medianReturnPct": 0.021217695614250687,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 04:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 114,
+        "down": 98,
+        "unchanged": 0,
+        "upPct": 53.77358490566038,
+        "downPct": 46.22641509433962,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          47.16981132075472,
+          60.37735849056604
+        ],
+        "averageReturnPct": 0.00442493468448127,
+        "medianReturnPct": 0.0115541718265888,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 05:00 PT",
+        "hours": 215,
+        "days": 215,
+        "up": 107,
+        "down": 108,
+        "unchanged": 0,
+        "upPct": 49.76744186046512,
+        "downPct": 50.23255813953489,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.25581395348837,
+          56.74418604651162
+        ],
+        "averageReturnPct": -0.006696324759580612,
+        "medianReturnPct": -0.005924053324579681,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 06:00 PT",
+        "hours": 213,
+        "days": 213,
+        "up": 104,
+        "down": 109,
+        "unchanged": 0,
+        "upPct": 48.82629107981221,
+        "downPct": 51.173708920187785,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          42.25352112676056,
+          55.39906103286385
+        ],
+        "averageReturnPct": 0.0015503360153827947,
+        "medianReturnPct": -0.007607787540397926,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 07:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 119,
+        "down": 93,
+        "unchanged": 0,
+        "upPct": 56.132075471698116,
+        "downPct": 43.86792452830189,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          49.528301886792455,
+          62.735849056603776
+        ],
+        "averageReturnPct": 0.021991266607607834,
+        "medianReturnPct": 0.043820799593474735,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 08:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 101,
+        "down": 111,
+        "unchanged": 0,
+        "upPct": 47.64150943396226,
+        "downPct": 52.358490566037744,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          40.56603773584906,
+          54.24528301886793
+        ],
+        "averageReturnPct": 0.0021281400878240242,
+        "medianReturnPct": -0.021980923309017353,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 09:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 107,
+        "down": 104,
+        "unchanged": 0,
+        "upPct": 50.71090047393365,
+        "downPct": 49.28909952606635,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.07582938388626,
+          57.345971563981045
+        ],
+        "averageReturnPct": -0.029029369121970485,
+        "medianReturnPct": 0.0017453959232360816,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 10:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 114,
+        "down": 97,
+        "unchanged": 0,
+        "upPct": 54.02843601895735,
+        "downPct": 45.97156398104265,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          47.39336492890995,
+          60.66350710900474
+        ],
+        "averageReturnPct": 0.01828117103450139,
+        "medianReturnPct": 0.06448780413528254,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 11:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 100,
+        "down": 111,
+        "unchanged": 0,
+        "upPct": 47.39336492890995,
+        "downPct": 52.60663507109005,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          40.758293838862556,
+          54.02843601895735
+        ],
+        "averageReturnPct": -0.022584833431492757,
+        "medianReturnPct": -0.0127675873515809,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 12:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 112,
+        "down": 99,
+        "unchanged": 0,
+        "upPct": 53.08056872037915,
+        "downPct": 46.91943127962085,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          46.44549763033176,
+          59.71563981042654
+        ],
+        "averageReturnPct": -0.0033946438774126882,
+        "medianReturnPct": 0.013961762436198732,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 13:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 113,
+        "down": 98,
+        "unchanged": 0,
+        "upPct": 53.55450236966824,
+        "downPct": 46.44549763033176,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          46.91943127962085,
+          60.18957345971564
+        ],
+        "averageReturnPct": 0.07777239827855843,
+        "medianReturnPct": 0.019073244283784874,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 14:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 127,
+        "down": 85,
+        "unchanged": 0,
+        "upPct": 59.905660377358494,
+        "downPct": 40.09433962264151,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          53.301886792452834,
+          66.50943396226415
+        ],
+        "averageReturnPct": 0.06177338843755307,
+        "medianReturnPct": 0.04527343197315847,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 15:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 80,
+        "down": 132,
+        "unchanged": 0,
+        "upPct": 37.735849056603776,
+        "downPct": 62.264150943396224,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          31.132075471698112,
+          44.339622641509436
+        ],
+        "averageReturnPct": -0.07119018902321617,
+        "medianReturnPct": -0.05878572404500182,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 16:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 105,
+        "down": 107,
+        "unchanged": 0,
+        "upPct": 49.528301886792455,
+        "downPct": 50.47169811320755,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          42.924528301886795,
+          56.132075471698116
+        ],
+        "averageReturnPct": -0.026701105566486992,
+        "medianReturnPct": -0.0013091037023238439,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 17:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 108,
+        "down": 104,
+        "unchanged": 0,
+        "upPct": 50.943396226415096,
+        "downPct": 49.056603773584904,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.339622641509436,
+          57.54716981132076
+        ],
+        "averageReturnPct": 0.04164860594241112,
+        "medianReturnPct": 0.012195629588962476,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 18:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 96,
+        "down": 116,
+        "unchanged": 0,
+        "upPct": 45.28301886792453,
+        "downPct": 54.71698113207547,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          38.67924528301887,
+          51.886792452830186
+        ],
+        "averageReturnPct": -0.057232133052826394,
+        "medianReturnPct": -0.025966367122187695,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 19:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 93,
+        "down": 119,
+        "unchanged": 0,
+        "upPct": 43.86792452830189,
+        "downPct": 56.132075471698116,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          37.264150943396224,
+          50.943396226415096
+        ],
+        "averageReturnPct": 0.004272834263241486,
+        "medianReturnPct": -0.04024303525934636,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 20:00 PT",
+        "hours": 212,
+        "days": 212,
+        "up": 107,
+        "down": 105,
+        "unchanged": 0,
+        "upPct": 50.47169811320755,
+        "downPct": 49.528301886792455,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.86792452830189,
+          57.07547169811321
+        ],
+        "averageReturnPct": -0.005632349458913919,
+        "medianReturnPct": 0.006933213175652764,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 21:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 96,
+        "down": 115,
+        "unchanged": 0,
+        "upPct": 45.497630331753555,
+        "downPct": 54.502369668246445,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          38.862559241706165,
+          52.13270142180095
+        ],
+        "averageReturnPct": -0.013130822374771605,
+        "medianReturnPct": -0.024957739561215497,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 22:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 109,
+        "down": 102,
+        "unchanged": 0,
+        "upPct": 51.65876777251185,
+        "downPct": 48.34123222748815,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.023696682464454,
+          58.29383886255924
+        ],
+        "averageReturnPct": -0.036580568709833006,
+        "medianReturnPct": 0.007722553180267155,
+        "limitedSample": false
+      },
+      {
+        "label": "Bearish periods · 23:00 PT",
+        "hours": 211,
+        "days": 211,
+        "up": 110,
+        "down": 101,
+        "unchanged": 0,
+        "upPct": 52.13270142180095,
+        "downPct": 47.867298578199055,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.497630331753555,
+          58.767772511848335
+        ],
+        "averageReturnPct": 0.0032632742253082925,
+        "medianReturnPct": 0.013536023321703006,
+        "limitedSample": false
+      }
+    ],
+    "Neutral periods": [
+      {
+        "label": "Neutral periods · 00:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 15,
+        "down": 25,
+        "unchanged": 0,
+        "upPct": 37.5,
+        "downPct": 62.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          22.5,
+          52.5
+        ],
+        "averageReturnPct": -0.04650959656714887,
+        "medianReturnPct": -0.04000281780372483,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 01:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 28,
+        "down": 12,
+        "unchanged": 0,
+        "upPct": 70.0,
+        "downPct": 30.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          55.00000000000001,
+          82.5
+        ],
+        "averageReturnPct": 0.02342305607242412,
+        "medianReturnPct": 0.09777690214247681,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 02:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 24,
+        "down": 16,
+        "unchanged": 0,
+        "upPct": 60.0,
+        "downPct": 40.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.0,
+          75.0
+        ],
+        "averageReturnPct": 0.04381350503103676,
+        "medianReturnPct": 0.060858580319067546,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 03:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 13,
+        "down": 27,
+        "unchanged": 0,
+        "upPct": 32.5,
+        "downPct": 67.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          17.5,
+          47.5
+        ],
+        "averageReturnPct": -0.08406278197251094,
+        "medianReturnPct": -0.0917127486233904,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 04:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 20,
+        "down": 20,
+        "unchanged": 0,
+        "upPct": 50.0,
+        "downPct": 50.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          35.0,
+          65.0
+        ],
+        "averageReturnPct": 0.018979417482589134,
+        "medianReturnPct": -0.003047194728289515,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 05:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 14,
+        "down": 26,
+        "unchanged": 0,
+        "upPct": 35.0,
+        "downPct": 65.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          20.0,
+          50.0
+        ],
+        "averageReturnPct": -0.09979117253763048,
+        "medianReturnPct": -0.044768602372008415,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 06:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 21,
+        "down": 19,
+        "unchanged": 0,
+        "upPct": 52.5,
+        "downPct": 47.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          37.5,
+          67.5
+        ],
+        "averageReturnPct": -0.08344950413788604,
+        "medianReturnPct": 0.04111619246678355,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 07:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 21,
+        "down": 19,
+        "unchanged": 0,
+        "upPct": 52.5,
+        "downPct": 47.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          37.5,
+          67.5
+        ],
+        "averageReturnPct": 0.05220308431007403,
+        "medianReturnPct": 0.019435380884347264,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 08:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 15,
+        "down": 25,
+        "unchanged": 0,
+        "upPct": 37.5,
+        "downPct": 62.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          22.5,
+          52.5
+        ],
+        "averageReturnPct": -0.07504689373427298,
+        "medianReturnPct": -0.04548792540102764,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 09:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 17,
+        "down": 23,
+        "unchanged": 0,
+        "upPct": 42.5,
+        "downPct": 57.49999999999999,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          27.500000000000004,
+          57.49999999999999
+        ],
+        "averageReturnPct": -0.017584417247851758,
+        "medianReturnPct": -0.017258413431109343,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 10:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 19,
+        "down": 21,
+        "unchanged": 0,
+        "upPct": 47.5,
+        "downPct": 52.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          32.5,
+          62.5
+        ],
+        "averageReturnPct": -0.035919797259579,
+        "medianReturnPct": -0.061827578611278744,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 11:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 20,
+        "down": 20,
+        "unchanged": 0,
+        "upPct": 50.0,
+        "downPct": 50.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          35.0,
+          65.0
+        ],
+        "averageReturnPct": -0.0036047592643426163,
+        "medianReturnPct": 0.014573213349416969,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 12:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 19,
+        "down": 21,
+        "unchanged": 0,
+        "upPct": 47.5,
+        "downPct": 52.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          32.5,
+          62.5
+        ],
+        "averageReturnPct": 0.0448979044978523,
+        "medianReturnPct": -0.007608052124868925,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 13:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 21,
+        "down": 19,
+        "unchanged": 0,
+        "upPct": 52.5,
+        "downPct": 47.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          37.5,
+          67.5
+        ],
+        "averageReturnPct": 0.05588872020606289,
+        "medianReturnPct": 0.06380186534794552,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 14:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 23,
+        "down": 17,
+        "unchanged": 0,
+        "upPct": 57.49999999999999,
+        "downPct": 42.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          42.5,
+          72.5
+        ],
+        "averageReturnPct": 0.01632727142880097,
+        "medianReturnPct": 0.04699104619674266,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 15:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 18,
+        "down": 22,
+        "unchanged": 0,
+        "upPct": 45.0,
+        "downPct": 55.00000000000001,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          30.0,
+          60.0
+        ],
+        "averageReturnPct": -0.017045778720554405,
+        "medianReturnPct": -0.061859383056889206,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 16:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 23,
+        "down": 17,
+        "unchanged": 0,
+        "upPct": 57.49999999999999,
+        "downPct": 42.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          42.5,
+          72.5
+        ],
+        "averageReturnPct": -0.007580071380218212,
+        "medianReturnPct": 0.045535379665961884,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 17:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 24,
+        "down": 16,
+        "unchanged": 0,
+        "upPct": 60.0,
+        "downPct": 40.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.0,
+          75.0
+        ],
+        "averageReturnPct": 0.050690719540331386,
+        "medianReturnPct": 0.04573927132769384,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 18:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 25,
+        "down": 15,
+        "unchanged": 0,
+        "upPct": 62.5,
+        "downPct": 37.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          47.5,
+          77.5
+        ],
+        "averageReturnPct": 0.06026630697396812,
+        "medianReturnPct": 0.02548263665612671,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 19:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 15,
+        "down": 25,
+        "unchanged": 0,
+        "upPct": 37.5,
+        "downPct": 62.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          22.5,
+          52.5
+        ],
+        "averageReturnPct": -0.008609054482112133,
+        "medianReturnPct": -0.038261100016867555,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 20:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 17,
+        "down": 23,
+        "unchanged": 0,
+        "upPct": 42.5,
+        "downPct": 57.49999999999999,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          27.500000000000004,
+          57.49999999999999
+        ],
+        "averageReturnPct": -0.03192250272585795,
+        "medianReturnPct": -0.04603248951514649,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 21:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 15,
+        "down": 25,
+        "unchanged": 0,
+        "upPct": 37.5,
+        "downPct": 62.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          22.5,
+          52.5
+        ],
+        "averageReturnPct": -0.021868532482590408,
+        "medianReturnPct": -0.03415219795437352,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 22:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 24,
+        "down": 16,
+        "unchanged": 0,
+        "upPct": 60.0,
+        "downPct": 40.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.0,
+          75.0
+        ],
+        "averageReturnPct": 0.00036041273091258486,
+        "medianReturnPct": 0.06880961074113845,
+        "limitedSample": false
+      },
+      {
+        "label": "Neutral periods · 23:00 PT",
+        "hours": 40,
+        "days": 40,
+        "up": 19,
+        "down": 21,
+        "unchanged": 0,
+        "upPct": 47.5,
+        "downPct": 52.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          32.5,
+          62.5
+        ],
+        "averageReturnPct": -0.024021272040658792,
+        "medianReturnPct": -0.020986107143317057,
+        "limitedSample": false
+      }
+    ],
+    "All known-signal hours": [
+      {
+        "label": "All known-signal hours · 00:00 PT",
+        "hours": 386,
+        "days": 386,
+        "up": 186,
+        "down": 200,
+        "unchanged": 0,
+        "upPct": 48.18652849740933,
+        "downPct": 51.813471502590666,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.26424870466321,
+          53.10880829015544
+        ],
+        "averageReturnPct": -0.016758232882694617,
+        "medianReturnPct": -0.00880160919199402,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 01:00 PT",
+        "hours": 387,
+        "days": 386,
+        "up": 208,
+        "down": 178,
+        "unchanged": 1,
+        "upPct": 53.746770025839794,
+        "downPct": 45.99483204134367,
+        "unchangedPct": 0.2583979328165375,
+        "upPct95Interval": [
+          48.96373056994819,
+          58.80829015544041
+        ],
+        "averageReturnPct": 0.027032649847276984,
+        "medianReturnPct": 0.016292414413654477,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 02:00 PT",
+        "hours": 385,
+        "days": 385,
+        "up": 189,
+        "down": 196,
+        "unchanged": 0,
+        "upPct": 49.09090909090909,
+        "downPct": 50.90909090909091,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.15584415584416,
+          54.02597402597402
+        ],
+        "averageReturnPct": -0.018408102776783106,
+        "medianReturnPct": -0.0030179467526814108,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 03:00 PT",
+        "hours": 386,
+        "days": 386,
+        "up": 192,
+        "down": 194,
+        "unchanged": 0,
+        "upPct": 49.740932642487046,
+        "downPct": 50.259067357512954,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.81865284974093,
+          54.66321243523316
+        ],
+        "averageReturnPct": -0.011965986583110568,
+        "medianReturnPct": -0.0015599410498667865,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 04:00 PT",
+        "hours": 388,
+        "days": 388,
+        "up": 209,
+        "down": 179,
+        "unchanged": 0,
+        "upPct": 53.865979381443296,
+        "downPct": 46.134020618556704,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          48.96907216494845,
+          58.76288659793815
+        ],
+        "averageReturnPct": 0.011475233412478832,
+        "medianReturnPct": 0.012160037620589925,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 05:00 PT",
+        "hours": 389,
+        "days": 389,
+        "up": 191,
+        "down": 198,
+        "unchanged": 0,
+        "upPct": 49.10025706940874,
+        "downPct": 50.899742930591266,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.2159383033419,
+          53.98457583547558
+        ],
+        "averageReturnPct": -0.012921478021550373,
+        "medianReturnPct": -0.01149261507606969,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 06:00 PT",
+        "hours": 389,
+        "days": 389,
+        "up": 183,
+        "down": 206,
+        "unchanged": 0,
+        "upPct": 47.04370179948586,
+        "downPct": 52.95629820051414,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          42.159383033419026,
+          52.185089974293064
+        ],
+        "averageReturnPct": -0.026320940262382023,
+        "medianReturnPct": -0.029379038890153808,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 07:00 PT",
+        "hours": 388,
+        "days": 388,
+        "up": 208,
+        "down": 180,
+        "unchanged": 0,
+        "upPct": 53.608247422680414,
+        "downPct": 46.391752577319586,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          48.71134020618557,
+          58.50515463917526
+        ],
+        "averageReturnPct": 0.027591774898136065,
+        "medianReturnPct": 0.03135988720163185,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 08:00 PT",
+        "hours": 388,
+        "days": 388,
+        "up": 184,
+        "down": 204,
+        "unchanged": 0,
+        "upPct": 47.42268041237113,
+        "downPct": 52.57731958762887,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          42.52577319587629,
+          52.31958762886598
+        ],
+        "averageReturnPct": -0.01010226933225376,
+        "medianReturnPct": -0.014669550955043187,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 09:00 PT",
+        "hours": 387,
+        "days": 387,
+        "up": 186,
+        "down": 201,
+        "unchanged": 0,
+        "upPct": 48.06201550387597,
+        "downPct": 51.93798449612403,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.15245478036176,
+          52.97157622739018
+        ],
+        "averageReturnPct": -0.02374869438318234,
+        "medianReturnPct": -0.008276870161205707,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 10:00 PT",
+        "hours": 387,
+        "days": 387,
+        "up": 210,
+        "down": 177,
+        "unchanged": 0,
+        "upPct": 54.263565891472865,
+        "downPct": 45.73643410852713,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          49.35400516795866,
+          59.17312661498708
+        ],
+        "averageReturnPct": 0.012601897882976748,
+        "medianReturnPct": 0.04546643051390742,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 11:00 PT",
+        "hours": 386,
+        "days": 386,
+        "up": 181,
+        "down": 205,
+        "unchanged": 0,
+        "upPct": 46.89119170984456,
+        "downPct": 53.10880829015544,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          41.968911917098445,
+          51.813471502590666
+        ],
+        "averageReturnPct": -0.02732280362309369,
+        "medianReturnPct": -0.016842041806175434,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 12:00 PT",
+        "hours": 386,
+        "days": 386,
+        "up": 204,
+        "down": 182,
+        "unchanged": 0,
+        "upPct": 52.84974093264248,
+        "downPct": 47.15025906735752,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          47.92746113989637,
+          57.77202072538861
+        ],
+        "averageReturnPct": 0.00136110032012464,
+        "medianReturnPct": 0.01113405750583496,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 13:00 PT",
+        "hours": 386,
+        "days": 386,
+        "up": 208,
+        "down": 178,
+        "unchanged": 0,
+        "upPct": 53.8860103626943,
+        "downPct": 46.1139896373057,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          48.96373056994819,
+          59.067357512953365
+        ],
+        "averageReturnPct": 0.04824380458171321,
+        "medianReturnPct": 0.02291011719922631,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 14:00 PT",
+        "hours": 387,
+        "days": 387,
+        "up": 219,
+        "down": 168,
+        "unchanged": 0,
+        "upPct": 56.58914728682171,
+        "downPct": 43.41085271317829,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          51.67958656330749,
+          61.49870801033591
+        ],
+        "averageReturnPct": 0.032720887126945576,
+        "medianReturnPct": 0.03471710703883968,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 15:00 PT",
+        "hours": 387,
+        "days": 387,
+        "up": 170,
+        "down": 217,
+        "unchanged": 0,
+        "upPct": 43.927648578811365,
+        "downPct": 56.07235142118863,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          39.01808785529715,
+          48.837209302325576
+        ],
+        "averageReturnPct": -0.040290667900520355,
+        "medianReturnPct": -0.027122974790905197,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 16:00 PT",
+        "hours": 387,
+        "days": 387,
+        "up": 193,
+        "down": 194,
+        "unchanged": 0,
+        "upPct": 49.87080103359173,
+        "downPct": 50.129198966408275,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.96124031007752,
+          54.78036175710594
+        ],
+        "averageReturnPct": -0.03180070430308958,
+        "medianReturnPct": -0.0007700542195121507,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 17:00 PT",
+        "hours": 387,
+        "days": 387,
+        "up": 196,
+        "down": 191,
+        "unchanged": 0,
+        "upPct": 50.64599483204134,
+        "downPct": 49.35400516795866,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.73643410852713,
+          55.55555555555556
+        ],
+        "averageReturnPct": 0.028759604334531504,
+        "medianReturnPct": 0.009027091661106823,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 18:00 PT",
+        "hours": 387,
+        "days": 387,
+        "up": 185,
+        "down": 201,
+        "unchanged": 1,
+        "upPct": 47.80361757105943,
+        "downPct": 51.93798449612403,
+        "unchangedPct": 0.2583979328165375,
+        "upPct95Interval": [
+          42.89405684754522,
+          52.71317829457365
+        ],
+        "averageReturnPct": -0.027766703092104706,
+        "medianReturnPct": -0.004595377050697902,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 19:00 PT",
+        "hours": 386,
+        "days": 386,
+        "up": 180,
+        "down": 206,
+        "unchanged": 0,
+        "upPct": 46.63212435233161,
+        "downPct": 53.36787564766839,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          41.70336787564767,
+          51.554404145077726
+        ],
+        "averageReturnPct": 0.017672738564183856,
+        "medianReturnPct": -0.018698758745583355,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 20:00 PT",
+        "hours": 386,
+        "days": 386,
+        "up": 181,
+        "down": 205,
+        "unchanged": 0,
+        "upPct": 46.89119170984456,
+        "downPct": 53.10880829015544,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          41.968911917098445,
+          51.813471502590666
+        ],
+        "averageReturnPct": -0.014484112283191852,
+        "medianReturnPct": -0.015353389168620835,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 21:00 PT",
+        "hours": 385,
+        "days": 385,
+        "up": 185,
+        "down": 200,
+        "unchanged": 0,
+        "upPct": 48.05194805194805,
+        "downPct": 51.94805194805194,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.116883116883116,
+          53.246753246753244
+        ],
+        "averageReturnPct": 0.0005460866277407949,
+        "medianReturnPct": -0.008484357196980596,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 22:00 PT",
+        "hours": 385,
+        "days": 385,
+        "up": 205,
+        "down": 180,
+        "unchanged": 0,
+        "upPct": 53.246753246753244,
+        "downPct": 46.75324675324675,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          48.311688311688314,
+          58.18181818181818
+        ],
+        "averageReturnPct": -0.017680135241077966,
+        "medianReturnPct": 0.014839476224670634,
+        "limitedSample": false
+      },
+      {
+        "label": "All known-signal hours · 23:00 PT",
+        "hours": 385,
+        "days": 385,
+        "up": 189,
+        "down": 196,
+        "unchanged": 0,
+        "upPct": 49.09090909090909,
+        "downPct": 50.90909090909091,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.15584415584416,
+          54.02597402597402
+        ],
+        "averageReturnPct": -0.004686819478637857,
+        "medianReturnPct": -0.005766903571946536,
+        "limitedSample": false
+      }
+    ]
+  },
+  "rangeZones": {
+    "Current bullish run": [
+      {
+        "label": "Below lower range",
+        "hours": 2,
+        "days": 2,
+        "up": 2,
+        "down": 0,
+        "unchanged": 0,
+        "upPct": 100.0,
+        "downPct": 0.0,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          100.0,
+          100.0
+        ],
+        "averageReturnPct": 0.31600240295160953,
+        "medianReturnPct": 0.31600240295160953,
+        "limitedSample": true
+      },
+      {
+        "label": "Lower half",
+        "hours": 306,
+        "days": 19,
+        "up": 152,
+        "down": 154,
+        "unchanged": 0,
+        "upPct": 49.673202614379086,
+        "downPct": 50.326797385620914,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          45.8461318051576,
+          53.81682859125607
+        ],
+        "averageReturnPct": 0.005440796806407694,
+        "medianReturnPct": -0.0016560825659817091,
+        "limitedSample": false
+      },
+      {
+        "label": "Upper half",
+        "hours": 274,
+        "days": 21,
+        "up": 138,
+        "down": 136,
+        "unchanged": 0,
+        "upPct": 50.36496350364964,
+        "downPct": 49.63503649635037,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.99959546925567,
+          55.35058171682635
+        ],
+        "averageReturnPct": 0.0011192332481511566,
+        "medianReturnPct": 0.0033122086439685283,
+        "limitedSample": false
+      },
+      {
+        "label": "Above upper range",
+        "hours": 47,
+        "days": 6,
+        "up": 24,
+        "down": 23,
+        "unchanged": 0,
+        "upPct": 51.06382978723404,
+        "downPct": 48.93617021276596,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          32.13928571428572,
+          61.016949152542374
+        ],
+        "averageReturnPct": 0.09809239099187311,
+        "medianReturnPct": 0.01792517963219442,
+        "limitedSample": true
+      }
+    ],
+    "All bullish periods": [
+      {
+        "label": "Below lower range",
+        "hours": 332,
+        "days": 34,
+        "up": 163,
+        "down": 169,
+        "unchanged": 0,
+        "upPct": 49.096385542168676,
+        "downPct": 50.903614457831324,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.84858044164038,
+          54.415979583824104
+        ],
+        "averageReturnPct": 0.00079578535852161,
+        "medianReturnPct": -0.006902549575898975,
+        "limitedSample": false
+      },
+      {
+        "label": "Lower half",
+        "hours": 1231,
+        "days": 82,
+        "up": 612,
+        "down": 619,
+        "unchanged": 0,
+        "upPct": 49.71567831031681,
+        "downPct": 50.28432168968319,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          47.59032572979665,
+          51.877829036953564
+        ],
+        "averageReturnPct": -0.013049325946130641,
+        "medianReturnPct": -0.0032808730805244934,
+        "limitedSample": false
+      },
+      {
+        "label": "Upper half",
+        "hours": 1390,
+        "days": 96,
+        "up": 700,
+        "down": 689,
+        "unchanged": 1,
+        "upPct": 50.35971223021583,
+        "downPct": 49.568345323741006,
+        "unchangedPct": 0.07194244604316546,
+        "upPct95Interval": [
+          47.79352906643482,
+          52.91086019670731
+        ],
+        "averageReturnPct": -0.0019075860918816145,
+        "medianReturnPct": 0.0004375136645862199,
+        "limitedSample": false
+      },
+      {
+        "label": "Above upper range",
+        "hours": 287,
+        "days": 31,
+        "up": 139,
+        "down": 148,
+        "unchanged": 0,
+        "upPct": 48.43205574912892,
+        "downPct": 51.56794425087108,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.16228070175439,
+          53.465518426842685
+        ],
+        "averageReturnPct": 0.013464736393960104,
+        "medianReturnPct": -0.005998443480825788,
+        "limitedSample": false
+      }
+    ],
+    "Bearish periods": [
+      {
+        "label": "Below lower range",
+        "hours": 427,
+        "days": 49,
+        "up": 223,
+        "down": 204,
+        "unchanged": 0,
+        "upPct": 52.2248243559719,
+        "downPct": 47.7751756440281,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          48.360559532055724,
+          56.72389270265186
+        ],
+        "averageReturnPct": -0.0031573513073565843,
+        "medianReturnPct": 0.013649430902917814,
+        "limitedSample": false
+      },
+      {
+        "label": "Lower half",
+        "hours": 2215,
+        "days": 151,
+        "up": 1138,
+        "down": 1077,
+        "unchanged": 0,
+        "upPct": 51.37697516930022,
+        "downPct": 48.62302483069978,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          49.27851318021888,
+          53.52941813364584
+        ],
+        "averageReturnPct": -8.23975677334628e-05,
+        "medianReturnPct": 0.007958264055574205,
+        "limitedSample": false
+      },
+      {
+        "label": "Upper half",
+        "hours": 2198,
+        "days": 146,
+        "up": 1083,
+        "down": 1114,
+        "unchanged": 1,
+        "upPct": 49.27206551410373,
+        "downPct": 50.68243858052776,
+        "unchangedPct": 0.04549590536851684,
+        "upPct95Interval": [
+          47.36341812924971,
+          51.161815034223274
+        ],
+        "averageReturnPct": -0.005581951743975403,
+        "medianReturnPct": -0.0035895516561246232,
+        "limitedSample": false
+      },
+      {
+        "label": "Above upper range",
+        "hours": 240,
+        "days": 29,
+        "up": 114,
+        "down": 126,
+        "unchanged": 0,
+        "upPct": 47.5,
+        "downPct": 52.5,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          41.62145375188853,
+          53.42960288808665
+        ],
+        "averageReturnPct": 0.027157752003785188,
+        "medianReturnPct": -0.025966436060720355,
+        "limitedSample": false
+      }
+    ],
+    "Neutral periods": [
+      {
+        "label": "Below lower range",
+        "hours": 47,
+        "days": 6,
+        "up": 23,
+        "down": 24,
+        "unchanged": 0,
+        "upPct": 48.93617021276596,
+        "downPct": 51.06382978723404,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          38.88888888888889,
+          60.0
+        ],
+        "averageReturnPct": -0.02508188775121258,
+        "medianReturnPct": -0.004352874839452792,
+        "limitedSample": true
+      },
+      {
+        "label": "Lower half",
+        "hours": 471,
+        "days": 34,
+        "up": 236,
+        "down": 235,
+        "unchanged": 0,
+        "upPct": 50.10615711252654,
+        "downPct": 49.89384288747346,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          46.75607949097882,
+          53.36225596529284
+        ],
+        "averageReturnPct": -0.0004588236771527358,
+        "medianReturnPct": 1.1097793750636242e-05,
+        "limitedSample": false
+      },
+      {
+        "label": "Upper half",
+        "hours": 353,
+        "days": 32,
+        "up": 166,
+        "down": 187,
+        "unchanged": 0,
+        "upPct": 47.02549575070821,
+        "downPct": 52.97450424929179,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          42.58055480256618,
+          51.59420289855072
+        ],
+        "averageReturnPct": -0.023503520857965608,
+        "medianReturnPct": -0.015896328447950747,
+        "limitedSample": false
+      },
+      {
+        "label": "Above upper range",
+        "hours": 89,
+        "days": 11,
+        "up": 45,
+        "down": 44,
+        "unchanged": 0,
+        "upPct": 50.56179775280899,
+        "downPct": 49.43820224719101,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          43.333333333333336,
+          58.97435897435898
+        ],
+        "averageReturnPct": 0.023427731325183145,
+        "medianReturnPct": 7.964607409149949e-05,
+        "limitedSample": false
+      }
+    ],
+    "All known-signal hours": [
+      {
+        "label": "Below lower range",
+        "hours": 806,
+        "days": 86,
+        "up": 409,
+        "down": 397,
+        "unchanged": 0,
+        "upPct": 50.744416873449126,
+        "downPct": 49.25558312655087,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          47.8964301163126,
+          53.928707396664244
+        ],
+        "averageReturnPct": -0.0028074900664008403,
+        "medianReturnPct": 0.009447389555805596,
+        "limitedSample": false
+      },
+      {
+        "label": "Lower half",
+        "hours": 3917,
+        "days": 261,
+        "up": 1986,
+        "down": 1931,
+        "unchanged": 0,
+        "upPct": 50.70206790911411,
+        "downPct": 49.29793209088588,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          49.308339756395895,
+          52.11768999429103
+        ],
+        "averageReturnPct": -0.004202792137900275,
+        "medianReturnPct": 0.00377267480136112,
+        "limitedSample": false
+      },
+      {
+        "label": "Upper half",
+        "hours": 3941,
+        "days": 264,
+        "up": 1949,
+        "down": 1990,
+        "unchanged": 2,
+        "upPct": 49.45445318447095,
+        "downPct": 50.4947982745496,
+        "unchangedPct": 0.050748540979446845,
+        "upPct95Interval": [
+          48.02903178902458,
+          50.8479267741803
+        ],
+        "averageReturnPct": -0.005891250308001838,
+        "medianReturnPct": -0.003061646853896871,
+        "limitedSample": false
+      },
+      {
+        "label": "Above upper range",
+        "hours": 616,
+        "days": 68,
+        "up": 298,
+        "down": 318,
+        "unchanged": 0,
+        "upPct": 48.37662337662338,
+        "downPct": 51.62337662337663,
+        "unchangedPct": 0.0,
+        "upPct95Interval": [
+          44.79631341731192,
+          51.886792452830186
+        ],
+        "averageReturnPct": 0.020239136223890085,
+        "medianReturnPct": -0.0076809316683579265,
+        "limitedSample": false
+      }
+    ]
+  },
+  "matchedSourceComparison": [
+    {
+      "label": "Current bullish run",
+      "hours": 612,
+      "coinbaseUpPct": 50.0,
+      "brtiUpPct": 49.83660130718954,
+      "directionAgreementPct": 96.56862745098039
+    },
+    {
+      "label": "All bullish periods",
+      "hours": 2583,
+      "coinbaseUpPct": 49.70963995354239,
+      "brtiUpPct": 49.670925280681374,
+      "directionAgreementPct": 96.16724738675958
+    },
+    {
+      "label": "Bearish periods",
+      "hours": 4284,
+      "coinbaseUpPct": 49.883286647992534,
+      "brtiUpPct": 49.85994397759104,
+      "directionAgreementPct": 96.68534080298787
+    },
+    {
+      "label": "Neutral periods",
+      "hours": 616,
+      "coinbaseUpPct": 49.67532467532468,
+      "brtiUpPct": 50.649350649350644,
+      "directionAgreementPct": 98.05194805194806
+    },
+    {
+      "label": "All known-signal hours",
+      "hours": 7483,
+      "coinbaseUpPct": 49.80622744888414,
+      "brtiUpPct": 49.85968194574368,
+      "directionAgreementPct": 96.61900307363356
+    }
+  ],
+  "bullishMissingRanges": 0,
+  "coverage": {
+    "startInclusive": "2025-07-28T00:00:00Z",
+    "expectedCandles": 9954,
+    "observedCandles": 9944,
+    "missingCandles": 10,
+    "knownSignalHours": 9280,
+    "unknownSignalHours": 664,
+    "settlementObservations": 8350,
+    "settlementPairs": 8103,
+    "excludedSettlementEvents": 99,
+    "knownSignalSettlementPairs": 7493
+  }
+}

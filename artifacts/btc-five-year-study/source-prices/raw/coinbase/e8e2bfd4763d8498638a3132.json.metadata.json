@@ -1,0 +1,11 @@
+{
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?end=2023-09-19T05%3A15%3A00Z&granularity=900&start=2023-09-16T02%3A30%3A00Z",
+  "provider": "coinbase",
+  "retrievedAt": "2026-09-15T23:03:39Z",
+  "httpStatus": 200,
+  "httpDate": "Tue, 15 Sep 2026 23:03:39 GMT",
+  "sha256": "28ce8751871597eb7390ad3c0640165f00ef2a470d8dd72e56a43e140c52af09",
+  "rawResponse": "raw/coinbase/e8e2bfd4763d8498638a3132.json.gz",
+  "bodyBytes": 18169,
+  "reusedArchive": false
+}

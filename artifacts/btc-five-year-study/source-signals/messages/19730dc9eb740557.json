@@ -1,0 +1,84 @@
+{
+  "sourceMessageId": "19730dc9eb740557",
+  "publicationAt": "2025-06-02T13:36:00Z",
+  "receivedAt": "2025-06-02T13:37:34Z",
+  "availableAt": "2025-06-02T13:37:34Z",
+  "reportDate": "2025-06-02",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:71c3:0:b0:87e:50e:b629 with SMTP id n3csp2649847uao;        Mon, 2 Jun 2025 06:37:35 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from pmta237-69.sailthru.com (pmta237-69.sailthru.com. [192.64.237.69])        by mx.google.com with ESMTPS id d75a77b69052e-4a4359eeceesi100433481cf.221.2025.06.02.06.37.34        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Mon, 02 Jun 2025 06:37:34 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=DElxi08U;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=\"J3C91Rr/\";       spf=pass (google.com: domain of delivery_20250602093703.40113127.756@mx.sailthru.com designates 192.64.237.69 as permitted sender) smtp.mailfrom=delivery_20250602093703.40113127.756@mx.sailthru.com;       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay8.sailthru.cloud (10.55.75.62) by pmta39.sailthru.com id h7mkhs3791s9 for <timsmithaviation@gmail.com>; Mon, 2 Jun 2025 08:37:27 -0500 (envelope-from <delivery_20250602093703.40113127.756@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Mon, 2 Jun 2025 09:37:03 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250602093703.40113127.756@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-0.9%), SOL=NEUTRAL, MARA/RIOT=BEARISH, MSTR/Metaplanet Buys, Ulbricht is Back!"
+    }
+  ],
+  "gmailInternalDate": "1748871423000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_084514.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_084557.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/ethsol.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/vax.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_084730.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_084750.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_084803.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/thingy.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_084914.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_084851.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/mstr.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/etha.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/coin.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_085133.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_085152.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_091324.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/MP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_091527.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_091115.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/zach.jpg",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_091304.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_091244.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_091642.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_091552.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Screenshot_2025_06_02_091430.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/glassnode_studio_btc_long_term_holder_net_position_change__2_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/glassnode_studio_btc_supply_held_by_entities_with_balance_100k__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/glassnode_studio_btc_total_supply_held_by_long_term_holders__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/glassnode_studio_eth_futures_open_interest__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/glassnode_studio_stablecoins_aggregated_market_cap_percentage_change.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141374/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/19730dc9eb740557",
+  "htmlSha256": "21a789605d804b99d90e9726557219be17eafaa1345a79c2508f3dea724420c8",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/19730dc9eb740557.json",
+  "rawGmailSha256": "71118224ffe1b0ff70daefc777e355b62ed12cbb19d5df27182c530e08de9917",
+  "collectionSource": "gmail_connector_original_mime"
+}

@@ -1,0 +1,55 @@
+{
+  "sourceMessageId": "1944b45012cdc07d",
+  "publicationAt": "2025-01-09T13:32:00Z",
+  "receivedAt": "2025-01-09T13:33:20Z",
+  "availableAt": "2025-01-09T13:33:20Z",
+  "reportDate": "2025-01-09",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a17:504:4924:b0:1c70:c5d9:3ab4 with SMTP id se4csp1477628njb;        Thu, 9 Jan 2025 05:33:21 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-37.sailthru.com (mta236-37.sailthru.com. [192.64.236.37])        by mx.google.com with ESMTPS id ada2fe7eead31-4b608fadaf0si402211137.51.2025.01.09.05.33.20        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Thu, 09 Jan 2025 05:33:20 -0800 (PST)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=jor+81PS;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=h92zY9PI;       spf=pass (google.com: domain of delivery_20250109083316.38136087.562@mx.sailthru.com designates 192.64.236.37 as permitted sender) smtp.mailfrom=delivery_20250109083316.38136087.562@mx.sailthru.com;       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay1.sailthru.cloud (10.55.90.180) by nj10mta-226.sailthru.com id hfv8203791sr for <timsmithaviation@gmail.com>; Thu, 9 Jan 2025 07:33:16 -0600 (envelope-from <delivery_20250109083316.38136087.562@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Thu, 9 Jan 2025 08:33:16 -0500 (EST)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250109083316.38136087.562@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | Holiday Update \u2192 \u20bfTC LRR, SOL=BEARISH, AVAX=NEUTRAL, rand()"
+    }
+  ],
+  "gmailInternalDate": "1736429596000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/135749/original/CQ1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/135749/original/CQ2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/135749/original/CQ3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/135749/original/Exit_Process.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1944b45012cdc07d",
+  "htmlSha256": "5353d7c6f63a8fa774306184b268ec9b8666e26a2bdd8709dfec59e63abe8b96",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/1944b45012cdc07d.json",
+  "rawGmailSha256": "fa35c39e4dab0df031529efda7d72e9d9b550269ddaf20a3a5b475c0507ee9e6",
+  "collectionSource": "gmail_connector_original_mime"
+}

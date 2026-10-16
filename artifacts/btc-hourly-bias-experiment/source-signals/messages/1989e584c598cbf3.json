@@ -1,0 +1,87 @@
+{
+  "sourceMessageId": "1989e584c598cbf3",
+  "publicationAt": "2025-08-12T12:53:00Z",
+  "receivedAt": "2025-08-12T12:54:03Z",
+  "availableAt": "2025-08-12T12:54:03Z",
+  "reportDate": "2025-08-12",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:30a:b0:88b:b22e:cb82 with SMTP id ay10csp455968uab;        Tue, 12 Aug 2025 05:54:03 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta238-65.sailthru.com (mta238-65.sailthru.com. [192.64.238.65])        by mx.google.com with ESMTPS id 6a1803df08f44-70976c87eafsi81422906d6.919.2025.08.12.05.54.03        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Tue, 12 Aug 2025 05:54:03 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay1.sailthru.cloud (10.55.90.180) by pmta11.sailthru.com id hjcsmm3791s2 for <timsmithaviation@gmail.com>; Tue, 12 Aug 2025 07:54:02 -0500 (envelope-from <delivery_20250812085402.41098860.643@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 12 Aug 2025 08:54:02 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250812085402.41098860.643@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-0.3%), XMR 51% Attack, Circle/Stripe Layer 1s, ETH ETF $1B Inflow, Figure IPO"
+    }
+  ],
+  "gmailInternalDate": "1755003242000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081127.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081142.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081157.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081210.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081225.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081239.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081253.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081307.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081326.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081350.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081409.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081425.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081441.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081454.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_081509.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083320.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083211.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083338.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083113.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_082935.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083411.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083809.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083934.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083948.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_084000.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083101.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083353.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083703.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083548.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083516.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083140.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083046.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083002.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Screenshot_2025_08_12_083245.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/glassnode_studio_xmr_price.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/glassnode_studio_eth_us_spot_etf_balances.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/glassnode_studio_btc_futures_open_interest_perpetual.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/glassnode_studio_eth_net_transfer_volume_from_to_exchanges.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/glassnode_studio_btc_liquid_supply_change.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/glassnode_studio_usdc_total_transfer_volume__2_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144236/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1989e584c598cbf3",
+  "htmlSha256": "67874f8acb7b857c164340b2ef81615bdfa9317e0299ce36444bfa731a4dcf37",
+  "archiveSnapshotDate": "2025-08-12",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-08-12/crypto-quant/1989e584c598cbf3-message-body-html-1-message-body.html"
+}

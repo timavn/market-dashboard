@@ -1,0 +1,31 @@
+{
+  "function": "market-dashboard-gmail-ingestor-v2",
+  "oldCodeSha256": "svECSU2Ddqi9VCDLvV502QfoB34rg7+k6ndoKrHzlkc=",
+  "newCodeSha256": "KIMEJrv38JlUibdZ8LBQmXj3ESPQftv60hc5bxgWxOs=",
+  "oldRevisionId": "89d2ed57-969d-4262-b714-b4cad8c9e56a",
+  "newRevisionId": "74a4a601-ba0b-446d-a306-1a1eb867cc8b",
+  "oldEnvironmentHash": "93f48b95488923afea19d952020ca6e5ef30c5e1532db5be6b840d25adfa9e9d",
+  "lastModified": "2026-09-18T17:33:40.000+0000",
+  "changedFiles": [
+    "hermes_gmail_ingestor.py",
+    "parse_hedgeye_email_html.py"
+  ],
+  "tests": {
+    "focusedCpiTests": 4,
+    "result": "passed"
+  },
+  "publicationRecovered": "2026-09-16T15:37:07+00:00",
+  "verification": {
+    "environmentUnchanged": true,
+    "boundedReplayMessages": 2,
+    "storedCount": 2,
+    "errorCount": 0,
+    "dynamoVerified": true,
+    "dashboardDateEndpointVerified": true,
+    "reportMonth": "2026-09",
+    "baseCase": 3.61,
+    "upperCase": 3.72,
+    "lowerCase": 3.5,
+    "materializedAt": "2026-09-18T17:34:00.717888+00:00"
+  }
+}

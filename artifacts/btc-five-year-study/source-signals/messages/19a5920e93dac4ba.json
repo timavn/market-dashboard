@@ -1,0 +1,64 @@
+{
+  "sourceMessageId": "19a5920e93dac4ba",
+  "publicationAt": "2025-11-06T12:23:00Z",
+  "receivedAt": "2025-11-06T12:25:20Z",
+  "availableAt": "2025-11-06T12:25:20Z",
+  "reportDate": "2025-11-06",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:4b0f:b0:934:fdb0:238c with SMTP id hg15csp976845uab;        Thu, 6 Nov 2025 04:25:20 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from pmta236-240.sailthru.com (pmta236-240.sailthru.com. [192.64.236.240])        by mx.google.com with ESMTPS id af79cd13be357-8b23520e25fsi70204085a.52.2025.11.06.04.25.20        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Thu, 06 Nov 2025 04:25:20 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay2.sailthru.cloud (10.55.73.49) by pmta236-241.sailthru.com id h1i9r03791s0 for <timsmithaviation@gmail.com>; Thu, 6 Nov 2025 06:25:18 -0600 (envelope-from <delivery_20251106072518.42384249.483@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Thu, 6 Nov 2025 07:25:18 -0500 (EST)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20251106072518.42384249.483@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "MOMO Tracker | Bitcoin & Crypto Crashing While The MAG7 Stays Bullish Trend"
+    }
+  ],
+  "gmailInternalDate": "1762431918000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/performance.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/relative_performance.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/valuation.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/rolling_correlation.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/return_correlations1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/risk_ranges.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/aaplAmzn.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/metaGoogl1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/nflxTsla1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/nvda.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/T3_110525.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/T1_110525.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/msftQuad.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/nflxQuad.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/googleQuad.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/appleQuad.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/amznQuad.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/metaQuad.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/tslaQuad.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147770/original/nvdaQuad.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/19a5920e93dac4ba",
+  "htmlSha256": "46430242c7a3073384246d1f92d5f81204fd824a2e16e051ddc3368723fb76fe",
+  "archiveSnapshotDate": "2025-11-06",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-11-06/bitcoin-trend-tracker/19a5920e93dac4ba-message-body-html-1-message-body.html"
+}

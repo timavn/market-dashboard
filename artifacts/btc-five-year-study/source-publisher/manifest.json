@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "status": "excluded-source-evidence",
+  "createdAt": "2026-09-15T23:26:31.777508Z",
+  "files": [
+    {
+      "path": "2023-01-31-BTC_2.headers.json",
+      "byteLength": 1058,
+      "sha256": "437363e55999c8a8508e0c85c3136d035666734bf2ce6b3194a0f68489d3244b"
+    },
+    {
+      "path": "2023-01-31-BTC_2.png",
+      "byteLength": 12113,
+      "sha256": "f874e424b6d9b0943e56b011f8341425bbdd36412afe2e8f78bf907185739005"
+    },
+    {
+      "path": "2023-01-31-receipt-search.json",
+      "byteLength": 489,
+      "sha256": "970363f33f51788f674bb0a585b250f852108cc21469fa60bdc8cd704937de00"
+    },
+    {
+      "path": "2023-01-31-worked-example.json",
+      "byteLength": 2562,
+      "sha256": "4b545790e91809ea07f3f02e0d74f8968f3a7ce8846e735237e7183d820dcfad"
+    },
+    {
+      "path": "publisher-followup.json",
+      "byteLength": 4391,
+      "sha256": "e7f2c68fc1349b3a29f91bf5a38701142b0c6017d0612a90f2399ecb2750645d"
+    }
+  ]
+}

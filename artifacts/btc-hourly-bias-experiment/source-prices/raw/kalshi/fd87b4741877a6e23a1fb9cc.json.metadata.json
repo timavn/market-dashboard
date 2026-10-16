@@ -1,0 +1,11 @@
+{
+  "url": "https://api.elections.kalshi.com/trade-api/v2/historical/markets?cursor=CgwIzJWv0QYQoJOOxwMSGktYQlRDRC0yNkpVTjEzMTAtVDYyOTk5Ljk5&limit=1000&series_ticker=KXBTCD",
+  "provider": "kalshi",
+  "retrievedAt": "2026-09-15T18:17:12Z",
+  "httpStatus": 200,
+  "httpDate": "Tue, 15 Sep 2026 18:17:12 GMT",
+  "sha256": "54d0d339c1241d9403b1cf67b5145bda27089d384adeea7c3819dead1c023944",
+  "rawResponse": "raw/kalshi/fd87b4741877a6e23a1fb9cc.json.gz",
+  "bodyBytes": 1960962,
+  "reusedArchive": false
+}

@@ -1,0 +1,77 @@
+{
+  "sourceMessageId": "180cc84a12ef520c",
+  "publicationAt": "2022-05-16T10:56:00Z",
+  "receivedAt": "2022-05-16T10:58:05Z",
+  "availableAt": "2022-05-16T10:58:05Z",
+  "reportDate": "2022-05-16",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a67:1786:0:0:0:0:0 with SMTP id 128csp2342588vsx;        Mon, 16 May 2022 03:58:06 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mx-hedgeye-d.sailthru.com (mx-hedgeye-d.sailthru.com. [192.64.236.26])        by mx.google.com with ESMTPS id v17-20020a05690204d100b0064dc5f0254esi1661515ybs.16.2022.05.16.03.58.05        for <timsmithaviation@gmail.com>        (version=TLS1_2 cipher=ECDHE-ECDSA-AES128-GCM-SHA256 bits=128/128);        Mon, 16 May 2022 03:58:05 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=l0ingCl9;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=dIR+SfMk;       spf=pass (google.com: domain of delivery@mx.sailthru.com designates 192.64.236.26 as permitted sender) smtp.mailfrom=delivery@mx.sailthru.com"
+    },
+    {
+      "name": "Received",
+      "value": "from njmta-180.sailthru.com (173.228.155.180) by mx-hedgeye-d.sailthru.com id hg8n3q2to8c4 for <timsmithaviation@gmail.com>; Mon, 16 May 2022 06:58:02 -0400 (envelope-from <delivery@mx.sailthru.com>)"
+    },
+    {
+      "name": "Received",
+      "value": "from nj1-farmelon.flt (172.18.20.31) by njmta-180.sailthru.com id hg8n3k1qqbsv for <timsmithaviation@gmail.com>; Mon, 16 May 2022 06:58:02 -0400 (envelope-from <delivery@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Mon, 16 May 2022 06:58:02 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20220516065802.27727908.456@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+0.4%), ETH (-0.5%), SOL (+11.3%), AVAX (+1.2%)"
+    }
+  ],
+  "gmailInternalDate": "1652698682000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_4A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/LFG1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/LFG2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/el1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/glassnode_studio_ethereum_net_transfer_volume_from_to_exchanges_usd_all_exchanges_7d_moving_average__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/glassnode_studio_bitcoin_entity_adjusted_urpd_btc__7_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/glassnode_studio_bitcoin_net_transfer_volume_from_to_exchanges_usd_all_exchanges_7d_moving_average__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/glassnode_studio_bitcoin_futures_open_interest_usd__3_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/GIP_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95482/original/ETH_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/180cc84a12ef520c",
+  "htmlSha256": "779f29b2c223060fd3873c2af1b983a5f717208ab1782b696945adaae0832358",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/180cc84a12ef520c.json",
+  "rawGmailSha256": "966e4ebbe695d86241fed83518f02673e19c374eb273991bf7fb3b64bd254b72",
+  "collectionSource": "gmail_connector_original_mime"
+}

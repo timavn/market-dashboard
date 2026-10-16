@@ -1,0 +1,175 @@
+{
+  "asOf": "2026-09-15T18:00:00Z",
+  "datasets": {
+    "hourly.json": {
+      "rawResponse": "artifacts/btc-five-year-study/source-usd/raw/DX-Y.NYB-60m-307a6116810141a1bdaf.json.gz",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=60m&period1=1726531200&period2=1789495200&includePrePost=false",
+      "retrievedAt": "2026-09-15T22:58:12Z",
+      "httpDate": "Tue, 15 Sep 2026 22:58:11 GMT",
+      "httpStatus": 200,
+      "contentType": "application/json;charset=utf-8",
+      "sha256": "3954271300cd926abc8901c329707ddb856be05ba98afff3d570a1080dd98c07",
+      "bytes": 1159744,
+      "coverage": {
+        "providerRows": 14492,
+        "acceptedRows": 11920,
+        "rejectedRowsByReason": {
+          "missing_or_invalid_ohlc": 2551,
+          "non_hour_aligned": 20,
+          "outside_completed_window": 1
+        },
+        "conflictingBucketsRemoved": 0,
+        "first": "2024-09-17T00:00:00Z",
+        "last": "2026-09-15T17:00:00Z",
+        "calendarHours": 17490,
+        "absentCalendarHours": 5570,
+        "absenceMeaning": "Calendar gaps include closed sessions and provider omissions; no values are filled."
+      },
+      "normalizedSha256": "097f4651620f4eb42c0750e5c957988a36fee296e906c59f88a5839d8ac53502"
+    },
+    "daily-dxy.json": {
+      "rawResponse": "artifacts/btc-five-year-study/source-usd/raw/DX-Y.NYB-1d-251fb258c5dc6c8c9b62.json.gz",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=1d&period1=1626480000&period2=1789495200&includePrePost=false",
+      "retrievedAt": "2026-09-15T22:59:25Z",
+      "httpDate": "Tue, 15 Sep 2026 22:59:25 GMT",
+      "httpStatus": 200,
+      "contentType": "application/json;charset=utf-8",
+      "sha256": "0b95a17a8da0a1b9897e9f871f60e19b17db5b7e589b28d66204f3f39458bd97",
+      "bytes": 145878,
+      "coverage": {
+        "providerRows": 1570,
+        "acceptedRows": 1297,
+        "rejectedRowsByReason": {
+          "missing_or_invalid_close": 272,
+          "outside_completed_window": 1
+        },
+        "conflictingBucketsRemoved": 0,
+        "first": "2021-07-19T04:00:00Z",
+        "last": "2026-09-14T04:00:00Z"
+      },
+      "normalizedSha256": "c0c625c7521e10c54f5bfd164d0fd982c798e3838f25ae07a4c1da186c721dad"
+    },
+    "daily-btc.json": {
+      "rawResponse": "artifacts/btc-five-year-study/source-usd/raw/BTC-USD-1d-fb83b4714e179d86b6c2.json.gz",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?interval=1d&period1=1626480000&period2=1789495200&includePrePost=false",
+      "retrievedAt": "2026-09-15T22:59:26Z",
+      "httpDate": "Tue, 15 Sep 2026 22:59:25 GMT",
+      "httpStatus": 200,
+      "contentType": "application/json;charset=utf-8",
+      "sha256": "928c156113fee96abd9dfbcaa5fb336fb1d7f7fba2d03fb57a5aac85921bdae3",
+      "bytes": 176986,
+      "coverage": {
+        "providerRows": 1887,
+        "acceptedRows": 1886,
+        "rejectedRowsByReason": {
+          "outside_completed_window": 1
+        },
+        "conflictingBucketsRemoved": 0,
+        "first": "2021-07-17T00:00:00Z",
+        "last": "2026-09-14T00:00:00Z"
+      },
+      "normalizedSha256": "93bd91ed19b3095097ee6e5d4959c9c4d0bf5545dabaec96aab8aa51349d8ceb"
+    }
+  },
+  "sources": [
+    {
+      "title": "Yahoo Finance US Dollar Index historical prices",
+      "url": "https://finance.yahoo.com/quote/DX-Y.NYB/history/"
+    },
+    {
+      "title": "Yahoo Finance US Dollar Index chart",
+      "url": "https://finance.yahoo.com/chart/DX-Y.NYB/"
+    },
+    {
+      "title": "ICE currency index definition",
+      "url": "https://www.ice.com/fixed-income-data-services/index-solutions/currency-indices"
+    },
+    {
+      "title": "ICE DXY calculation-hours update effective April 2, 2021",
+      "url": "https://www.ice.com/publicdocs/equity_indices/notices/DXY_ICE_FX_Indices_Methodology_Updates_20210311.pdf"
+    },
+    {
+      "title": "ICE FX Indexes methodology: closing-level definition (earlier version; hours updated in 2021 notice)",
+      "url": "https://www.nyse.com/publicdocs/nyse/indices/ICE_FX_Indexes_Methodology.pdf"
+    }
+  ],
+  "notes": [
+    "DXY is the same actual index and Yahoo symbol used by the dashboard. No futures, ETF, FX-pair proxy or inferred index was substituted.",
+    "Yahoo chart is a public provider endpoint without a versioned research API guarantee. Full raw responses and request metadata are archived for offline replay.",
+    "Daily closes use raw close, not adjusted close, matching dashboard daily price-level correlation inputs.",
+    "No prices are interpolated or filled. Missing hourly observations remain absent.",
+    "ICE spot DXY calculation continues until 19:15 ET Monday\u2013Thursday and 17:00 ET Friday. The daily closing level is the last calculated level. The app 17:00 ET gate is therefore not used as historical final-close availability; the study conservatively uses next New York midnight."
+  ],
+  "overlapVerification": [
+    {
+      "date": "2025-07-28",
+      "comparedRows": 24,
+      "ohlcDisagreements": [],
+      "missingFromTargetedRequest": [],
+      "rawResponse": "artifacts/btc-five-year-study/source-usd/raw/DX-Y.NYB-60m-e3a680416b8b55bc28d3.json.gz",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=60m&period1=1753660800&period2=1753747200&includePrePost=false",
+      "retrievedAt": "2026-09-15T22:59:26Z",
+      "httpDate": "Tue, 15 Sep 2026 22:59:26 GMT",
+      "httpStatus": 200,
+      "contentType": "application/json;charset=utf-8",
+      "sha256": "02ca979d1e93eeb2446ac662725f6b2cf33e55e36d157a19b4176bbcbdece3c5",
+      "bytes": 3409
+    },
+    {
+      "date": "2025-11-03",
+      "comparedRows": 24,
+      "ohlcDisagreements": [],
+      "missingFromTargetedRequest": [],
+      "rawResponse": "artifacts/btc-five-year-study/source-usd/raw/DX-Y.NYB-60m-16def9a8e716de0b3026.json.gz",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=60m&period1=1762128000&period2=1762214400&includePrePost=false",
+      "retrievedAt": "2026-09-15T22:59:26Z",
+      "httpDate": "Tue, 15 Sep 2026 22:59:26 GMT",
+      "httpStatus": 200,
+      "contentType": "application/json;charset=utf-8",
+      "sha256": "bf39f879286002b396664177b72533b095d0b485f5f72aa9696ddaede3041e47",
+      "bytes": 3386
+    },
+    {
+      "date": "2026-08-20",
+      "comparedRows": 24,
+      "ohlcDisagreements": [],
+      "missingFromTargetedRequest": [],
+      "rawResponse": "artifacts/btc-five-year-study/source-usd/raw/DX-Y.NYB-60m-54adedcbc54b0240b7e9.json.gz",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=60m&period1=1787184000&period2=1787270400&includePrePost=false",
+      "retrievedAt": "2026-09-15T22:59:27Z",
+      "httpDate": "Tue, 15 Sep 2026 22:59:26 GMT",
+      "httpStatus": 200,
+      "contentType": "application/json;charset=utf-8",
+      "sha256": "04572d6adc06e0877b32da42abc31ca0f4f43d6efd75ef9be747d652d8399439",
+      "bytes": 3409
+    }
+  ],
+  "officialMethodology": [
+    {
+      "path": "artifacts/btc-five-year-study/source-usd/raw/DXY_Methodology_Updates_20210311.pdf",
+      "url": "https://www.ice.com/publicdocs/equity_indices/notices/DXY_ICE_FX_Indices_Methodology_Updates_20210311.pdf",
+      "retrievedAt": "2026-09-15T22:59:27Z",
+      "httpDate": "Tue, 15 Sep 2026 22:59:27 GMT",
+      "httpStatus": 200,
+      "sha256": "f9d17394999fae9d68b11fabff960c7c135650a889889fda8f72648b63723666",
+      "bytes": 152860
+    },
+    {
+      "path": "artifacts/btc-five-year-study/source-usd/raw/ICE_FX_Indexes_Methodology_2018.pdf",
+      "url": "https://www.nyse.com/publicdocs/nyse/indices/ICE_FX_Indexes_Methodology.pdf",
+      "retrievedAt": "2026-09-15T22:59:27Z",
+      "httpDate": "Tue, 15 Sep 2026 22:59:27 GMT",
+      "httpStatus": 200,
+      "sha256": "1ae45cbcb27292c8d4371bc116b24826c70a49f641d82aa8b1b76eee3ab23ecb",
+      "bytes": 758947
+    }
+  ],
+  "timingEvidence": {
+    "source": "DXY_Methodology_Updates_20210311.pdf, page 1, item 1",
+    "excerpt": "the index will stop calculating and publishing at 5 PM ET on the Friday of each week.",
+    "summary": "The March 11, 2021 notice retains 19:15 ET on other weekdays and changes Friday to 17:00 ET, effective April 2, 2021.",
+    "closingDefinitionSource": "ICE_FX_Indexes_Methodology_2018.pdf, Publication section: the daily closing level is the last calculated index level.",
+    "application": "Next New York midnight plus any additional analysis latency is a conservative research availability convention, not a claim of verified historical Yahoo receipt time."
+  },
+  "scriptSha256": "c268f37de6fb04311435f8dfdc7d4994341dd25129dd89c8aea85fc74cee8788"
+}

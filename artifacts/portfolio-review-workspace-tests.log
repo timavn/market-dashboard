@@ -1,0 +1,6 @@
+PASS src/components/Dashboard/AnalystWorkspace.test.jsx (27.861 s)
+
+Test Suites: 1 passed, 1 total
+Tests:       167 passed, 167 total
+Snapshots:   0 total
+Time:        28.147 s

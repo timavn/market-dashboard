@@ -1,0 +1,7 @@
+{
+  "status": "passed",
+  "automatedTests": 36,
+  "independentAudit": "All candle and settlement calculations, timing, signal exclusions, DST, group statistics, and exported counts reconciled without discrepancies.",
+  "renderReview": "Report summary, primary table and interval chart, hour-of-day chart/table, and download footer reviewed in local browser.",
+  "scope": "Standalone historical research; no dashboard production files changed for this experiment."
+}

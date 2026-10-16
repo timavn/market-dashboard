@@ -1,0 +1,5737 @@
+{
+  "schemaVersion": 1,
+  "historical": true,
+  "executable": false,
+  "source": "coinbase_exchange_public_15minute_candles",
+  "productId": "BTC-USD",
+  "timeZone": "America/New_York",
+  "startInclusive": "2025-07-28T00:00:00Z",
+  "cutoff": "2026-09-15T18:00:00Z",
+  "asOf": "2026-09-15T21:47:56Z",
+  "granularitySeconds": 900,
+  "calendarSources": [
+    "https://www.nyse.com/trade/hours-calendars",
+    "https://www.nyse.com/publicdocs/ICE_NYSE_2025_Yearly_Trading_Calendar.pdf"
+  ],
+  "earlyCloseDates": [
+    "2025-07-03",
+    "2025-11-28",
+    "2025-12-24",
+    "2026-11-27",
+    "2026-12-24"
+  ],
+  "expectedSessions": 285,
+  "incompleteSessions": [
+    {
+      "sessionDate": "2026-09-15",
+      "startAt": "2026-09-15T13:30:00Z",
+      "endAt": "2026-09-15T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26
+    }
+  ],
+  "rows": [
+    {
+      "sessionDate": "2025-07-28",
+      "startAt": "2025-07-28T13:30:00Z",
+      "endAt": "2025-07-28T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 118604.08,
+      "close": 118066.31,
+      "high": 119111.87,
+      "low": 117380.6,
+      "volume": 3219.7565411600012,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a223f29213fa038d9d171656.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-07-29",
+      "startAt": "2025-07-29T13:30:00Z",
+      "endAt": "2025-07-29T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 118937.33,
+      "close": 117483.28,
+      "high": 119038.51,
+      "low": 116900.0,
+      "volume": 3259.5548238600004,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a0e1c5a83eaca8e7a15132b1.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-07-30",
+      "startAt": "2025-07-30T13:30:00Z",
+      "endAt": "2025-07-30T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 117508.07,
+      "close": 116900.01,
+      "high": 118809.43,
+      "low": 115728.49,
+      "volume": 2918.20587419,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e69183d9fbfc601345d97053.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-07-31",
+      "startAt": "2025-07-31T13:30:00Z",
+      "endAt": "2025-07-31T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 118119.99,
+      "close": 116757.77,
+      "high": 118888.0,
+      "low": 116722.22,
+      "volume": 1838.8715532200001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/fae0b0c6578d02ce4777ccf0.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-01",
+      "startAt": "2025-08-01T13:30:00Z",
+      "endAt": "2025-08-01T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 115650.1,
+      "close": 113247.92,
+      "high": 115812.7,
+      "low": 113142.0,
+      "volume": 4563.4590493,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/82707a8ea5512f72b616a8cc.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-04",
+      "startAt": "2025-08-04T13:30:00Z",
+      "endAt": "2025-08-04T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 114188.92,
+      "close": 114746.95,
+      "high": 115756.06,
+      "low": 114118.18,
+      "volume": 2626.39179036,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/595fe20cceae27dfb0366b00.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-05",
+      "startAt": "2025-08-05T13:30:00Z",
+      "endAt": "2025-08-05T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 114170.98,
+      "close": 113602.75,
+      "high": 114597.71,
+      "low": 112622.14,
+      "volume": 2989.3449255799997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/71b9b10ba939c748bcd3091b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-06",
+      "startAt": "2025-08-06T13:30:00Z",
+      "endAt": "2025-08-06T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113899.36,
+      "close": 115295.57,
+      "high": 115749.99,
+      "low": 113566.01,
+      "volume": 2662.59728239,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/2c66f86cc6b0e27a21092f21.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-07",
+      "startAt": "2025-08-07T13:30:00Z",
+      "endAt": "2025-08-07T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 116428.3,
+      "close": 117525.79,
+      "high": 117609.31,
+      "low": 115673.04,
+      "volume": 3010.17416894,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/d1b451dee1d6f3f1763a69ab.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-08",
+      "startAt": "2025-08-08T13:30:00Z",
+      "endAt": "2025-08-08T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 116788.84,
+      "close": 116467.8,
+      "high": 117330.8,
+      "low": 115800.0,
+      "volume": 2875.4406027400005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/655b5d386f2800be0f19f544.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-11",
+      "startAt": "2025-08-11T13:30:00Z",
+      "endAt": "2025-08-11T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 119514.07,
+      "close": 119068.36,
+      "high": 120796.74,
+      "low": 118541.21,
+      "volume": 1941.37969999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/54c30ad87510586317c8c0dc.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-12",
+      "startAt": "2025-08-12T13:30:00Z",
+      "endAt": "2025-08-12T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 119202.14,
+      "close": 119655.97,
+      "high": 120199.99,
+      "low": 118617.74,
+      "volume": 1917.02137802,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/db037a9470f5ba6b94c6359a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-13",
+      "startAt": "2025-08-13T13:30:00Z",
+      "endAt": "2025-08-13T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 120630.15,
+      "close": 122804.64,
+      "high": 122900.0,
+      "low": 120103.0,
+      "volume": 4138.70743886,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/97ab7c2bde8873581312f735.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-14",
+      "startAt": "2025-08-14T13:30:00Z",
+      "endAt": "2025-08-14T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 118291.24,
+      "close": 117997.18,
+      "high": 119456.65,
+      "low": 117208.97,
+      "volume": 3851.9493555500007,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/93a8d3c97412a6daa6eef3da.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-15",
+      "startAt": "2025-08-15T13:30:00Z",
+      "endAt": "2025-08-15T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 118538.19,
+      "close": 116997.52,
+      "high": 118600.0,
+      "low": 116859.32,
+      "volume": 2496.46276906,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/462ffca5d67bbf45dd07f693.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-18",
+      "startAt": "2025-08-18T13:30:00Z",
+      "endAt": "2025-08-18T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 115728.58,
+      "close": 116365.53,
+      "high": 116888.0,
+      "low": 114863.47,
+      "volume": 2264.04889325,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/03863c278f414be1ec4eeb46.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-19",
+      "startAt": "2025-08-19T13:30:00Z",
+      "endAt": "2025-08-19T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 115792.86,
+      "close": 113105.4,
+      "high": 115922.62,
+      "low": 112720.0,
+      "volume": 4755.899605579999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8ead6fdbe3479062dcbde5a8.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-20",
+      "startAt": "2025-08-20T13:30:00Z",
+      "endAt": "2025-08-20T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113423.98,
+      "close": 114279.3,
+      "high": 114458.52,
+      "low": 112344.11,
+      "volume": 2819.4631710600006,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8c9f7685d72d5b1979b3b40a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-21",
+      "startAt": "2025-08-21T13:30:00Z",
+      "endAt": "2025-08-21T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113295.92,
+      "close": 112160.29,
+      "high": 113980.0,
+      "low": 111964.0,
+      "volume": 3227.3276131000002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c306225f8c6d6b03405c67d4.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-22",
+      "startAt": "2025-08-22T13:30:00Z",
+      "endAt": "2025-08-22T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 112249.42,
+      "close": 116648.95,
+      "high": 117416.73,
+      "low": 111904.18,
+      "volume": 5390.494034910001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f4a412f8f49c45a497911bd9.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-25",
+      "startAt": "2025-08-25T13:30:00Z",
+      "endAt": "2025-08-25T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 111648.86,
+      "close": 110693.42,
+      "high": 112932.52,
+      "low": 110555.26,
+      "volume": 2720.2797586799998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/eb8e13372ff14c45d20621c6.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-26",
+      "startAt": "2025-08-26T13:30:00Z",
+      "endAt": "2025-08-26T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 109844.02,
+      "close": 111125.26,
+      "high": 111183.3,
+      "low": 109337.48,
+      "volume": 3144.24665636,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0cfe736741b405d61b4ddde5.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-27",
+      "startAt": "2025-08-27T13:30:00Z",
+      "endAt": "2025-08-27T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 111330.89,
+      "close": 112078.96,
+      "high": 112683.39,
+      "low": 111009.81,
+      "volume": 2300.7474145999995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/64eaf77659f16e4fb50b930a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-28",
+      "startAt": "2025-08-28T13:30:00Z",
+      "endAt": "2025-08-28T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113045.12,
+      "close": 111905.45,
+      "high": 113322.3,
+      "low": 111895.32,
+      "volume": 2060.8386482600004,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e8f726e55d885aa720a81101.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-08-29",
+      "startAt": "2025-08-29T13:30:00Z",
+      "endAt": "2025-08-29T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 110521.82,
+      "close": 108213.98,
+      "high": 110584.31,
+      "low": 107900.35,
+      "volume": 4023.66234692,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/b9747deaa6cb57f60c4b0008.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-02",
+      "startAt": "2025-09-02T13:30:00Z",
+      "endAt": "2025-09-02T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 109385.69,
+      "close": 110809.89,
+      "high": 111801.86,
+      "low": 109044.07,
+      "volume": 3793.4024000699997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c930d7b23364651be399b3df.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-03",
+      "startAt": "2025-09-03T13:30:00Z",
+      "endAt": "2025-09-03T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 111363.86,
+      "close": 112240.18,
+      "high": 112600.0,
+      "low": 111126.85,
+      "volume": 2849.43551045,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/25b10bad6abfbf10a5cedc1c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-04",
+      "startAt": "2025-09-04T13:30:00Z",
+      "endAt": "2025-09-04T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 110812.17,
+      "close": 109808.31,
+      "high": 110920.05,
+      "low": 109321.0,
+      "volume": 2579.6627556100007,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/fa9d695b1474afc974a91220.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-05",
+      "startAt": "2025-09-05T13:30:00Z",
+      "endAt": "2025-09-05T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 112965.79,
+      "close": 111630.22,
+      "high": 113329.78,
+      "low": 110202.36,
+      "volume": 3686.6003542599997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/5bf01c71f7e0274bfd48496d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-08",
+      "startAt": "2025-09-08T13:30:00Z",
+      "endAt": "2025-09-08T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 112200.05,
+      "close": 112107.76,
+      "high": 112940.84,
+      "low": 111866.48,
+      "volume": 2260.40589757,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/baf6773bb66ba66d30e8e845.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-09",
+      "startAt": "2025-09-09T13:30:00Z",
+      "endAt": "2025-09-09T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 112836.31,
+      "close": 111305.71,
+      "high": 112975.0,
+      "low": 110765.72,
+      "volume": 2206.0383376600003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e003b367d9401036b1f49b3b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-10",
+      "startAt": "2025-09-10T13:30:00Z",
+      "endAt": "2025-09-10T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113673.33,
+      "close": 113610.0,
+      "high": 114362.1,
+      "low": 113179.9,
+      "volume": 3300.6822960500003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/627eef2c838429778d34f203.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-11",
+      "startAt": "2025-09-11T13:30:00Z",
+      "endAt": "2025-09-11T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113750.0,
+      "close": 114464.0,
+      "high": 114754.95,
+      "low": 113700.05,
+      "volume": 2524.0494977199996,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3e7dc026e0b98033f5501207.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-12",
+      "startAt": "2025-09-12T13:30:00Z",
+      "endAt": "2025-09-12T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 114983.2,
+      "close": 116793.73,
+      "high": 116833.25,
+      "low": 114813.42,
+      "volume": 3490.50029059,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/04d89610e93c40bbc14abcd5.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-15",
+      "startAt": "2025-09-15T13:30:00Z",
+      "endAt": "2025-09-15T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 115057.0,
+      "close": 115327.01,
+      "high": 115594.82,
+      "low": 114395.84,
+      "volume": 2622.72281269,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ac367e431f2d25ebdd45f825.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-16",
+      "startAt": "2025-09-16T13:30:00Z",
+      "endAt": "2025-09-16T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 115483.23,
+      "close": 116866.13,
+      "high": 116940.0,
+      "low": 114750.0,
+      "volume": 3405.7707141599994,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c0cab76c6725276515f566c6.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-17",
+      "startAt": "2025-09-17T13:30:00Z",
+      "endAt": "2025-09-17T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 116278.02,
+      "close": 115699.28,
+      "high": 116384.9,
+      "low": 114724.57,
+      "volume": 3690.7578332300004,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/48a1cb49c7f6790e50a43ce6.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-18",
+      "startAt": "2025-09-18T13:30:00Z",
+      "endAt": "2025-09-18T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 117492.03,
+      "close": 117503.13,
+      "high": 117998.17,
+      "low": 117030.06,
+      "volume": 3084.417258430001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/767993c66b05ba94ab356c19.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-19",
+      "startAt": "2025-09-19T13:30:00Z",
+      "endAt": "2025-09-19T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 116252.05,
+      "close": 115166.0,
+      "high": 116534.58,
+      "low": 115141.23,
+      "volume": 2644.37554946,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c24119842ccc3b95592a41d4.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-22",
+      "startAt": "2025-09-22T13:30:00Z",
+      "endAt": "2025-09-22T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113026.04,
+      "close": 112192.0,
+      "high": 113568.27,
+      "low": 112004.34,
+      "volume": 2861.53730213,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c693ffb1a6066e4eafa242de.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-23",
+      "startAt": "2025-09-23T13:30:00Z",
+      "endAt": "2025-09-23T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 112969.0,
+      "close": 111679.02,
+      "high": 113357.0,
+      "low": 111538.85,
+      "volume": 2175.1008015999996,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/2326790f5613f2bc52f6cd92.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-24",
+      "startAt": "2025-09-24T13:30:00Z",
+      "endAt": "2025-09-24T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113082.87,
+      "close": 113477.89,
+      "high": 113999.98,
+      "low": 112832.74,
+      "volume": 2207.73150896,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ca859fb912f4314571295e8d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-25",
+      "startAt": "2025-09-25T13:30:00Z",
+      "endAt": "2025-09-25T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 111644.0,
+      "close": 109391.38,
+      "high": 111775.13,
+      "low": 108623.7,
+      "volume": 4929.319176200001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/47470c80c170435ef30d36e0.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-26",
+      "startAt": "2025-09-26T13:30:00Z",
+      "endAt": "2025-09-26T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 109233.84,
+      "close": 109218.56,
+      "high": 110369.99,
+      "low": 108817.02,
+      "volume": 3575.277629010001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f24b6ea4a950d76a38435496.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-29",
+      "startAt": "2025-09-29T13:30:00Z",
+      "endAt": "2025-09-29T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 112222.2,
+      "close": 114325.41,
+      "high": 114473.0,
+      "low": 112121.11,
+      "volume": 2755.4142857899997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/da1e89f46481dae381a7114d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-09-30",
+      "startAt": "2025-09-30T13:30:00Z",
+      "endAt": "2025-09-30T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113359.5,
+      "close": 114378.49,
+      "high": 114600.0,
+      "low": 112803.57,
+      "volume": 2168.3122881,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/9b92c72a60dc789056a58831.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-01",
+      "startAt": "2025-10-01T13:30:00Z",
+      "endAt": "2025-10-01T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 116685.8,
+      "close": 117501.25,
+      "high": 118280.0,
+      "low": 116452.11,
+      "volume": 4027.38507202,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/fd1066790df3a5049623cee3.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-02",
+      "startAt": "2025-10-02T13:30:00Z",
+      "endAt": "2025-10-02T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 119231.97,
+      "close": 120932.04,
+      "high": 121111.0,
+      "low": 118581.0,
+      "volume": 4623.0664086199995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/347b0a75797227e5ef3ca041.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-03",
+      "startAt": "2025-10-03T13:30:00Z",
+      "endAt": "2025-10-03T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 120644.03,
+      "close": 122778.0,
+      "high": 123996.81,
+      "low": 119971.71,
+      "volume": 7080.069539140001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0eb07f0076e6646e6654d47c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-06",
+      "startAt": "2025-10-06T13:30:00Z",
+      "endAt": "2025-10-06T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 124907.96,
+      "close": 125474.93,
+      "high": 126296.0,
+      "low": 124406.35,
+      "volume": 4878.95456168,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c87d8a7116b058cf4dfb3e7a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-07",
+      "startAt": "2025-10-07T13:30:00Z",
+      "endAt": "2025-10-07T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 124897.97,
+      "close": 121695.48,
+      "high": 124911.35,
+      "low": 120636.0,
+      "volume": 4996.5234804,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/db0a8a5e35b4db68ed535b79.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-08",
+      "startAt": "2025-10-08T13:30:00Z",
+      "endAt": "2025-10-08T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 122523.98,
+      "close": 123467.99,
+      "high": 124254.31,
+      "low": 121681.92,
+      "volume": 3127.546417750001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3184020553927480b8a27caa.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-09",
+      "startAt": "2025-10-09T13:30:00Z",
+      "endAt": "2025-10-09T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 123507.99,
+      "close": 121040.0,
+      "high": 123513.99,
+      "low": 119713.65,
+      "volume": 3765.4301671700005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/d263cbdb480034e73527c31d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-10",
+      "startAt": "2025-10-10T13:30:00Z",
+      "endAt": "2025-10-10T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 122018.27,
+      "close": 116670.01,
+      "high": 122600.0,
+      "low": 115946.13,
+      "volume": 7153.71243396,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/50aeb11fa410c4d8e9f55157.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-13",
+      "startAt": "2025-10-13T13:30:00Z",
+      "endAt": "2025-10-13T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 114445.64,
+      "close": 115899.11,
+      "high": 115995.74,
+      "low": 113898.97,
+      "volume": 3883.9743719299995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/657d12708c1c6a8e96aec113.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-14",
+      "startAt": "2025-10-14T13:30:00Z",
+      "endAt": "2025-10-14T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 110836.88,
+      "close": 112664.75,
+      "high": 113611.36,
+      "low": 109945.86,
+      "volume": 4708.1681250500005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/b4480396f68cab2112db1ea3.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-15",
+      "startAt": "2025-10-15T13:30:00Z",
+      "endAt": "2025-10-15T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 111516.0,
+      "close": 111318.21,
+      "high": 112322.49,
+      "low": 110185.87,
+      "volume": 3241.1715056600005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c613f9a24da360b505fa8a9d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-16",
+      "startAt": "2025-10-16T13:30:00Z",
+      "endAt": "2025-10-16T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 111192.28,
+      "close": 108246.33,
+      "high": 111547.33,
+      "low": 107600.37,
+      "volume": 7180.821588389998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/964cba7574e1311283632274.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-17",
+      "startAt": "2025-10-17T13:30:00Z",
+      "endAt": "2025-10-17T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 105523.9,
+      "close": 106484.0,
+      "high": 107576.94,
+      "low": 104553.98,
+      "volume": 5061.843920089999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8f0cdb2b15452116f9330567.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-20",
+      "startAt": "2025-10-20T13:30:00Z",
+      "endAt": "2025-10-20T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 110777.93,
+      "close": 110840.0,
+      "high": 111748.6,
+      "low": 109875.47,
+      "volume": 2381.50148463,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/602b906817405fff78ec7545.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-21",
+      "startAt": "2025-10-21T13:30:00Z",
+      "endAt": "2025-10-21T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 108740.88,
+      "close": 111841.0,
+      "high": 114082.29,
+      "low": 108201.0,
+      "volume": 6550.935781770002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/63c27065429544e76dd15344.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-22",
+      "startAt": "2025-10-22T13:30:00Z",
+      "endAt": "2025-10-22T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 108174.01,
+      "close": 107846.83,
+      "high": 109188.27,
+      "low": 107461.49,
+      "volume": 4555.95016153,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/91a2fc216e5a2b6a36a2dd5c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-23",
+      "startAt": "2025-10-23T13:30:00Z",
+      "endAt": "2025-10-23T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 109160.35,
+      "close": 110247.6,
+      "high": 111342.6,
+      "low": 108746.49,
+      "volume": 2925.64069488,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4d461c8d2905fae38367385f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-24",
+      "startAt": "2025-10-24T13:30:00Z",
+      "endAt": "2025-10-24T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 111261.02,
+      "close": 110624.14,
+      "high": 111341.34,
+      "low": 109725.51,
+      "volume": 2166.67130251,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/27fe953ec32bc1ff7475f0d9.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-27",
+      "startAt": "2025-10-27T13:30:00Z",
+      "endAt": "2025-10-27T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 115128.0,
+      "close": 114950.0,
+      "high": 115808.76,
+      "low": 114477.0,
+      "volume": 1756.90866713,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/b404c0f9a1656d2dad5615f8.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-28",
+      "startAt": "2025-10-28T13:30:00Z",
+      "endAt": "2025-10-28T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 115064.04,
+      "close": 113687.51,
+      "high": 116114.13,
+      "low": 113534.01,
+      "volume": 2399.38464944,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/58cd355d54b6db5e2d22882e.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-29",
+      "startAt": "2025-10-29T13:30:00Z",
+      "endAt": "2025-10-29T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 113563.62,
+      "close": 110644.31,
+      "high": 113629.15,
+      "low": 109000.0,
+      "volume": 3365.55772689,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8c160961fcef9e701147033e.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-30",
+      "startAt": "2025-10-30T13:30:00Z",
+      "endAt": "2025-10-30T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 108468.99,
+      "close": 106491.99,
+      "high": 108546.65,
+      "low": 106283.11,
+      "volume": 3700.3215959400004,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f87426d3a32fd67be93efe20.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-10-31",
+      "startAt": "2025-10-31T13:30:00Z",
+      "endAt": "2025-10-31T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 109891.12,
+      "close": 109756.29,
+      "high": 111066.1,
+      "low": 108514.07,
+      "volume": 3074.6258728500006,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4b2d06a72f2ffa583383663a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-03",
+      "startAt": "2025-11-03T14:30:00Z",
+      "endAt": "2025-11-03T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 107519.59,
+      "close": 106632.31,
+      "high": 108137.67,
+      "low": 105271.67,
+      "volume": 3794.118746989999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/be479cd79becb8648da1b9a5.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-04",
+      "startAt": "2025-11-04T14:30:00Z",
+      "endAt": "2025-11-04T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 103734.66,
+      "close": 100680.87,
+      "high": 104803.32,
+      "low": 99500.0,
+      "volume": 9006.688936690001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ac98c54da447ef84efea8000.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-05",
+      "startAt": "2025-11-05T14:30:00Z",
+      "endAt": "2025-11-05T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 102642.6,
+      "close": 103841.98,
+      "high": 104550.0,
+      "low": 102144.56,
+      "volume": 4514.12140243,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/9fb3e97c66a635e57518af6e.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-06",
+      "startAt": "2025-11-06T14:30:00Z",
+      "endAt": "2025-11-06T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 102855.45,
+      "close": 100860.0,
+      "high": 102894.57,
+      "low": 100235.02,
+      "volume": 4921.86002359,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f6ee433a9bb6572d63756ea7.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-07",
+      "startAt": "2025-11-07T14:30:00Z",
+      "endAt": "2025-11-07T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 100244.95,
+      "close": 103749.09,
+      "high": 103859.6,
+      "low": 99428.0,
+      "volume": 4687.29726628,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0e2ffd3c3f4d2a494ab993de.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-10",
+      "startAt": "2025-11-10T14:30:00Z",
+      "endAt": "2025-11-10T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 106168.75,
+      "close": 105985.94,
+      "high": 106261.91,
+      "low": 104627.49,
+      "volume": 2811.8385840199994,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8d4e011bdd36c428fc7b8c28.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-11",
+      "startAt": "2025-11-11T14:30:00Z",
+      "endAt": "2025-11-11T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 104472.27,
+      "close": 102771.54,
+      "high": 104654.6,
+      "low": 102624.11,
+      "volume": 2357.59540951,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/87ea48576d6ea1fcd29cd97e.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-12",
+      "startAt": "2025-11-12T14:30:00Z",
+      "endAt": "2025-11-12T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 104769.69,
+      "close": 101519.99,
+      "high": 104896.02,
+      "low": 100803.2,
+      "volume": 3078.158447629999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/18a970e8908f72715d042ec8.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-13",
+      "startAt": "2025-11-13T14:30:00Z",
+      "endAt": "2025-11-13T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 102421.8,
+      "close": 98090.0,
+      "high": 103466.69,
+      "low": 97870.0,
+      "volume": 7170.06874834,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/b80d95245bd11dd041ef3270.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-14",
+      "startAt": "2025-11-14T14:30:00Z",
+      "endAt": "2025-11-14T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 95317.21,
+      "close": 94287.01,
+      "high": 97345.33,
+      "low": 94000.0,
+      "volume": 7926.61237759,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e05197db6dfd8a522834daf1.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-17",
+      "startAt": "2025-11-17T14:30:00Z",
+      "endAt": "2025-11-17T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 94069.43,
+      "close": 91787.28,
+      "high": 95950.0,
+      "low": 91158.35,
+      "volume": 7230.68037946,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/889de9b5a0c490c5cce543cb.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-18",
+      "startAt": "2025-11-18T14:30:00Z",
+      "endAt": "2025-11-18T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 91684.0,
+      "close": 92748.97,
+      "high": 93775.0,
+      "low": 90914.56,
+      "volume": 6323.856228659998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/48481ce720b037e9624a7b8f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-19",
+      "startAt": "2025-11-19T14:30:00Z",
+      "endAt": "2025-11-19T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 91057.12,
+      "close": 89413.61,
+      "high": 92358.27,
+      "low": 88483.12,
+      "volume": 7093.310843170001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/dc8448a57b077ca6e31075a1.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-20",
+      "startAt": "2025-11-20T14:30:00Z",
+      "endAt": "2025-11-20T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 91360.74,
+      "close": 86333.83,
+      "high": 91583.0,
+      "low": 85980.7,
+      "volume": 10591.73026095,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3a057ab694a05bb24c57da8e.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-21",
+      "startAt": "2025-11-21T14:30:00Z",
+      "endAt": "2025-11-21T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 83601.01,
+      "close": 84487.2,
+      "high": 85490.57,
+      "low": 82233.99,
+      "volume": 12149.071373590003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/70c065d1f41cb5d0f20e8733.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-24",
+      "startAt": "2025-11-24T14:30:00Z",
+      "endAt": "2025-11-24T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 85888.4,
+      "close": 89072.01,
+      "high": 89225.6,
+      "low": 85213.17,
+      "volume": 6712.52670161,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/1008048a7893bb7fff79dfc0.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-25",
+      "startAt": "2025-11-25T14:30:00Z",
+      "endAt": "2025-11-25T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 87144.8,
+      "close": 87343.65,
+      "high": 88108.0,
+      "low": 86067.02,
+      "volume": 4782.51818122,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0dd8588e0bcad7b47d017c58.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-26",
+      "startAt": "2025-11-26T14:30:00Z",
+      "endAt": "2025-11-26T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 87274.98,
+      "close": 89856.06,
+      "high": 90399.74,
+      "low": 86634.84,
+      "volume": 5612.50935278,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/73a7aa4f88652cf7311c7b14.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-11-28",
+      "startAt": "2025-11-28T14:30:00Z",
+      "endAt": "2025-11-28T18:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": true,
+      "expectedCandles": 14,
+      "open": 92965.52,
+      "close": 90673.19,
+      "high": 93161.86,
+      "low": 90220.5,
+      "volume": 3281.74058281,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/df22f0a5ae0cc5e95c4c0cf0.json.gz"
+      ],
+      "candleCount": 14,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-01",
+      "startAt": "2025-12-01T14:30:00Z",
+      "endAt": "2025-12-01T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 86234.23,
+      "close": 85511.18,
+      "high": 86666.67,
+      "low": 83800.0,
+      "volume": 6555.47341933,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/1bcf28409c3a5d5ef09e28b3.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-02",
+      "startAt": "2025-12-02T14:30:00Z",
+      "endAt": "2025-12-02T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 88679.88,
+      "close": 91070.79,
+      "high": 92342.0,
+      "low": 88392.0,
+      "volume": 6855.2472106899995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/68f0a043e84714d1e6ce2fb0.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-03",
+      "startAt": "2025-12-03T14:30:00Z",
+      "endAt": "2025-12-03T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 92582.0,
+      "close": 92991.75,
+      "high": 93716.63,
+      "low": 91795.12,
+      "volume": 3196.8887041600005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8606f178c875a51d41df6bca.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-04",
+      "startAt": "2025-12-04T14:30:00Z",
+      "endAt": "2025-12-04T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 92812.97,
+      "close": 92523.07,
+      "high": 93291.02,
+      "low": 90904.73,
+      "volume": 2814.85086028,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3bea96ca270215262bfa0c7b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-05",
+      "startAt": "2025-12-05T14:30:00Z",
+      "endAt": "2025-12-05T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 90449.54,
+      "close": 89321.7,
+      "high": 91488.2,
+      "low": 88099.05,
+      "volume": 4842.23093841,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/301c4151cb3a473b28073ace.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-08",
+      "startAt": "2025-12-08T14:30:00Z",
+      "endAt": "2025-12-08T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 91359.84,
+      "close": 90813.85,
+      "high": 91783.82,
+      "low": 89599.0,
+      "volume": 3260.2135823299996,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/de04fc4a1eaf892b0a178384.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-09",
+      "startAt": "2025-12-09T14:30:00Z",
+      "endAt": "2025-12-09T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 90266.07,
+      "close": 93136.46,
+      "high": 94640.66,
+      "low": 90007.13,
+      "volume": 6285.392695729999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/091ee6a99ae5775ac6f76fea.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-10",
+      "startAt": "2025-12-10T14:30:00Z",
+      "endAt": "2025-12-10T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 91944.89,
+      "close": 92498.32,
+      "high": 94500.0,
+      "low": 91556.64,
+      "volume": 4769.57719313,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/14d163ae565dfced62e87a10.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-11",
+      "startAt": "2025-12-11T14:30:00Z",
+      "endAt": "2025-12-11T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 90140.11,
+      "close": 91808.02,
+      "high": 91855.7,
+      "low": 89257.98,
+      "volume": 3552.5781304899992,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/102d39153c4b8a73243f2eab.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-12",
+      "startAt": "2025-12-12T14:30:00Z",
+      "endAt": "2025-12-12T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 92135.33,
+      "close": 90220.0,
+      "high": 92690.02,
+      "low": 89500.0,
+      "volume": 3655.6330371099993,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a65e698584b1d5cc1ba5ce8a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-15",
+      "startAt": "2025-12-15T14:30:00Z",
+      "endAt": "2025-12-15T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 89393.66,
+      "close": 85757.01,
+      "high": 89874.0,
+      "low": 85129.63,
+      "volume": 5766.541426370001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c362da035cdb32b7f8d99103.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-16",
+      "startAt": "2025-12-16T14:30:00Z",
+      "endAt": "2025-12-16T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 86919.99,
+      "close": 87552.02,
+      "high": 88148.0,
+      "low": 86793.12,
+      "volume": 3686.15574163,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f2cf1e9f9bf65ab63ae722ee.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-17",
+      "startAt": "2025-12-17T14:30:00Z",
+      "endAt": "2025-12-17T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 87699.03,
+      "close": 85857.38,
+      "high": 90336.36,
+      "low": 85267.69,
+      "volume": 6507.420862479999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e63c3deca8ed7ed036baf4a8.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-18",
+      "startAt": "2025-12-18T14:30:00Z",
+      "endAt": "2025-12-18T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 88464.34,
+      "close": 84558.65,
+      "high": 89317.33,
+      "low": 84400.0,
+      "volume": 4994.2322870299995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/315bdb7c4c94a195d139c00b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-19",
+      "startAt": "2025-12-19T14:30:00Z",
+      "endAt": "2025-12-19T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 87976.03,
+      "close": 88021.73,
+      "high": 89365.85,
+      "low": 86784.83,
+      "volume": 3810.4089322300006,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/b331c1fa924651e487b8723f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-22",
+      "startAt": "2025-12-22T14:30:00Z",
+      "endAt": "2025-12-22T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 89925.98,
+      "close": 88294.02,
+      "high": 90408.98,
+      "low": 87853.86,
+      "volume": 4320.580004539999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/28ee5654c8ccda98df17521c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-23",
+      "startAt": "2025-12-23T14:30:00Z",
+      "endAt": "2025-12-23T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 87609.0,
+      "close": 87613.32,
+      "high": 88321.65,
+      "low": 86533.86,
+      "volume": 2985.2888418499997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c031ec43eda2212c7a834bfb.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-24",
+      "startAt": "2025-12-24T14:30:00Z",
+      "endAt": "2025-12-24T18:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": true,
+      "expectedCandles": 14,
+      "open": 87182.3,
+      "close": 87257.34,
+      "high": 87617.19,
+      "low": 86350.0,
+      "volume": 1704.2587194399998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/767702f178e5b75a0d77a137.json.gz"
+      ],
+      "candleCount": 14,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-26",
+      "startAt": "2025-12-26T14:30:00Z",
+      "endAt": "2025-12-26T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 88922.07,
+      "close": 87507.92,
+      "high": 89001.28,
+      "low": 86569.53,
+      "volume": 4381.98571846,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/13b8693ba126079f409b7102.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-29",
+      "startAt": "2025-12-29T14:30:00Z",
+      "endAt": "2025-12-29T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 87506.96,
+      "close": 87076.36,
+      "high": 88109.96,
+      "low": 86935.8,
+      "volume": 3292.1711451699994,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3eaceff5eaf3d186055ef446.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-30",
+      "startAt": "2025-12-30T14:30:00Z",
+      "endAt": "2025-12-30T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 88032.14,
+      "close": 87836.94,
+      "high": 89343.52,
+      "low": 87755.89,
+      "volume": 4832.749919039999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f40667764ce9f8ede98b6422.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2025-12-31",
+      "startAt": "2025-12-31T14:30:00Z",
+      "endAt": "2025-12-31T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 88850.48,
+      "close": 87523.98,
+      "high": 88853.19,
+      "low": 87082.64,
+      "volume": 4170.578261090001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0ddfc2c941486285e6a6fcc6.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-02",
+      "startAt": "2026-01-02T14:30:00Z",
+      "endAt": "2026-01-02T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 88818.01,
+      "close": 89693.1,
+      "high": 90935.22,
+      "low": 88375.0,
+      "volume": 7022.485715120001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/79523df551b81e03ad170a51.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-05",
+      "startAt": "2026-01-05T14:30:00Z",
+      "endAt": "2026-01-05T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 92716.0,
+      "close": 94194.02,
+      "high": 94825.27,
+      "low": 92338.0,
+      "volume": 7128.47370792,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3b9c85533bcfd99ac15454af.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-06",
+      "startAt": "2026-01-06T14:30:00Z",
+      "endAt": "2026-01-06T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 94309.98,
+      "close": 92447.52,
+      "high": 94350.0,
+      "low": 91203.13,
+      "volume": 5157.70514967,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/35ee3caff4cff433efd6250a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-07",
+      "startAt": "2026-01-07T14:30:00Z",
+      "endAt": "2026-01-07T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 91466.65,
+      "close": 90930.07,
+      "high": 92080.2,
+      "low": 90576.24,
+      "volume": 5579.515346709999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/45d8d7b685be821516c43f17.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-08",
+      "startAt": "2026-01-08T14:30:00Z",
+      "endAt": "2026-01-08T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 89519.59,
+      "close": 90847.09,
+      "high": 91403.97,
+      "low": 89200.0,
+      "volume": 4708.730859119999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/2741e8bf2661f040bad87d03.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-09",
+      "startAt": "2026-01-09T14:30:00Z",
+      "endAt": "2026-01-09T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 90489.55,
+      "close": 90195.99,
+      "high": 91944.52,
+      "low": 89735.11,
+      "volume": 4968.07631489,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/59db92b709f53ca2392e09c1.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-12",
+      "startAt": "2026-01-12T14:30:00Z",
+      "endAt": "2026-01-12T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 90155.61,
+      "close": 91409.51,
+      "high": 92257.47,
+      "low": 90064.98,
+      "volume": 4526.196100979999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/892494a711769f3dc6289c5c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-13",
+      "startAt": "2026-01-13T14:30:00Z",
+      "endAt": "2026-01-13T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 92334.11,
+      "close": 94411.91,
+      "high": 94500.0,
+      "low": 92026.0,
+      "volume": 10284.074584840002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/23699d9db2d3c06ed2d3e9a7.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-14",
+      "startAt": "2026-01-14T14:30:00Z",
+      "endAt": "2026-01-14T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 95596.6,
+      "close": 97676.01,
+      "high": 97963.62,
+      "low": 95322.91,
+      "volume": 13077.76875667,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/6cc6293321df2a13da3f25e8.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-15",
+      "startAt": "2026-01-15T14:30:00Z",
+      "endAt": "2026-01-15T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 96761.85,
+      "close": 95225.99,
+      "high": 97041.95,
+      "low": 95066.19,
+      "volume": 5458.213036660001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c7ae8c5b124108292fb62e3e.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-16",
+      "startAt": "2026-01-16T14:30:00Z",
+      "endAt": "2026-01-16T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 95690.05,
+      "close": 95536.0,
+      "high": 95799.96,
+      "low": 94229.04,
+      "volume": 3386.2136980799996,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/86e77ad9528fe51ffdcb182b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-20",
+      "startAt": "2026-01-20T14:30:00Z",
+      "endAt": "2026-01-20T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 90920.7,
+      "close": 89592.06,
+      "high": 91286.99,
+      "low": 89162.0,
+      "volume": 6331.83533646,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ac74e546b790bf8104a7b5b4.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-21",
+      "startAt": "2026-01-21T14:30:00Z",
+      "endAt": "2026-01-21T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 89494.96,
+      "close": 90136.01,
+      "high": 90500.0,
+      "low": 87156.0,
+      "volume": 7051.42770577,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/fd1fe180f60562183494fbb5.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-22",
+      "startAt": "2026-01-22T14:30:00Z",
+      "endAt": "2026-01-22T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 89476.01,
+      "close": 89312.0,
+      "high": 89868.0,
+      "low": 88408.65,
+      "volume": 3637.5297660900005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/64030cf22cd13d4c9acadea8.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-23",
+      "startAt": "2026-01-23T14:30:00Z",
+      "endAt": "2026-01-23T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 89564.93,
+      "close": 89395.04,
+      "high": 91147.01,
+      "low": 88440.65,
+      "volume": 4605.19689955,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/14d298c0f80b24a55ee1550f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-26",
+      "startAt": "2026-01-26T14:30:00Z",
+      "endAt": "2026-01-26T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 87584.77,
+      "close": 87528.0,
+      "high": 88787.97,
+      "low": 86922.04,
+      "volume": 3892.12866359,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/451bf462f4612cf779181e21.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-27",
+      "startAt": "2026-01-27T14:30:00Z",
+      "endAt": "2026-01-27T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 88148.7,
+      "close": 89297.98,
+      "high": 89391.39,
+      "low": 87180.01,
+      "volume": 3655.56502779,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c0adbe023ed7bc552c1c65c6.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-28",
+      "startAt": "2026-01-28T14:30:00Z",
+      "endAt": "2026-01-28T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 89880.85,
+      "close": 88997.89,
+      "high": 90476.81,
+      "low": 88760.0,
+      "volume": 3056.66665218,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/6e2f6c88e6d0aa0ca270f7c7.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-29",
+      "startAt": "2026-01-29T14:30:00Z",
+      "endAt": "2026-01-29T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 87666.28,
+      "close": 84043.29,
+      "high": 87804.7,
+      "low": 83216.21,
+      "volume": 10823.40191711,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4fb8e34e107e753ef5320dd0.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-01-30",
+      "startAt": "2026-01-30T14:30:00Z",
+      "endAt": "2026-01-30T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 82849.96,
+      "close": 83738.0,
+      "high": 84509.2,
+      "low": 81722.33,
+      "volume": 6822.11141768,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ab015fc7f41cdd7cc0549e88.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-02",
+      "startAt": "2026-02-02T14:30:00Z",
+      "endAt": "2026-02-02T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77955.0,
+      "close": 77941.95,
+      "high": 79339.0,
+      "low": 77501.59,
+      "volume": 9885.438804669999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/91ceba15f81836e5286ead2b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-03",
+      "startAt": "2026-02-03T14:30:00Z",
+      "endAt": "2026-02-03T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78354.67,
+      "close": 76370.3,
+      "high": 78366.91,
+      "low": 72859.0,
+      "volume": 10615.751432629999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a1ac20d07c6a1c32748b39b4.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-04",
+      "startAt": "2026-02-04T14:30:00Z",
+      "endAt": "2026-02-04T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 75176.47,
+      "close": 73337.99,
+      "high": 75642.08,
+      "low": 72010.0,
+      "volume": 11228.968821210003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f90c6b0837f87792f88c2fac.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-05",
+      "startAt": "2026-02-05T14:30:00Z",
+      "endAt": "2026-02-05T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 70010.75,
+      "close": 63620.01,
+      "high": 70784.93,
+      "low": 62181.65,
+      "volume": 25921.15132568,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/d4d7a6c79c63bbd37ea43a72.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-06",
+      "startAt": "2026-02-06T14:30:00Z",
+      "endAt": "2026-02-06T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 67061.99,
+      "close": 69963.99,
+      "high": 71496.34,
+      "low": 66978.83,
+      "volume": 19031.03271718,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8e79e99b6ca6f3396a18f876.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-09",
+      "startAt": "2026-02-09T14:30:00Z",
+      "endAt": "2026-02-09T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 68940.1,
+      "close": 70707.99,
+      "high": 71101.35,
+      "low": 68436.38,
+      "volume": 6904.02764081,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/dc7a86e34dc30647d7d1f020.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-10",
+      "startAt": "2026-02-10T14:30:00Z",
+      "endAt": "2026-02-10T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 69157.55,
+      "close": 68708.94,
+      "high": 69970.59,
+      "low": 67857.0,
+      "volume": 5686.631029000002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/62dfd7a15dfd16d0de2fd9d9.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-11",
+      "startAt": "2026-02-11T14:30:00Z",
+      "endAt": "2026-02-11T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 67973.27,
+      "close": 67517.41,
+      "high": 68226.24,
+      "low": 65702.95,
+      "volume": 6909.498578810002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8b78c5f836ea213c5d2172bb.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-12",
+      "startAt": "2026-02-12T14:30:00Z",
+      "endAt": "2026-02-12T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 67951.96,
+      "close": 65362.5,
+      "high": 68255.85,
+      "low": 65065.47,
+      "volume": 8427.177751710002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/282e0f80db14903fce248834.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-13",
+      "startAt": "2026-02-13T14:30:00Z",
+      "endAt": "2026-02-13T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 67262.58,
+      "close": 68729.57,
+      "high": 69434.2,
+      "low": 66810.0,
+      "volume": 6481.110139480002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/9cd2f888bffa110f64de1b24.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-17",
+      "startAt": "2026-02-17T14:30:00Z",
+      "endAt": "2026-02-17T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 67987.51,
+      "close": 67712.49,
+      "high": 68211.76,
+      "low": 66569.58,
+      "volume": 5421.0340003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/9c8aa4837488e560d152ff0f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-18",
+      "startAt": "2026-02-18T14:30:00Z",
+      "endAt": "2026-02-18T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 67053.18,
+      "close": 66221.41,
+      "high": 68333.93,
+      "low": 65812.57,
+      "volume": 5413.852920110001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/cddd271da7416378f6e89b18.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-19",
+      "startAt": "2026-02-19T14:30:00Z",
+      "endAt": "2026-02-19T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 65951.99,
+      "close": 67125.14,
+      "high": 67179.95,
+      "low": 65604.63,
+      "volume": 4752.42442058,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c1e11b666de0ed67b0be70e5.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-20",
+      "startAt": "2026-02-20T14:30:00Z",
+      "endAt": "2026-02-20T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66991.18,
+      "close": 67733.36,
+      "high": 68069.75,
+      "low": 66529.5,
+      "volume": 6100.685161129999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a09e227343af77fcd32cf7af.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-23",
+      "startAt": "2026-02-23T14:30:00Z",
+      "endAt": "2026-02-23T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66073.29,
+      "close": 64463.59,
+      "high": 66231.81,
+      "low": 63855.0,
+      "volume": 6597.953016959999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/32b785a617a0dacc2300b5f1.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-24",
+      "startAt": "2026-02-24T14:30:00Z",
+      "endAt": "2026-02-24T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63007.32,
+      "close": 64474.97,
+      "high": 64749.86,
+      "low": 62775.44,
+      "volume": 5345.344007700001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/dd29144648df6a4d0d48550d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-25",
+      "startAt": "2026-02-25T14:30:00Z",
+      "endAt": "2026-02-25T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66578.82,
+      "close": 69177.78,
+      "high": 69573.99,
+      "low": 66194.43,
+      "volume": 9527.790053989998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4ad9dbe8f506a5a2cb622b06.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-26",
+      "startAt": "2026-02-26T14:30:00Z",
+      "endAt": "2026-02-26T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 68114.39,
+      "close": 67434.87,
+      "high": 68275.86,
+      "low": 66500.92,
+      "volume": 5620.17323068,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/987f62b65aa5d2ec8b129fe5.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-02-27",
+      "startAt": "2026-02-27T14:30:00Z",
+      "endAt": "2026-02-27T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66135.09,
+      "close": 65590.47,
+      "high": 66353.77,
+      "low": 65108.23,
+      "volume": 3896.151248049999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/756d1e45ddf498250339359d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-02",
+      "startAt": "2026-03-02T14:30:00Z",
+      "endAt": "2026-03-02T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 65572.9,
+      "close": 69128.01,
+      "high": 70128.74,
+      "low": 65560.96,
+      "volume": 11521.254678759999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/145829712900083b8226d2b7.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-03",
+      "startAt": "2026-03-03T14:30:00Z",
+      "endAt": "2026-03-03T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 67093.99,
+      "close": 68264.6,
+      "high": 69000.07,
+      "low": 66138.2,
+      "volume": 6643.16467041,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0926db3acb122b3d4cf10214.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-04",
+      "startAt": "2026-03-04T14:30:00Z",
+      "endAt": "2026-03-04T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 71749.71,
+      "close": 73077.92,
+      "high": 74100.0,
+      "low": 71308.67,
+      "volume": 10591.948047110003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/901149c4bdcef7777487f580.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-05",
+      "startAt": "2026-03-05T14:30:00Z",
+      "endAt": "2026-03-05T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 72572.5,
+      "close": 71233.32,
+      "high": 72860.35,
+      "low": 70639.01,
+      "volume": 5131.994139210002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/eb538169f4129f0f35109c34.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-06",
+      "startAt": "2026-03-06T14:30:00Z",
+      "endAt": "2026-03-06T21:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 68993.69,
+      "close": 68102.86,
+      "high": 69115.47,
+      "low": 67725.14,
+      "volume": 5335.037701520001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/63c2125345dd65c891eaec3d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-09",
+      "startAt": "2026-03-09T13:30:00Z",
+      "endAt": "2026-03-09T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 68770.0,
+      "close": 69012.12,
+      "high": 69543.0,
+      "low": 68238.72,
+      "volume": 7047.299072689998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ecf991dacf5960ba3d3337da.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-10",
+      "startAt": "2026-03-10T13:30:00Z",
+      "endAt": "2026-03-10T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 70881.87,
+      "close": 70055.27,
+      "high": 71800.0,
+      "low": 69275.01,
+      "volume": 7057.860982120001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a94215b2957766b3c9056e36.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-11",
+      "startAt": "2026-03-11T13:30:00Z",
+      "endAt": "2026-03-11T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 70238.02,
+      "close": 70670.11,
+      "high": 71358.48,
+      "low": 69724.0,
+      "volume": 5308.713520730001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/949bf24874a5f4e8a735e536.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-12",
+      "startAt": "2026-03-12T13:30:00Z",
+      "endAt": "2026-03-12T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 70132.81,
+      "close": 70462.0,
+      "high": 70694.0,
+      "low": 69359.19,
+      "volume": 5358.06238201,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/99c954cea6fe168e443cd725.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-13",
+      "startAt": "2026-03-13T13:30:00Z",
+      "endAt": "2026-03-13T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 73054.96,
+      "close": 71190.64,
+      "high": 73968.0,
+      "low": 70836.25,
+      "volume": 6008.55717707,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/68df74fd8611ca5e743b3e70.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-16",
+      "startAt": "2026-03-16T13:30:00Z",
+      "endAt": "2026-03-16T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 73912.81,
+      "close": 73969.53,
+      "high": 74547.5,
+      "low": 72992.12,
+      "volume": 4738.90565834,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/1ff6f7e528c2a9c65a460bb3.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-17",
+      "startAt": "2026-03-17T13:30:00Z",
+      "endAt": "2026-03-17T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 73710.04,
+      "close": 74542.28,
+      "high": 74934.42,
+      "low": 73400.01,
+      "volume": 4952.75870572,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f22dd13908491dfc31e74815.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-18",
+      "startAt": "2026-03-18T13:30:00Z",
+      "endAt": "2026-03-18T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 72498.05,
+      "close": 71065.73,
+      "high": 72572.32,
+      "low": 70863.85,
+      "volume": 4462.09379015,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/53a07b8134abd31beec0c692.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-19",
+      "startAt": "2026-03-19T13:30:00Z",
+      "endAt": "2026-03-19T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 69330.65,
+      "close": 70265.41,
+      "high": 70600.0,
+      "low": 68772.78,
+      "volume": 3718.10380196,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/aff6544ecd768cccc7460d47.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-20",
+      "startAt": "2026-03-20T13:30:00Z",
+      "endAt": "2026-03-20T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 70497.42,
+      "close": 70169.39,
+      "high": 70516.49,
+      "low": 69360.0,
+      "volume": 3389.0247078699995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/61b023f3233f5e92978207fa.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-23",
+      "startAt": "2026-03-23T13:30:00Z",
+      "endAt": "2026-03-23T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 70793.15,
+      "close": 70660.88,
+      "high": 71811.0,
+      "low": 70075.56,
+      "volume": 4229.98307405,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0e13cdc209fe8cfe0187762c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-24",
+      "startAt": "2026-03-24T13:30:00Z",
+      "endAt": "2026-03-24T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 70583.99,
+      "close": 69334.0,
+      "high": 70773.08,
+      "low": 68889.0,
+      "volume": 3760.57143706,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/74e7b75f9c80f34ae04ca95f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-25",
+      "startAt": "2026-03-25T13:30:00Z",
+      "endAt": "2026-03-25T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 71607.09,
+      "close": 70859.88,
+      "high": 71954.83,
+      "low": 70545.67,
+      "volume": 3111.07138049,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/1d3dddba667fafddd67285b0.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-26",
+      "startAt": "2026-03-26T13:30:00Z",
+      "endAt": "2026-03-26T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 69359.56,
+      "close": 68479.59,
+      "high": 69832.15,
+      "low": 68102.36,
+      "volume": 4186.082158,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f5788069c45371a2c6806ced.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-27",
+      "startAt": "2026-03-27T13:30:00Z",
+      "endAt": "2026-03-27T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66663.09,
+      "close": 65975.02,
+      "high": 66692.69,
+      "low": 65498.75,
+      "volume": 8021.103596099998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f4ca2fdf2f41fb928bc5fa51.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-30",
+      "startAt": "2026-03-30T13:30:00Z",
+      "endAt": "2026-03-30T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 67829.39,
+      "close": 66488.0,
+      "high": 67999.69,
+      "low": 66168.98,
+      "volume": 4020.0580552199995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/98833cceccb3650f76f59f24.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-03-31",
+      "startAt": "2026-03-31T13:30:00Z",
+      "endAt": "2026-03-31T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66739.53,
+      "close": 67772.92,
+      "high": 68518.1,
+      "low": 66362.57,
+      "volume": 5640.262798859999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4376a3d737b5535f31450cd2.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-01",
+      "startAt": "2026-04-01T13:30:00Z",
+      "endAt": "2026-04-01T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 68533.02,
+      "close": 68162.03,
+      "high": 69156.3,
+      "low": 67900.01,
+      "volume": 4385.18774493,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f840e23a20d808057889b92d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-02",
+      "startAt": "2026-04-02T13:30:00Z",
+      "endAt": "2026-04-02T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66134.61,
+      "close": 66976.06,
+      "high": 67450.75,
+      "low": 65696.96,
+      "volume": 3361.0190175299995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e655d7619589c63074bbec53.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-06",
+      "startAt": "2026-04-06T13:30:00Z",
+      "endAt": "2026-04-06T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 69471.57,
+      "close": 69732.99,
+      "high": 70378.48,
+      "low": 69150.37,
+      "volume": 5893.325623390001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f71c82449c07845cce898b89.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-07",
+      "startAt": "2026-04-07T13:30:00Z",
+      "endAt": "2026-04-07T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 68468.75,
+      "close": 68993.62,
+      "high": 69083.82,
+      "low": 67710.01,
+      "volume": 3134.0532826999997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c63ffdfad1e7d84dc6acc919.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-08",
+      "startAt": "2026-04-08T13:30:00Z",
+      "endAt": "2026-04-08T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 72485.33,
+      "close": 71331.51,
+      "high": 72605.62,
+      "low": 70684.65,
+      "volume": 5651.89660936,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/1cff051b54eb1e2e7f23a003.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-09",
+      "startAt": "2026-04-09T13:30:00Z",
+      "endAt": "2026-04-09T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 71105.56,
+      "close": 72136.37,
+      "high": 72568.12,
+      "low": 70511.78,
+      "volume": 6327.964654429999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/54efadba7fa32b5e16b11c34.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-10",
+      "startAt": "2026-04-10T13:30:00Z",
+      "endAt": "2026-04-10T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 72314.76,
+      "close": 73286.01,
+      "high": 73339.39,
+      "low": 71899.6,
+      "volume": 5977.45477844,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/997325f2e81a67a14f6bbf71.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-13",
+      "startAt": "2026-04-13T13:30:00Z",
+      "endAt": "2026-04-13T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 71200.47,
+      "close": 73373.2,
+      "high": 73529.27,
+      "low": 70831.95,
+      "volume": 10939.885155529999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/d379ac9a096f3a82484c30f3.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-14",
+      "startAt": "2026-04-14T13:30:00Z",
+      "endAt": "2026-04-14T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 74534.71,
+      "close": 74299.83,
+      "high": 76127.18,
+      "low": 73874.42,
+      "volume": 15061.051111580002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/6a2d8b153a559bd13713c8c4.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-15",
+      "startAt": "2026-04-15T13:30:00Z",
+      "endAt": "2026-04-15T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 74423.51,
+      "close": 75048.06,
+      "high": 75316.55,
+      "low": 73604.79,
+      "volume": 3438.8156759199996,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8926681ed7f1195e041286e4.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-16",
+      "startAt": "2026-04-16T13:30:00Z",
+      "endAt": "2026-04-16T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 74992.08,
+      "close": 75378.0,
+      "high": 75436.56,
+      "low": 73298.01,
+      "volume": 4390.422272639999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3858af1cb0468bcaa662b222.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-17",
+      "startAt": "2026-04-17T13:30:00Z",
+      "endAt": "2026-04-17T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76630.02,
+      "close": 77453.07,
+      "high": 78390.0,
+      "low": 76183.81,
+      "volume": 9653.86783361,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f36409c6df401c23495d67f9.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-20",
+      "startAt": "2026-04-20T13:30:00Z",
+      "endAt": "2026-04-20T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 75231.53,
+      "close": 76337.42,
+      "high": 76528.01,
+      "low": 74730.01,
+      "volume": 4564.531212290001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8b5f385f9369bb4138a38915.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-21",
+      "startAt": "2026-04-21T13:30:00Z",
+      "endAt": "2026-04-21T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76061.69,
+      "close": 75030.96,
+      "high": 76632.97,
+      "low": 74817.27,
+      "volume": 3491.1966289600005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/9d0e962c4e369656ab4d01ba.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-22",
+      "startAt": "2026-04-22T13:30:00Z",
+      "endAt": "2026-04-22T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78509.43,
+      "close": 78878.3,
+      "high": 79523.0,
+      "low": 78310.03,
+      "volume": 5380.75090733,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a7b5d13def9426b72fa98ea2.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-23",
+      "startAt": "2026-04-23T13:30:00Z",
+      "endAt": "2026-04-23T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77627.54,
+      "close": 77743.16,
+      "high": 78722.96,
+      "low": 76979.99,
+      "volume": 5074.53441198,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/b56ddeb205cad553cce9f11a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-24",
+      "startAt": "2026-04-24T13:30:00Z",
+      "endAt": "2026-04-24T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78193.31,
+      "close": 77659.72,
+      "high": 78323.13,
+      "low": 77381.74,
+      "volume": 3823.184789199999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/555a3445a71ed1da0aa58819.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-27",
+      "startAt": "2026-04-27T13:30:00Z",
+      "endAt": "2026-04-27T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77713.79,
+      "close": 76886.0,
+      "high": 78278.39,
+      "low": 76447.51,
+      "volume": 4144.55595355,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/14b8d01b06fd8f49e3405c8e.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-28",
+      "startAt": "2026-04-28T13:30:00Z",
+      "endAt": "2026-04-28T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76185.11,
+      "close": 76308.13,
+      "high": 76418.16,
+      "low": 75646.84,
+      "volume": 2608.2316823099995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8f4f124c89e8a83207aeb9e5.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-29",
+      "startAt": "2026-04-29T13:30:00Z",
+      "endAt": "2026-04-29T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76907.49,
+      "close": 75526.0,
+      "high": 76907.49,
+      "low": 74914.0,
+      "volume": 4968.598879299999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/29f91d25bf8dc6b089bc8a5d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-04-30",
+      "startAt": "2026-04-30T13:30:00Z",
+      "endAt": "2026-04-30T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76148.02,
+      "close": 76375.39,
+      "high": 76655.95,
+      "low": 76047.26,
+      "volume": 2599.0149393799998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4ade2ca614b163e59bbd6f86.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-01",
+      "startAt": "2026-05-01T13:30:00Z",
+      "endAt": "2026-05-01T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78282.28,
+      "close": 78374.85,
+      "high": 78961.14,
+      "low": 78050.68,
+      "volume": 4246.82171523,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ead2c98d0b0dbdc4945d3709.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-04",
+      "startAt": "2026-05-04T13:30:00Z",
+      "endAt": "2026-05-04T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78952.6,
+      "close": 80052.2,
+      "high": 80750.0,
+      "low": 78491.0,
+      "volume": 5038.737226669998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/cb0f0116871e2ef1bc8c306b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-05",
+      "startAt": "2026-05-05T13:30:00Z",
+      "endAt": "2026-05-05T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 81465.0,
+      "close": 81611.95,
+      "high": 81720.65,
+      "low": 80943.42,
+      "volume": 3715.4546845200002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e9a695f51124476e916797fc.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-06",
+      "startAt": "2026-05-06T13:30:00Z",
+      "endAt": "2026-05-06T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 81933.05,
+      "close": 81457.38,
+      "high": 82052.99,
+      "low": 81122.0,
+      "volume": 2920.0838794799997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/cf78a220ecf5d150f60e518c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-07",
+      "startAt": "2026-05-07T13:30:00Z",
+      "endAt": "2026-05-07T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 80951.19,
+      "close": 80142.85,
+      "high": 80975.44,
+      "low": 79456.0,
+      "volume": 3964.7985997600003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/756c2dc69831f7ebed56dfde.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-08",
+      "startAt": "2026-05-08T13:30:00Z",
+      "endAt": "2026-05-08T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 79599.45,
+      "close": 80149.99,
+      "high": 80426.01,
+      "low": 79520.44,
+      "volume": 1474.5621794200001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4901e2ef1a55b1d3cc0d4a9c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-11",
+      "startAt": "2026-05-11T13:30:00Z",
+      "endAt": "2026-05-11T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 81115.68,
+      "close": 81956.0,
+      "high": 82131.55,
+      "low": 80417.72,
+      "volume": 3857.5178603999993,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/efa3551ad5880a10e54cc10a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-12",
+      "startAt": "2026-05-12T13:30:00Z",
+      "endAt": "2026-05-12T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 80631.01,
+      "close": 80820.63,
+      "high": 80880.27,
+      "low": 79802.51,
+      "volume": 2693.1358665400003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8ff8f12a1d7274e5f101780d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-13",
+      "startAt": "2026-05-13T13:30:00Z",
+      "endAt": "2026-05-13T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 80116.02,
+      "close": 79612.0,
+      "high": 80186.56,
+      "low": 78699.83,
+      "volume": 5701.90471249,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c284eb476e8799029196c248.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-14",
+      "startAt": "2026-05-14T13:30:00Z",
+      "endAt": "2026-05-14T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 79913.44,
+      "close": 81439.17,
+      "high": 82066.22,
+      "low": 79530.28,
+      "volume": 9734.44896407,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/cc6c012da8e425af5480acbb.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-15",
+      "startAt": "2026-05-15T13:30:00Z",
+      "endAt": "2026-05-15T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 79999.5,
+      "close": 79089.14,
+      "high": 80008.58,
+      "low": 78591.99,
+      "volume": 4306.769712890001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/63dc1f5e196577e67a1a28bb.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-18",
+      "startAt": "2026-05-18T13:30:00Z",
+      "endAt": "2026-05-18T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77231.44,
+      "close": 76859.05,
+      "high": 77238.99,
+      "low": 75992.0,
+      "volume": 5514.647066979999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0ff606a45b2ccc9193938970.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-19",
+      "startAt": "2026-05-19T13:30:00Z",
+      "endAt": "2026-05-19T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76527.25,
+      "close": 76758.13,
+      "high": 77002.56,
+      "low": 76061.12,
+      "volume": 2657.9397013499993,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a050a84d5b62688cf949699f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-20",
+      "startAt": "2026-05-20T13:30:00Z",
+      "endAt": "2026-05-20T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77221.77,
+      "close": 77598.0,
+      "high": 77782.61,
+      "low": 76794.91,
+      "volume": 3136.1753349100004,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/1dcf18a5251b4270c6f6f1e0.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-21",
+      "startAt": "2026-05-21T13:30:00Z",
+      "endAt": "2026-05-21T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77219.29,
+      "close": 77613.34,
+      "high": 78016.84,
+      "low": 76619.02,
+      "volume": 2948.6836523199995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/bd7c95c552b958d0719d6fe4.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-22",
+      "startAt": "2026-05-22T13:30:00Z",
+      "endAt": "2026-05-22T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77206.61,
+      "close": 75769.44,
+      "high": 77281.38,
+      "low": 75557.4,
+      "volume": 2355.57335394,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3022bd30f74d2f0caa20f263.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-26",
+      "startAt": "2026-05-26T13:30:00Z",
+      "endAt": "2026-05-26T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76698.05,
+      "close": 75919.93,
+      "high": 78015.46,
+      "low": 75645.54,
+      "volume": 5361.5265112100005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/48d45738168c4948180ebe3d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-27",
+      "startAt": "2026-05-27T13:30:00Z",
+      "endAt": "2026-05-27T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 75046.0,
+      "close": 74920.54,
+      "high": 75372.0,
+      "low": 74513.64,
+      "volume": 2887.5948547499997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/52da90046ee23e5eddc63001.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-28",
+      "startAt": "2026-05-28T13:30:00Z",
+      "endAt": "2026-05-28T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 73028.01,
+      "close": 73318.39,
+      "high": 73639.25,
+      "low": 72445.11,
+      "volume": 4155.076997659999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/7d136dce5740aba1435fa952.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-05-29",
+      "startAt": "2026-05-29T13:30:00Z",
+      "endAt": "2026-05-29T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 72948.89,
+      "close": 73404.1,
+      "high": 74224.84,
+      "low": 72364.13,
+      "volume": 5134.843744519999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/526f9cdbf4099b184bf6a74f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-01",
+      "startAt": "2026-06-01T13:30:00Z",
+      "endAt": "2026-06-01T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 71711.45,
+      "close": 71488.84,
+      "high": 71940.61,
+      "low": 70555.0,
+      "volume": 6362.36483524,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/d186908c4d0ac1207f72ddaf.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-02",
+      "startAt": "2026-06-02T13:30:00Z",
+      "endAt": "2026-06-02T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 68905.23,
+      "close": 67213.59,
+      "high": 68995.76,
+      "low": 66320.16,
+      "volume": 8179.125408479999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/889e2053fb2aad7ac59022dc.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-03",
+      "startAt": "2026-06-03T13:30:00Z",
+      "endAt": "2026-06-03T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66721.42,
+      "close": 65356.01,
+      "high": 67090.06,
+      "low": 65158.0,
+      "volume": 5865.40308544,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/75a28e2d32ec3a933f88b56d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-04",
+      "startAt": "2026-06-04T13:30:00Z",
+      "endAt": "2026-06-04T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63153.9,
+      "close": 63541.28,
+      "high": 64443.41,
+      "low": 62857.79,
+      "volume": 8761.220050190002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/655a0aab9a9bd716ae3ea693.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-05",
+      "startAt": "2026-06-05T13:30:00Z",
+      "endAt": "2026-06-05T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 62050.2,
+      "close": 60264.11,
+      "high": 62276.59,
+      "low": 59073.01,
+      "volume": 14010.850607040002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/d30897c5874ea455a8d046b3.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-08",
+      "startAt": "2026-06-08T13:30:00Z",
+      "endAt": "2026-06-08T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63536.42,
+      "close": 63352.53,
+      "high": 64200.02,
+      "low": 63237.0,
+      "volume": 4426.85451207,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e509cc57763e642a361b112a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-09",
+      "startAt": "2026-06-09T13:30:00Z",
+      "endAt": "2026-06-09T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 62298.01,
+      "close": 62044.83,
+      "high": 62496.18,
+      "low": 60713.5,
+      "volume": 5646.401887420001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a6c33297240b1760a4c38a4f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-10",
+      "startAt": "2026-06-10T13:30:00Z",
+      "endAt": "2026-06-10T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 61495.99,
+      "close": 61882.0,
+      "high": 62809.04,
+      "low": 61441.81,
+      "volume": 4235.18252984,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/6d9208924a79484776c6fcfd.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-11",
+      "startAt": "2026-06-11T13:30:00Z",
+      "endAt": "2026-06-11T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 62743.59,
+      "close": 63548.0,
+      "high": 63866.82,
+      "low": 62255.87,
+      "volume": 4503.597241969999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/dae5069b11565a287f830f8d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-12",
+      "startAt": "2026-06-12T13:30:00Z",
+      "endAt": "2026-06-12T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63338.68,
+      "close": 63552.05,
+      "high": 64347.32,
+      "low": 62964.0,
+      "volume": 4255.69489883,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/b2db0bf4f203043b32ab8ba6.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-15",
+      "startAt": "2026-06-15T13:30:00Z",
+      "endAt": "2026-06-15T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66798.5,
+      "close": 66577.42,
+      "high": 67264.0,
+      "low": 66240.54,
+      "volume": 3743.24988157,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/18661408d40a0121b2c43179.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-16",
+      "startAt": "2026-06-16T13:30:00Z",
+      "endAt": "2026-06-16T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 65959.77,
+      "close": 65622.49,
+      "high": 66214.99,
+      "low": 65300.03,
+      "volume": 3198.85390434,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/2cffe73b833d984d85ecddf9.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-17",
+      "startAt": "2026-06-17T13:30:00Z",
+      "endAt": "2026-06-17T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64861.44,
+      "close": 64241.65,
+      "high": 66384.01,
+      "low": 63985.0,
+      "volume": 4127.81994636,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ed1203d3474ceac1a4dccefa.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-18",
+      "startAt": "2026-06-18T13:30:00Z",
+      "endAt": "2026-06-18T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64279.8,
+      "close": 62872.8,
+      "high": 64315.95,
+      "low": 62159.76,
+      "volume": 3948.5266888200003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4cf4b7929a004be91564649d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-22",
+      "startAt": "2026-06-22T13:30:00Z",
+      "endAt": "2026-06-22T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64919.03,
+      "close": 64408.02,
+      "high": 65553.39,
+      "low": 64187.25,
+      "volume": 3580.386178270001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f264923074854ba9f38024b7.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-23",
+      "startAt": "2026-06-23T13:30:00Z",
+      "endAt": "2026-06-23T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 61971.42,
+      "close": 62310.83,
+      "high": 62778.89,
+      "low": 61871.56,
+      "volume": 2980.167250910001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e47b0460bb41802ce1a5d109.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-24",
+      "startAt": "2026-06-24T13:30:00Z",
+      "endAt": "2026-06-24T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 61749.77,
+      "close": 59858.28,
+      "high": 62055.89,
+      "low": 59010.74,
+      "volume": 10250.33246142,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e351ab204020a6ef889ab505.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-25",
+      "startAt": "2026-06-25T13:30:00Z",
+      "endAt": "2026-06-25T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 61127.6,
+      "close": 59220.01,
+      "high": 61248.33,
+      "low": 58000.0,
+      "volume": 9605.319823759999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/1ff340e5b2584688c0f44dcc.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-26",
+      "startAt": "2026-06-26T13:30:00Z",
+      "endAt": "2026-06-26T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 58809.28,
+      "close": 59655.5,
+      "high": 60492.32,
+      "low": 58742.82,
+      "volume": 6770.84833951,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/55d34b0060026d3cb28c435f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-29",
+      "startAt": "2026-06-29T13:30:00Z",
+      "endAt": "2026-06-29T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 59868.52,
+      "close": 60332.0,
+      "high": 60582.85,
+      "low": 58880.39,
+      "volume": 5945.185114910002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/2e76054a6343d7f28b59ba3d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-06-30",
+      "startAt": "2026-06-30T13:30:00Z",
+      "endAt": "2026-06-30T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 58397.97,
+      "close": 58716.53,
+      "high": 59159.15,
+      "low": 58056.0,
+      "volume": 5104.992498219998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/101a64cdd5659a3560517018.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-01",
+      "startAt": "2026-07-01T13:30:00Z",
+      "endAt": "2026-07-01T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 58728.31,
+      "close": 59971.68,
+      "high": 60473.99,
+      "low": 58517.56,
+      "volume": 4322.302688379999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/063841140f9e8852b82fa928.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-02",
+      "startAt": "2026-07-02T13:30:00Z",
+      "endAt": "2026-07-02T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 61613.89,
+      "close": 61424.29,
+      "high": 62147.89,
+      "low": 61074.21,
+      "volume": 3722.50311884,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/05a0467afd64aaa6acd90dfd.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-06",
+      "startAt": "2026-07-06T13:30:00Z",
+      "endAt": "2026-07-06T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 61382.02,
+      "close": 63692.7,
+      "high": 63938.39,
+      "low": 61250.0,
+      "volume": 5161.01720924,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0690ac2f8bb3dfe852b2ef96.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-07",
+      "startAt": "2026-07-07T13:30:00Z",
+      "endAt": "2026-07-07T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63045.37,
+      "close": 63776.81,
+      "high": 64199.93,
+      "low": 62583.0,
+      "volume": 4375.451775849999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/690f93722dd1386bee831eff.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-08",
+      "startAt": "2026-07-08T13:30:00Z",
+      "endAt": "2026-07-08T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 61763.31,
+      "close": 62223.7,
+      "high": 62343.04,
+      "low": 61453.09,
+      "volume": 3000.8535252699994,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/4ce67e8f4baeec736a3b9dcf.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-09",
+      "startAt": "2026-07-09T13:30:00Z",
+      "endAt": "2026-07-09T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 62659.98,
+      "close": 63193.84,
+      "high": 63448.46,
+      "low": 62444.99,
+      "volume": 2495.36751795,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c6de9a5210de240605c06614.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-10",
+      "startAt": "2026-07-10T13:30:00Z",
+      "endAt": "2026-07-10T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64102.43,
+      "close": 63878.41,
+      "high": 64669.42,
+      "low": 63686.04,
+      "volume": 3377.25406443,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3c781856a5e800f6af5d46bd.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-13",
+      "startAt": "2026-07-13T13:30:00Z",
+      "endAt": "2026-07-13T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 62455.07,
+      "close": 62210.67,
+      "high": 62908.0,
+      "low": 61750.9,
+      "volume": 4941.29216755,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f74cc21524b35a3619f78c0b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-14",
+      "startAt": "2026-07-14T13:30:00Z",
+      "endAt": "2026-07-14T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63898.93,
+      "close": 64542.41,
+      "high": 64918.0,
+      "low": 63517.0,
+      "volume": 3390.8493676200005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/13c71229755e331f7847563a.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-15",
+      "startAt": "2026-07-15T13:30:00Z",
+      "endAt": "2026-07-15T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 65257.82,
+      "close": 64941.86,
+      "high": 65559.5,
+      "low": 64697.49,
+      "volume": 2625.06613537,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/76ef84fbade3518b338d8800.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-16",
+      "startAt": "2026-07-16T13:30:00Z",
+      "endAt": "2026-07-16T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64193.72,
+      "close": 64217.54,
+      "high": 64847.44,
+      "low": 63940.36,
+      "volume": 1979.63372738,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/cfb4ae6822656b1423244751.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-17",
+      "startAt": "2026-07-17T13:30:00Z",
+      "endAt": "2026-07-17T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 62791.84,
+      "close": 64113.2,
+      "high": 64353.56,
+      "low": 62452.52,
+      "volume": 4194.06190603,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/62f2e1f291d8547a6ea55e75.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-20",
+      "startAt": "2026-07-20T13:30:00Z",
+      "endAt": "2026-07-20T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64495.21,
+      "close": 65099.39,
+      "high": 65756.09,
+      "low": 64010.0,
+      "volume": 3726.2365670899994,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/52d9c1ef921f14841ac7f362.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-21",
+      "startAt": "2026-07-21T13:30:00Z",
+      "endAt": "2026-07-21T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 66391.42,
+      "close": 66424.0,
+      "high": 66923.95,
+      "low": 66018.97,
+      "volume": 3525.9221833300003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/223b1ae8c2cba78a046f2921.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-22",
+      "startAt": "2026-07-22T13:30:00Z",
+      "endAt": "2026-07-22T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 65568.86,
+      "close": 65894.99,
+      "high": 66373.57,
+      "low": 65544.97,
+      "volume": 2744.08350899,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/f107b9f359544e6513299e9d.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-23",
+      "startAt": "2026-07-23T13:30:00Z",
+      "endAt": "2026-07-23T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64975.39,
+      "close": 64778.48,
+      "high": 65181.34,
+      "low": 64564.09,
+      "volume": 3781.49793676,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/c46b5654e15a7a463ed23bd2.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-24",
+      "startAt": "2026-07-24T13:30:00Z",
+      "endAt": "2026-07-24T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64321.98,
+      "close": 64163.76,
+      "high": 64387.1,
+      "low": 63641.0,
+      "volume": 4308.594317370001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/595a98a47aac92f392390c8b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-27",
+      "startAt": "2026-07-27T13:30:00Z",
+      "endAt": "2026-07-27T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64872.09,
+      "close": 64915.15,
+      "high": 65655.98,
+      "low": 64342.0,
+      "volume": 2133.98666522,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/04bd4c3af88623e62f134232.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-28",
+      "startAt": "2026-07-28T13:30:00Z",
+      "endAt": "2026-07-28T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63232.35,
+      "close": 63825.78,
+      "high": 64041.02,
+      "low": 62645.39,
+      "volume": 3063.864997059999,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ea2625dad788ee26895c4cb2.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-29",
+      "startAt": "2026-07-29T13:30:00Z",
+      "endAt": "2026-07-29T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64125.63,
+      "close": 63515.6,
+      "high": 64657.85,
+      "low": 63441.0,
+      "volume": 3833.17273115,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/1b9db1f8f2b6eddafe3d9db5.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-30",
+      "startAt": "2026-07-30T13:30:00Z",
+      "endAt": "2026-07-30T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64747.96,
+      "close": 64741.54,
+      "high": 65118.08,
+      "low": 64535.87,
+      "volume": 3478.8056464199994,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e3c8700ace769f4e709ff4f1.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-07-31",
+      "startAt": "2026-07-31T13:30:00Z",
+      "endAt": "2026-07-31T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63750.07,
+      "close": 62903.64,
+      "high": 63750.07,
+      "low": 62358.96,
+      "volume": 4525.20239256,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a4f2477e405d1298fae84826.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-03",
+      "startAt": "2026-08-03T13:30:00Z",
+      "endAt": "2026-08-03T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 62685.42,
+      "close": 63813.48,
+      "high": 64032.43,
+      "low": 62474.64,
+      "volume": 4065.4300452899997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/7e615551c255575448b61bf1.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-04",
+      "startAt": "2026-08-04T13:30:00Z",
+      "endAt": "2026-08-04T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63817.08,
+      "close": 64197.18,
+      "high": 64369.46,
+      "low": 63537.0,
+      "volume": 3171.51660092,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/7ed4b6c22fdedf2dfd913240.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-05",
+      "startAt": "2026-08-05T13:30:00Z",
+      "endAt": "2026-08-05T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64085.64,
+      "close": 64794.63,
+      "high": 64893.55,
+      "low": 63814.8,
+      "volume": 3522.8692198399995,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ad53dd3757e8ae667a9da3be.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-06",
+      "startAt": "2026-08-06T13:30:00Z",
+      "endAt": "2026-08-06T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64167.82,
+      "close": 64390.13,
+      "high": 64932.11,
+      "low": 64087.41,
+      "volume": 2040.5514446599998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/367cffb8cdc245d5d85279b9.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-07",
+      "startAt": "2026-08-07T13:30:00Z",
+      "endAt": "2026-08-07T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 65120.17,
+      "close": 64914.79,
+      "high": 65299.5,
+      "low": 64470.01,
+      "volume": 3203.2363413199996,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/5791038f180bce6018075d12.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-10",
+      "startAt": "2026-08-10T13:30:00Z",
+      "endAt": "2026-08-10T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64869.26,
+      "close": 63977.9,
+      "high": 64884.28,
+      "low": 63733.03,
+      "volume": 3167.79978429,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/28792f1674535f29f9cc6f6c.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-11",
+      "startAt": "2026-08-11T13:30:00Z",
+      "endAt": "2026-08-11T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64141.34,
+      "close": 63468.75,
+      "high": 64202.31,
+      "low": 63158.0,
+      "volume": 3618.2044532200002,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/54da59b48f4a316d02f70c9b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-12",
+      "startAt": "2026-08-12T13:30:00Z",
+      "endAt": "2026-08-12T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63892.76,
+      "close": 63344.07,
+      "high": 64016.61,
+      "low": 63235.88,
+      "volume": 2766.42749817,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/285bc24c6604854bc0735605.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-13",
+      "startAt": "2026-08-13T13:30:00Z",
+      "endAt": "2026-08-13T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63524.37,
+      "close": 63339.67,
+      "high": 63936.45,
+      "low": 62772.84,
+      "volume": 2476.7144978399992,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/d9ba6137331a290365112e77.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-14",
+      "startAt": "2026-08-14T13:30:00Z",
+      "endAt": "2026-08-14T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 62702.94,
+      "close": 62892.03,
+      "high": 63183.08,
+      "low": 62468.21,
+      "volume": 2261.20418154,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/23103b379c6e5c155c41cc2f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-17",
+      "startAt": "2026-08-17T13:30:00Z",
+      "endAt": "2026-08-17T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 63412.31,
+      "close": 64262.0,
+      "high": 64588.0,
+      "low": 63387.12,
+      "volume": 2914.36029829,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8911d8a8f58d07efd9738275.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-18",
+      "startAt": "2026-08-18T13:30:00Z",
+      "endAt": "2026-08-18T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64012.66,
+      "close": 64610.51,
+      "high": 65020.0,
+      "low": 63981.0,
+      "volume": 2748.8029363799997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/172f138348b3bb136efdcc53.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-19",
+      "startAt": "2026-08-19T13:30:00Z",
+      "endAt": "2026-08-19T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 64958.95,
+      "close": 68418.55,
+      "high": 69698.0,
+      "low": 64750.98,
+      "volume": 11094.18644059,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/46779c80d717f79fae84f5de.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-20",
+      "startAt": "2026-08-20T13:30:00Z",
+      "endAt": "2026-08-20T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 71908.78,
+      "close": 72669.36,
+      "high": 72950.0,
+      "low": 71065.0,
+      "volume": 6289.06314565,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/3a2a767166c427ca03fd93b4.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-21",
+      "startAt": "2026-08-21T13:30:00Z",
+      "endAt": "2026-08-21T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77062.24,
+      "close": 77003.92,
+      "high": 77860.39,
+      "low": 76202.06,
+      "volume": 7003.453996639998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/e35d7b9c0f1657c6d954276f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-24",
+      "startAt": "2026-08-24T13:30:00Z",
+      "endAt": "2026-08-24T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 79003.98,
+      "close": 78746.35,
+      "high": 79999.99,
+      "low": 77828.35,
+      "volume": 5898.525136249998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/a364c2ebd3448ae8ad305f02.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-25",
+      "startAt": "2026-08-25T13:30:00Z",
+      "endAt": "2026-08-25T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78627.2,
+      "close": 78928.78,
+      "high": 79575.0,
+      "low": 78100.0,
+      "volume": 3838.6805843300003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/6ad053d215d5f81c7425447b.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-26",
+      "startAt": "2026-08-26T13:30:00Z",
+      "endAt": "2026-08-26T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78038.09,
+      "close": 78475.06,
+      "high": 78658.34,
+      "low": 77601.02,
+      "volume": 3232.1062269999993,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/dc6fae2b4a339ac5061b023e.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-27",
+      "startAt": "2026-08-27T13:30:00Z",
+      "endAt": "2026-08-27T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 79342.19,
+      "close": 79910.05,
+      "high": 80835.82,
+      "low": 78910.99,
+      "volume": 5783.7826157,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/d5c794b55aacabedb18c56cf.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-28",
+      "startAt": "2026-08-28T13:30:00Z",
+      "endAt": "2026-08-28T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 79205.99,
+      "close": 77559.99,
+      "high": 79865.53,
+      "low": 76845.71,
+      "volume": 6894.763003210001,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/8464a81bf72e2fd231d0d70f.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-08-31",
+      "startAt": "2026-08-31T13:30:00Z",
+      "endAt": "2026-08-31T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78029.76,
+      "close": 78893.63,
+      "high": 79257.14,
+      "low": 77690.06,
+      "volume": 3755.8706775500004,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/db9825578791c088944189a8.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-01",
+      "startAt": "2026-09-01T13:30:00Z",
+      "endAt": "2026-09-01T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77848.44,
+      "close": 77277.15,
+      "high": 78400.59,
+      "low": 76366.12,
+      "volume": 3605.4984706000005,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/df520e62eb083d9e885b1c37.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-02",
+      "startAt": "2026-09-02T13:30:00Z",
+      "endAt": "2026-09-02T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76830.32,
+      "close": 77316.03,
+      "high": 77546.93,
+      "low": 76571.74,
+      "volume": 1965.92018782,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/74129942af01be20bb5f64ab.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-03",
+      "startAt": "2026-09-03T13:30:00Z",
+      "endAt": "2026-09-03T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78466.94,
+      "close": 81768.48,
+      "high": 81812.31,
+      "low": 78431.32,
+      "volume": 7212.95246441,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/0d4e654a69c0851388c6aac8.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-04",
+      "startAt": "2026-09-04T13:30:00Z",
+      "endAt": "2026-09-04T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 79309.91,
+      "close": 79807.37,
+      "high": 79875.32,
+      "low": 78626.0,
+      "volume": 2772.71037713,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/7dd8c5bee3b973b8898bceac.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-08",
+      "startAt": "2026-09-08T13:30:00Z",
+      "endAt": "2026-09-08T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 78301.23,
+      "close": 78434.47,
+      "high": 78976.21,
+      "low": 77589.0,
+      "volume": 2489.1057832300003,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/7b1345757270d5a7fa3a5f82.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-09",
+      "startAt": "2026-09-09T13:30:00Z",
+      "endAt": "2026-09-09T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 79598.75,
+      "close": 78212.95,
+      "high": 79664.24,
+      "low": 78025.0,
+      "volume": 2735.5955962099997,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/ffe581c443daa384279f6660.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-10",
+      "startAt": "2026-09-10T13:30:00Z",
+      "endAt": "2026-09-10T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 76904.69,
+      "close": 77123.6,
+      "high": 77518.0,
+      "low": 76729.51,
+      "volume": 2489.70439083,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/504ed64d244af7baeab164ec.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-11",
+      "startAt": "2026-09-11T13:30:00Z",
+      "endAt": "2026-09-11T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77486.32,
+      "close": 77257.36,
+      "high": 79852.22,
+      "low": 76850.0,
+      "volume": 3604.9050699599998,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/b6149fcd2bf41820dfe8bb79.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    },
+    {
+      "sessionDate": "2026-09-14",
+      "startAt": "2026-09-14T13:30:00Z",
+      "endAt": "2026-09-14T20:00:00Z",
+      "timeZone": "America/New_York",
+      "earlyClose": false,
+      "expectedCandles": 26,
+      "open": 77826.55,
+      "close": 78982.77,
+      "high": 79336.77,
+      "low": 77785.45,
+      "volume": 3010.88691923,
+      "source": "coinbase_exchange_public_15minute_candles",
+      "rawResponses": [
+        "raw/coinbase/eeefcff7e4c5c81f50e6a587.json.gz"
+      ],
+      "candleCount": 26,
+      "historical": true,
+      "executable": false
+    }
+  ],
+  "rejected": []
+}

@@ -1,0 +1,85 @@
+{
+  "sourceMessageId": "1985b41e879bc364",
+  "publicationAt": "2025-07-30T12:13:00Z",
+  "receivedAt": "2025-07-30T12:15:02Z",
+  "availableAt": "2025-07-30T12:15:02Z",
+  "reportDate": "2025-07-30",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:221a:b0:88b:b22e:cb82 with SMTP id cw26csp791922uab;        Wed, 30 Jul 2025 05:15:03 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-141.sailthru.com (mta236-141.sailthru.com. [192.64.236.141])        by mx.google.com with ESMTPS id d75a77b69052e-4ae99522c6fsi69666451cf.119.2025.07.30.05.15.02        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Wed, 30 Jul 2025 05:15:02 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay9.sailthru.cloud (10.55.62.145) by pmta11.sailthru.com id hh86cc3791su for <timsmithaviation@gmail.com>; Wed, 30 Jul 2025 07:15:02 -0500 (envelope-from <delivery_20250730081502.40913021.293@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Wed, 30 Jul 2025 08:15:02 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250730081502.40913021.293@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+0.1%), ETFs\u2192Staking & In-kind Coming, HYPE Outage, Kraken & IPO Pipleline"
+    }
+  ],
+  "gmailInternalDate": "1753877702000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/inkind_0.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/inkind.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/HYPE_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/HYPE_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/HYPE_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/Kraken_500M.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/Kraken_500M_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/Strategy_073025.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/LF180.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/SUI_Stratg.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/ETH_Strat.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/ETH_Strat2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/etoro.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/Zora.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/CB_Biz.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/WoC_073025_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/WoC_073025_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/3WoC_073025_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/3WoC_073025_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/3WoC_073025_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/3WoC_073025_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/3WoC_073025_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/3WoC_073025_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143695/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1985b41e879bc364",
+  "htmlSha256": "1f1651b2b340d8161ea48c3eec4d0e4f215f716716a28ed731c3d14f26d81a61",
+  "archiveSnapshotDate": "2025-07-30",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-07-30/crypto-quant/1985b41e879bc364-message-body-html-1-message-body.html"
+}

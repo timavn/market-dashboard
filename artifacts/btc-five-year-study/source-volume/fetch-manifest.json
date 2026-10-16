@@ -1,0 +1,17 @@
+{
+  "requests": [
+    {
+      "url": "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&end_time=2026-09-15&frequency=1d&metrics=volume_reported_spot_usd_1d&page_size=10000&start_time=2021-07-17",
+      "provider": "coinmetrics",
+      "retrievedAt": "2026-09-15T22:57:28Z",
+      "httpStatus": 200,
+      "httpDate": "Tue, 15 Sep 2026 22:57:28 GMT",
+      "sha256": "b003d9b6db4ab602bafc4b42df7b62af4c6202eafb237d1b8a3102a173146da6",
+      "rawResponse": "raw/coinmetrics/21594e2d559e73b8ea5df5d0.json.gz",
+      "bodyBytes": 197840,
+      "reusedArchive": true
+    }
+  ],
+  "start": "2021-07-17",
+  "end": "2026-09-15"
+}

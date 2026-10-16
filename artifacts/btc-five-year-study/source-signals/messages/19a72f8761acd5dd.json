@@ -1,0 +1,73 @@
+{
+  "sourceMessageId": "19a72f8761acd5dd",
+  "publicationAt": "2025-11-11T12:49:00Z",
+  "receivedAt": "2025-11-11T12:51:17Z",
+  "availableAt": "2025-11-11T12:51:17Z",
+  "reportDate": "2025-11-11",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:4d90:b0:937:2e36:5001 with SMTP id hm16csp1452437uab;        Tue, 11 Nov 2025 04:51:17 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from nj10mta-225.sailthru.com (nj10mta-225.sailthru.com. [192.64.237.225])        by mx.google.com with ESMTPS id d75a77b69052e-4eda57c16fasi31948031cf.560.2025.11.11.04.51.17        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Tue, 11 Nov 2025 04:51:17 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay6.sailthru.cloud (10.55.61.156) by nj10mta-226.sailthru.com id h2coka3791s9 for <timsmithaviation@gmail.com>; Tue, 11 Nov 2025 06:51:16 -0600 (envelope-from <delivery_20251111075116.42468137.947@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 11 Nov 2025 07:51:16 -0500 (EST)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20251111075116.42468137.947@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-0.6%), Bessent Announces ETF Staking, COIN\u2192TokenLaunch, UNI Turns On Fees"
+    }
+  ],
+  "gmailInternalDate": "1762865476000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_4p5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/Bessent_Staking.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/Bessent_Staking_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/Coin_token_launch.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/UNI_FR.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/UNI_FR_0p5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/UNI_FR_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/UNI_FR_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/UNI_FR_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/DBS_JPM.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/cleanspark.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/Baselayer.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/Brazil_fx.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147970/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/19a72f8761acd5dd",
+  "htmlSha256": "2818a172f809b75687b721981c3ec4d5b7e31023fb33001732b67622187ce8a6",
+  "archiveSnapshotDate": "2025-11-11",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-11-11/crypto-quant/19a72f8761acd5dd-message-body-html-1-message-body.html"
+}

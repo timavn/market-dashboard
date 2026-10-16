@@ -1,0 +1,240 @@
+[
+  {
+    "messageId": "17c02b35e2455c5c",
+    "reportDate": "2021-09-20",
+    "imagePath": "images/2021-09-20/3568db971443-BTC_2.png",
+    "imageSha256": "9db8fd2755742fc620816df16eacbba532e101e45c6a448aab54a6fbd963f8c3",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/86035/original/BTC_2.png"
+  },
+  {
+    "messageId": "17c07d7160fdbd8c",
+    "reportDate": "2021-09-21",
+    "imagePath": "images/2021-09-21/8654db439c17-BTC_2.png",
+    "imageSha256": "820ccc8c3046211bdf7028f1f1e4591dfa75d0fc43a266a9e596460d3ce9ac2b",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/86081/original/BTC_2.png"
+  },
+  {
+    "messageId": "17c26e762cca4f87",
+    "reportDate": "2021-09-27",
+    "imagePath": "images/2021-09-27/6467616a0553-BTC_2.png",
+    "imageSha256": "a712e2c3d82ec2378b5eaa6e6744832d529f7a70cd4d38cb5170847e7ce14925",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/86329/original/BTC_2.png"
+  },
+  {
+    "messageId": "17c2bea4047d305c",
+    "reportDate": "2021-09-28",
+    "imagePath": "images/2021-09-28/7c38fcdd1f20-BTC_2.png",
+    "imageSha256": "6f9d9a0d4026df8d17733afb4f3e5f2f3421d9d4f81c6208fd5753a92eea66a5",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/86383/original/BTC_2.png"
+  },
+  {
+    "messageId": "17c3b5fdd4e948db",
+    "reportDate": "2021-10-01",
+    "imagePath": "images/2021-10-01/243ebb097ace-BTC_2.png",
+    "imageSha256": "e57d565b2831c4810b5af7147ad2b37d51d314eabb1570275b62156ac0459081",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/86526/original/BTC_2.png"
+  },
+  {
+    "messageId": "17c74100456e921c",
+    "reportDate": "2021-10-12",
+    "imagePath": "images/2021-10-12/ed6d4a8d5af5-BTC_2.png",
+    "imageSha256": "28242e18116e045992d6799988ac642b288ad0f2c8e80eb9f758ab4547ca47ff",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/86907/original/BTC_2.png"
+  },
+  {
+    "messageId": "17c838f590f027c1",
+    "reportDate": "2021-10-15",
+    "imagePath": "images/2021-10-15/9ff95f57b193-BTC_2.png",
+    "imageSha256": "5e5a4ff6fc2473a6fa53f1de48edab619211e97e60af4d01221a9a6869e1a3a7",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/87047/original/BTC_2.png"
+  },
+  {
+    "messageId": "17c9302824c24fa6",
+    "reportDate": "2021-10-18",
+    "imagePath": "images/2021-10-18/9bf1f79bf842-BTC_2.png",
+    "imageSha256": "424e33ee8f58e2768f6ec6f5c38855266b85708d05faf515d93409a8da041a61",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/87126/original/BTC_2.png"
+  },
+  {
+    "messageId": "17cb705e7cc36c2e",
+    "reportDate": "2021-10-25",
+    "imagePath": "images/2021-10-25/7a9b0a5d247a-BTC_2.png",
+    "imageSha256": "12d6bd5e5ca94927a3b9f6de175a19f1e50004156551d414d3137e9556648572",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/87367/original/BTC_2.png"
+  },
+  {
+    "messageId": "17cbc3ce5ac68c76",
+    "reportDate": "2021-10-26",
+    "imagePath": "images/2021-10-26/d5adbcd1bac4-BTC_2.png",
+    "imageSha256": "3caa7ef93715f0ccca5d68f1b2933cade69eaa85620c24d8bfa7cefffec4e2e7",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/87414/original/BTC_2.png"
+  },
+  {
+    "messageId": "17cc1909c661cc60",
+    "reportDate": "2021-10-27",
+    "imagePath": "images/2021-10-27/999341264a37-BTC_2.png",
+    "imageSha256": "a1c8e315fec10feaed83760590a6e5307679f9a04043d8bb22951e07e6cee412",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/87470/original/BTC_2.png"
+  },
+  {
+    "messageId": "17ccc19feb06c4bd",
+    "reportDate": "2021-10-29",
+    "imagePath": "images/2021-10-29/2a8eb164014b-BTC_2.png",
+    "imageSha256": "4ced9830367171996d5a280d9ba31185622787867754540a56ebdd53b13faf61",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/87586/original/BTC_2.png"
+  },
+  {
+    "messageId": "17cdb23e2a38f7cc",
+    "reportDate": "2021-11-01",
+    "imagePath": "images/2021-11-01/285fa0110a1c-BTC_2.png",
+    "imageSha256": "473176a85d77c043b4d9c7226dff4028d2dcfdf47a096ad151a6555a259f6f0b",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/87660/original/BTC_2.png"
+  },
+  {
+    "messageId": "17ce554c6617e8c3",
+    "reportDate": "2021-11-03",
+    "imagePath": "images/2021-11-03/a5b6854368ea-BTC_2.png",
+    "imageSha256": "ab77cebe37a4e2437a074c5c40d7234f8b6162fb222a18ace1beef42bee3119b",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/87772/original/BTC_2.png"
+  },
+  {
+    "messageId": "17d04719ae6909fd",
+    "reportDate": "2021-11-09",
+    "imagePath": "images/2021-11-09/20d2244bc3f2-BTC_2.png",
+    "imageSha256": "ef5b636279e44cf48110359834496a4785e1b3b64fe22afcec876b21f9eec865",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/88050/original/BTC_2.png"
+  },
+  {
+    "messageId": "17d14663ad33bfc7",
+    "reportDate": "2021-11-12",
+    "imagePath": "images/2021-11-12/db91015a68d5-BTC_2.png",
+    "imageSha256": "c21388bb2c7a696a3225d8a9e065ea98cdb8c4f8b95bb99f695d02c9f5d99094",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/88200/original/BTC_2.png"
+  },
+  {
+    "messageId": "17d237659eadeb8a",
+    "reportDate": "2021-11-15",
+    "imagePath": "images/2021-11-15/ba8f76a4141a-BTC_2.png",
+    "imageSha256": "bf7c681a7ba7d4cdcbd8b833f5a3b03ff32b7dd2fceba083621b34996efed5ec",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/88275/original/BTC_2.png"
+  },
+  {
+    "messageId": "17d8051003da04b1",
+    "reportDate": "2021-12-03",
+    "imagePath": "images/2021-12-03/700d790a62fb-BTC_2.png",
+    "imageSha256": "4a69f06edec2efe58e90612184e665d8e400d941b460bb974ca62378e89bfcee",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/88972/original/BTC_2.png"
+  },
+  {
+    "messageId": "17d9ef6f945883c4",
+    "reportDate": "2021-12-09",
+    "imagePath": "images/2021-12-09/35f2fe1ebaec-BTC_2.png",
+    "imageSha256": "851e535268bfa0cb4b3165d7ee0a7dc655053a58a765faba348d6950a1d0075b",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/89223/original/BTC_2.png"
+  },
+  {
+    "messageId": "17da456a92facc3d",
+    "reportDate": "2021-12-10",
+    "imagePath": "images/2021-12-10/79a1cf5e6549-BTC_2.png",
+    "imageSha256": "d31c13c6c2476578f66c41e6f7919a443f233b79af7400b4596c38408a38e2f0",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/89262/original/BTC_2.png"
+  },
+  {
+    "messageId": "17e43cb6985c2dac",
+    "reportDate": "2022-01-10",
+    "imagePath": "images/2022-01-10/07a66f9a5e0e-BTC_2.png",
+    "imageSha256": "526080953a29ce51fa252458071c9a70bbd493e410b1625d6014e2e3e23b93c8",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/90163/original/BTC_2.png"
+  },
+  {
+    "messageId": "17ef859ddc1e1a01",
+    "reportDate": "2022-02-14",
+    "imagePath": "images/2022-02-14/33713db564d7-btc_2.png",
+    "imageSha256": "0456f12a7b578d57cc4cc17edfee4755d4d0e70284202fbf33ffa5d90ce121e9",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/91624/original/btc_2.png"
+  },
+  {
+    "messageId": "180f07ac799ba5bb",
+    "reportDate": "2022-05-23",
+    "imagePath": "images/2022-05-23/f93769f46431-BTC_2.png",
+    "imageSha256": "5c38ded96f8388053d35c217f0addfc65242aea74359eb9e89a420ee41558f8f",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/95795/original/BTC_2.png"
+  },
+  {
+    "messageId": "181713603731ff6e",
+    "reportDate": "2022-06-17",
+    "imagePath": "images/2022-06-17/86282ecf0bc0-BTC_2.png",
+    "imageSha256": "6039ead107740a8d0a3ba46b6e8875df653d3d018159e63e0455bbc2b1e2be47",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96962/original/BTC_2.png"
+  },
+  {
+    "messageId": "18185d04d6f04c0a",
+    "reportDate": "2022-06-21",
+    "imagePath": "images/2022-06-21/765ea05ad541-BTC_2.png",
+    "imageSha256": "6b7fb3d4e65a326f25a8f9ec5774fbebefe0c102a913e9ef99bf8803a7cd95ba",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/97049/original/BTC_2.png"
+  },
+  {
+    "messageId": "18244b337e271377",
+    "reportDate": "2022-07-28",
+    "imagePath": "images/2022-07-28/07b108f99faa-BTC_2.png",
+    "imageSha256": "cf8fb310eb22780f629ed7cfc2b14a0e51ee8bd0e18879552402c2f76a76d5b2",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/98686/original/BTC_2.png"
+  },
+  {
+    "messageId": "19426e80abd4732a",
+    "reportDate": "2025-01-02",
+    "imagePath": "images/2025-01-02/ac21084d71df-BTC_2.png",
+    "imageSha256": "1be0e099a4e6e7c95ec998fe003e4dc88c771f80dae76df741182b62526654a6",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/135497/original/BTC_2.png"
+  },
+  {
+    "messageId": "1942c4c1348ef37f",
+    "reportDate": "2025-01-03",
+    "imagePath": "images/2025-01-03/fa1005a79391-BTC_2.png",
+    "imageSha256": "eb5a0fb54ae7d6a207c98ec76dfd9ff39da4f57cc37f6160e7e9b3c73832dcc0",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/135535/original/BTC_2.png"
+  },
+  {
+    "messageId": "1957091e430a1292",
+    "reportDate": "2025-03-07",
+    "imagePath": "images/2025-03-07/0e78bfdbf7ad-BTC_2.png",
+    "imageSha256": "3b73ddf81746a5f63ddba9b4f897c29c828838c04fb78abda2d713fdbff72b89",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/138006/original/BTC_2.png"
+  },
+  {
+    "messageId": "1961582340a297a4",
+    "reportDate": "2025-04-08",
+    "imagePath": "images/2025-04-08/7a00b2ef04be-Picture2.png",
+    "imageSha256": "8915d129492d7c06acb2f9197fe3b83ba40a4d649f3076971db6df5ce7d584fa",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139265/original/Picture2.png"
+  },
+  {
+    "messageId": "19735ec4c69953bb",
+    "reportDate": "2025-06-03",
+    "imagePath": "images/2025-06-03/8b305160c6f1-Screenshot_2025_06_03_085135.png",
+    "imageSha256": "69ad6f5d973ad828dbc633f4bc9a152c008bdfad46ac60c2ace681135cc30ba8",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141467/original/Screenshot_2025_06_03_085135.png"
+  },
+  {
+    "messageId": "197403b61cea8049",
+    "reportDate": "2025-06-05",
+    "imagePath": "images/2025-06-05/cbaff0940ff9-Screenshot_2025_06_05_084356.png",
+    "imageSha256": "e026035ef8b124e71dbfe3d55d4cc863e4d76dc556ab97767ba8dc5612af6dea",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/141546/original/Screenshot_2025_06_05_084356.png"
+  },
+  {
+    "messageId": "197ac0f258539283",
+    "reportDate": "2025-06-26",
+    "imagePath": "images/2025-06-26/34cfb9587cd0-Screenshot_2025_06_26_070650.png",
+    "imageSha256": "ece21837135708281220150f532184757a0131a519620629d12ba42a8c69e8f2",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/142334/original/Screenshot_2025_06_26_070650.png"
+  },
+  {
+    "messageId": "1981335b248bd1a9",
+    "reportDate": "2025-07-16",
+    "imagePath": "images/2025-07-16/5eb25ca34698-BTC_2.png",
+    "imageSha256": "0d475669363532d2571f4562290e3eb4dc362d25905b812fe38455ce63499d8d",
+    "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143079/original/BTC_2.png"
+  }
+]

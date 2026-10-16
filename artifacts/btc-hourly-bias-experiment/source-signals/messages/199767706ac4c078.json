@@ -1,0 +1,78 @@
+{
+  "sourceMessageId": "199767706ac4c078",
+  "publicationAt": "2025-09-23T12:03:00Z",
+  "receivedAt": "2025-09-23T12:05:35Z",
+  "availableAt": "2025-09-23T12:05:35Z",
+  "reportDate": "2025-09-23",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:3d06:0:b0:892:1cb4:2dc1 with SMTP id f6csp826144uax;        Tue, 23 Sep 2025 05:05:36 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-141.sailthru.com (mta236-141.sailthru.com. [192.64.236.141])        by mx.google.com with ESMTPS id d75a77b69052e-4d60dc1e0f4si1414511cf.1451.2025.09.23.05.05.35        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Tue, 23 Sep 2025 05:05:35 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay2.sailthru.cloud (10.55.73.49) by pmta11.sailthru.com id hqa6gu3791sp for <timsmithaviation@gmail.com>; Tue, 23 Sep 2025 07:04:57 -0500 (envelope-from <delivery_20250923080405.41684960.817@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 23 Sep 2025 08:04:05 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250923080405.41684960.817@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+0.2%), FORD\u2192Tokenized Equity + Onchain Collateral, AVAX DAT, ASTER vs HYPE"
+    }
+  ],
+  "gmailInternalDate": "1758629045000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/Perp_DEX_Day.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/Cryp_401.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/ASTER_HYPE.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/YZi_Open.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/FORWARD_Tok_0.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/FORWARD_Tok.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BASE_Token.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BASE_Token_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/AVAX_One.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/ASST_SMLR.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/MSB.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_CB.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/WLFI_Debit.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/glassnode_studio_bitcoin_long_term_holder_us_spot_etf_balances_position_change__6_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/glassnode_studio_bitcoin_price_performance_since_halving__48_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/glassnode_studio_bitcoin_price_performance_since_cycle_low__31_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/145853/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/199767706ac4c078",
+  "htmlSha256": "0ff26197a3329753a12bb98e39deb6a18f6c5589d87ed447db3705e154f20474",
+  "archiveSnapshotDate": "2025-09-23",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-09-23/crypto-quant/199767706ac4c078-message-body-html-1-message-body.html"
+}

@@ -1,0 +1,82 @@
+{
+  "sourceMessageId": "1999592c805b2a99",
+  "publicationAt": "2025-09-29T13:01:00Z",
+  "receivedAt": "2025-09-29T13:04:08Z",
+  "availableAt": "2025-09-29T13:04:08Z",
+  "reportDate": "2025-09-29",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:6688:0:b0:892:1cb4:2dc1 with SMTP id a8csp2278909uan;        Mon, 29 Sep 2025 06:04:10 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-149.sailthru.com (mta236-149.sailthru.com. [192.64.236.149])        by mx.google.com with ESMTPS id af79cd13be357-85c25b6d943si529252485a.41.2025.09.29.06.04.08        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Mon, 29 Sep 2025 06:04:08 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay1.sailthru.cloud (10.55.90.180) by mta237-109.sailthru.com id hra1sg3791st for <timsmithaviation@gmail.com>; Mon, 29 Sep 2025 08:03:57 -0500 (envelope-from <delivery_20250929090202.41765945.1118@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Mon, 29 Sep 2025 09:02:02 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250929090202.41765945.1118@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+1.1%), COIN=BEARISH, PerpDEX Meta, Plasma Stablecoin Vaccum, XRP ETFs, Uptober?"
+    }
+  ],
+  "gmailInternalDate": "1759150922000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_081651.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_081728.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_081804.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_081828.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_081843.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_081900.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_081915.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_081941.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_082004.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_082019.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_082036.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_082058.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_082128.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_082143.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_082209.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_083939.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_083917.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084245.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084315.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084110.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084001.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084031.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084349.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084203.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084453.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084302.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084125.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084405.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Screenshot_2025_09_29_084427.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/glassnode_studio_btc_net_transfer_volume_from_to_exchanges__5_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/glassnode_studio_btc_coin_years_destroyed.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/glassnode_studio_stablecoins_aggregate_supplies__4_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/glassnode_studio_btc_cost_basis_distribution_heatmap__2_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/glassnode_studio_eth_futures_volume.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/glassnode_studio_eth_total_value_locked_in_defi_tvl__2_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146099/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1999592c805b2a99",
+  "htmlSha256": "c2216f3bad17d4954637d3c348c341102645d7c6f2afe3d0b147606424e2e825",
+  "archiveSnapshotDate": "2025-09-29",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-09-29/crypto-quant/1999592c805b2a99-message-body-html-1-message-body.html"
+}

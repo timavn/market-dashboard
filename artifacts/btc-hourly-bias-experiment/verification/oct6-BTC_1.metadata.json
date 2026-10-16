@@ -1,0 +1,22 @@
+{
+  "url": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146365/original/BTC_1.png",
+  "headers": {
+    "Content-Type": "binary/octet-stream",
+    "Content-Length": "78172",
+    "Connection": "close",
+    "Date": "Tue, 15 Sep 2026 18:25:28 GMT",
+    "x-amz-replication-status": "COMPLETED",
+    "Last-Modified": "Mon, 06 Oct 2025 10:57:39 GMT",
+    "ETag": "\"ab5e0a27f6282017aa0ff57018609199\"",
+    "x-amz-server-side-encryption": "AES256",
+    "x-amz-version-id": "ulQunrqF56Xshe99mRovWHeluKihVLrh",
+    "Accept-Ranges": "bytes",
+    "Server": "AmazonS3",
+    "X-Cache": "Miss from cloudfront",
+    "Via": "1.1 b7b9d4ff5955525f07b19c08b74c752e.cloudfront.net (CloudFront)",
+    "X-Amz-Cf-Pop": "LAX53-P6",
+    "X-Amz-Cf-Id": "-m99mDlzyRqksTzkrCRVWyI9PmHqYPP7lAzX8o9nrCtnxRYpRLknEw==",
+    "Vary": "Origin"
+  },
+  "sha256": "071660255eaa0668fa178a0735dc3fe4a1e56cf65b89108b0b48cd0347af8f58"
+}

@@ -1,0 +1,25 @@
+{
+  "url": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/106081/large/BTC_2.png",
+  "status": 200,
+  "retrievedAt": "2026-09-15T23:25:39.279825Z",
+  "headers": {
+    "Content-Length": "12113",
+    "Connection": "close",
+    "Accept-Ranges": "bytes",
+    "Date": "Tue, 15 Sep 2026 23:25:39 GMT",
+    "Server": "AmazonS3",
+    "Last-Modified": "Tue, 31 Jan 2023 11:25:43 GMT",
+    "ETag": "\"d4169485ce05d8f5176068ecdbb20f24\"",
+    "x-amz-version-id": "P_z_z01fr2977UZtGzXrAq2p_RoEz4EF",
+    "x-amz-server-side-encryption": "AES256",
+    "x-amz-replication-status": "COMPLETED",
+    "X-Cache": "Miss from cloudfront",
+    "Via": "1.1 ed44b2ce269f864e7a3f4a5b06b805e6.cloudfront.net (CloudFront)",
+    "X-Amz-Cf-Pop": "LAX53-P6",
+    "X-Amz-Cf-Id": "miJ6As8JXJzraxWDM3BRKY_E2yzT7N9sIw5l-qrcha1zmXQWn1B0FQ==",
+    "Vary": "Origin"
+  },
+  "byteLength": 12113,
+  "sha256": "f874e424b6d9b0943e56b011f8341425bbdd36412afe2e8f78bf907185739005",
+  "purpose": "Excluded historical-source worked example; current retrieval is not historical receipt evidence."
+}

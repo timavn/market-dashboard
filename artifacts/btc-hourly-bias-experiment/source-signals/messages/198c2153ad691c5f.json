@@ -1,0 +1,78 @@
+{
+  "sourceMessageId": "198c2153ad691c5f",
+  "publicationAt": "2025-08-19T11:26:00Z",
+  "receivedAt": "2025-08-19T11:27:07Z",
+  "availableAt": "2025-08-19T11:27:07Z",
+  "reportDate": "2025-08-19",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:373a:0:b0:88b:b22e:cb82 with SMTP id s26csp2007579uag;        Tue, 19 Aug 2025 04:27:08 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-145.sailthru.com (mta236-145.sailthru.com. [192.64.236.145])        by mx.google.com with ESMTPS id af79cd13be357-7e9f5f2b12asi32160485a.1154.2025.08.19.04.27.07        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Tue, 19 Aug 2025 04:27:07 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay9.sailthru.cloud (10.55.62.145) by pmta11.sailthru.com id hkhfom3791s5 for <timsmithaviation@gmail.com>; Tue, 19 Aug 2025 06:27:07 -0500 (envelope-from <delivery_20250819072707.41194974.421@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 19 Aug 2025 07:27:07 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250819072707.41194974.421@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-0.8%), CRCL=NEUTRAL, Tradfi \u2764\ufe0f LINK, SOL DAT, ETH\u2192Best 3Q Ever?"
+    }
+  ],
+  "gmailInternalDate": "1755602827000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/ETH_SEAG_ATH.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/LINK_Equity.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/SOL_Dat_081925.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/ETH_5_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/USDe_AAVE.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/NFP_Edu.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/prediction_markets.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/GOOG_Teawulf.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/glassnode_studio_eth_net_transfer_volume_from_to_exchanges.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/glassnode_studio_eth_net_transfer_volume_from_to_exchanges_breakdown_by_size.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/glassnode_studio_eth_percent_balance_on_exchanges.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/glassnode_studio_eth_spot_volume.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/glassnode_studio_btc_net_transfer_volume_from_to_exchanges_breakdown_by_size__39_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/glassnode_studio_btc_net_transfer_volume_from_to_exchanges__39_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/glassnode_studio_btc_percent_balance_on_exchanges__12_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/glassnode_studio_btc_spot_volume__13_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144520/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/198c2153ad691c5f",
+  "htmlSha256": "05e68ab1dd65274eab1bdfebc697e539f9c7ca838bfc3d60521ef0e30a1c8eb2",
+  "archiveSnapshotDate": "2025-08-19",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-08-19/crypto-quant/198c2153ad691c5f-message-body-html-1-message-body.html"
+}

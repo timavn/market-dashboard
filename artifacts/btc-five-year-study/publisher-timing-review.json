@@ -1,0 +1,24 @@
+{
+  "originalReportsAvailable": true,
+  "historicalReceiptVerified": false,
+  "sampleDate": "2023-01-31",
+  "reconstructedSignalsIncluded": 0,
+  "reason": "The authenticated publisher archive contains historical reports, including the January 31, 2023 original. Its printed publication time and versioned source image do not establish a historical receipt. The approved receipt requirement is unchanged; these reports remain excluded, so the study gap reflects unavailable verified entry-timing evidence rather than proof that reports did not exist.",
+  "schemaVersion": 1,
+  "checkedAt": "2026-09-15T23:26:31.777508Z",
+  "sealedSourceArchiveModified": false,
+  "privateEvidence": {
+    "directory": "source-publisher",
+    "manifestPath": "source-publisher/manifest.json",
+    "manifestSha256": "3bf2dd9e9d9040e0cf7c2346a10445fb89f5f13a78a7d83d570720f67a44c6b2",
+    "workedExamplePath": "source-publisher/2023-01-31-worked-example.json",
+    "archiveMonth": "2023-01",
+    "reportsListed": 20,
+    "firstListedDate": "2023-01-03",
+    "lastListedDate": "2023-01-31",
+    "rangeNumericallyVerified": true,
+    "historicalPublishedAt": "2023-01-31T11:33:00Z",
+    "imageLastModifiedAt": "2023-01-31T11:25:43Z",
+    "receiptSearchMessagesFound": 0
+  }
+}

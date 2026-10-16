@@ -1,0 +1,74 @@
+{
+  "sourceMessageId": "19cd7c94e0e0916a",
+  "publicationAt": "2026-03-10T12:43:00Z",
+  "receivedAt": "2026-03-10T12:47:00Z",
+  "availableAt": "2026-03-10T12:47:00Z",
+  "reportDate": "2026-03-10",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:6803:b0:937:2e36:5001 with SMTP id je3csp1834443uab;        Tue, 10 Mar 2026 05:47:00 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta237-137.sailthru.com (mta237-137.sailthru.com. [192.64.237.137])        by mx.google.com with ESMTPS id af79cd13be357-8cd88ec532bsi563817585a.8.2026.03.10.05.47.00        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Tue, 10 Mar 2026 05:47:00 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay5.sailthru.cloud (10.55.76.97) by pmta19.sailthru.com id hm09c83791sq for <timsmithaviation@gmail.com>; Tue, 10 Mar 2026 07:45:02 -0500 (envelope-from <delivery_20260310084502.44606254.777@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 10 Mar 2026 08:45:02 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20260310084502.44606254.777@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+2.8%), SOL Flows, Hyperliquid Volume \u2191,  Crypto Tax Intractability"
+    }
+  ],
+  "gmailInternalDate": "1773146702000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/SOL_Flow.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/Tokenized_Equities.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/C_tax.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/Cryp_cap.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/HL_031026.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/CBD_1M_031026.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/CBD_3M_031026.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/CBD_1Y_031026.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/glassnode_studio_btc_realized_profit_loss_ratio.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/glassnode_studio_btc_treasury_net_unrealized_profit_loss_companies__3_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/glassnode_studio_eth_treasury_net_unrealized_profit_loss_companies__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/glassnode_studio_sol_treasury_net_unrealized_profit_loss_companies.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/152850/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/19cd7c94e0e0916a",
+  "htmlSha256": "c1caf801104fcbbc01b111cc3ba582ef0a6da54073ea827aad4076916be141af",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": "hedgeye-email/messages/2026-03-10/crypto-quant/19cd7c94e0e0916a-message-body-html-1-message-body.html"
+}

@@ -1,0 +1,10 @@
+{
+  "sourceMessageId": "17ed917bf50ff72f",
+  "reportDate": "2022-02-08",
+  "candidates": [
+    {
+      "sourceUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/91371/original/BTC_2.png",
+      "error": "HTTPError: HTTP Error 403: Forbidden"
+    }
+  ]
+}

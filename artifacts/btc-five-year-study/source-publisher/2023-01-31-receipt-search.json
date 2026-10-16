@@ -1,0 +1,10 @@
+{
+  "query": "in:anywhere after:2023/01/30 before:2023/02/02 {subject:\"CRYPTO QUANT\" \"128291\" \"Squeeze Over\"}",
+  "result": {
+    "message_ids": [],
+    "next_page_token": null
+  },
+  "checkedOn": "2026-09-15",
+  "scope": "Connected mailbox, including archived and trash/spam mail; bounded exact-date/title/article search.",
+  "interpretation": "No historical receipt located. This is not proof that the publisher did not publish or that no other subscriber received this report."
+}

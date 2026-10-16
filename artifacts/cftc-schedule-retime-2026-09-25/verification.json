@@ -1,0 +1,29 @@
+{
+  "verifiedAt": "2026-09-25T13:42:20.675511+00:00",
+  "stackStatus": "UPDATE_COMPLETE",
+  "schedule": {
+    "Name": "market-dashboard-cftc-weekday-v1",
+    "State": "ENABLED",
+    "ScheduleExpression": "cron(31 15 * * ? *)",
+    "ScheduleExpressionTimezone": "America/New_York",
+    "FlexibleTimeWindow": {
+      "Mode": "OFF"
+    },
+    "LastModificationDate": "2026-09-25 06:41:48.279000-07:00",
+    "Target": {
+      "Arn": "arn:aws:lambda:us-west-1:915328198276:function:market-dashboard-cftc-ingestor-v1",
+      "Input": "{\"source\":\"aws-scheduler\",\"scheduleId\":\"market-dashboard-cftc-weekday-v1\",\"mode\":\"current\"}",
+      "RetryPolicy": {
+        "MaximumEventAgeInSeconds": 900,
+        "MaximumRetryAttempts": 0
+      },
+      "RoleArn": "arn:aws:iam::915328198276:role/market-dashboard-readiness--CftcSchedulerInvokeRole-WMs3HzOzles1"
+    }
+  },
+  "baselineSha256": "81cfa87d052320548c133747d101526bb9b3f404d1c387372620d56d09bbc078",
+  "targetSha256": "e186416fffeb23cef5d1fd4e4d4975279df886c64a5ec13a89aa369235aa77e4",
+  "preservedAllStackParameters": true,
+  "changedResources": [
+    "CftcWeekdaySchedule"
+  ]
+}

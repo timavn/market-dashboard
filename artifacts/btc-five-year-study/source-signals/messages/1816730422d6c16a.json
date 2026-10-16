@@ -1,0 +1,71 @@
+{
+  "sourceMessageId": "1816730422d6c16a",
+  "publicationAt": "2022-06-15T11:45:00Z",
+  "receivedAt": "2022-06-15T11:47:05Z",
+  "availableAt": "2022-06-15T11:47:05Z",
+  "reportDate": "2022-06-15",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a59:154b:0:b0:2ca:226d:e08b with SMTP id 72csp189547vqv;        Wed, 15 Jun 2022 04:47:05 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mx-hedgeye-d.sailthru.com (mx-hedgeye-d.sailthru.com. [192.64.236.26])        by mx.google.com with ESMTPS id b205-20020a2534d6000000b006648622fd66si14269518yba.481.2022.06.15.04.47.04        for <timsmithaviation@gmail.com>        (version=TLS1_2 cipher=ECDHE-ECDSA-AES128-GCM-SHA256 bits=128/128);        Wed, 15 Jun 2022 04:47:05 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=mbq3icdH;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=UrjsGIRq;       spf=pass (google.com: domain of delivery@mx.sailthru.com designates 192.64.236.26 as permitted sender) smtp.mailfrom=delivery@mx.sailthru.com"
+    },
+    {
+      "name": "Received",
+      "value": "from nj2mta-17.sailthru.com (204.153.121.17) by mx-hedgeye-d.sailthru.com id hl73bi2to8cq for <timsmithaviation@gmail.com>; Wed, 15 Jun 2022 07:47:03 -0400 (envelope-from <delivery@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Wed, 15 Jun 2022 07:47:03 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20220615074703.28061604.2455@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-5.4%), ETH (-8.1%), SOL (-1.8%), AVAX (-2.9%), 3AC = RIP?"
+    }
+  ],
+  "gmailInternalDate": "1655293623000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/BTC_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/glassnode_studio_bitcoin_net_transfer_volume_from_to_exchanges_btc_all_exchanges__41_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/glassnode_studio_bitcoin_price_drawdown_from_ath__5_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/glassnode_studio_bitcoin_options_25_delta_skew_1_week_deribit__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/glassnode_studio_bitcoin_options_atm_implied_volatility_1_week_deribit__2_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/glassnode_studio_bitcoin_entity_adjusted_dormancy_flow__5_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/GIP_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/96826/original/ETH_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1816730422d6c16a",
+  "htmlSha256": "7e32463a0a18271b863e58b34abfa1a82f72a37f34e4f445137a9df4bb3b07dd",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/1816730422d6c16a.json",
+  "rawGmailSha256": "70a79d2a5f359861b189953311b42d229d12aa98dc95aa6fe0db5868834025cc",
+  "collectionSource": "gmail_connector_original_mime"
+}

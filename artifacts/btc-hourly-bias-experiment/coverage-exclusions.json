@@ -1,0 +1,90 @@
+{
+  "missingCandleStarts": [
+    "2025-10-25T16:00:00Z",
+    "2025-10-25T17:00:00Z",
+    "2025-10-25T18:00:00Z",
+    "2025-10-25T19:00:00Z",
+    "2025-10-25T20:00:00Z",
+    "2026-05-08T02:00:00Z",
+    "2026-05-08T03:00:00Z",
+    "2026-05-08T04:00:00Z",
+    "2026-05-08T05:00:00Z",
+    "2026-05-08T06:00:00Z"
+  ],
+  "rejectedCandles": [],
+  "rejectedSettlements": [],
+  "collectorRejectedCandles": [],
+  "collectorRejectedSettlementReasons": {
+    "Invalid numeric observation": 4359,
+    "Invalid or disagreeing finalized observations": 99
+  },
+  "collectorSettlementExclusionsFile": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-bias-experiment/source-prices/settlements.json",
+  "unknownSignalReasons": {
+    "Before first timed report": 12,
+    "BTC_SOURCE_TABLE_UNRECOVERED": 45,
+    "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY;TRUSTED_RECEIPT_TIME_UNAVAILABLE": 607
+  },
+  "sourceInterruptions": [
+    {
+      "startAt": "2025-08-06T13:14:19Z",
+      "endAt": "2025-08-07T11:33:34Z",
+      "reason": "BTC_SOURCE_TABLE_UNRECOVERED",
+      "sourceMessageIds": [
+        "1987f84b1927f3da"
+      ],
+      "reportDates": [
+        "2025-08-06"
+      ]
+    },
+    {
+      "startAt": "2025-10-06T11:10:55Z",
+      "endAt": "2025-10-07T10:42:03Z",
+      "reason": "BTC_SOURCE_TABLE_UNRECOVERED",
+      "sourceMessageIds": [
+        "199b937a2c6f95e8"
+      ],
+      "reportDates": [
+        "2025-10-06"
+      ]
+    },
+    {
+      "startAt": "2026-06-04T04:00:00Z",
+      "endAt": "2026-06-29T10:56:47Z",
+      "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY;TRUSTED_RECEIPT_TIME_UNAVAILABLE",
+      "sourceMessageIds": [
+        "19e92ac4d650c4ec",
+        "19e97ab27cbc9e89",
+        "19ea6ecfe9352cc4",
+        "19eac4a4b067606b",
+        "19eb139d41825b20",
+        "19eb686da86e2ef9",
+        "19ebbbc56d27f381",
+        "19ecae48ff4abea1",
+        "19ed013e18e509ef",
+        "19ed5386a0dec25c",
+        "19eda809c0b9bbda",
+        "19eef019e605772c",
+        "19ef47a198215511",
+        "19ef991d5e2df4b7"
+      ],
+      "reportDates": [
+        "2026-06-04",
+        "2026-06-05",
+        "2026-06-08",
+        "2026-06-09",
+        "2026-06-10",
+        "2026-06-11",
+        "2026-06-12",
+        "2026-06-15",
+        "2026-06-16",
+        "2026-06-17",
+        "2026-06-18",
+        "2026-06-22",
+        "2026-06-23",
+        "2026-06-24",
+        "2026-06-25",
+        "2026-06-26"
+      ]
+    }
+  ]
+}

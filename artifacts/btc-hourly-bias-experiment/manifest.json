@@ -1,0 +1,1343 @@
+{
+  "study": "BTC hourly direction conditional on previously available Crypto Tracker trend",
+  "asOf": "2026-09-15T18:10:12Z",
+  "cutoff": "2026-09-15T18:00:00Z",
+  "historicalResearchOnly": true,
+  "python": "3.9.6",
+  "numpy": "2.0.2",
+  "bootstrapReplicates": 10000,
+  "bootstrapSeed": 20260915,
+  "bootstrapUnit": "America/Los_Angeles calendar day",
+  "inputs": [
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-bias-experiment/source-signals/signals.json",
+      "sha256": "5fab69b3d4466b808ae57dd8e71aee9f7e786dd3f35f569f595233197b681536"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-bias-experiment/source-prices/candles.json",
+      "sha256": "2ebd859c58e07e8192959ea560034c756b168e5ba01f5c1557ed6d27b7439fe1"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-bias-experiment/source-prices/settlements.json",
+      "sha256": "7c8dc3184e71fdda182602c1411fc0b3cd87155d84b0cdf71630c190d41649db"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/scripts/research/btc_hourly_bias.py",
+      "sha256": "d3d660e733c8bcb558d373b53c4119e191da824330af689357487dbcde7ea78d"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/scripts/research/btc_signal_history.py",
+      "sha256": "3dd1d5deee1578c0fa91a65daec2b3dbbf83561afa48391895b150d5ce50c434"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/scripts/research/btc_price_history.py",
+      "sha256": "94493a9b5ecc1dbd7d8b21e4b62f877ec788eaa62727e7272fad6b92fc30ec9b"
+    }
+  ],
+  "signalCoverage": {
+    "from": "2025-07-28",
+    "through": "2026-09-15",
+    "reportVersions": 285,
+    "uniqueReportDates": 284,
+    "directionEligibleReports": 269,
+    "rangeEligibleReports": 269,
+    "visuallyReviewedReports": 56,
+    "directionTransitionsReviewed": 30,
+    "archiveSnapshots": 169
+  },
+  "priceCoverage": {
+    "expectedHours": 9954,
+    "observedHours": 9944,
+    "missingIntervals": [
+      {
+        "startInclusive": "2025-10-25T16:00:00Z",
+        "endExclusive": "2025-10-25T21:00:00Z",
+        "hours": 5
+      },
+      {
+        "startInclusive": "2026-05-08T02:00:00Z",
+        "endExclusive": "2026-05-08T07:00:00Z",
+        "hours": 5
+      }
+    ],
+    "pages": 36,
+    "gapRechecks": [
+      {
+        "startInclusive": "2025-10-25T16:00:00Z",
+        "endExclusive": "2025-10-25T21:00:00Z",
+        "hours": 5,
+        "rawResponse": "raw/coinbase/c36c0f17ec99051ac533149f.json.gz",
+        "recoveredHours": 0
+      },
+      {
+        "startInclusive": "2026-05-08T02:00:00Z",
+        "endExclusive": "2026-05-08T07:00:00Z",
+        "hours": 5,
+        "rawResponse": "raw/coinbase/0ed2368706493045b71c94f7.json.gz",
+        "recoveredHours": 0
+      }
+    ]
+  },
+  "settlementCoverage": {
+    "expectedHourlyObservationSlots": 9955,
+    "observedHours": 8350,
+    "missingIntervals": [
+      {
+        "startInclusive": "2025-07-28T05:00:00Z",
+        "endExclusive": "2025-07-28T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-07-29T05:00:00Z",
+        "endExclusive": "2025-07-29T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-07-30T05:00:00Z",
+        "endExclusive": "2025-07-30T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-07-31T05:00:00Z",
+        "endExclusive": "2025-07-31T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-01T05:00:00Z",
+        "endExclusive": "2025-08-01T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-02T05:00:00Z",
+        "endExclusive": "2025-08-02T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-03T05:00:00Z",
+        "endExclusive": "2025-08-03T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-04T05:00:00Z",
+        "endExclusive": "2025-08-04T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-05T05:00:00Z",
+        "endExclusive": "2025-08-05T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-06T05:00:00Z",
+        "endExclusive": "2025-08-06T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-07T05:00:00Z",
+        "endExclusive": "2025-08-07T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-08T05:00:00Z",
+        "endExclusive": "2025-08-08T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-09T05:00:00Z",
+        "endExclusive": "2025-08-09T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-10T05:00:00Z",
+        "endExclusive": "2025-08-10T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-11T05:00:00Z",
+        "endExclusive": "2025-08-11T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-12T05:00:00Z",
+        "endExclusive": "2025-08-12T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-13T05:00:00Z",
+        "endExclusive": "2025-08-13T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-14T05:00:00Z",
+        "endExclusive": "2025-08-14T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-15T05:00:00Z",
+        "endExclusive": "2025-08-15T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-16T05:00:00Z",
+        "endExclusive": "2025-08-16T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-17T05:00:00Z",
+        "endExclusive": "2025-08-17T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-18T05:00:00Z",
+        "endExclusive": "2025-08-18T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-19T05:00:00Z",
+        "endExclusive": "2025-08-19T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-20T05:00:00Z",
+        "endExclusive": "2025-08-20T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-21T01:00:00Z",
+        "endExclusive": "2025-08-21T02:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-08-21T05:00:00Z",
+        "endExclusive": "2025-08-21T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-22T05:00:00Z",
+        "endExclusive": "2025-08-22T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-23T05:00:00Z",
+        "endExclusive": "2025-08-23T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-24T05:00:00Z",
+        "endExclusive": "2025-08-24T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-25T05:00:00Z",
+        "endExclusive": "2025-08-25T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-26T05:00:00Z",
+        "endExclusive": "2025-08-26T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-27T05:00:00Z",
+        "endExclusive": "2025-08-27T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-28T05:00:00Z",
+        "endExclusive": "2025-08-28T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-29T05:00:00Z",
+        "endExclusive": "2025-08-29T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-30T05:00:00Z",
+        "endExclusive": "2025-08-30T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-08-31T05:00:00Z",
+        "endExclusive": "2025-08-31T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-01T05:00:00Z",
+        "endExclusive": "2025-09-01T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-02T05:00:00Z",
+        "endExclusive": "2025-09-02T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-03T05:00:00Z",
+        "endExclusive": "2025-09-03T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-04T05:00:00Z",
+        "endExclusive": "2025-09-04T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-05T05:00:00Z",
+        "endExclusive": "2025-09-05T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-06T05:00:00Z",
+        "endExclusive": "2025-09-06T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-07T05:00:00Z",
+        "endExclusive": "2025-09-07T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-08T05:00:00Z",
+        "endExclusive": "2025-09-08T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-09T05:00:00Z",
+        "endExclusive": "2025-09-09T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-10T05:00:00Z",
+        "endExclusive": "2025-09-10T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-11T05:00:00Z",
+        "endExclusive": "2025-09-11T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-12T05:00:00Z",
+        "endExclusive": "2025-09-12T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-13T05:00:00Z",
+        "endExclusive": "2025-09-13T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-14T05:00:00Z",
+        "endExclusive": "2025-09-14T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-15T05:00:00Z",
+        "endExclusive": "2025-09-15T14:00:00Z",
+        "hours": 9
+      },
+      {
+        "startInclusive": "2025-09-16T05:00:00Z",
+        "endExclusive": "2025-09-16T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-17T05:00:00Z",
+        "endExclusive": "2025-09-17T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-18T05:00:00Z",
+        "endExclusive": "2025-09-18T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-19T05:00:00Z",
+        "endExclusive": "2025-09-19T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-20T05:00:00Z",
+        "endExclusive": "2025-09-20T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-21T05:00:00Z",
+        "endExclusive": "2025-09-21T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-22T05:00:00Z",
+        "endExclusive": "2025-09-22T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-23T05:00:00Z",
+        "endExclusive": "2025-09-23T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-24T05:00:00Z",
+        "endExclusive": "2025-09-24T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-25T05:00:00Z",
+        "endExclusive": "2025-09-25T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-26T05:00:00Z",
+        "endExclusive": "2025-09-26T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-27T05:00:00Z",
+        "endExclusive": "2025-09-27T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-28T05:00:00Z",
+        "endExclusive": "2025-09-28T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-29T05:00:00Z",
+        "endExclusive": "2025-09-29T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-09-30T05:00:00Z",
+        "endExclusive": "2025-09-30T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-01T05:00:00Z",
+        "endExclusive": "2025-10-01T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-02T05:00:00Z",
+        "endExclusive": "2025-10-02T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-03T05:00:00Z",
+        "endExclusive": "2025-10-03T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-04T05:00:00Z",
+        "endExclusive": "2025-10-04T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-05T05:00:00Z",
+        "endExclusive": "2025-10-05T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-06T05:00:00Z",
+        "endExclusive": "2025-10-06T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-07T05:00:00Z",
+        "endExclusive": "2025-10-07T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-08T05:00:00Z",
+        "endExclusive": "2025-10-08T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-09T05:00:00Z",
+        "endExclusive": "2025-10-09T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-10T04:00:00Z",
+        "endExclusive": "2025-10-10T13:00:00Z",
+        "hours": 9
+      },
+      {
+        "startInclusive": "2025-10-11T02:00:00Z",
+        "endExclusive": "2025-10-11T03:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-10-11T05:00:00Z",
+        "endExclusive": "2025-10-11T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-11T15:00:00Z",
+        "endExclusive": "2025-10-12T13:00:00Z",
+        "hours": 22
+      },
+      {
+        "startInclusive": "2025-10-13T05:00:00Z",
+        "endExclusive": "2025-10-13T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-14T05:00:00Z",
+        "endExclusive": "2025-10-14T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-15T05:00:00Z",
+        "endExclusive": "2025-10-15T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-16T05:00:00Z",
+        "endExclusive": "2025-10-16T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-17T05:00:00Z",
+        "endExclusive": "2025-10-17T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-17T21:00:00Z",
+        "endExclusive": "2025-10-17T22:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-10-18T05:00:00Z",
+        "endExclusive": "2025-10-18T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-19T05:00:00Z",
+        "endExclusive": "2025-10-19T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-20T05:00:00Z",
+        "endExclusive": "2025-10-20T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-21T05:00:00Z",
+        "endExclusive": "2025-10-21T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-22T05:00:00Z",
+        "endExclusive": "2025-10-22T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-23T05:00:00Z",
+        "endExclusive": "2025-10-23T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-24T05:00:00Z",
+        "endExclusive": "2025-10-24T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-25T05:00:00Z",
+        "endExclusive": "2025-10-25T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-26T05:00:00Z",
+        "endExclusive": "2025-10-26T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-27T05:00:00Z",
+        "endExclusive": "2025-10-27T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-28T05:00:00Z",
+        "endExclusive": "2025-10-28T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-29T05:00:00Z",
+        "endExclusive": "2025-10-29T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-30T05:00:00Z",
+        "endExclusive": "2025-10-30T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-10-30T16:00:00Z",
+        "endExclusive": "2025-10-30T17:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-10-31T05:00:00Z",
+        "endExclusive": "2025-10-31T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-01T05:00:00Z",
+        "endExclusive": "2025-11-01T13:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-02T05:00:00Z",
+        "endExclusive": "2025-11-02T14:00:00Z",
+        "hours": 9
+      },
+      {
+        "startInclusive": "2025-11-02T15:00:00Z",
+        "endExclusive": "2025-11-02T17:00:00Z",
+        "hours": 2
+      },
+      {
+        "startInclusive": "2025-11-02T18:00:00Z",
+        "endExclusive": "2025-11-04T14:00:00Z",
+        "hours": 44
+      },
+      {
+        "startInclusive": "2025-11-05T06:00:00Z",
+        "endExclusive": "2025-11-05T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-06T06:00:00Z",
+        "endExclusive": "2025-11-06T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-07T05:00:00Z",
+        "endExclusive": "2025-11-07T14:00:00Z",
+        "hours": 9
+      },
+      {
+        "startInclusive": "2025-11-08T06:00:00Z",
+        "endExclusive": "2025-11-08T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-09T06:00:00Z",
+        "endExclusive": "2025-11-09T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-10T05:00:00Z",
+        "endExclusive": "2025-11-10T14:00:00Z",
+        "hours": 9
+      },
+      {
+        "startInclusive": "2025-11-11T06:00:00Z",
+        "endExclusive": "2025-11-11T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-12T06:00:00Z",
+        "endExclusive": "2025-11-12T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-13T06:00:00Z",
+        "endExclusive": "2025-11-13T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-14T06:00:00Z",
+        "endExclusive": "2025-11-14T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-15T06:00:00Z",
+        "endExclusive": "2025-11-15T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-16T06:00:00Z",
+        "endExclusive": "2025-11-16T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-17T06:00:00Z",
+        "endExclusive": "2025-11-17T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-18T06:00:00Z",
+        "endExclusive": "2025-11-18T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-19T06:00:00Z",
+        "endExclusive": "2025-11-19T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-20T06:00:00Z",
+        "endExclusive": "2025-11-20T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-21T06:00:00Z",
+        "endExclusive": "2025-11-21T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-22T06:00:00Z",
+        "endExclusive": "2025-11-22T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-23T06:00:00Z",
+        "endExclusive": "2025-11-23T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-24T06:00:00Z",
+        "endExclusive": "2025-11-24T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-25T06:00:00Z",
+        "endExclusive": "2025-11-25T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-26T06:00:00Z",
+        "endExclusive": "2025-11-26T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-27T06:00:00Z",
+        "endExclusive": "2025-11-27T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-27T21:00:00Z",
+        "endExclusive": "2025-11-27T22:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-11-28T06:00:00Z",
+        "endExclusive": "2025-11-28T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-29T06:00:00Z",
+        "endExclusive": "2025-11-29T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-11-30T06:00:00Z",
+        "endExclusive": "2025-11-30T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-01T06:00:00Z",
+        "endExclusive": "2025-12-01T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-02T06:00:00Z",
+        "endExclusive": "2025-12-02T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-03T06:00:00Z",
+        "endExclusive": "2025-12-03T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-04T06:00:00Z",
+        "endExclusive": "2025-12-04T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-05T06:00:00Z",
+        "endExclusive": "2025-12-05T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-06T06:00:00Z",
+        "endExclusive": "2025-12-06T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-07T06:00:00Z",
+        "endExclusive": "2025-12-07T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-08T06:00:00Z",
+        "endExclusive": "2025-12-08T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-08T15:00:00Z",
+        "endExclusive": "2025-12-08T16:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-12-09T06:00:00Z",
+        "endExclusive": "2025-12-09T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-10T06:00:00Z",
+        "endExclusive": "2025-12-10T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-11T06:00:00Z",
+        "endExclusive": "2025-12-11T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-12T06:00:00Z",
+        "endExclusive": "2025-12-12T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-13T06:00:00Z",
+        "endExclusive": "2025-12-13T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-14T06:00:00Z",
+        "endExclusive": "2025-12-14T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-15T06:00:00Z",
+        "endExclusive": "2025-12-15T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-16T06:00:00Z",
+        "endExclusive": "2025-12-16T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-17T06:00:00Z",
+        "endExclusive": "2025-12-17T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-18T06:00:00Z",
+        "endExclusive": "2025-12-18T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-19T00:00:00Z",
+        "endExclusive": "2025-12-19T01:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-12-19T04:00:00Z",
+        "endExclusive": "2025-12-19T05:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-12-19T06:00:00Z",
+        "endExclusive": "2025-12-19T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-20T01:00:00Z",
+        "endExclusive": "2025-12-20T02:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-12-20T06:00:00Z",
+        "endExclusive": "2025-12-20T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-21T06:00:00Z",
+        "endExclusive": "2025-12-21T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-22T06:00:00Z",
+        "endExclusive": "2025-12-22T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-23T06:00:00Z",
+        "endExclusive": "2025-12-23T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-24T06:00:00Z",
+        "endExclusive": "2025-12-24T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-25T06:00:00Z",
+        "endExclusive": "2025-12-25T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-26T06:00:00Z",
+        "endExclusive": "2025-12-26T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-26T17:00:00Z",
+        "endExclusive": "2025-12-26T20:00:00Z",
+        "hours": 3
+      },
+      {
+        "startInclusive": "2025-12-27T06:00:00Z",
+        "endExclusive": "2025-12-27T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-28T06:00:00Z",
+        "endExclusive": "2025-12-28T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-28T16:00:00Z",
+        "endExclusive": "2025-12-28T20:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2025-12-28T21:00:00Z",
+        "endExclusive": "2025-12-28T22:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2025-12-29T06:00:00Z",
+        "endExclusive": "2025-12-29T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-30T06:00:00Z",
+        "endExclusive": "2025-12-30T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2025-12-31T06:00:00Z",
+        "endExclusive": "2025-12-31T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-01T06:00:00Z",
+        "endExclusive": "2026-01-01T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-02T06:00:00Z",
+        "endExclusive": "2026-01-02T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-03T06:00:00Z",
+        "endExclusive": "2026-01-03T16:00:00Z",
+        "hours": 10
+      },
+      {
+        "startInclusive": "2026-01-04T06:00:00Z",
+        "endExclusive": "2026-01-04T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-05T06:00:00Z",
+        "endExclusive": "2026-01-05T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-06T06:00:00Z",
+        "endExclusive": "2026-01-06T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-07T06:00:00Z",
+        "endExclusive": "2026-01-07T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-08T06:00:00Z",
+        "endExclusive": "2026-01-08T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-09T04:00:00Z",
+        "endExclusive": "2026-01-09T05:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-01-09T06:00:00Z",
+        "endExclusive": "2026-01-09T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-10T06:00:00Z",
+        "endExclusive": "2026-01-10T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-11T06:00:00Z",
+        "endExclusive": "2026-01-11T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-12T06:00:00Z",
+        "endExclusive": "2026-01-12T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-13T06:00:00Z",
+        "endExclusive": "2026-01-13T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-14T06:00:00Z",
+        "endExclusive": "2026-01-14T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-15T06:00:00Z",
+        "endExclusive": "2026-01-15T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-16T06:00:00Z",
+        "endExclusive": "2026-01-16T14:00:00Z",
+        "hours": 8
+      },
+      {
+        "startInclusive": "2026-01-18T09:00:00Z",
+        "endExclusive": "2026-01-18T10:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-02-05T17:00:00Z",
+        "endExclusive": "2026-02-05T21:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-02-06T01:00:00Z",
+        "endExclusive": "2026-02-06T02:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-02-11T07:00:00Z",
+        "endExclusive": "2026-02-11T08:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-02-26T07:00:00Z",
+        "endExclusive": "2026-02-26T11:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-03-03T23:00:00Z",
+        "endExclusive": "2026-03-04T00:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-03-05T07:00:00Z",
+        "endExclusive": "2026-03-05T11:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-03-09T16:00:00Z",
+        "endExclusive": "2026-03-09T17:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-03-12T06:00:00Z",
+        "endExclusive": "2026-03-12T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-03-19T06:00:00Z",
+        "endExclusive": "2026-03-19T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-03-19T18:00:00Z",
+        "endExclusive": "2026-03-19T19:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-03-26T06:00:00Z",
+        "endExclusive": "2026-03-26T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-04-02T06:00:00Z",
+        "endExclusive": "2026-04-02T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-04-09T06:00:00Z",
+        "endExclusive": "2026-04-09T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-04-16T06:00:00Z",
+        "endExclusive": "2026-04-16T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-04-23T06:00:00Z",
+        "endExclusive": "2026-04-23T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-04-30T06:00:00Z",
+        "endExclusive": "2026-04-30T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-05-07T06:00:00Z",
+        "endExclusive": "2026-05-07T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-05-14T06:00:00Z",
+        "endExclusive": "2026-05-14T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-05-14T19:00:00Z",
+        "endExclusive": "2026-05-14T20:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-05-20T17:00:00Z",
+        "endExclusive": "2026-05-20T19:00:00Z",
+        "hours": 2
+      },
+      {
+        "startInclusive": "2026-05-21T06:00:00Z",
+        "endExclusive": "2026-05-21T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-05-23T04:00:00Z",
+        "endExclusive": "2026-05-23T05:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-05-23T10:00:00Z",
+        "endExclusive": "2026-05-23T11:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-05-23T20:00:00Z",
+        "endExclusive": "2026-05-23T21:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-05-27T03:00:00Z",
+        "endExclusive": "2026-05-27T04:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-05-28T06:00:00Z",
+        "endExclusive": "2026-05-28T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-05-29T01:00:00Z",
+        "endExclusive": "2026-05-29T02:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-06-04T06:00:00Z",
+        "endExclusive": "2026-06-04T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-06-09T04:00:00Z",
+        "endExclusive": "2026-06-09T05:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-06-11T06:00:00Z",
+        "endExclusive": "2026-06-11T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-06-14T12:00:00Z",
+        "endExclusive": "2026-06-14T13:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-06-18T06:00:00Z",
+        "endExclusive": "2026-06-18T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-06-24T00:00:00Z",
+        "endExclusive": "2026-06-24T01:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-06-24T19:00:00Z",
+        "endExclusive": "2026-06-24T20:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-06-25T06:00:00Z",
+        "endExclusive": "2026-06-25T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-06-27T20:00:00Z",
+        "endExclusive": "2026-06-27T21:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-07-02T06:00:00Z",
+        "endExclusive": "2026-07-02T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-07-09T06:00:00Z",
+        "endExclusive": "2026-07-09T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-07-10T22:00:00Z",
+        "endExclusive": "2026-07-10T23:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-07-16T06:00:00Z",
+        "endExclusive": "2026-07-16T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-07-20T20:00:00Z",
+        "endExclusive": "2026-07-20T21:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-07-22T18:00:00Z",
+        "endExclusive": "2026-07-22T19:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-07-23T06:00:00Z",
+        "endExclusive": "2026-07-23T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-07-25T10:00:00Z",
+        "endExclusive": "2026-07-25T11:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-07-25T13:00:00Z",
+        "endExclusive": "2026-07-25T14:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-07-30T06:00:00Z",
+        "endExclusive": "2026-07-30T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-08-05T03:00:00Z",
+        "endExclusive": "2026-08-05T04:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-08-05T05:00:00Z",
+        "endExclusive": "2026-08-05T06:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-08-06T06:00:00Z",
+        "endExclusive": "2026-08-06T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-08-13T06:00:00Z",
+        "endExclusive": "2026-08-13T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-08-14T17:00:00Z",
+        "endExclusive": "2026-08-14T19:00:00Z",
+        "hours": 2
+      },
+      {
+        "startInclusive": "2026-08-16T10:00:00Z",
+        "endExclusive": "2026-08-16T11:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-08-18T05:00:00Z",
+        "endExclusive": "2026-08-18T06:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-08-19T10:00:00Z",
+        "endExclusive": "2026-08-19T11:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-08-20T06:00:00Z",
+        "endExclusive": "2026-08-20T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-08-24T20:00:00Z",
+        "endExclusive": "2026-08-24T21:00:00Z",
+        "hours": 1
+      },
+      {
+        "startInclusive": "2026-08-27T06:00:00Z",
+        "endExclusive": "2026-08-27T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-09-03T06:00:00Z",
+        "endExclusive": "2026-09-03T10:00:00Z",
+        "hours": 4
+      },
+      {
+        "startInclusive": "2026-09-10T06:00:00Z",
+        "endExclusive": "2026-09-10T10:00:00Z",
+        "hours": 4
+      }
+    ],
+    "pages": 1370,
+    "marketRowsChecked": 1369311,
+    "note": "Missing slots include hours without a listed/finalized KXBTCD event; no missing observations are filled."
+  },
+  "currentRegime": {
+    "trend": "BULLISH",
+    "startedAt": "2026-08-20T12:38:43Z",
+    "firstReportDate": "2026-08-20",
+    "onsetQuality": "verified_flip",
+    "previousTrend": "BEARISH",
+    "previousReportDate": "2026-08-19",
+    "sourceMessageId": "1a01f2e4c072357e",
+    "sourceUrl": "https://mail.google.com/mail/u/0/#all/1a01f2e4c072357e",
+    "explanation": "Consecutive original reports verify the change; the signal begins at trusted inbox receipt, after publication."
+  },
+  "publicationCadence": {
+    "sourceUrl": "https://app.hedgeye.com/user-guides/bitcoin-trend-tracker",
+    "sourceTitle": "Hedgeye Bitcoin Trend Tracker User Guide",
+    "verifiedOn": "2026-09-15",
+    "section": "Frequently Asked Questions: How often is Bitcoin Trend Tracker published?",
+    "exactQuote": "Bitcoin Trend Tracker is published every trading day before the U.S. stock market opens.",
+    "interpretation": "Use U.S. equity trading days as the expected publication calendar. Weekends and U.S. market holidays have no expected daily report. Independently check the complete email inventory for any exceptional publication.",
+    "carryConvention": "The last verified published direction remains the research state between reports, including scheduled nonpublication days. This does not assert a new signal observation or live price during the interval."
+  },
+  "reproduction": "python3 scripts/research/btc_hourly_bias.py",
+  "noLookahead": "Signal availability must be no earlier than verified publication and receipt and no later than hour start.",
+  "uncertaintyLimit": "Day-block resampling does not remove cross-day dependence or archive selection bias."
+}

@@ -1,0 +1,86 @@
+{
+  "sourceMessageId": "1963e9dd347cb93b",
+  "publicationAt": "2025-04-16T12:39:00Z",
+  "receivedAt": "2025-04-16T12:40:52Z",
+  "availableAt": "2025-04-16T12:40:52Z",
+  "reportDate": "2025-04-16",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:d06:b0:86d:3970:2726 with SMTP id co6csp540052uab;        Wed, 16 Apr 2025 05:40:52 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from pmta236-131.sailthru.com (pmta236-131.sailthru.com. [192.64.236.131])        by mx.google.com with ESMTPS id 6a1803df08f44-6f0de9dd961si146000666d6.265.2025.04.16.05.40.52        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Wed, 16 Apr 2025 05:40:52 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=jj6fYJkl;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=SWByZu5i;       spf=pass (google.com: domain of delivery_20250416084005.39450232.225@mx.sailthru.com designates 192.64.236.131 as permitted sender) smtp.mailfrom=delivery_20250416084005.39450232.225@mx.sailthru.com;       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay5.sailthru.cloud (10.55.76.97) by pmta237-67.sailthru.com id hvuil83791sf for <timsmithaviation@gmail.com>; Wed, 16 Apr 2025 07:40:05 -0500 (envelope-from <delivery_20250416084005.39450232.225@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Wed, 16 Apr 2025 08:40:05 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250416084005.39450232.225@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+0.0%), SMLR to Buy $500M BTC, OKX\u2764\ufe0fUSA, $OM Token Burn, BTC Dominance \u2b06\u2b06\u2b06"
+    }
+  ],
+  "gmailInternalDate": "1744807205000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075405.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075427.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/ethsol.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/avax.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075529.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075546.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075601.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075621.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075640.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075706.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/mstr.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/etha.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/coin.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075844.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_075906.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/semler0.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/semler1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/semler2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/bitbond.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_080930.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/okx.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_080356.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_080611.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_080718.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/sol.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/bnb.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Screenshot_2025_04_16_080858.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/glassnode_studio_btc_accumulation_trend_score.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/glassnode_studio_btc_number_of_entities_with_balance_1k.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/glassnode_studio_btc_balance_on_exchanges_total__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/glassnode_studio_btc_exchange_net_position_change.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/glassnode_studio_btc_btc_dominance.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139574/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1963e9dd347cb93b",
+  "htmlSha256": "fcd89ec1177e3ba6924986510a2ee1c025a0f470bcc851592e91ef7d4e84b821",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/1963e9dd347cb93b.json",
+  "rawGmailSha256": "9334e3bd5ef02948af3462cc2631e52a4fa46cc6358bc8868021d23dfe0f9ed8",
+  "collectionSource": "gmail_connector_original_mime"
+}

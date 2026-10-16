@@ -1,0 +1,94 @@
+  console.error
+    Warning: `ReactDOMTestUtils.act` is deprecated in favor of `React.act`. Import `act` from `react` instead of `react-dom/test-utils`. See https://react.dev/warnings/react-dom-test-utils for more info.
+
+      30 | test('the centered review puts Gross first and Net last without redundant labels', () => {
+      31 |   const data = message(); data.portfolioBrief.metrics.valuationComplete = false;
+    > 32 |   render(<AnalystPortfolioBrief message={data} onCitation={jest.fn()} />);
+         |         ^
+      33 |   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
+      34 |   expect(report).toHaveClass('portfolio-brief-centered');
+      35 |   expect(report.firstElementChild).toHaveTextContent('Good morning, this is game 170/251 of the 2026 season.');
+
+      at printWarning (node_modules/react-dom/cjs/react-dom-test-utils.development.js:71:30)
+      at error (node_modules/react-dom/cjs/react-dom-test-utils.development.js:45:7)
+      at actWithWarning (node_modules/react-dom/cjs/react-dom-test-utils.development.js:1736:7)
+      at node_modules/@testing-library/react/dist/act-compat.js:63:25
+      at renderRoot (node_modules/@testing-library/react/dist/pure.js:159:26)
+      at render (node_modules/@testing-library/react/dist/pure.js:246:10)
+      at Object.<anonymous> (src/components/Dashboard/AnalystPortfolioBrief.test.jsx:32:9)
+
+PASS src/components/Dashboard/AnalystPortfolioBrief.test.jsx (5.473 s)
+  ✓ the centered review puts Gross first and Net last without redundant labels (120 ms)
+  ✓ exposure table separates aligned dollar values and right-aligned percentages for all four rows (66 ms)
+  ✓ every Weight is an unsigned neutral magnitude while captured Short and negative Net dollars keep their signs (48 ms)
+  ✓ legacy exposure without captured NLV keeps dollar values and captured ratios without inventing Long or Short percentages (39 ms)
+  ✓ the saved review date supplies the opening even when holdings are unavailable (10 ms)
+  ✓ every review section dates its captured inputs without refreshing old research to the review date (49 ms)
+  ✓ position exceptions keep their original holdings date beside the complete captured research period (25 ms)
+  ✓ only supported position exceptions appear and their signal sources still open (34 ms)
+  ✓ saved product-list indications do not appear as published Trade while captured Trend remains visible (84 ms)
+  ✓ retained published Trade displays its captured source without changing current portfolio rules (85 ms)
+  ✓ the empty exceptions slot stays present without including ordinary holdings with coverageComplete true (11 ms)
+  ✓ the empty exceptions slot stays present without including ordinary holdings with coverageComplete false (10 ms)
+  ✓ five long and five short exceptions expand inline without including ordinary holdings (65 ms)
+  ✓ weight exceptions keep side ordering and colored text without conditional row formatting (370 ms)
+  ✓ position exceptions keep compact headers and captured names without classification or sizing labels (295 ms)
+  ✓ missing security names remain empty instead of repeating the ticker (82 ms)
+  ✓ position exceptions show captured product labels beside Review and open all of that product’s evidence (66 ms)
+  ✓ saved position products preserve the publisher label and visible proxy instrument without filling missing evidence (148 ms)
+  ✓ Tick precedes Trade and Trend in one signal cell while retaining separate captured evidence (103 ms)
+  ✓ Tick preserves historical without inventing a direction or changing Trend (81 ms)
+  ✓ Tick preserves missing without inventing a direction or changing Trend (80 ms)
+  ✓ Tick preserves uncited without inventing a direction or changing Trend (74 ms)
+  ✓ Tick preserves undated without inventing a direction or changing Trend (80 ms)
+  ✓ Tick preserves offline without inventing a direction or changing Trend (75 ms)
+  ✓ Tick preserves stale without inventing a direction or changing Trend (74 ms)
+  ✓ Tick preserves cacheOnly without inventing a direction or changing Trend (73 ms)
+  ✓ Tick preserves mock without inventing a direction or changing Trend (77 ms)
+  ✓ Tick preserves seeded without inventing a direction or changing Trend (74 ms)
+  ✓ Tick preserves inferred without inventing a direction or changing Trend (74 ms)
+  ✓ Tick preserves fixture without inventing a direction or changing Trend (73 ms)
+  ✓ Tick preserves fromCache without inventing a direction or changing Trend (73 ms)
+  ✓ Tick preserves source offline without inventing a direction or changing Trend (73 ms)
+  ✓ Tick preserves metadata unverified without inventing a direction or changing Trend (75 ms)
+  ✓ Tick preserves mismatched without inventing a direction or changing Trend (77 ms)
+  ✓ Tick preserves historical Wait without inventing a direction or changing Trend (83 ms)
+  ✓ Tick preserves uncited Wait without inventing a direction or changing Trend (113 ms)
+  ✓ Tick preserves stale Wait without inventing a direction or changing Trend (86 ms)
+  ✓ Tick preserves mismatched Wait without inventing a direction or changing Trend (83 ms)
+  ✓ Tick shows the original captured published Buy below the strategy threshold independently of historical strategy statistics (75 ms)
+  ✓ Tick shows the original captured published Short with unavailable statistics independently of historical strategy statistics (75 ms)
+  ✓ Tick shows the original captured legacy excluded Short independently of historical strategy statistics (76 ms)
+  ✓ Tick shows the original captured legacy Wait independently of historical strategy statistics (75 ms)
+  ✓ Tick shows the original captured published Wait independently of historical strategy statistics (74 ms)
+  ✓ captured published Wait displays Neutral with its gray color, dated evidence, and no-direction tooltip (13 ms)
+  ✓ captured legacy Wait displays Neutral with its gray color, dated evidence, and no-direction tooltip (14 ms)
+  ✓ weight flags preserve LONG Trade exit and Trend reduction instructions (205 ms)
+  ✓ weight flags preserve SHORT Trade exit and Trend reduction instructions (204 ms)
+  ✓ underweight exceptions report the shortfall without suggesting an addition (73 ms)
+  ✓ the 10 bp buffer and invalid sizing evidence never create exceptions (11 ms)
+  ✓ stop evidence does not create a report section or an exception (12 ms)
+  ✓ a dated opposing Trend retains the MIN warning when Trade is unavailable (141 ms)
+  ✓ since-last-review keeps comparable percentages and the full captured interval beside the holdings date (18 ms)
+  ✓ comparison uses captured dollar pairs only when percentage pairs are unavailable (32 ms)
+  ✓ unsupported comparisons and factor totals stay out of the report (21 ms)
+  ✓ omits the redundant asset exposure table even when the saved report includes totals (33 ms)
+  ✓ daily rollup replaces the old automated Quad outlook and renders every substantive section (23 ms)
+  ✓ an empty current rollup never falls back to the legacy inferred Quad scenario or next-session summary (25 ms)
+  ✓ saved unavailable holdings do not prevent the cited research rollup from rendering (31 ms)
+  ✓ saved Session outlook colors each Quad and held side without changing the scenario or source (19 ms)
+  ✓ a single Quad 4 scenario and next-session narrative use the same directional colors (26 ms)
+  ✓ new validated held research appears separately; stale current weights and unheld events are excluded (3 ms)
+  ✓ verified current holdings with missing sizing inputs remain a sizing verification gap (1 ms)
+  ✓ loading, partial, ready and rejected captures keep account sections and columns in the same slots (180 ms)
+  ✓ the launch and deferred-history placeholder reserves the full report without financial values (14 ms)
+  ✓ exception disclosure caps each held side independently with 5 Long and 5 Short (16 ms)
+  ✓ exception disclosure caps each held side independently with 6 Long and 3 Short (17 ms)
+  ✓ exception disclosure caps each held side independently with 3 Long and 7 Short (16 ms)
+  ✓ exception disclosure caps each held side independently with 0 Long and 6 Short (15 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       68 passed, 68 total
+Snapshots:   0 total
+Time:        5.828 s, estimated 6 s
+Ran all test suites matching /src\/components\/Dashboard\/AnalystPortfolioBrief.test.jsx/i.

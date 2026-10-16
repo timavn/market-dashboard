@@ -1,0 +1,75 @@
+
+> market-dashboard@1.0.0 build
+> vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 1458 modules transformed.
+rendering chunks...
+computing gzip size...
+build/index.html                                                 1.68 kB │ gzip:   0.71 kB
+build/assets/PerformanceTracking-DKYKp2xj.css                    0.24 kB │ gzip:   0.17 kB
+build/assets/PcaRiskWorkspace-BTLwlRLJ.css                       4.95 kB │ gzip:   1.41 kB
+build/assets/ReferencePanelShell-BCIBrSqv.css                    8.08 kB │ gzip:   1.93 kB
+build/assets/BitcoinResearch-DzAADogx.css                        8.71 kB │ gzip:   1.99 kB
+build/assets/ProcessOverlay-C7r5ic9S.css                         9.62 kB │ gzip:   2.55 kB
+build/assets/WorkflowStatus-CJpWR--o.css                        11.00 kB │ gzip:   2.45 kB
+build/assets/SystemReadinessPanel-HFGqpnUq.css                  11.00 kB │ gzip:   2.25 kB
+build/assets/MorningTldrOverlay-Ba8YMP8g.css                    11.95 kB │ gzip:   2.82 kB
+build/assets/PortfolioBalanceScenarioPlanner-CyacmFsv.css       22.47 kB │ gzip:   4.15 kB
+build/assets/PredictionMarketPerformanceCard-CdQaGEU6.css       30.79 kB │ gzip:   5.62 kB
+build/assets/PortfolioBreakdown-Dzo3FW52.css                    60.62 kB │ gzip:  11.20 kB
+build/assets/AnalystPanel-BkcO5ErZ.css                          69.50 kB │ gzip:  12.49 kB
+build/assets/PredictionMarketResolverTest-CcWqm00D.css          85.94 kB │ gzip:  14.98 kB
+build/assets/index-D-9TMsTY.css                                259.30 kB │ gzip:  42.62 kB
+build/assets/securitiesConfig-e-wmiHZ5.js                        0.09 kB │ gzip:   0.10 kB
+build/assets/x-DdJtt77J.js                                       0.15 kB │ gzip:   0.15 kB
+build/assets/download-CU6dQwr9.js                                0.26 kB │ gzip:   0.21 kB
+build/assets/trash-2-Dg6CJf7B.js                                 0.48 kB │ gzip:   0.30 kB
+build/assets/createLucideIcon-BaGq7k1_.js                        0.72 kB │ gzip:   0.47 kB
+build/assets/visibilityAwarePolling-BrLP7iWh.js                  0.90 kB │ gzip:   0.48 kB
+build/assets/useHedgaiTickResearch-DmdoVoMf.js                   0.93 kB │ gzip:   0.51 kB
+build/assets/ReferencePanelShell-C0faxaMK.js                     1.03 kB │ gzip:   0.44 kB
+build/assets/ResourceDataStatusChip-Dli5QGo-.js                  1.20 kB │ gzip:   0.63 kB
+build/assets/securityIntelligenceV2-DI2Hs1tf.js                  2.19 kB │ gzip:   1.08 kB
+build/assets/PersistentSurface-BDgHQauJ.js                       2.22 kB │ gzip:   1.11 kB
+build/assets/volatilitySnapshotRows-D25LLdk0.js                  3.47 kB │ gzip:   1.53 kB
+build/assets/usEquityMarketCalendar.cjs.browser-BYAE9GwN.js      3.91 kB │ gzip:   1.67 kB
+build/assets/PopoverSelect-DOyXSq_x.js                           5.88 kB │ gzip:   2.52 kB
+build/assets/DataStatusChip-CZXfDXdP.js                          6.40 kB │ gzip:   2.59 kB
+build/assets/HedgeyeShowPanel-BBoLyfo4.js                        7.15 kB │ gzip:   2.53 kB
+build/assets/jsx-runtime-OQpaS_Dv.js                             7.77 kB │ gzip:   2.99 kB
+build/assets/EtfProPanel-CRC1-RYZ.js                             8.83 kB │ gzip:   2.83 kB
+build/assets/SignalStrengthPanel-CojFznbt.js                    14.08 kB │ gzip:   4.47 kB
+build/assets/WorkflowStatus-qDYK11w0.js                         16.35 kB │ gzip:   5.13 kB
+build/assets/LineChart-p1oMP7LT.js                              17.54 kB │ gzip:   5.65 kB
+build/assets/bookContent-kKGfhABQ.js                            25.53 kB │ gzip:  10.62 kB
+build/assets/SystemReadinessPanel-BZv2flGY.js                   29.54 kB │ gzip:   9.23 kB
+build/assets/PcaRiskWorkspace-DMF4vJVx.js                       31.02 kB │ gzip:   8.90 kB
+build/assets/quadExposureCatalog-Cedjx4ed.js                    32.25 kB │ gzip:   8.58 kB
+build/assets/BitcoinResearch-CsZF8iCT.js                        38.25 kB │ gzip:  12.48 kB
+build/assets/MorningTldrOverlay-ysisHkqm.js                     41.24 kB │ gzip:  12.35 kB
+build/assets/PredictionMarketPerformanceCard-mLq1f2_I.js        47.96 kB │ gzip:  13.25 kB
+build/assets/axios-P5NTEkrs.js                                  49.95 kB │ gzip:  18.75 kB
+build/assets/PerformanceTracking-BGScXfdb.js                    53.45 kB │ gzip:  15.09 kB
+build/assets/PortfolioBalanceScenarioPlanner-BiL10eTd.js        53.53 kB │ gzip:  15.30 kB
+build/assets/useSessionResource-Cuea5hMX.js                     73.40 kB │ gzip:  21.40 kB
+build/assets/react-markdown-BWByR6oh.js                        115.63 kB │ gzip:  34.98 kB
+build/assets/PortfolioBreakdown-y9msHpxU.js                    159.95 kB │ gzip:  50.76 kB
+build/assets/ProcessOverlay-SlMfw-mv.js                        170.24 kB │ gzip:  48.76 kB
+build/assets/AnalystPanel-BkrGn8fK.js                          240.02 kB │ gzip:  74.76 kB
+build/assets/PredictionMarketResolverTest-C_nksH5E.js          273.57 kB │ gzip:  82.01 kB
+build/assets/index-CHq0RkqL.js                               1,123.79 kB │ gzip: 324.00 kB
+
+✓ built in 3.11s
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[33m[PLUGIN_TIMINGS] [0mPlugin hooks ran for 2.8s of this 3.1s build (91%).
+The slowest hooks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+  - vite:css transform (52%, 1.6s, 73 calls)
+Additional hook time came from hooks under 1s.
+See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+

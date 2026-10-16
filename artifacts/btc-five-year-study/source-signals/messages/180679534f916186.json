@@ -1,0 +1,50 @@
+{
+  "sourceMessageId": "180679534f916186",
+  "publicationAt": null,
+  "receivedAt": "2022-04-26T20:34:33Z",
+  "availableAt": null,
+  "reportDate": "2022-04-26",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a67:6e85:0:0:0:0:0 with SMTP id j127csp3592286vsc;        Tue, 26 Apr 2022 13:34:33 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from hb131.mta.exacttarget.com (hb131.mta.exacttarget.com. [13.111.111.131])        by mx.google.com with ESMTPS id h23-20020a9d6f97000000b005cb2fc1378esi11301546otq.10.2022.04.26.13.34.33        for <timsmithaviation@gmail.com>        (version=TLS1_2 cipher=ECDHE-ECDSA-AES128-GCM-SHA256 bits=128/128);        Tue, 26 Apr 2022 13:34:33 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       spf=pass (google.com: domain of bounce-22689_html-699594874-54783-100032969-1065727@bounce.s10.mc.pd25.com designates 13.111.111.131 as permitted sender) smtp.mailfrom=bounce-22689_HTML-699594874-54783-100032969-1065727@bounce.s10.mc.pd25.com"
+    },
+    {
+      "name": "Received",
+      "value": "by hb131.mta.exacttarget.com id hd1bli2fmd43 for <timsmithaviation@gmail.com>; Tue, 26 Apr 2022 20:34:32 +0000 (envelope-from <bounce-22689_HTML-699594874-54783-100032969-1065727@bounce.s10.mc.pd25.com>)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <hedgeye@hedgeye.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "A Quick Note: Save $45 On The \"Bitcoin Trend Tracker\""
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 26 Apr 2022 14:34:32 -0600"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<d15abb28-2a76-4b8a-94fd-d801d5d739a8@dfw1s10mta663.xt.local>"
+    }
+  ],
+  "gmailInternalDate": "1651005272000",
+  "imageUrls": [],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/180679534f916186",
+  "htmlSha256": "5e7a4302e6746ad94dd34856d71c322794c64cf7ba69e09e40e02649c737af32",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/180679534f916186.json",
+  "rawGmailSha256": "92fee7c16ea4c81ca0c96611516285360c87267e7b8c272cb8f85ae74a155b88",
+  "collectionSource": "gmail_connector_original_mime"
+}

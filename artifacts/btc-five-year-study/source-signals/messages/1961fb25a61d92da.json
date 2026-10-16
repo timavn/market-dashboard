@@ -1,0 +1,85 @@
+{
+  "sourceMessageId": "1961fb25a61d92da",
+  "publicationAt": "2025-04-10T12:34:00Z",
+  "receivedAt": "2025-04-10T12:35:04Z",
+  "availableAt": "2025-04-10T12:35:04Z",
+  "reportDate": "2025-04-10",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:150a:b0:86d:3970:2726 with SMTP id ed10csp8089569uab;        Thu, 10 Apr 2025 05:35:04 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-149.sailthru.com (mta236-149.sailthru.com. [192.64.236.149])        by mx.google.com with ESMTPS id 6a1803df08f44-6f0de970f76si29082376d6.130.2025.04.10.05.35.04        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Thu, 10 Apr 2025 05:35:04 -0700 (PDT)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sailthru header.b=dZgKDa14;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=WPAiXz85;       spf=pass (google.com: domain of delivery_20250410083503.39376737.59@mx.sailthru.com designates 192.64.236.149 as permitted sender) smtp.mailfrom=delivery_20250410083503.39376737.59@mx.sailthru.com;       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay8.sailthru.cloud (10.55.75.62) by mta237-109.sailthru.com id huutfg3791s3 for <timsmithaviation@gmail.com>; Thu, 10 Apr 2025 07:35:03 -0500 (envelope-from <delivery_20250410083503.39376737.59@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Thu, 10 Apr 2025 08:35:03 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250410083503.39376737.59@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-1.8%), $320M Shorts REKT, Fidelity SOL ETF Progress, Stablecoin Drama(s)"
+    }
+  ],
+  "gmailInternalDate": "1744288503000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_074433.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_074515.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/ethsol.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/avax.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_074629.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_074646.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_074702.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_074720.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_074808.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_074845.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/mstr.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/etha.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/coin.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_075042.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_075058.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_082256.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_080312.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_080521.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_080742.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_080926.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_080946.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_081219.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_081237.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_080423.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_080205.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/glassnode_studio_btc_proof_of_reserves.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/glassnode_studio_btc_futures_open_interest.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_081746.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Screenshot_2025_04_10_081802.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/glassnode_studio_stablecoins_aggregate_supplies.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/glassnode_studio_eth_estimated_annual_issuance.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/139336/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1961fb25a61d92da",
+  "htmlSha256": "54a4c88aa18bd1dc53e4085af0e23965776ab3f74870bd769271e8b739dc375c",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/1961fb25a61d92da.json",
+  "rawGmailSha256": "d8a3af4c2c1bb3b67ea8072a5e1f5e192ce5d3b627c445a573dae15603fce394",
+  "collectionSource": "gmail_connector_original_mime"
+}

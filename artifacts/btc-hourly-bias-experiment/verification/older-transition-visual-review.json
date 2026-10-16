@@ -1,0 +1,373 @@
+[
+  {
+    "reportDate": "2025-07-28",
+    "trend": "BULLISH",
+    "lrr": 116128,
+    "hrr": 120416,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-07-28/06e894b6beae-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-1.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-08-07",
+    "trend": "BULLISH",
+    "lrr": 111987,
+    "hrr": 118938,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-08-07/e50460e8473e-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-1.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-08-25",
+    "trend": "BULLISH",
+    "lrr": 111006,
+    "hrr": 118971,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-08-25/5ae2d77da166-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-1.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-08-26",
+    "trend": "BEARISH",
+    "lrr": 108903,
+    "hrr": 116901,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-08-26/1a3182e198b4-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-1.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-09-04",
+    "trend": "BEARISH",
+    "lrr": 107209,
+    "hrr": 112998,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-09-04/231c9805b409-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-1.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-09-05",
+    "trend": "BULLISH",
+    "lrr": 107102,
+    "hrr": 113678,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-09-05/d7755c7030f5-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-1.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-09-08",
+    "trend": "NEUTRAL",
+    "lrr": 108317,
+    "hrr": 112995,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-09-08/2e0fcc732527-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-1.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-09-09",
+    "trend": "BULLISH",
+    "lrr": 108318,
+    "hrr": 113368,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-09-09/5602a9b61cc1-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-2.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-09-25",
+    "trend": "BULLISH",
+    "lrr": 110702,
+    "hrr": 118333,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-09-25/456ccdebfebb-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-2.png",
+    "matchesOcr": true,
+    "detailReview": "verification/sep25-detail.png"
+  },
+  {
+    "reportDate": "2025-09-26",
+    "trend": "BEARISH",
+    "lrr": 107991,
+    "hrr": 113561,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-09-26/b7cc8e738ba8-Screenshot_2025_09_26_080540.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-2.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-09-29",
+    "trend": "BEARISH",
+    "lrr": 108300,
+    "hrr": 115395,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-09-29/23028b70b8c2-Screenshot_2025_09_29_081728.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-2.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-09-30",
+    "trend": "NEUTRAL",
+    "lrr": 108187,
+    "hrr": 115303,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-09-30/153df9341f3c-Screenshot_2025_09_30_083432.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-2.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-02",
+    "trend": "BULLISH",
+    "lrr": 110930,
+    "hrr": 120283,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-02/a9d5d052bd4b-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-2.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-07",
+    "trend": "BULLISH",
+    "lrr": 117157,
+    "hrr": 128264,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-07/b09ba09a4f29-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-2.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-10",
+    "trend": "BULLISH",
+    "lrr": 120007,
+    "hrr": 125101,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-10/cc23384bbaf6-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-3.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-13",
+    "trend": "NEUTRAL",
+    "lrr": 108399,
+    "hrr": 124701,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-13/6e2616b46469-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-3.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-14",
+    "trend": "BEARISH",
+    "lrr": 107209,
+    "hrr": 119647,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-14/21d85c8cc11e-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-3.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-24",
+    "trend": "BEARISH",
+    "lrr": 105122,
+    "hrr": 113002,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-24/9c4d9e56f9d9-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-3.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-27",
+    "trend": "BULLISH",
+    "lrr": 106501,
+    "hrr": 115909,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-27/1766e47db9a4-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-3.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-29",
+    "trend": "BULLISH",
+    "lrr": 110408,
+    "hrr": 116195,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-29/c32eef178caf-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-3.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-10-30",
+    "trend": "BEARISH",
+    "lrr": 106533,
+    "hrr": 113099,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-10-30/2ede91216094-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-3.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-11-07",
+    "trend": "BEARISH",
+    "lrr": 98008,
+    "hrr": 108902,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-11-07/cb3b339c5e5b-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-4.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-02",
+    "trend": "BEARISH",
+    "lrr": 85011,
+    "hrr": 92988,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-02/6a7759830ced-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-4.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-03",
+    "trend": "NEUTRAL",
+    "lrr": 86006,
+    "hrr": 95151,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-03/5e0a36a3cc85-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-4.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-15",
+    "trend": "NEUTRAL",
+    "lrr": 88008,
+    "hrr": 93677,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-15/6021d649752b-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-4.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-16",
+    "trend": "BEARISH",
+    "lrr": 85238,
+    "hrr": 93501,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-16/7afdea106ff0-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-4.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-19",
+    "trend": "BEARISH",
+    "lrr": 84178,
+    "hrr": 91548,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-19/0937d908d51a-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-4.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-22",
+    "trend": "NEUTRAL",
+    "lrr": 85226,
+    "hrr": 91212,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-22/cee217a0a51e-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-4.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-23",
+    "trend": "BEARISH",
+    "lrr": 85213,
+    "hrr": 90883,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-23/ed6bef73b5e0-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-5.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-24",
+    "trend": "BEARISH",
+    "lrr": 85494,
+    "hrr": 89997,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-24/f27c3d51309d-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-5.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2025-12-26",
+    "trend": "NEUTRAL",
+    "lrr": 85661,
+    "hrr": 90606,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2025-12-26/4ac65ad4c1ee-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-5.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2026-01-13",
+    "trend": "NEUTRAL",
+    "lrr": 89314,
+    "hrr": 94581,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2026-01-13/fcaa54b63b7b-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-5.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2026-01-14",
+    "trend": "BULLISH",
+    "lrr": 90913,
+    "hrr": 96018,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2026-01-14/73e9333ecb5d-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-5.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2026-01-16",
+    "trend": "BULLISH",
+    "lrr": 91609,
+    "hrr": 98333,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2026-01-16/4f295ce8371f-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-5.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2026-01-20",
+    "trend": "NEUTRAL",
+    "lrr": 90108,
+    "hrr": 96901,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2026-01-20/ab50a590b85c-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-5.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2026-01-21",
+    "trend": "BEARISH",
+    "lrr": 87564,
+    "hrr": 94231,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2026-01-21/01c6e9056dd6-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-6.png",
+    "matchesOcr": true
+  },
+  {
+    "reportDate": "2026-02-18",
+    "trend": "BEARISH",
+    "lrr": 65184,
+    "hrr": 70398,
+    "imagePath": "artifacts/btc-hourly-bias-experiment/source-signals/images/2026-02-18/3f51673d5b4f-BTC_2.png",
+    "reviewMethod": "root visually read original table crops and independently transcribed BTC Trend/Buy/Sell",
+    "contactSheet": "verification/older-transition-tables-6.png",
+    "matchesOcr": true
+  }
+]

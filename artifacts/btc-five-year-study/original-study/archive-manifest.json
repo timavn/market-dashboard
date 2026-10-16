@@ -1,0 +1,126 @@
+[
+  {
+    "path": "public/hourly-statistics.csv",
+    "sha256": "8e7822767632dd5c27ef50b5622c2a5c83ae0c5290ac27e802ca651f8c24a815"
+  },
+  {
+    "path": "public/hourly-quad-statistics.csv",
+    "sha256": "74f1784c1416bbd8ccba26fae25762c04d7079030a8c0aac5b4418e3cce1607f"
+  },
+  {
+    "path": "public/study.json",
+    "sha256": "e52378625249bcde020d54388331186c1c082c756cedf42262d0f9ef14fe23b5"
+  },
+  {
+    "path": "public/hourly-observations.csv",
+    "sha256": "08a29ab95a18b782a7b40bb5bbac3f60d8df27b9515d2bb6eb073aec5c078a9a"
+  },
+  {
+    "path": "public/statistics.csv",
+    "sha256": "8e7822767632dd5c27ef50b5622c2a5c83ae0c5290ac27e802ca651f8c24a815"
+  },
+  {
+    "path": "public/daily-quad-statistics.csv",
+    "sha256": "bc9e9a060fca5e032b2762fae35347c95039ed25dbdacb3f417ef3e0cfff40ba"
+  },
+  {
+    "path": "public/settlement-checks.csv",
+    "sha256": "c92cac76d5e8f6009106890bab8532d19ea345d57687f619c8d903f4af5b9497"
+  },
+  {
+    "path": "public/daily-statistics.csv",
+    "sha256": "3655a7d5a6d81b139523d5d1efa5df2694a955ebb64594ffc52e35ec8f2afc5a"
+  },
+  {
+    "path": "public/README.md",
+    "sha256": "8651a691e67833c70f4eec638e637cc0eccb8773076e8648176995ba45ce1f1c"
+  },
+  {
+    "path": "public/manifest.json",
+    "sha256": "ac80bc1b442bf5a9221cd8fe8b5034464044bf1112715d0bc4771155445008d2"
+  },
+  {
+    "path": "public/daily-observations.csv",
+    "sha256": "0d99eee20ab8202543eb7824ac16f51b0ef662b6c67bd18b437a27d7865d0cb7"
+  },
+  {
+    "path": "scripts/test_btc_usd_history.py",
+    "sha256": "548cafc38cd052ca3e4a5c1376a0f91f2fe70137093cf0bad52e492adfd70b60"
+  },
+  {
+    "path": "scripts/audit_btc_range_entries.py",
+    "sha256": "9ecfe5a741f9a5f035fb042b4daa1d0c3e494fdd4db7846a36a00cdfdd5a792d"
+  },
+  {
+    "path": "scripts/test_btc_interval_study.py",
+    "sha256": "55e0c1cc20d3cd750beabde55a76e296feb4b2e2f1352763a3874bf84e544bf8"
+  },
+  {
+    "path": "scripts/btc_range_entry_experiment.py",
+    "sha256": "dd5f32049db7bf9b464eb074f38ec28c379848fcf1f3c765497b70b105d0282b"
+  },
+  {
+    "path": "scripts/btc_usd_features.py",
+    "sha256": "8b12cfee994b54dc0959e1de2f0bcf64f858d40735defb16dd7bdaf3c3ced1a6"
+  },
+  {
+    "path": "scripts/btc_quad_overlay.py",
+    "sha256": "dbdbcbbcaa6a67fdf74450fe85436543427e56b44a13764ebf4dd77cc437e528"
+  },
+  {
+    "path": "scripts/test_btc_nyse_sessions.py",
+    "sha256": "0d8e3096c8d2aa5f8fddb985eb80e13f69a4d93fe1f05026b4cdf705c7968ca6"
+  },
+  {
+    "path": "scripts/btc_price_history.py",
+    "sha256": "94493a9b5ecc1dbd7d8b21e4b62f877ec788eaa62727e7272fad6b92fc30ec9b"
+  },
+  {
+    "path": "scripts/btc_hourly_bias.py",
+    "sha256": "d3d660e733c8bcb558d373b53c4119e191da824330af689357487dbcde7ea78d"
+  },
+  {
+    "path": "scripts/btc_usd_experiment.py",
+    "sha256": "e1bad6a1ed68b6f152183c51719462359d2e3936da703869b17de4e28846224a"
+  },
+  {
+    "path": "scripts/btc_signal_history.py",
+    "sha256": "3dd1d5deee1578c0fa91a65daec2b3dbbf83561afa48391895b150d5ce50c434"
+  },
+  {
+    "path": "scripts/btc_usd_history.py",
+    "sha256": "c268f37de6fb04311435f8dfdc7d4994341dd25129dd89c8aea85fc74cee8788"
+  },
+  {
+    "path": "scripts/test_btc_usd_experiment.py",
+    "sha256": "19bebfdaa7ba8f79fdc789025954c893d3c5e4bdad7353de07056caa705ec754"
+  },
+  {
+    "path": "scripts/test_btc_range_entry_experiment.py",
+    "sha256": "88290729569bd3c372c8784bf872e81389aaa41523ce409f0594bb9fadfdb2aa"
+  },
+  {
+    "path": "scripts/test_btc_hourly_bias.py",
+    "sha256": "5b1d42b7513b0b70f4b61a9c9de99324fb85a74e3cd70b710fd82f0c21af0220"
+  },
+  {
+    "path": "scripts/btc_interval_study.py",
+    "sha256": "c5b16153d08a9d3bbdf0f1dbe1f6b3aaebd64be82f8a7b235311810527ae83a4"
+  },
+  {
+    "path": "scripts/btc_nyse_sessions.py",
+    "sha256": "b076b660911d33f1745ef7d2104f3bc761ff92ddb2ac2c028232801d147b8b21"
+  },
+  {
+    "path": "scripts/test_btc_price_history.py",
+    "sha256": "8c497f925b6f65ce3235ea473785f68093385cd1c2e88f668d2d46a1f44b695c"
+  },
+  {
+    "path": "scripts/test_btc_usd_features.py",
+    "sha256": "82d774be69f440a224372a1f73b7f41e8b8ed3da396de580281fe873749dc84f"
+  },
+  {
+    "path": "scripts/test_btc_quad_overlay.py",
+    "sha256": "e7ea0744ccae1f7a7f6a84e5ebc6d9bb2a8557afe1579083bfc476857d2f5f55"
+  }
+]

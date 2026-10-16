@@ -1,0 +1,83 @@
+{
+  "sourceMessageId": "1999ac4fddaff6cd",
+  "publicationAt": "2025-09-30T13:16:00Z",
+  "receivedAt": "2025-09-30T13:17:05Z",
+  "availableAt": "2025-09-30T13:17:05Z",
+  "reportDate": "2025-09-30",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:6688:0:b0:892:1cb4:2dc1 with SMTP id a8csp2965985uan;        Tue, 30 Sep 2025 06:17:05 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta237-239.sailthru.com (mta237-239.sailthru.com. [192.64.237.239])        by mx.google.com with ESMTPS id af79cd13be357-85c25b6efaesi646732285a.184.2025.09.30.06.17.05        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Tue, 30 Sep 2025 06:17:05 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay3.sailthru.cloud (10.55.62.127) by mta237-109.sailthru.com id hrfc523791su for <timsmithaviation@gmail.com>; Tue, 30 Sep 2025 08:17:03 -0500 (envelope-from <delivery_20250930091703.41789329.587@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 30 Sep 2025 09:17:03 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250930091703.41789329.587@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-1.1%), SEC-CFTC Harmony, Anomica Tokenized on Solana, SOL ETF in 12 days"
+    }
+  ],
+  "gmailInternalDate": "1759238223000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083411.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083432.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083451.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083508.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083526.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083542.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083555.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083609.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083624.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083639.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083655.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083713.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083734.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083754.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_083809.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085403.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085439.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085104.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085049.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085140.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085422.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_084959.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085027.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085452.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085709.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085619.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085122.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085509.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085522.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085559.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085547.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085744.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085808.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_085858.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_090009.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Screenshot_2025_09_30_090024.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/146131/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1999ac4fddaff6cd",
+  "htmlSha256": "a3932d0dd249b1e7bc19a36f8158eb036af51b6a6c2a50902743ac0a154dca50",
+  "archiveSnapshotDate": "2025-09-30",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-09-30/crypto-quant/1999ac4fddaff6cd-message-body-html-1-message-body.html"
+}

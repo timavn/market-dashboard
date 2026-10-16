@@ -1,0 +1,68 @@
+{
+  "sourceMessageId": "19b9e0944723d8d7",
+  "publicationAt": "2026-01-08T14:34:00Z",
+  "receivedAt": "2026-01-08T14:36:06Z",
+  "availableAt": "2026-01-08T14:36:06Z",
+  "reportDate": "2026-01-08",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:1905:b0:937:2e36:5001 with SMTP id jv5csp860634uab;        Thu, 8 Jan 2026 06:36:06 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-145.sailthru.com (mta236-145.sailthru.com. [192.64.236.145])        by mx.google.com with ESMTPS id af79cd13be357-8c37f56562csi953378785a.587.2026.01.08.06.36.06        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Thu, 08 Jan 2026 06:36:06 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay6.sailthru.cloud (10.55.61.156) by pmta11.sailthru.com id hbv0dc3791sk for <timsmithaviation@gmail.com>; Thu, 8 Jan 2026 08:36:04 -0600 (envelope-from <delivery_20260108093604.43435788.189@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Thu, 8 Jan 2026 09:36:04 -0500 (EST)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20260108093604.43435788.189@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-1.4%), ZEC (-14%), BLOK=BEARISH, Zcash Devs Quit, Binance Tradfi Perps"
+    }
+  ],
+  "gmailInternalDate": "1767882964000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_4p5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_13p5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/Zdevs.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/bi_perp.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/glassnode_studio_btc_net_transfer_volume_from_to_exchanges_all_exchanges_btc.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/glassnode_studio_btc_average_cost_basis_of_us_spot_etf_deposits__3_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/glassnode_studio_bitcoin_price_performance_since_halving__57_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/glassnode_studio_btc_cumulative_lth_realized_profit_bull_market__7_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/150227/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/19b9e0944723d8d7",
+  "htmlSha256": "2e203796a4fa97409f396675aa9b1338ee03376c02741fafb1c0646db469f3d7",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": "hedgeye-email/messages/2026-01-08/crypto-quant/19b9e0944723d8d7-message-body-html-1-message-body.html"
+}

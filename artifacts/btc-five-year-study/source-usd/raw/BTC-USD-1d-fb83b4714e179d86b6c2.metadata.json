@@ -1,0 +1,9 @@
+{
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?interval=1d&period1=1626480000&period2=1789495200&includePrePost=false",
+  "retrievedAt": "2026-09-15T22:59:26Z",
+  "httpDate": "Tue, 15 Sep 2026 22:59:25 GMT",
+  "httpStatus": 200,
+  "contentType": "application/json;charset=utf-8",
+  "sha256": "928c156113fee96abd9dfbcaa5fb336fb1d7f7fba2d03fb57a5aac85921bdae3",
+  "bytes": 176986
+}

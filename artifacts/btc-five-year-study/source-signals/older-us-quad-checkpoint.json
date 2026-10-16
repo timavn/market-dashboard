@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "status": "verified",
+  "source": "hedgeye-published-global-quads",
+  "country": "United States",
+  "frequency": "quarterly",
+  "sourceAsOf": "2025-07-22",
+  "publishedAt": "2025-07-22T11:23:00Z",
+  "availableAt": "2025-07-22T11:26:56Z",
+  "sourceTitle": "Quads/GIP Update: 3Q25 Updated Macro Themes Deck",
+  "sourceMessageId": "19831e2ff359393b",
+  "imageUrl": "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/143327/original/7.png",
+  "imagePath": "archive-audit/quad-candidates/linked-sources/19831e2ff359393b-7.png",
+  "imageHash": "5c2b2c10cff4bd031f7539f7f6eef06ee96c79296eff7a0134cbb36e4636c1e9",
+  "imageModifiedAt": "2025-07-22T11:22:16Z",
+  "quarters": [
+    {
+      "quarter": "2023-Q1",
+      "quad": 1,
+      "kind": "actual",
+      "periodStart": "2023-01-01T05:00:00Z",
+      "periodEnd": "2023-04-01T04:00:00Z"
+    },
+    {
+      "quarter": "2023-Q2",
+      "quad": 1,
+      "kind": "actual",
+      "periodStart": "2023-04-01T04:00:00Z",
+      "periodEnd": "2023-07-01T04:00:00Z"
+    },
+    {
+      "quarter": "2023-Q3",
+      "quad": 1,
+      "kind": "actual",
+      "periodStart": "2023-07-01T04:00:00Z",
+      "periodEnd": "2023-10-01T04:00:00Z"
+    },
+    {
+      "quarter": "2023-Q4",
+      "quad": 4,
+      "kind": "actual",
+      "periodStart": "2023-10-01T04:00:00Z",
+      "periodEnd": "2024-01-01T05:00:00Z"
+    },
+    {
+      "quarter": "2024-Q1",
+      "quad": 4,
+      "kind": "actual",
+      "periodStart": "2024-01-01T05:00:00Z",
+      "periodEnd": "2024-04-01T04:00:00Z"
+    },
+    {
+      "quarter": "2024-Q2",
+      "quad": 1,
+      "kind": "actual",
+      "periodStart": "2024-04-01T04:00:00Z",
+      "periodEnd": "2024-07-01T04:00:00Z"
+    },
+    {
+      "quarter": "2024-Q3",
+      "quad": 4,
+      "kind": "actual",
+      "periodStart": "2024-07-01T04:00:00Z",
+      "periodEnd": "2024-10-01T04:00:00Z"
+    },
+    {
+      "quarter": "2024-Q4",
+      "quad": 3,
+      "kind": "actual",
+      "periodStart": "2024-10-01T04:00:00Z",
+      "periodEnd": "2025-01-01T05:00:00Z"
+    },
+    {
+      "quarter": "2025-Q1",
+      "quad": 4,
+      "kind": "actual",
+      "periodStart": "2025-01-01T05:00:00Z",
+      "periodEnd": "2025-04-01T04:00:00Z"
+    }
+  ],
+  "reviewer": "codex_research_audit",
+  "reviewMethod": "Visually read explicit numeric United States row under Actuals columns 1Q23 through1Q25, excluding all blue forecast columns.",
+  "excludedForecastQuarters": [
+    "2025-Q2",
+    "2025-Q3",
+    "2025-Q4",
+    "2026-Q1"
+  ],
+  "methodology": "Retrospective actual-quarter classification only; these values were published after the historical quarter and were not available as historical entry signals.",
+  "receivedAt": "2025-07-22T11:26:56Z",
+  "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+  "independentReviewer": "root_codex_visual_source_inspection",
+  "rawMessagePath": "archive-audit/quad-candidates/19831e2ff359393b.json",
+  "rawMessageSha256": "d98f9130010a621f81aeb77e047f22af45e4fcd473409c9e7661f53816675183",
+  "headersPath": "archive-audit/quad-candidates/linked-sources/19831e2ff359393b-7.png.headers.json",
+  "headersSha256": "854dc1bef46500aa710c3386c5f1d1d32e87e3ba016f7ba26ba4fea7525a1815",
+  "contentHash": "6c08718281ebba7a3595d5658bd68d013c24b1476747835687ddc3bf5910575d",
+  "reviewContentHash": "6c08718281ebba7a3595d5658bd68d013c24b1476747835687ddc3bf5910575d",
+  "reviewMethodId": "visual-source-comparison",
+  "rawMessageHash": "d98f9130010a621f81aeb77e047f22af45e4fcd473409c9e7661f53816675183",
+  "headersHash": "854dc1bef46500aa710c3386c5f1d1d32e87e3ba016f7ba26ba4fea7525a1815"
+}

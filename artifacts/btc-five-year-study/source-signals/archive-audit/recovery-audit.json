@@ -1,0 +1,38 @@
+{
+  "checkedAt": "2026-09-15T23:15:37.012078+00:00",
+  "olderCandidateCount": 395,
+  "trueTrackerReports": 388,
+  "promotionalOrWelcomeMessagesExcluded": 7,
+  "prewindowBoundaryMessages": 1,
+  "gapMailboxSearch": {
+    "query": "in:anywhere after:2022/10/04 before:2024/12/16 from:hedgeye.com {subject:\"Bitcoin Trend Tracker\" subject:\"Crypto Quant\" subject:\"Crypto Tracker\"}",
+    "complete": true,
+    "matchingMessageIds": [
+      "183a2a46d65d84a5"
+    ],
+    "conclusion": "Only Oct4 2022 boundary report; no daily Tracker report inside the gap."
+  },
+  "broadGapSearch": {
+    "query": "after:2022/10/04 before:2024/12/16 from:hedgeye.com {subject:bitcoin subject:crypto}",
+    "complete": true,
+    "matchingMessages": 16,
+    "boundaryTrackerReports": 1,
+    "otherMessages": 15,
+    "evidencePath": "archive-audit/gap-search-originals.json",
+    "conclusion": "Promotions, webinars, Early Look and unrelated summaries do not restore dated BTC Trend/ranges."
+  },
+  "publisherAccessAudit": "archive-audit/publisher-access.json",
+  "quadRecovery": {
+    "candidateQuery": "after:2021/09/14 before:2025/07/28 from:hedgeye.com {subject:\"mid-quarter\" subject:\"Macro Themes\" subject:\"Quarterly Call\" subject:\"GIP\"}",
+    "complete": true,
+    "candidateMessages": 23,
+    "originalDatedMacroEmailsInspected": [
+      "19831e2ff359393b",
+      "192af49da9166113"
+    ],
+    "subscribedDeckLinks": "Both returned HTTP403; URLs retained privately in linked-sources/fetch-index.json.",
+    "previewImagesRecovered": 8,
+    "verifiedActualCheckpoint": "older-us-quad-checkpoint.json",
+    "sourceReview": "Explicit numeric United States Actuals row, double visual review; GDP/CPI-only history and forecast columns are not converted into historical classifications."
+  }
+}

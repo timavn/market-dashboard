@@ -1,0 +1,9 @@
+{
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=60m&period1=1726531200&period2=1789495200&includePrePost=false",
+  "retrievedAt": "2026-09-15T22:58:12Z",
+  "httpDate": "Tue, 15 Sep 2026 22:58:11 GMT",
+  "httpStatus": 200,
+  "contentType": "application/json;charset=utf-8",
+  "sha256": "3954271300cd926abc8901c329707ddb856be05ba98afff3d570a1080dd98c07",
+  "bytes": 1159744
+}

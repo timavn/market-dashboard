@@ -1,0 +1,82 @@
+{
+  "sourceMessageId": "19889d425a76edc1",
+  "publicationAt": "2025-08-08T13:16:00Z",
+  "receivedAt": "2025-08-08T13:17:18Z",
+  "availableAt": "2025-08-08T13:17:18Z",
+  "reportDate": "2025-08-08",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:6e88:0:b0:88b:b22e:cb82 with SMTP id b8csp1508103uav;        Fri, 8 Aug 2025 06:17:18 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-194.sailthru.com (mta236-194.sailthru.com. [192.64.236.194])        by mx.google.com with ESMTPS id d75a77b69052e-4aeee90304csi114393021cf.106.2025.08.08.06.17.18        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Fri, 08 Aug 2025 06:17:18 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay7.sailthru.cloud (10.55.90.61) by pmta236-241.sailthru.com id hinsds3791s9 for <timsmithaviation@gmail.com>; Fri, 8 Aug 2025 08:17:17 -0500 (envelope-from <delivery_20250808091717.41054370.335@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Fri, 8 Aug 2025 09:17:17 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20250808091717.41054370.335@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (-0.4%), AAVE=BULLISH, $5B ETH Treasury, S&P DeFi Credit Ratings, $4.5M RUG PULL"
+    }
+  ],
+  "gmailInternalDate": "1754659037000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082520.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082538.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082555.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082617.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082639.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082700.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082715.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082735.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082755.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082812.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082832.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082930.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_082950.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_083008.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_083022.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084524.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084403.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_085026.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_085132.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_085656.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_085428.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_091148.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084550.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_083647.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084341.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084454.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084238.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084327.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084845.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Screenshot_2025_08_08_084951.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/glassnode_studio_btc_supply_held_by_entities_with_balance_100_1k.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/glassnode_studio_btc_futures_perpetual_funding_rate__4_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/glassnode_studio_eth_supply_held_by_addresses_with_balance_10k_100k.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Untitled.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/glassnode_studio_eth_futures_short_liquidations_total__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/144134/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/19889d425a76edc1",
+  "htmlSha256": "c29c1710a6837bb465379af68046d482c60a21985621d47bf25cd1fcf57365d7",
+  "archiveSnapshotDate": "2025-08-08",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-08-08/crypto-quant/19889d425a76edc1-message-body-html-1-message-body.html"
+}

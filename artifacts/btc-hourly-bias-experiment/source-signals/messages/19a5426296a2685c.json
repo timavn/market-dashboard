@@ -1,0 +1,77 @@
+{
+  "sourceMessageId": "19a5426296a2685c",
+  "publicationAt": "2025-11-05T13:12:00Z",
+  "receivedAt": "2025-11-05T13:12:58Z",
+  "availableAt": "2025-11-05T13:12:58Z",
+  "reportDate": "2025-11-05",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a05:6130:4b0f:b0:934:fdb0:238c with SMTP id hg15csp309879uab;        Wed, 5 Nov 2025 05:12:58 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from o2.ptr7909.hedgeye.com (o2.ptr7909.hedgeye.com. [149.72.62.71])        by mx.google.com with ESMTPS id e9e14a558f8ab-43324e0a90asi93000685ab.3.2025.11.05.05.12.57        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);        Wed, 05 Nov 2025 05:12:58 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "by recvd-7f68b6458b-5qvlt with SMTP id recvd-7f68b6458b-5qvlt-1-690B4D44-14 2025-11-05 13:12:36.121288189 +0000 UTC m=+13293525.509166199"
+    },
+    {
+      "name": "Received",
+      "value": "from Mzc1MjUyNzY (unknown) by geopod-ismtpd-11 (SG) with HTTP id -g9ZOYdURuOUIvwro44Yhw Wed, 05 Nov 2025 13:12:36.086 +0000 (UTC)"
+    },
+    {
+      "name": "Date",
+      "value": "Wed, 05 Nov 2025 13:12:55 +0000 (UTC)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<-g9ZOYdURuOUIvwro44Yhw@geopod-ismtpd-11>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+2.4%), ETFs=-$800M, DAT Probe, Rekt(again)\u2192$1.7B Rinsed, Gemini Prediction Mkt"
+    }
+  ],
+  "gmailInternalDate": "1762348375000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_4p5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/REKT_110525.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/glassnode_studio_btc_options_atm_implied_volatility_deribit__9_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/DAT_Probe.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/Gemini_Prediction_Mkts.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_Ipo_moment.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/Zcash.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/STRE.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/Streak_2X.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/Morpho_Stuck.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/Exchange_CVD.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/glassnode_studio_spot_cumulative_volume_delta_cvd__3_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/147710/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/19a5426296a2685c",
+  "htmlSha256": "52bfc8763afc7e62689ec0a229292eb234c4d414e5a6b05718baf0cef54af34e",
+  "archiveSnapshotDate": "2025-11-05",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-11-05/crypto-quant/19a5426296a2685c-message-body-html--message-body.html"
+}

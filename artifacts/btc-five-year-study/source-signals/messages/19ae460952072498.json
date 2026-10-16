@@ -1,0 +1,69 @@
+{
+  "sourceMessageId": "19ae460952072498",
+  "publicationAt": "2025-12-03T13:21:00Z",
+  "receivedAt": "2025-12-03T13:22:06Z",
+  "availableAt": "2025-12-03T13:22:06Z",
+  "reportDate": "2025-12-03",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:71c5:0:b0:937:2e36:5001 with SMTP id n5csp8359876uao;        Wed, 3 Dec 2025 05:22:06 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-134.sailthru.com (mta236-134.sailthru.com. [192.64.236.134])        by mx.google.com with ESMTPS id d75a77b69052e-4efd342ef86si74694181cf.353.2025.12.03.05.22.06        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Wed, 03 Dec 2025 05:22:06 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from aws1-mta-relay9.sailthru.cloud (10.55.62.145) by mta237-109.sailthru.com id h60sns3791sg for <timsmithaviation@gmail.com>; Wed, 3 Dec 2025 07:22:04 -0600 (envelope-from <delivery_20251203082204.42845745.736@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Wed, 3 Dec 2025 08:22:04 -0500 (EST)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20251203082204.42845745.736@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+1.5%), \u20bfTC/ETH/SOL=NEUTRAL, Vanguard Goes Degen, BofA \u21921-4% Crypto Allocation"
+    }
+  ],
+  "gmailInternalDate": "1764768124000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_4p5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_13p5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_internal.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BofA_4_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/Vanguard_Effect.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/Tokenization_Economist.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/Crypto_Exemption.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/kraken_Backed.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/EU_Stablecoin.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/Cryp_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/148921/original/ETH_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/19ae460952072498",
+  "htmlSha256": "5088bcd96027cbb9b9cd519a3088541849779332cce188647adda20279f1a80a",
+  "archiveSnapshotDate": "2025-12-03",
+  "archivedHtmlS3Key": "hedgeye-email/messages/2025-12-03/crypto-quant/19ae460952072498-message-body-html-1-message-body.html"
+}

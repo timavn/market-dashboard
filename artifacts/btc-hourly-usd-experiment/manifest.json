@@ -1,0 +1,107 @@
+{
+  "study": "BTC hourly direction conditional on previously observable DXY movement and correlation",
+  "frozenCutoff": "2026-09-15T18:00:00Z",
+  "historicalResearchOnly": true,
+  "python": "3.9.6",
+  "numpy": "2.0.2",
+  "bootstrapReplicates": 10000,
+  "seed": 20260915,
+  "variants": [
+    {
+      "id": "main",
+      "label": "30-session levels · −0.50 · 10 bp",
+      "corr": "corr30Level",
+      "limit": -0.5,
+      "move": "usdSessionMoveBp",
+      "bp": 10
+    },
+    {
+      "id": "short_window",
+      "label": "15-session levels · −0.50 · 10 bp",
+      "corr": "corr15Level",
+      "limit": -0.5,
+      "move": "usdSessionMoveBp",
+      "bp": 10
+    },
+    {
+      "id": "stronger_corr",
+      "label": "30-session levels · −0.75 · 10 bp",
+      "corr": "corr30Level",
+      "limit": -0.75,
+      "move": "usdSessionMoveBp",
+      "bp": 10
+    },
+    {
+      "id": "smaller_move",
+      "label": "30-session levels · −0.50 · 5 bp",
+      "corr": "corr30Level",
+      "limit": -0.5,
+      "move": "usdSessionMoveBp",
+      "bp": 5
+    },
+    {
+      "id": "larger_move",
+      "label": "30-session levels · −0.50 · 20 bp",
+      "corr": "corr30Level",
+      "limit": -0.5,
+      "move": "usdSessionMoveBp",
+      "bp": 20
+    },
+    {
+      "id": "return_corr",
+      "label": "120-hour returns · −0.50 · 10 bp",
+      "corr": "corr120Return",
+      "limit": -0.5,
+      "move": "usdSessionMoveBp",
+      "bp": 10
+    },
+    {
+      "id": "hour_move",
+      "label": "30-session levels · −0.50 · prior-hour 10 bp",
+      "corr": "corr30Level",
+      "limit": -0.5,
+      "move": "usdHourMoveBp",
+      "bp": 10
+    }
+  ],
+  "availabilityLagHours": 1,
+  "inputsAndScripts": [
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-bias-experiment/hourly-observations.csv",
+      "sha256": "7798c941b755284584f6b2c97891c26704b66eb2789b75c3860349fcdebd2c41"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-usd-experiment/source-usd/hourly.json",
+      "sha256": "ca0c21341c8d8d16492fca2fee2fa64a73db42cfeaf50d729fe2093e00e2d591"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-usd-experiment/source-usd/daily-dxy.json",
+      "sha256": "17b91b49b499555fd85f8fbc55f3a607fb1508574adfb389e01eccde639f3736"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-usd-experiment/source-usd/daily-btc.json",
+      "sha256": "9773fde514aecc0e6082ed186bb60110fff9796197e9f477e693fb34935696bd"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/artifacts/btc-hourly-bias-experiment/settlement-changes.csv",
+      "sha256": "ffbaf06e158effdc31f6c31d7e9acbcf5dd34066322c131193fa41807dae943b"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/scripts/research/btc_usd_experiment.py",
+      "sha256": "e1bad6a1ed68b6f152183c51719462359d2e3936da703869b17de4e28846224a"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/scripts/research/btc_usd_features.py",
+      "sha256": "8b12cfee994b54dc0959e1de2f0bcf64f858d40735defb16dd7bdaf3c3ced1a6"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/scripts/research/btc_usd_history.py",
+      "sha256": "c268f37de6fb04311435f8dfdc7d4994341dd25129dd89c8aea85fc74cee8788"
+    },
+    {
+      "path": "/Users/timsmith/Desktop/cursor/market-dashboard/scripts/research/btc_hourly_bias.py",
+      "sha256": "d3d660e733c8bcb558d373b53c4119e191da824330af689357487dbcde7ea78d"
+    }
+  ],
+  "reproduction": "python3 scripts/research/btc_usd_experiment.py"
+}

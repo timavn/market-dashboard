@@ -1,0 +1,67 @@
+{
+  "sourceMessageId": "17f30d3f5511cd9d",
+  "publicationAt": "2022-02-25T12:20:00Z",
+  "receivedAt": "2022-02-25T12:21:11Z",
+  "availableAt": "2022-02-25T12:21:11Z",
+  "reportDate": "2022-02-25",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:a67:6e85:0:0:0:0:0 with SMTP id j127csp1891794vsc;        Fri, 25 Feb 2022 04:21:11 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from mx-hedgeye-d.sailthru.com (mx-hedgeye-d.sailthru.com. [192.64.236.26])        by mx.google.com with ESMTPS id x2-20020a92d302000000b002c243fc0582si1235641ila.63.2022.02.25.04.21.10        for <timsmithaviation@gmail.com>        (version=TLS1_2 cipher=ECDHE-ECDSA-AES128-GCM-SHA256 bits=128/128);        Fri, 25 Feb 2022 04:21:11 -0800 (PST)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@pmta.sailthru.com header.s=mt header.b=pi3eXGS0;       dkim=fail header.i=@hedgeye.com header.s=sailthru header.b=d693hyV0;       spf=pass (google.com: domain of delivery@mx.sailthru.com designates 192.64.236.26 as permitted sender) smtp.mailfrom=delivery@mx.sailthru.com"
+    },
+    {
+      "name": "Received",
+      "value": "from njmta-90.sailthru.com (173.228.155.90) by mx-hedgeye-d.sailthru.com id h334re2to8c3 for <timsmithaviation@gmail.com>; Fri, 25 Feb 2022 07:21:02 -0500 (envelope-from <delivery@mx.sailthru.com>)"
+    },
+    {
+      "name": "Received",
+      "value": "from nj1-rawolive.flt (172.18.20.13) by njmta-90.sailthru.com id h334qs1qqbs5 for <timsmithaviation@gmail.com>; Fri, 25 Feb 2022 07:21:02 -0500 (envelope-from <delivery@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Fri, 25 Feb 2022 07:21:02 -0500 (EST)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20220225072102.26829229.3797@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+1.2%), ETH (+0.1%), Ukraine Crypto Donations (\u2191\u2191)"
+    }
+  ],
+  "gmailInternalDate": "1645791662000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_7A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_9A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_10A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_11A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/92124/original/BTC_12A.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/17f30d3f5511cd9d",
+  "htmlSha256": "b9c92d01f7aa23e9bfdc1b5d94399209835a934c924f6217bec26fc0cbd7ba67",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/17f30d3f5511cd9d.json",
+  "rawGmailSha256": "efe67cc3100fcb8da531201ebd8b46c2df5d14f5f1797ee0e9759bc2d0dc5e6d",
+  "collectionSource": "gmail_connector_original_mime"
+}

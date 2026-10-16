@@ -1,0 +1,54 @@
+{
+  "sourceMessageId": "1a03dd98f7e5a714",
+  "publicationAt": "2026-08-26T11:33:00Z",
+  "receivedAt": "2026-08-26T11:34:23Z",
+  "availableAt": "2026-08-26T11:34:23Z",
+  "reportDate": "2026-08-26",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:30c7:0:b0:97c:bfc5:d362 with SMTP id c7csp604438uam;        Wed, 26 Aug 2026 04:34:23 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from mta236-15.sailthru.com (mta236-15.sailthru.com. [192.64.236.15])        by mx.google.com with ESMTPS id 6a1803df08f44-90cc6327779si31999676d6.129.2026.08.26.04.34.22        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);        Wed, 26 Aug 2026 04:34:23 -0700 (PDT)"
+    },
+    {
+      "name": "Received",
+      "value": "from pmta-prod-relay6.sailthru.cloud (10.55.63.220) by mta237-109.sailthru.com id hhr7js3791s3 for <timsmithaviation@gmail.com>; Wed, 26 Aug 2026 06:34:21 -0500 (envelope-from <delivery_20260826073421.47205769.665@mx.sailthru.com>)"
+    },
+    {
+      "name": "Date",
+      "value": "Wed, 26 Aug 2026 07:34:21 -0400 (EDT)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<20260826073421.47205769.665@sailthru.com>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+0.6%)"
+    }
+  ],
+  "gmailInternalDate": "1787744061000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/c7299682_2ad0_40e4_bf56_32e65c09eacb.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/4634c840_c2ae_4045_bb3b_6dbe4ea3a023.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/b85639c5_2975_4938_80e8_8d0bd17d4251.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/efeda601_6653_4f22_b8b5_7ea95d6ce491.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/d64b911e_07c2_4225_a6ef_8298b856d93a.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/a9468dc6_2d92_4baf_b326_6c77fdb3e2e3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/b947440f_4e10_4170_a938_728bd3204e06.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/159560/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/1a03dd98f7e5a714",
+  "htmlSha256": "7a1847b0a4b2cdc33623830a4cd921e4626a3ea5172193214455010b1e4c0669",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": "hedgeye-email/messages/2026-08-26/crypto-quant/1a03dd98f7e5a714-message-body-html-1-message-body.html"
+}

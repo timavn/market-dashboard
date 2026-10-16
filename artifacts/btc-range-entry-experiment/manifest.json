@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "study": "Bitcoin: entry within the published range",
+  "historicalResearchOnly": true,
+  "asOf": "2026-09-15T18:10:12Z",
+  "startAt": "2025-07-28T00:00:00Z",
+  "endAt": "2026-09-15T18:00:00Z",
+  "python": "3.9.6",
+  "numpy": "2.0.2",
+  "bootstrapReplicates": 10000,
+  "seed": 20260915,
+  "bootstrapUnit": "Pacific calendar day",
+  "validation": {
+    "comparisonGroups": 750,
+    "countsReconciled": true,
+    "percentagesReconciled": true,
+    "firstPerDayReconciled": true,
+    "allRegimesPartitionReconciled": true,
+    "outsideZonesNeverPreferred": true
+  },
+  "signalField": "Published Trend; trade is an alias, Buy/Sell Trade are range boundaries",
+  "entryModeConvention": "First qualifying hour per Pacific date within each cohort/zone/filter",
+  "inputsAndScripts": [
+    {
+      "path": "artifacts/btc-hourly-usd-experiment/hourly-observations.csv",
+      "sha256": "f119721c6b0f6a0818d5ac97f85ce43df93a254f63b61a91554f3a283968d997"
+    },
+    {
+      "path": "artifacts/btc-hourly-bias-experiment/manifest.json",
+      "sha256": "5082f5d9688cef3e302f2b036dd26512f2dea56d03ecc254024a3e32a220de87"
+    },
+    {
+      "path": "artifacts/btc-hourly-bias-experiment/settlement-changes.csv",
+      "sha256": "ffbaf06e158effdc31f6c31d7e9acbcf5dd34066322c131193fa41807dae943b"
+    },
+    {
+      "path": "scripts/research/btc_range_entry_experiment.py",
+      "sha256": "de14cde1c066fcb063b15868b871ce021319d3fb6c2d0db1e6b7c18f6707738e"
+    },
+    {
+      "path": "scripts/research/btc_usd_experiment.py",
+      "sha256": "e1bad6a1ed68b6f152183c51719462359d2e3936da703869b17de4e28846224a"
+    },
+    {
+      "path": "scripts/research/btc_usd_features.py",
+      "sha256": "8b12cfee994b54dc0959e1de2f0bcf64f858d40735defb16dd7bdaf3c3ced1a6"
+    }
+  ],
+  "coverage": {
+    "observedHours": 9944,
+    "expectedHours": 9954,
+    "missingCandleHours": 10,
+    "knownSignalHours": 9280,
+    "eligibleEntryHours": 9280,
+    "excludedHours": 664,
+    "unknownRangeHours": 0,
+    "unknownSignalHours": 664,
+    "exclusionCounts": {
+      "Unknown tracker signal": 664
+    },
+    "zoneHours": {
+      "middle": 3436,
+      "bottom": 2127,
+      "below": 806,
+      "top": 2295,
+      "above": 616
+    },
+    "trendHours": {
+      "BULLISH": 3240,
+      "BEARISH": 5080,
+      "NEUTRAL": 960
+    },
+    "freshUsdEntryHours": 6311,
+    "currentBullishStart": "2026-08-20T12:38:43Z",
+    "rangeDefinition": "Three equal price-width sections of the published lower-to-upper range, assigned from the hour's opening price.",
+    "missingIntervals": [
+      {
+        "startInclusive": "2025-10-25T16:00:00Z",
+        "endExclusive": "2025-10-25T21:00:00Z",
+        "hours": 5
+      },
+      {
+        "startInclusive": "2026-05-08T02:00:00Z",
+        "endExclusive": "2026-05-08T07:00:00Z",
+        "hours": 5
+      }
+    ]
+  },
+  "publicPrivacy": "No source emails, message IDs, mail links, report images, or raw provider responses exported."
+}

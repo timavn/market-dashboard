@@ -1,0 +1,84 @@
+{
+  "sourceMessageId": "194f5496d384e5f1",
+  "publicationAt": "2025-02-11T13:53:00Z",
+  "receivedAt": "2025-02-11T13:53:37Z",
+  "availableAt": "2025-02-11T13:53:37Z",
+  "reportDate": "2025-02-11",
+  "headers": [
+    {
+      "name": "Received",
+      "value": "by 2002:ab0:69d0:0:b0:85c:4e4d:b5e7 with SMTP id u16csp326840uaq;        Tue, 11 Feb 2025 05:53:38 -0800 (PST)"
+    },
+    {
+      "name": "Received",
+      "value": "from o1.ptr696.hedgeye.com (o1.ptr696.hedgeye.com. [149.72.63.115])        by mx.google.com with ESMTPS id 41be03b00d2f7-ad849759f6asi2793671a12.574.2025.02.11.05.53.36        for <timsmithaviation@gmail.com>        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);        Tue, 11 Feb 2025 05:53:37 -0800 (PST)"
+    },
+    {
+      "name": "Authentication-Results",
+      "value": "mx.google.com;       dkim=pass header.i=@hedgeye.com header.s=sg1 header.b=S8DEdWTY;       dkim=pass header.i=@sendgrid.info header.s=smtpapi header.b=c4h5oiiG;       spf=pass (google.com: domain of bounces+37525276-aebf-timsmithaviation=gmail.com@em7154.hedgeye.com designates 149.72.63.115 as permitted sender) smtp.mailfrom=\"bounces+37525276-aebf-timsmithaviation=gmail.com@em7154.hedgeye.com\";       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hedgeye.com"
+    },
+    {
+      "name": "Received",
+      "value": "by recvd-5fb76865d7-f676f with SMTP id recvd-5fb76865d7-f676f-1-67AB5648-1E 2025-02-11 13:53:12.771427638 +0000 UTC m=+7662588.583632451"
+    },
+    {
+      "name": "Received",
+      "value": "from Mzc1MjUyNzY (unknown) by geopod-ismtpd-11 (SG) with HTTP id qFLABlnPSuO7-XYU_8MKXw Tue, 11 Feb 2025 13:53:12.677 +0000 (UTC)"
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 11 Feb 2025 13:53:32 +0000 (UTC)"
+    },
+    {
+      "name": "From",
+      "value": "Hedgeye <info@hedgeye.com>"
+    },
+    {
+      "name": "Message-ID",
+      "value": "<qFLABlnPSuO7-XYU_8MKXw@geopod-ismtpd-11>"
+    },
+    {
+      "name": "Subject",
+      "value": "CRYPTO QUANT | \u20bfTC (+1%), State Adoption \u2192 NC Piles On, Which ETF Next? \u2192 LTC/SOL/XRP/DOGE?"
+    }
+  ],
+  "gmailInternalDate": "1739282012000",
+  "imageUrls": [
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_1.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_3.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_4.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_5.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_6.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_7.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_8.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_9.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_10.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_11.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_12.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_13.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/ETF_NET_FLOW_2A.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/ETH_Table.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/NC_Stte_Inv.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/Binace_vs_SEC.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/Bberg_ETF_odds.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/Bberg_ETF_odds_2.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/URPD_021125.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/Accum_021125.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/glassnode_studio_btc_whale_net_flow_volume_deposits_less_withdrawals_to_exchanges__53_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/glassnode_studio_accumulation_trend_score__1_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/glassnode_studio_options_futures_open_interest_btc_eth__32_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/glassnode_studio_net_transfer_volume_from_to_exchanges_breakdown_by_size__17_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/glassnode_studio_net_transfer_volume_from_to_exchanges__21_.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/BTC_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/ETH_GIP.png",
+    "https://d1yhils6iwh5l5.cloudfront.net/charts/resized/137020/original/Cryp_GIP.png"
+  ],
+  "sourceUrl": "https://mail.google.com/mail/u/0/#all/194f5496d384e5f1",
+  "htmlSha256": "c46e7dddf45658af7caf0ad19d4ffd7d6e941f5df7e360e1b17fd1f4ae898f9e",
+  "archiveSnapshotDate": null,
+  "archivedHtmlS3Key": null,
+  "rawGmailPath": "raw-gmail/194f5496d384e5f1.json",
+  "rawGmailSha256": "67a4fa7283375dfef55bfba8c35f07db47a70bd50a82a83fa23b54e6aafe23da",
+  "collectionSource": "gmail_connector_original_mime"
+}

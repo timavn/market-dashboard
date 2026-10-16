@@ -1,0 +1,11 @@
+{
+  "status": "passed",
+  "focusedTests": 31,
+  "exportRows": {
+    "hourly": 9944,
+    "statistics": 70,
+    "settlementChecks": 8
+  },
+  "independentAudit": "All hourly features, 70 filter/cohort counts and underlying official settlement pairs independently reconciled; zero lookahead mismatches.",
+  "visualReview": "Summary, variation table and uncertainty chart verified in local browser."
+}

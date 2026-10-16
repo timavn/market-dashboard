@@ -1,0 +1,9 @@
+{
+  "sourceUrl": "https://app.hedgeye.com/user-guides/bitcoin-trend-tracker",
+  "sourceTitle": "Hedgeye Bitcoin Trend Tracker User Guide",
+  "verifiedOn": "2026-09-15",
+  "section": "Frequently Asked Questions: How often is Bitcoin Trend Tracker published?",
+  "exactQuote": "Bitcoin Trend Tracker is published every trading day before the U.S. stock market opens.",
+  "interpretation": "Use U.S. equity trading days as the expected publication calendar. Weekends and U.S. market holidays have no expected daily report. Independently check the complete email inventory for any exceptional publication.",
+  "carryConvention": "The last verified published direction remains the research state between reports, including scheduled nonpublication days. This does not assert a new signal observation or live price during the interval."
+}

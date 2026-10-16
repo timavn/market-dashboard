@@ -1,0 +1,336 @@
+{
+  "schemaVersion": 2,
+  "historicalResearchOnly": true,
+  "study": "Bitcoin: entry within the published range",
+  "asOf": "2026-09-15T18:10:12Z",
+  "startAt": "2025-07-28T00:00:00Z",
+  "endAt": "2026-09-15T18:00:00Z",
+  "timeZone": "America/New_York",
+  "priceBasis": "open_to_close",
+  "bootstrapReplicates": 10000,
+  "seed": 20260915,
+  "bootstrapUnit": "New York calendar day",
+  "calendarSources": [
+    "https://www.nyse.com/trade/hours-calendars",
+    "https://www.nyse.com/publicdocs/ICE_NYSE_2025_Yearly_Trading_Calendar.pdf"
+  ],
+  "validation": {
+    "hourly": {
+      "comparisonGroups": 750,
+      "countsReconciled": true,
+      "percentagesReconciled": true,
+      "allRegimesPartitionReconciled": true,
+      "newYorkDayGrouping": true
+    },
+    "daily": {
+      "comparisonGroups": 375,
+      "countsReconciled": true,
+      "percentagesReconciled": true,
+      "allRegimesPartitionReconciled": true,
+      "newYorkDayGrouping": true
+    }
+  },
+  "quadOverlayValidation": {
+    "hourly": {
+      "q1": {
+        "comparisonGroups": 750,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q2": {
+        "comparisonGroups": 750,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q3": {
+        "comparisonGroups": 750,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q4": {
+        "comparisonGroups": 750,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "newYorkDayGrouping": true
+      }
+    },
+    "daily": {
+      "q1": {
+        "comparisonGroups": 375,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q2": {
+        "comparisonGroups": 375,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q3": {
+        "comparisonGroups": 375,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q4": {
+        "comparisonGroups": 375,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "newYorkDayGrouping": true
+      }
+    }
+  },
+  "quadOverlay": {
+    "hourly": {
+      "basis": "retrospective_actual",
+      "country": "United States",
+      "source": "hedgeye-published-global-quads",
+      "sourceAsOf": "2026-08-12",
+      "publishedAt": null,
+      "availableAt": "2026-09-09T18:02:55.426921Z",
+      "quarterAssignments": [
+        {
+          "quarter": "2025-Q3",
+          "quad": 2,
+          "kind": "actual",
+          "periodStart": "2025-07-01T04:00:00Z",
+          "periodEnd": "2025-10-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q4",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2025-10-01T04:00:00Z",
+          "periodEnd": "2026-01-01T05:00:00Z"
+        },
+        {
+          "quarter": "2026-Q1",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2026-01-01T05:00:00Z",
+          "periodEnd": "2026-04-01T04:00:00Z"
+        },
+        {
+          "quarter": "2026-Q2",
+          "quad": 3,
+          "kind": "actual",
+          "periodStart": "2026-04-01T04:00:00Z",
+          "periodEnd": "2026-07-01T04:00:00Z"
+        }
+      ],
+      "excludedQuarters": [
+        {
+          "quarter": "2026-Q3",
+          "quad": 4,
+          "kind": "estimate",
+          "periodStart": "2026-07-01T04:00:00Z",
+          "periodEnd": "2026-10-01T04:00:00Z"
+        }
+      ],
+      "classifiedIntervals": 8106,
+      "unclassifiedIntervals": 1838,
+      "classifiedEligibleEntries": 7442,
+      "unclassifiedEligibleEntries": 1838
+    },
+    "daily": {
+      "basis": "retrospective_actual",
+      "country": "United States",
+      "source": "hedgeye-published-global-quads",
+      "sourceAsOf": "2026-08-12",
+      "publishedAt": null,
+      "availableAt": "2026-09-09T18:02:55.426921Z",
+      "quarterAssignments": [
+        {
+          "quarter": "2025-Q3",
+          "quad": 2,
+          "kind": "actual",
+          "periodStart": "2025-07-01T04:00:00Z",
+          "periodEnd": "2025-10-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q4",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2025-10-01T04:00:00Z",
+          "periodEnd": "2026-01-01T05:00:00Z"
+        },
+        {
+          "quarter": "2026-Q1",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2026-01-01T05:00:00Z",
+          "periodEnd": "2026-04-01T04:00:00Z"
+        },
+        {
+          "quarter": "2026-Q2",
+          "quad": 3,
+          "kind": "actual",
+          "periodStart": "2026-04-01T04:00:00Z",
+          "periodEnd": "2026-07-01T04:00:00Z"
+        }
+      ],
+      "excludedQuarters": [
+        {
+          "quarter": "2026-Q3",
+          "quad": 4,
+          "kind": "estimate",
+          "periodStart": "2026-07-01T04:00:00Z",
+          "periodEnd": "2026-10-01T04:00:00Z"
+        }
+      ],
+      "classifiedIntervals": 233,
+      "unclassifiedIntervals": 52,
+      "classifiedEligibleEntries": 215,
+      "unclassifiedEligibleEntries": 52
+    }
+  },
+  "coverage": {
+    "hourly": {
+      "observedIntervals": 9944,
+      "expectedIntervals": 9954,
+      "eligibleEntryIntervals": 9280,
+      "excludedIntervals": 664,
+      "missingIntervalCount": 10,
+      "missingCandleIntervals": 10,
+      "missingIntervals": [
+        {
+          "startInclusive": "2025-10-25T16:00:00Z",
+          "endExclusive": "2025-10-25T21:00:00Z",
+          "hours": 5
+        },
+        {
+          "startInclusive": "2026-05-08T02:00:00Z",
+          "endExclusive": "2026-05-08T07:00:00Z",
+          "hours": 5
+        }
+      ],
+      "incompleteIntervals": 0,
+      "incompleteIntervalDetails": [],
+      "unknownSignalIntervals": 664,
+      "exclusionCounts": {
+        "Unknown tracker signal": 664
+      },
+      "currentBullishStart": "2026-08-20T12:38:43Z",
+      "trendIntervals": {
+        "BULLISH": 3240,
+        "BEARISH": 5080,
+        "NEUTRAL": 960
+      },
+      "freshUsdEntryIntervals": 6311
+    },
+    "daily": {
+      "observedIntervals": 285,
+      "expectedIntervals": 285,
+      "eligibleEntryIntervals": 267,
+      "excludedIntervals": 18,
+      "missingIntervalCount": 0,
+      "missingCandleIntervals": 0,
+      "missingIntervals": [],
+      "incompleteIntervals": 1,
+      "incompleteIntervalDetails": [
+        {
+          "sessionDate": "2026-09-15",
+          "startAt": "2026-09-15T13:30:00Z",
+          "endAt": "2026-09-15T20:00:00Z",
+          "timeZone": "America/New_York",
+          "earlyClose": false,
+          "expectedCandles": 26
+        }
+      ],
+      "unknownSignalIntervals": 18,
+      "exclusionCounts": {
+        "Unknown tracker signal": 18
+      },
+      "currentBullishStart": "2026-08-20T12:38:43Z",
+      "trendIntervals": {
+        "BULLISH": 92,
+        "BEARISH": 146,
+        "NEUTRAL": 29
+      },
+      "freshUsdEntryIntervals": 264
+    }
+  },
+  "inputsAndScripts": [
+    {
+      "path": "artifacts/btc-hourly-usd-experiment/hourly-observations.csv",
+      "sha256": "f119721c6b0f6a0818d5ac97f85ce43df93a254f63b61a91554f3a283968d997"
+    },
+    {
+      "path": "artifacts/btc-hourly-bias-experiment/manifest.json",
+      "sha256": "5082f5d9688cef3e302f2b036dd26512f2dea56d03ecc254024a3e32a220de87"
+    },
+    {
+      "path": "artifacts/btc-hourly-bias-experiment/source-signals/signals.json",
+      "sha256": "5fab69b3d4466b808ae57dd8e71aee9f7e786dd3f35f569f595233197b681536"
+    },
+    {
+      "path": "artifacts/btc-interval-experiment/source-sessions/sessions.json",
+      "sha256": "1777bd8c30f5f64cc065f2add71249bf8ad015ed73c30b07ed0d798737b6896c"
+    },
+    {
+      "path": "artifacts/btc-interval-experiment/source-sessions/fetch-manifest.json",
+      "sha256": "d94db88a4fd5e8243e74d3f5dcb154996e1381241bc154707d1a333339ef5f56"
+    },
+    {
+      "path": "scripts/research/btc_interval_study.py",
+      "sha256": "c5b16153d08a9d3bbdf0f1dbe1f6b3aaebd64be82f8a7b235311810527ae83a4"
+    },
+    {
+      "path": "scripts/research/btc_nyse_sessions.py",
+      "sha256": "b076b660911d33f1745ef7d2104f3bc761ff92ddb2ac2c028232801d147b8b21"
+    },
+    {
+      "path": "scripts/research/btc_range_entry_experiment.py",
+      "sha256": "dd5f32049db7bf9b464eb074f38ec28c379848fcf1f3c765497b70b105d0282b"
+    },
+    {
+      "path": "scripts/research/btc_hourly_bias.py",
+      "sha256": "d3d660e733c8bcb558d373b53c4119e191da824330af689357487dbcde7ea78d"
+    },
+    {
+      "path": "scripts/research/btc_usd_experiment.py",
+      "sha256": "e1bad6a1ed68b6f152183c51719462359d2e3936da703869b17de4e28846224a"
+    },
+    {
+      "path": "scripts/research/btc_usd_features.py",
+      "sha256": "8b12cfee994b54dc0959e1de2f0bcf64f858d40735defb16dd7bdaf3c3ced1a6"
+    },
+    {
+      "path": "scripts/research/btc_quad_overlay.py",
+      "sha256": "dbdbcbbcaa6a67fdf74450fe85436543427e56b44a13764ebf4dd77cc437e528"
+    },
+    {
+      "path": "artifacts/btc-interval-experiment/source-quads/global-quads-history.json",
+      "sha256": "9cb745f1f6182314a31fda2a608d461679e6dcfb386312cb745600de5ee8fb29"
+    },
+    {
+      "path": "artifacts/btc-interval-experiment/source-quads/us-quarterly-checkpoint.json",
+      "sha256": "3e9c3d5a6e5d7d3e1decf82a2a593950178c2ae94391a201aa0cda118a9ec164"
+    },
+    {
+      "path": "artifacts/btc-interval-experiment/source-quads/g20.png",
+      "sha256": "a48332e644bd82c622a546c15f020baf66f4be7b928913b828630159e960c348"
+    },
+    {
+      "path": "artifacts/btc-interval-experiment/source-quads/global.png",
+      "sha256": "aded4dd5139cd562e67cb99fad23a8d54c09637e7c7f730fe3f08f337f411af5"
+    },
+    {
+      "path": "src/utils/usEquityMarketCalendar.cjs",
+      "sha256": "db616e0ff5e452272803e84cb9660c3cfe21849c2a4a8835ec757dff14daf6e4"
+    }
+  ],
+  "publicPrivacy": "No subscriber report content, message IDs, mail links, source images or raw provider bodies exported."
+}

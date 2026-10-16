@@ -1,0 +1,12 @@
+## Design 1
+
+Use case: precise-object-edit. Preserve this expanded matrix image exactly except for the following small-sample treatment corrections. No layout change and no title additions.
+There is a minimum sample filter of30hours/10days. In Neutral / Top third / USD UP / Uninvestable, the cell44.0% with30/8 is BELOW minimum distinct days. Change to44.0%† and give it unfilled light-gray neutral styling, not red. In Neutral / Above range / USD UP / Uninvestable, the cell42.0% with20/4 is also below minimum. Change to42.0%† and give it unfilled light-gray neutral styling, not red. Preserve the existing75.0%† cell8/2 with gray unfilled background. Any other cell with hours<30 or days<10 must also get† and gray/unfilled treatment. Make all these below-minimum values regular-weight mediumgray.
+Preserve every other percentage and sample, the12-column/15-row matrix, merged group labels, the selected66.0%cell, controls with USD rule dropdown, outline and footer design-example notice. Do not touch qualified cell heatmap colors. Do not add any new heading.
+
+## Design 2
+
+Use case: precise-object-edit. Preserve this expanded paired directional matrix exactly except fix the heatmap semantics.
+The ENTIRE RIGHT FOUR COLUMNS headed "BEARISH · DOWN CLOSES %" must use ONLY white-to-muted-RED shading for qualified values above50%. No green backgrounds anywhere in the right half. Values<=50.0% in right half should be white or very light neutral gray, never pink just because they belong to the bearish group.50.0%white;51–54.9%very faint pink;55–59.9%pale pink;60–64.9%medium muted pink;65%strongest muted pink. Therefore56.0%,55.0%,58.0% cells in right half currently tinted green must be changed to pale pink. Cells such as42.0%,39.0%,44.0%,46.0% must become white/neutral. Red intensity must grow monotonically with the printed down-close frequency.
+The ENTIRE LEFT FOUR COLUMNS "BULLISH · UP CLOSES %" use only white-to-muted-GREEN for qualified values above50%;<=50 white/neutral. No pink in left half. Preserve75.0%†8/2 as gray/unfilled below-minimum. Preserve thin charcoal selected-cell outlines at66.0% and65.0%.
+Keep all numeric values, rows, sample counts, controls including USD rule dropdown, column labels and footer absolutely unchanged. No title banner. Labels and values normal font weight400, bold only column headings. Do not add panels, legends or controls. Existing legendGreen=upRed=downmust now accurately match the color treatment.
