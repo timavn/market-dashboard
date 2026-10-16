@@ -4,6 +4,7 @@ import '@testing-library/jest-dom';
 import AnalystPanel from './AnalystPanel';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 
+jest.mock('./AnalystLandingStatus', () => ({ __esModule: true, default: () => null, AnalystLandingClock: () => null }));
 jest.mock('remark-gfm', () => function mockGfm() {});
 jest.mock('react-markdown', () => ({ children }) => <div>{children}</div>);
 jest.mock('../../services/analyst/analystClient', () => ({ analystWorkspaceApi: { request: jest.fn(), events: jest.fn() }, analystApi: {}, analystWebSocketUrl: jest.fn() }));

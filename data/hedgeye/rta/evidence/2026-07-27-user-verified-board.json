@@ -1,0 +1,48 @@
+{
+  "evidenceVersion": "manual-official-research-board-v1",
+  "product": "rta",
+  "capturedAt": "2026-07-27T02:20:06Z",
+  "capturePrecision": "exact",
+  "source": "manual-official-rta-board",
+  "sourceScreenshot": "conversation-attachment:codex-clipboard-2f689250-25b3-4d32-9aa4-9042be677ffa.png",
+  "userVerified": true,
+  "counts": {
+    "long": 4,
+    "short": 3
+  },
+  "positionsInBoardOrder": [
+    {
+      "ticker": "RSI",
+      "call": "Long"
+    },
+    {
+      "ticker": "DDOG",
+      "call": "Long"
+    },
+    {
+      "ticker": "BUG",
+      "call": "Long"
+    },
+    {
+      "ticker": "CRWD",
+      "call": "Long"
+    },
+    {
+      "ticker": "HSY",
+      "call": "Short"
+    },
+    {
+      "ticker": "HCA",
+      "call": "Short"
+    },
+    {
+      "ticker": "SUJA",
+      "call": "Short"
+    }
+  ],
+  "notes": [
+    "The user supplied and explicitly confirmed this current official RTA board.",
+    "This artifact records position membership and direction only.",
+    "Displayed cost basis and performance values are intentionally excluded because this checkpoint must not be presented as live market data."
+  ]
+}

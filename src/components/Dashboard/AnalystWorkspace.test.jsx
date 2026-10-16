@@ -6,6 +6,7 @@ import PersistentSurface from '../common/PersistentSurface';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 import ReactMarkdown from 'react-markdown';
 import * as analystMarkdown from './analystMarkdown';
+jest.mock('./AnalystLandingStatus', () => ({ __esModule: true, default: () => null, AnalystLandingClock: () => null }));
 jest.mock('remark-gfm', () => function mockGfm() {});
 jest.mock('react-markdown', () => ({ __esModule: true, default: jest.fn(({ children }) => <div>{children}</div>), defaultUrlTransform: value => value }));
 jest.mock('../../hooks/usePortfolioSecurityNames', () => ({ __esModule: true, default: () => ({}) }));
@@ -755,7 +756,8 @@ test('new chat creates no row; search is server-side and review actions remain a
   await screen.findByRole('button', { name: 'Portfolio Review' });
   expect(screen.getByRole('button', { name: 'Predictive Markets Review' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Balance Review' })).not.toBeInTheDocument();
-  expect(within(screen.getByRole('group', { name: 'Start a review' })).getAllByRole('button').map(button => button.textContent)).toEqual(['Portfolio Review', 'Predictive Markets Review', 'Manual Portfolio Update']);
+  expect(within(screen.getByRole('group', { name: 'Start a review' })).getAllByRole('button').map(button => [button.getAttribute('aria-label'), button.textContent, button.getAttribute('aria-keyshortcuts')])).toEqual([
+    ['Portfolio Review', 'Portfolio reviewP', 'P'], ['Predictive Markets Review', 'Predictive marketsM', 'M'], ['Manual Portfolio Update', 'Manual portfolio updateU', 'U']]);
   expect(screen.queryByText(/Waiting for|Research ready|Market Situation Report/i)).not.toBeInTheDocument();
   expect(api.request.mock.calls.some(([path]) => path === '/daily')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
@@ -1056,6 +1058,38 @@ test('Portfolio launch reserves account tables before acceptance without display
   expect(within(body).getByRole('region', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
   expect(within(body).getByRole('table', { name: 'Position exceptions' })).toBeVisible();
   expect(body).not.toHaveTextContent(/\$|\d+\.\d+%/);
+});
+
+test.each([
+  ['p', 'portfolio-review'],
+  ['M', 'prediction-markets-review'],
+])('the landing shortcut %s starts its review, but not while typing', async (key, kind) => {
+  const request = api.request.getMockImplementation();
+  api.request.mockImplementation((path, body, method) => path === `/daily/${kind}`
+    ? Promise.resolve({ conversation: conversations.a }) : request(path, body, method));
+  render(<AnalystPanel />);
+  await screen.findByRole('button', { name: 'Resume Chat a' });
+  fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message The Analyst' }), { key });
+  fireEvent.keyDown(screen.getByRole('dialog', { name: 'The Analyst', exact: true }), { key, metaKey: true });
+  expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Resume Chat a' }), { key });
+  await screen.findByText('Only answer A');
+  expect(api.request).toHaveBeenCalledWith(`/daily/${kind}`, { requestId: expect.stringMatching(/^review-start:/) });
+});
+
+test('the landing lists recent conversations newest first and opens one', async () => {
+  conversations.b = { ...conversations.b, kind: 'prediction-markets-review', title: 'Predictive Markets Review', updated_at: '2026-09-05T20:41:00Z' };
+  conversations.a = { ...conversations.a, state: 'running' };
+  render(<AnalystPanel />);
+  const recent = await screen.findByRole('region', { name: 'Recent' });
+  const cells = () => [...recent.querySelectorAll('tbody tr')].map(row => within(row).getAllByRole('cell').map(cell => cell.textContent));
+  await waitFor(() => expect(cells()).toHaveLength(2));
+  const [first, second] = cells();
+  expect(first).toEqual(['MARKETS', 'Predictive Markets Review', '09/05 16:41', '1 msg']);
+  expect(second).toEqual(['CHAT', 'Chat a', '09/04 10:00', 'Running']);
+  fireEvent.click(within(recent).getByRole('button', { name: 'Resume Chat a' }));
+  await screen.findByText('Only answer A');
+  expect(screen.queryByRole('region', { name: 'Recent' })).not.toBeInTheDocument();
 });
 
 test.each([

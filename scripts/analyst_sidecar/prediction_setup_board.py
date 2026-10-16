@@ -79,6 +79,15 @@ def _pacific(value: Any) -> str:
     return f"{MONTHS[moment.month - 1]} {moment.day} {moment:%H:%M}"
 
 
+def _pacific_zoned(value: Any) -> str:
+    """Publication time as the Sources table shows it, e.g. Oct 15 04:37 PDT; date-only stays a date."""
+    text = _pacific(value)
+    if not re.search(r"\d{2}:\d{2}$", text):
+        return text
+    moment = datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(PACIFIC)
+    return f"{text} {moment.tzname()}"
+
+
 def _signal(reading: dict[str, Any] | None) -> str:
     if not reading:
         return DASH
@@ -356,7 +365,7 @@ def render_setup_board(board: dict[str, Any]) -> str:
                     coded = re.search(r"-(\d{2})([A-Z]{3})$", str(forecast.get("eventTicker") or ""))
                     label = (f"{MONTHS[int(month[2]) - 1]} {month[1]}" if month
                              else f"{MONTHS[MONTH_CODES[coded[2]] - 1]} 20{coded[1]}" if coded and coded[2] in MONTH_CODES else NA)
-                    published = _short_date(forecast.get("publishedAt"))
+                    published = _pacific_zoned(forecast.get("publishedAt"))
                     rows.append([f"{cpi.get('label') or 'CPI YoY'} · {label}",
                                  _event_label({"eventTicker": forecast.get("eventTicker")}) if forecast.get("eventTicker") else NA,
                                  *(_number(forecast.get(key), percent=True) if forecast.get("available") else NA
@@ -405,7 +414,7 @@ def render_setup_board(board: dict[str, Any]) -> str:
         if block:
             lines += ["```analyst-research", json.dumps(block, ensure_ascii=False, separators=(",", ":")), "```", ""]
 
-    dated = [(label, _short_date(sources.get(key))) for key, label in (
+    dated = [(label, _pacific_zoned(sources.get(key))) for key, label in (
         ("riskRanges", "Risk Ranges"), ("cryptoQuant", "Crypto Quant"), ("inflationNowcast", "Inflation Nowcast"))]
     named = [f"{label} {date}" for label, date in dated if date != DASH] + ["HedgAI Signals", "Cboe volatility indices", "Kalshi"]
     lines += ["Sources: " + ", ".join(named), ""]

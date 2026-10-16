@@ -1567,6 +1567,9 @@ test('market close and restarted workers keep scheduled captures out of conversa
  assert.equal(capture.status,'pending','only the Hermes POST starts the close capture');
  assert.equal(capture.reason,'not_started');
  assert.equal(capture.scheduledTime,'16:30');
+ const baseline=await api('/automation/portfolio-close/baseline');
+ assert.equal(baseline.sessionDate,'2026-09-25','the baseline is the preceding session');
+ assert.equal(baseline.status,'pending');
 });
 
 test('Hermes close capture starts one headless portfolio review after the close, never before, without a chat', async t => {

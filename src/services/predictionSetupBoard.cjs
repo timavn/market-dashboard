@@ -238,12 +238,22 @@ const eventMonth = (ticker) => {
   return month && MONTHS[month[2]] ? `20${month[1]}-${String(MONTHS[month[2]]).padStart(2, '0')}` : null;
 };
 
-/** Every nowcast month from the current Kalshi release on, each with its Kalshi event when one is listed. */
-function cpiForecasts(nowcast, currentEvent, eventsBySeries) {
+/**
+ * Every month in the latest nowcast that BLS has not released yet, plus any from the current Kalshi
+ * release on, each with its Kalshi event when one is listed. Kalshi may not list the next print.
+ */
+function cpiForecasts(nowcast, currentEvent, eventsBySeries, asOf) {
   const listed = new Map((eventsBySeries?.KXCPIYOY || []).map((event) => [eventMonth(event?.event_ticker), event.event_ticker]));
   const firstMonth = eventMonth(currentEvent?.eventTicker);
-  const months = [...new Set((nowcast?.data?.forecasts || []).map((row) => row?.reportMonth)
-    .filter((month) => /^\d{4}-\d{2}$/.test(String(month || '')) && (!firstMonth || month >= firstMonth)))].sort();
+  const now = Date.parse(asOf);
+  const upcoming = (row) => {
+    const release = Date.parse(row?.releaseAt || (row?.releaseDate && `${row.releaseDate}T23:59:59Z`));
+    return Number.isFinite(release) && Number.isFinite(now) ? release > now : null;
+  };
+  const months = [...new Set((nowcast?.data?.forecasts || [])
+    .filter((row) => /^\d{4}-\d{2}$/.test(String(row?.reportMonth || '')))
+    .filter((row) => upcoming(row) ?? (!firstMonth || row.reportMonth >= firstMonth))
+    .map((row) => row.reportMonth).concat(listed.has(firstMonth) ? [firstMonth] : []))].sort();
   return months.map((month) => ({ ...cpiForecast(nowcast, { eventTicker: listed.get(month) || null }, month),
     eventTicker: listed.get(month) || null }));
 }
@@ -284,7 +294,7 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
     const events = selectEvents(market, eventsBySeries);
     if (market.id === 'cpi') {
       return { id: market.id, label: market.label, group: market.group, cadence: market.cadence,
-        events, forecast: cpiForecast(nowcast, events[0]), forecasts: cpiForecasts(nowcast, events[0], eventsBySeries) };
+        events, forecast: cpiForecast(nowcast, events[0]), forecasts: cpiForecasts(nowcast, events[0], eventsBySeries, asOf) };
     }
     const range = riskRangeReading(market, { riskRanges, cryptoQuant });
     const price = priceReading(market.price.symbol, market.price.label, market.price.fit, quotes);
@@ -320,10 +330,9 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
     sections: UNIVERSE.sections,
     usd,
     ...(research ? { research: { version: research.version, marketDate: research.marketDate, products: research.products } } : {}),
-
     sources: {
-      riskRanges: riskRanges?.manifest?.publicationDate || null,
-      cryptoQuant: cryptoQuant?.date || null,
+      riskRanges: riskRanges?.publishedAt || riskRanges?.manifest?.publicationDate || null,
+      cryptoQuant: emailPublishedAt(cryptoQuant) || cryptoQuant?.date || null,
       hedgai: hedgai?.asOf || null,
       inflationNowcast: nowcast?.publishedAt || nowcast?.date || null,
     },
@@ -371,7 +380,6 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
     board.sourceStatus = Object.fromEntries(Object.entries({ riskRanges, cryptoQuant, hedgai, securityIntelligence,
       nowcast, quotes, volatility, usdCorrelations, kalshi: events, ...(loadMorningProducts ? { morningResearch: morning } : {}) })
       .map(([key, result]) => [key, result.error ? 'failed' : 'ready']));
-
     return board;
   };
 }

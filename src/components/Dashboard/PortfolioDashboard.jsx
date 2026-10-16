@@ -1405,7 +1405,7 @@ const PortfolioDashboard = ({
         setShowAnalyst={setShowAnalyst}
       >
         <Suspense fallback={<AnalystLoading />}>
-              <AnalystPanel onClose={() => closeSidebarPanel('analyst', setShowAnalyst)} />
+              <AnalystPanel onClose={() => closeSidebarPanel('analyst', setShowAnalyst)} holdingsCount={portfolioData?.holdings?.length} />
             </Suspense>
       </DashboardAnalystPanel>
 

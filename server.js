@@ -1297,10 +1297,18 @@ app.use('/api/prediction-market-test', predictionMarketTest.router);
 
 // Predictive Markets Review setup board: Hedgeye Tick/Trade/Trend, price and
 // Risk Range position for every tracked Kalshi market.
-const { createSetupBoardLoader, extraCboeSeries } = require('./src/services/predictionSetupBoard.cjs');
+const { createSetupBoardLoader, emailPublishedAt, extraCboeSeries } = require('./src/services/predictionSetupBoard.cjs');
 const PREDICTION_EXTRA_CBOE_SERIES = extraCboeSeries();
 const loadPredictionSetupBoard = createSetupBoardLoader({
-  loadRiskRanges: ({ now }) => loadRiskRangePublicationEnvelope({ now }),
+  loadRiskRanges: async ({ now }) => {
+    const envelope = await loadRiskRangePublicationEnvelope({ now });
+    const date = envelope?.manifest?.publicationDate;
+    // The Risk Range email's own send time, so Sources reads like the other publications.
+    const email = date ? await dynamodb.get({ TableName: 'HedgeyeDailySnapshot',
+      Key: { date, snapshotType: 'risk-ranges' }, ProjectionExpression: 'publishedAt, article.bodyText',
+    }).promise().then((result) => result.Item, () => null) : null;
+    return { ...envelope, publishedAt: emailPublishedAt(email) };
+  },
   loadCryptoQuant: () => queryLatestSnapshotsByType('bitcoin-trend-tracker', { limit: 1 }).then((rows) => rows[0] || null),
   loadHedgai: ({ now }) => loadHedgaiResearch({ asOf: now.toISOString() }),
   loadSecurityIntelligence: ({ symbols, now }) => loadCanonicalSecurityIntelligence({

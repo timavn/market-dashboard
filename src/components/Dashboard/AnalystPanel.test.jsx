@@ -21,6 +21,7 @@ import AnalystLoading from './AnalystLoading';
 import PersistentSurface from '../common/PersistentSurface';
 import { analystApi } from '../../services/analyst/analystClient';
 
+jest.mock('./AnalystLandingStatus', () => ({ __esModule: true, default: () => null, AnalystLandingClock: () => null }));
 jest.mock('remark-gfm', () => function remarkGfmMock() {});
 jest.mock('react-markdown', () => {
   function MarkdownMock({ children }) {

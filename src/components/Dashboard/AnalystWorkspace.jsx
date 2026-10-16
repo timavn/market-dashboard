@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Archive, ChevronLeft, ChevronRight, Loader, MessageSquare, Plus, RefreshCw, Search, Send, Square, Trash2, X } from 'lucide-react';
+import { Archive, ArrowUp, ChevronLeft, ChevronRight, Loader, MessageSquare, Plus, RefreshCw, Search, Send, Square, Trash2, X } from 'lucide-react';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 import { Message, SourceLibrary } from './AnalystConversationPanel';
 import { useSurfaceActivity } from '../common/PersistentSurface';
@@ -10,6 +10,7 @@ import useAnalystInbox from '../../hooks/useAnalystInbox';
 import { balanceReviewMessages } from './balanceReviewPresentation';
 import { analystReviewMessages } from './analystReviewMessages';
 import AnalystReviewSources from './AnalystReviewSources';
+import AnalystLandingStatus, { AnalystLandingClock } from './AnalystLandingStatus';
 import useAnalystReviewSources from '../../hooks/useAnalystReviewSources';
 import AnalystSourceExcerpt from './AnalystSourceExcerpt';
 import { formatResearchSourceDate } from '../../utils/researchDateFormat';
@@ -104,6 +105,32 @@ const balancePrimaryReady = conversation => {
   return capturedBalancePrimary(message) && message.balancePrimaryIncluded !== false
     && (message.turn_id === active?.id || message.reviewRunId === conversation.reviewRunId || samePostRetry);
 };
+// Landing actions keep the review titles as accessible names; the visible
+// labels are shorter and the shortcut keys work while focus is in the panel.
+const landingActions = [
+  { kind: 'portfolio-review', label: 'Portfolio review', key: 'P' },
+  { kind: 'prediction-markets-review', label: 'Predictive markets', key: 'M' },
+  { kind: manualVerificationKind, label: 'Manual portfolio update', key: 'U', name: 'Manual Portfolio Update' },
+];
+const recentTypes = { 'portfolio-review': ['PORTFOLIO', 'portfolio'], 'prediction-markets-review': ['MARKETS', 'markets'],
+  'balance-review': ['BALANCE', 'portfolio'], [manualVerificationKind]: ['UPDATE', 'update'], audit: ['AUDIT', 'update'] };
+const recentType = kind => recentTypes[kind] || ['CHAT', 'chat'];
+const easternStamp = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const recentTime = row => Date.parse(row.updated_at || row.created_at) || 0;
+const recentStamp = row => {
+  const time = recentTime(row);
+  if (!time) return '—';
+  const parts = Object.fromEntries(easternStamp.formatToParts(new Date(time)).map(part => [part.type, part.value]));
+  return `${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
+};
+const recentStatus = row => {
+  if (row.pending) return ['Starting', 'running'];
+  if (row.activeTurn || ['running', 'accepted'].includes(row.state)) return ['Running', 'running'];
+  if (['failed', 'interrupted'].includes(row.state)) return ['Failed', 'failed'];
+  const count = sidebarMessageCount(row);
+  return count ? [`${count} ${count === 1 ? 'msg' : 'msgs'}`, null] : ['—', null];
+};
+const RECENT_LIMIT = 5;
 const ResponseDots = ({ phase }) => <div className={`analyst-running-dots${phase ? ' has-phase' : ''}`} role="status" aria-label="Response running" aria-description={phase}><span /><span /><span />{phase && <small>{phase}</small>}</div>;
 const acceptedConversation = (entities, request) => request && Object.values(entities).find(conversation =>
   (!request.conversationId || conversation.id === request.conversationId)
@@ -192,7 +219,7 @@ function citationPublications(source, context) {
   return publications;
 }
 
-export default function AnalystWorkspace({ onClose }) {
+export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const active = useSurfaceActivity();
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -1341,7 +1368,20 @@ export default function AnalystWorkspace({ onClose }) {
   const lastPrompt = conversation?.messages.find(m => m.turn_id === terminalError?.id && m.role === 'user')?.text;
   const selectedRecoveryFailure = requestRecoveryFailed && (requestRecoveryFailed.conversationId === selected
     || manualOpening(requestRecoveryFailed)?.id === selected) ? requestRecoveryFailed : null;
-  return <section ref={panel} className={`analyst-panel analyst-panel-v2${portfolioPresentation ? ' has-portfolio-brief' : ''}`} data-testid="analyst-panel" role="dialog" aria-label="The Analyst">
+  const landing = !selected && !selectedSend && !launchingReview;
+  const manualBusy = sending || running || Boolean(launchingReview);
+  const startLanding = kind => kind === manualVerificationKind
+    ? submit(manualPortfolioUpdatePrompt, { operation: manualVerificationKind }) : launch(kind);
+  const recentRows = landing ? [...visibleRows].sort((a, b) => recentTime(b) - recentTime(a)).slice(0, RECENT_LIMIT) : [];
+  const landingShortcut = e => {
+    if (!landing || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;
+    if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    const action = landingActions.find(row => row.key === e.key.toUpperCase());
+    if (!action || (action.kind === manualVerificationKind && manualBusy)) return;
+    e.preventDefault();
+    startLanding(action.kind);
+  };
+  return <section ref={panel} className={`analyst-panel analyst-panel-v2${portfolioPresentation ? ' has-portfolio-brief' : ''}`} data-testid="analyst-panel" role="dialog" aria-label="The Analyst" onKeyDown={landingShortcut}>
     <div className="analyst-workspace">
       <aside className={`analyst-conversation-rail ${sidebar ? 'is-open' : 'is-collapsed'}`} data-testid="analyst-conversation-rail">
         <header className="analyst-sidebar-header"><div className="analyst-sidebar-top-actions">
@@ -1364,14 +1404,14 @@ export default function AnalystWorkspace({ onClose }) {
         </div>
         <nav className="analyst-sidebar-footer"><button aria-label="Inbox" aria-expanded={inboxOpen} aria-controls="analyst-inbox-drawer" className={inbox.actionRequired > 0 ? 'has-action-required' : inbox.unread > 0 ? 'has-notification' : undefined} onClick={() => setInboxOpen(open => !open)}><MessageSquare size={15} /><span>Inbox {inbox.unread > 0 ? `(${inbox.unread})` : ''}</span></button><button aria-label="Sources" onClick={() => setLibrary(true)}><Archive size={15} /><span>Sources</span></button></nav>
       </aside>
-      <main className="analyst-chat analyst-chat-v2">
+      <main className={`analyst-chat analyst-chat-v2${landing ? ' is-landing' : ''}`}>
         <div ref={transcript} onScroll={e => { const node = e.currentTarget; followReply.current = !sourcesAnchoredReview(selectedKind) && responsePending && node.scrollHeight - node.scrollTop - node.clientHeight < 80; scrolls.current[selected || 'landing'] = node.scrollTop; clearTimeout(scrollSaveTimer.current); scrollSaveTimer.current = setTimeout(() => save('scrolls', scrolls.current), 150); }} className={`analyst-transcript analyst-transcript-v2${selected || selectedSend || launchingReview ? '' : ' is-landing'}`} role="log" aria-label="Conversation" aria-live="polite">
           {launchingReview ? <div className="analyst-message-list"><AnalystReviewSources reviewKind={launchingReview.kind} loading phase="Starting…" />
             {launchingReview.kind === 'portfolio-review' && <PortfolioReviewPlaceholder />}</div>
-            : !selected && !selectedSend ? <div className="analyst-landing"><h1>The Analyst</h1><div className="analyst-landing-actions" role="group" aria-label="Start a review">
-              {reviews.map(([kind, label]) => <button key={kind} onClick={() => launch(kind)}>{label}</button>)}
-              <button type="button" className="analyst-manual-portfolio-update" disabled={sending || running || Boolean(launchingReview)} onClick={() => submit(manualPortfolioUpdatePrompt, { operation: manualVerificationKind })}>Manual Portfolio Update</button>
-            </div></div>
+            : !selected && !selectedSend ? <header className="analyst-landing">
+              <div className="analyst-landing-title"><h1>The Analyst</h1><AnalystLandingClock /></div>
+              <AnalystLandingStatus holdingsCount={holdingsCount} />
+            </header>
               : <div className="analyst-message-list">
                 {isReview && <AnalystReviewSources reviewKind={selectedKind} sources={reviewSources.sources} loading={reviewSources.loading}
                   readFailed={reviewSources.readFailed} reconnecting={reviewSources.reconnecting} phase={sourcesPhase} modelPhase={manualWriting || summarizing} />}
@@ -1405,8 +1445,36 @@ export default function AnalystWorkspace({ onClose }) {
             ? <button type="button" disabled={confirmingRequest} onClick={() => confirmRequest(selectedRecoveryFailure)}>Retry confirmation</button>
             : pendingRequest.current?.conversationId === selected && <button type="button" disabled={sending || running} onClick={() => submit(pendingRequest.current.text)}>Retry</button>}</div>}
           {Object.entries(deleteErrors).map(([id, message]) => <div key={id} className="analyst-inline-error" role="alert"><span>{message}</span><button type="button" aria-label={`Retry deleting conversation: ${entities[id]?.title || rows.find(row => row.id === id)?.title || 'Conversation'}`} onClick={() => deleteConversation(id)}>Retry delete</button></div>)}
-          <form className="analyst-composer" onSubmit={e => { e.preventDefault(); submit(); }}><textarea ref={composer} aria-label="Message The Analyst" placeholder="Message The Analyst…" value={draft} rows={2} disabled={Boolean(launchingReview)} onChange={e => editDraft(draftKey, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); } }} />{reconnecting && <span className="analyst-connection-status" role="status">Reconnecting…</span>}{running && !launchingReview ? <button type="button" className="analyst-stop-button" onClick={async () => { try { await api.request(`/conversations/${selected}/turns/${conversation.activeTurn.id}/stop`, {}); await load(selected); } catch (e) { setError(e.message); } }}><Square size={14} />Stop</button> : <button type="submit" className="analyst-send-button" disabled={sending || Boolean(launchingReview) || !draft.trim()} aria-label="Send"><Send size={17} /></button>}</form>
+          <form className="analyst-composer" onSubmit={e => { e.preventDefault(); submit(); }}><textarea ref={composer} aria-label="Message The Analyst" placeholder={landing ? 'Ask about positions, exposure, regime, or a setup…' : 'Message The Analyst…'} value={draft} rows={2} disabled={Boolean(launchingReview)} onChange={e => editDraft(draftKey, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); } }} />{landing && <span className="analyst-composer-hint" aria-hidden="true">↵ send · ⇧↵ newline</span>}{reconnecting && <span className="analyst-connection-status" role="status">Reconnecting…</span>}{running && !launchingReview ? <button type="button" className="analyst-stop-button" onClick={async () => { try { await api.request(`/conversations/${selected}/turns/${conversation.activeTurn.id}/stop`, {}); await load(selected); } catch (e) { setError(e.message); } }}><Square size={14} />Stop</button> : <button type="submit" className="analyst-send-button" disabled={sending || Boolean(launchingReview) || !draft.trim()} aria-label="Send">{landing ? <ArrowUp size={16} /> : <Send size={17} />}</button>}</form>
         </footer>
+        {landing && <div className="analyst-landing-lower">
+          <div className="analyst-landing-actions" role="group" aria-label="Start a review">
+            {landingActions.map(action => {
+              const manual = action.kind === manualVerificationKind;
+              return <button key={action.kind} type="button" className={manual ? 'analyst-manual-portfolio-update' : undefined}
+                aria-label={action.name || reviews.find(([kind]) => kind === action.kind)[1]} aria-keyshortcuts={action.key}
+                disabled={manual && manualBusy} onClick={() => startLanding(action.kind)}>
+                <span>{action.label}</span><kbd aria-hidden="true">{action.key}</kbd>
+              </button>;
+            })}
+          </div>
+          {recentRows.length > 0 && <section className="analyst-landing-recent" aria-labelledby="analyst-landing-recent-title">
+            <h2 id="analyst-landing-recent-title">Recent</h2>
+            <table>
+              <thead><tr><th scope="col">Type</th><th scope="col">Title</th><th scope="col">Updated</th><th scope="col">Status</th></tr></thead>
+              <tbody>{recentRows.map(row => {
+                const [type, typeTone] = recentType(row.kind);
+                const [status, statusTone] = recentStatus(row);
+                return <tr key={row.id}>
+                  <td className={`is-${typeTone}`}>{type}</td>
+                  <td><button type="button" aria-label={`Resume ${row.title}`} onClick={() => choose(row.id)}>{row.title}</button></td>
+                  <td className="is-numeric">{recentStamp(row)}</td>
+                  <td className={statusTone ? `is-${statusTone}` : 'is-muted'}>{status}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </section>}
+        </div>}
       </main>
       {inboxOpen && <AnalystInboxDrawer findings={inbox.findings} error={inboxError} onCitation={openCitation} onAcknowledge={acknowledge} onClose={() => setInboxOpen(false)} />}
       {library && <SourceLibrary onClose={() => setLibrary(false)} />}

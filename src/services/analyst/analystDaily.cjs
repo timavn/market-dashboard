@@ -605,6 +605,12 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
       catch { res.status(503).json({ error: 'Closing holdings capture unavailable.' }); }
     });
   }
+  // The Analyst landing reports which close today's holdings are verified against.
+  router.get('/automation/portfolio-close/baseline', async (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try { res.json(await closeReview.baseline()); }
+    catch { res.status(503).json({ error: 'Closing holdings capture unavailable.' }); }
+  });
   let collectorTimer;
   let collectorTick = 0;
   return { tick, prepare, getReviewDiagnostics, portfolioCloseBaseline: () => closeReview.baseline(), start() { if (!timer) {

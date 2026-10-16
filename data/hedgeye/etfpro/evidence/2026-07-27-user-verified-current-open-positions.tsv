@@ -1,0 +1,47 @@
+# evidence_version	manual-official-research-board-v1
+# product	etf-pro
+# captured_at	2026-07-27T02:26:10Z
+# capture_precision	exact
+# source	manual-official-etf-pro-board
+# source_screenshot	conversation-attachment:codex-clipboard-5d7b4a61-c859-4429-bc20-960b73780e4a.png
+# user_verified	true
+# expected_counts	24 long / 13 short
+# use_restriction	Evidence only. Current/recent prices, returns, ranges, and holding periods must not be presented as live market data.
+ticker	name	call	date_added	entry_price	recent_price	price_return_pct	trend_low_end	trend_high_end	pct_from_low_end	pct_from_high_end	holding_period
+CARZ	Future Vehicles	Short	07/24/26	103.00	101.36	+1.59%					2 days
+ETHA	Ethereum	Long	07/24/26	14.08	14.04	-0.25%					2 days
+WEAT	Wheat	Long	07/24/26	24.88	25.22	+1.37%					2 days
+CPER	Copper	Long	07/23/26	38.57	38.35	-0.57%					3 days
+MEME	Meme	Short	07/22/26	7.69	7.00	+8.93%					4 days
+PTF	Technology Momentum	Short	07/22/26	107.65	102.34	+4.94%					4 days
+XLK	Technology Sector	Short	07/22/26	178.42	175.88	+1.42%					4 days
+VTIP	US TIPS	Long	07/22/26	49.65	49.59	-0.12%					4 days
+EPHE	Philippines	Long	07/21/26	25.38	25.22	-0.63%					5 days
+RSP	S&P Equal Weight	Long	07/21/26	212.57	213.57	+0.47%					5 days
+EWY	South Korea	Short	07/20/26	165.19	162.96	+1.35%					6 days
+IPAY	Digital Payments	Long	07/20/26	48.91	48.01	-1.84%					6 days
+EWQ	France	Short	07/17/26	44.94	44.95	-0.02%	44.07	45.76	+2.00%	-1.77%	9 days
+ENZL	New Zealand	Long	07/17/26	46.14	46.57	+0.94%	45.35	47.44	+2.70%	-1.83%	9 days
+COLO	Colombia	Long	07/17/26	43.88	44.31	+0.98%	42.50	45.97	+4.26%	-3.61%	9 days
+QAT	Qatar	Short	07/16/26	17.75	17.53	+1.24%	17.33	18.00	+1.15%	-2.61%	10 days
+EWG	Germany	Short	07/16/26	41.10	41.12	-0.05%	40.51	41.99	+1.51%	-2.07%	10 days
+EWZ	Brazil	Long	07/16/26	35.50	35.73	+0.65%	34.10	36.49	+4.78%	-2.08%	10 days
+INDA	India	Short	07/14/26	48.67	48.02	+1.35%	47.21	49.69	+1.72%	-3.36%	12 days
+NOBL	Dividend Aristocrats	Long	07/14/26	56.46	56.91	+0.80%	55.77	57.71	+2.04%	-1.39%	12 days
+BUG	Cybersecurity	Long	07/13/26	39.23	37.80	-3.65%	37.06	42.53	+2.00%	-11.12%	13 days
+DESK	Office REITs	Long	07/10/26	41.13	43.14	+4.89%	41.08	43.98	+5.01%	-1.91%	16 days
+FAB	Multi Cap Value	Long	07/09/26	101.18	104.64	+3.41%	101.00	106.00	+3.60%	-1.29%	17 days
+SIL	Silver Miners	Short	07/02/26	80.44	75.44	+6.22%	70.13	79.54	+7.57%	-5.15%	24 days
+XLU	Utilities Sector	Long	06/30/26	45.56	46.29	+1.60%	44.19	46.98	+4.75%	-1.47%	26 days
+EIS	Israel	Short	06/23/26	120.17	119.57	+0.50%	116.00	123.00	+3.08%	-2.79%	33 days
+IAK	US Insurance	Long	06/18/26	135.04	148.15	+9.71%	140.00	150.00	+5.82%	-1.23%	38 days
+XLV	Healthcare	Long	06/17/26	151.27	162.57	+7.47%	156.00	166.00	+4.21%	-2.07%	39 days
+XLRE	Real Estate	Long	06/17/26	44.71	45.95	+2.77%	44.09	46.11	+4.22%	-0.35%	39 days
+URA	Uranium	Short	06/16/26	48.06	39.89	+17.00%	38.13	43.66	+4.62%	-8.63%	40 days
+MSTY	MSTR Income Strategy	Short	06/12/26	15.94	12.24	+23.23%	11.03	14.04	+10.97%	-12.82%	44 days
+FXH	Healthcare Equity	Long	06/12/26	116.94	124.05	+6.08%	120.00	127.00	+3.37%	-2.32%	44 days
+VYM	Dividend Yield	Long	05/12/26	154.13	162.23	+5.26%	159.00	163.00	+2.03%	-0.47%	75 days
+CLOZ	CLOs	Long	04/22/26	25.63	26.39	+2.96%	26.24	26.44	+0.57%	-0.19%	95 days
+CLOX	AAA CLO	Long	03/06/25	24.02	25.59	+6.52%	25.50	25.59	+0.33%	-0.02%	507 days
+AAAU	Physical Gold	Long	02/28/25	28.23	39.96	+41.55%	39.00	41.01	+2.46%	-2.56%	513 days
+BUXX	Income Short Maturity	Long	10/25/23	17.60	20.24	+15.00%	20.19	20.28	+0.25%	-0.20%	1005 days

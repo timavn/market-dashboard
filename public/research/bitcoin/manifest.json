@@ -1,0 +1,1524 @@
+{
+  "schemaVersion": 3,
+  "historicalResearchOnly": true,
+  "study": "Bitcoin: entry within the published range",
+  "asOf": "2026-09-15T23:27:07Z",
+  "startAt": "2021-09-15T04:00:00Z",
+  "endAt": "2026-09-15T18:00:00Z",
+  "timeZone": "America/New_York",
+  "priceBasis": "open_to_close",
+  "bootstrapReplicates": 10000,
+  "bootstrapBatchSize": 256,
+  "seed": 20260915,
+  "runtime": {
+    "python": "3.9.6",
+    "numpy": "2.0.2",
+    "system": "Darwin"
+  },
+  "bootstrapUnit": "New York calendar day",
+  "sensitivityBootstrapUnit": "Monday-start calendar week",
+  "calendarSources": [
+    "https://www.nyse.com/trade/hours-calendars",
+    "https://ir.theice.com/press/news-details/2020/NYSE-Group-Announces-2021-2022-and-2023-Holiday-and-Early-Closings-Calendar/default.aspx",
+    "https://s2.q4cdn.com/154085107/files/doc_news/NYSE-Group-Announces-2022-2023-and-2024-Holiday-and-Early-Closings-Calendar-2021.pdf",
+    "https://s2.q4cdn.com/154085107/files/doc_news/NYSE-Group-Announces-2023-2024-and-2025-Holiday-and-Early-Closings-Calendar-2022.pdf",
+    "https://www.nyse.com/publicdocs/ICE_NYSE_2025_Yearly_Trading_Calendar.pdf",
+    "https://ir.theice.com/press/news-details/2024/The-New-York-Stock-Exchange-Will-Close-Markets-on-January-9-to-Honor-the-Passing-of-Former-President-Jimmy-Carter-on-National-Day-of-Mourning/default.aspx"
+  ],
+  "validation": {
+    "hourly": {
+      "comparisonGroups": 2250,
+      "countsReconciled": true,
+      "percentagesReconciled": true,
+      "allRegimesPartitionReconciled": true,
+      "volumePartitionReconciled": true,
+      "newYorkDayGrouping": true
+    },
+    "calendar_day": {
+      "comparisonGroups": 1125,
+      "countsReconciled": true,
+      "percentagesReconciled": true,
+      "allRegimesPartitionReconciled": true,
+      "volumePartitionReconciled": true,
+      "newYorkDayGrouping": true
+    },
+    "daily": {
+      "comparisonGroups": 1125,
+      "countsReconciled": true,
+      "percentagesReconciled": true,
+      "allRegimesPartitionReconciled": true,
+      "volumePartitionReconciled": true,
+      "newYorkDayGrouping": true
+    }
+  },
+  "quadOverlayValidation": {
+    "hourly": {
+      "q1": {
+        "comparisonGroups": 2250,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q2": {
+        "comparisonGroups": 2250,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q3": {
+        "comparisonGroups": 2250,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q4": {
+        "comparisonGroups": 2250,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      }
+    },
+    "calendar_day": {
+      "q1": {
+        "comparisonGroups": 1125,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q2": {
+        "comparisonGroups": 1125,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q3": {
+        "comparisonGroups": 1125,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q4": {
+        "comparisonGroups": 1125,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      }
+    },
+    "daily": {
+      "q1": {
+        "comparisonGroups": 1125,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q2": {
+        "comparisonGroups": 1125,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q3": {
+        "comparisonGroups": 1125,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      },
+      "q4": {
+        "comparisonGroups": 1125,
+        "countsReconciled": true,
+        "percentagesReconciled": true,
+        "allRegimesPartitionReconciled": true,
+        "volumePartitionReconciled": true,
+        "newYorkDayGrouping": true
+      }
+    }
+  },
+  "coverage": {
+    "hourly": {
+      "observedIntervals": 43812,
+      "expectedIntervals": 43838,
+      "eligibleEntryIntervals": 22648,
+      "excludedIntervals": 21164,
+      "missingIntervalCount": 26,
+      "missingCandleIntervals": 26,
+      "missingIntervals": [
+        {
+          "sessionDate": "2021-11-23",
+          "startAt": "2021-11-24T00:00:00Z",
+          "endAt": "2021-11-24T01:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-03-04",
+          "startAt": "2023-03-04T17:00:00Z",
+          "endAt": "2023-03-04T18:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-03-04",
+          "startAt": "2023-03-04T18:00:00Z",
+          "endAt": "2023-03-04T19:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-03-04",
+          "startAt": "2023-03-04T19:00:00Z",
+          "endAt": "2023-03-04T20:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-03-04",
+          "startAt": "2023-03-04T20:00:00Z",
+          "endAt": "2023-03-04T21:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-03-04",
+          "startAt": "2023-03-04T21:00:00Z",
+          "endAt": "2023-03-04T22:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-05-19",
+          "startAt": "2023-05-19T07:00:00Z",
+          "endAt": "2023-05-19T08:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-05-19",
+          "startAt": "2023-05-19T08:00:00Z",
+          "endAt": "2023-05-19T09:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2024-02-09",
+          "startAt": "2024-02-09T21:00:00Z",
+          "endAt": "2024-02-09T22:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2024-05-31",
+          "startAt": "2024-05-31T22:00:00Z",
+          "endAt": "2024-05-31T23:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2024-05-31",
+          "startAt": "2024-05-31T23:00:00Z",
+          "endAt": "2024-06-01T00:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2024-10-26",
+          "startAt": "2024-10-26T16:00:00Z",
+          "endAt": "2024-10-26T17:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2024-10-26",
+          "startAt": "2024-10-26T17:00:00Z",
+          "endAt": "2024-10-26T18:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2025-10-25",
+          "startAt": "2025-10-25T15:00:00Z",
+          "endAt": "2025-10-25T16:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2025-10-25",
+          "startAt": "2025-10-25T16:00:00Z",
+          "endAt": "2025-10-25T17:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2025-10-25",
+          "startAt": "2025-10-25T17:00:00Z",
+          "endAt": "2025-10-25T18:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2025-10-25",
+          "startAt": "2025-10-25T18:00:00Z",
+          "endAt": "2025-10-25T19:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2025-10-25",
+          "startAt": "2025-10-25T19:00:00Z",
+          "endAt": "2025-10-25T20:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2025-10-25",
+          "startAt": "2025-10-25T20:00:00Z",
+          "endAt": "2025-10-25T21:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-07",
+          "startAt": "2026-05-08T01:00:00Z",
+          "endAt": "2026-05-08T02:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-07",
+          "startAt": "2026-05-08T02:00:00Z",
+          "endAt": "2026-05-08T03:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-07",
+          "startAt": "2026-05-08T03:00:00Z",
+          "endAt": "2026-05-08T04:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-08",
+          "startAt": "2026-05-08T04:00:00Z",
+          "endAt": "2026-05-08T05:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-08",
+          "startAt": "2026-05-08T05:00:00Z",
+          "endAt": "2026-05-08T06:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-08",
+          "startAt": "2026-05-08T06:00:00Z",
+          "endAt": "2026-05-08T07:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-08",
+          "startAt": "2026-05-08T07:00:00Z",
+          "endAt": "2026-05-08T08:00:00Z",
+          "expectedCandles": 4,
+          "reason": "Missing 15-minute source candles"
+        }
+      ],
+      "incompleteIntervals": 0,
+      "incompleteIntervalDetails": [],
+      "unknownSignalIntervals": 21164,
+      "exclusionCounts": {
+        "Unknown tracker signal": 21164
+      },
+      "currentBullishStart": "2026-08-20T12:38:43Z",
+      "trendIntervals": {
+        "BULLISH": 8313,
+        "NEUTRAL": 1468,
+        "BEARISH": 12867
+      },
+      "freshUsdEntryIntervals": 9140
+    },
+    "calendar_day": {
+      "observedIntervals": 1817,
+      "expectedIntervals": 1826,
+      "eligibleEntryIntervals": 936,
+      "excludedIntervals": 881,
+      "missingIntervalCount": 9,
+      "missingCandleIntervals": 9,
+      "missingIntervals": [
+        {
+          "sessionDate": "2021-11-23",
+          "startAt": "2021-11-23T05:00:00Z",
+          "endAt": "2021-11-24T05:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-03-04",
+          "startAt": "2023-03-04T05:00:00Z",
+          "endAt": "2023-03-05T05:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2023-05-19",
+          "startAt": "2023-05-19T04:00:00Z",
+          "endAt": "2023-05-20T04:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2024-02-09",
+          "startAt": "2024-02-09T05:00:00Z",
+          "endAt": "2024-02-10T05:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2024-05-31",
+          "startAt": "2024-05-31T04:00:00Z",
+          "endAt": "2024-06-01T04:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2024-10-26",
+          "startAt": "2024-10-26T04:00:00Z",
+          "endAt": "2024-10-27T04:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2025-10-25",
+          "startAt": "2025-10-25T04:00:00Z",
+          "endAt": "2025-10-26T04:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-07",
+          "startAt": "2026-05-07T04:00:00Z",
+          "endAt": "2026-05-08T04:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        },
+        {
+          "sessionDate": "2026-05-08",
+          "startAt": "2026-05-08T04:00:00Z",
+          "endAt": "2026-05-09T04:00:00Z",
+          "expectedCandles": 96,
+          "reason": "Missing 15-minute source candles"
+        }
+      ],
+      "incompleteIntervals": 1,
+      "incompleteIntervalDetails": [
+        {
+          "sessionDate": "2026-09-15",
+          "startAt": "2026-09-15T04:00:00Z",
+          "endAt": "2026-09-16T04:00:00Z",
+          "expectedCandles": 96
+        }
+      ],
+      "unknownSignalIntervals": 881,
+      "exclusionCounts": {
+        "Unknown tracker signal": 881
+      },
+      "currentBullishStart": "2026-08-20T12:38:43Z",
+      "trendIntervals": {
+        "BULLISH": 341,
+        "NEUTRAL": 61,
+        "BEARISH": 534
+      },
+      "freshUsdEntryIntervals": 380
+    },
+    "daily": {
+      "observedIntervals": 1254,
+      "expectedIntervals": 1254,
+      "eligibleEntryIntervals": 649,
+      "excludedIntervals": 605,
+      "missingIntervalCount": 0,
+      "missingCandleIntervals": 0,
+      "missingIntervals": [],
+      "incompleteIntervals": 1,
+      "incompleteIntervalDetails": [
+        {
+          "sessionDate": "2026-09-15",
+          "startAt": "2026-09-15T13:30:00Z",
+          "endAt": "2026-09-15T20:00:00Z",
+          "timeZone": "America/New_York",
+          "earlyClose": false,
+          "expectedCandles": 26
+        }
+      ],
+      "unknownSignalIntervals": 605,
+      "exclusionCounts": {
+        "Unknown tracker signal": 605
+      },
+      "currentBullishStart": "2026-08-20T12:38:43Z",
+      "trendIntervals": {
+        "BULLISH": 237,
+        "NEUTRAL": 46,
+        "BEARISH": 366
+      },
+      "freshUsdEntryIntervals": 380
+    }
+  },
+  "coverageByYear": {
+    "hourly": [
+      {
+        "year": 2021,
+        "prices": 2592,
+        "signalsAndRanges": 2585,
+        "volume": 2592,
+        "dollar": 0,
+        "quads": 0
+      },
+      {
+        "year": 2022,
+        "prices": 8760,
+        "signalsAndRanges": 6601,
+        "volume": 8760,
+        "dollar": 0,
+        "quads": 0
+      },
+      {
+        "year": 2023,
+        "prices": 8753,
+        "signalsAndRanges": 0,
+        "volume": 8753,
+        "dollar": 0,
+        "quads": 8753
+      },
+      {
+        "year": 2024,
+        "prices": 8779,
+        "signalsAndRanges": 376,
+        "volume": 8779,
+        "dollar": 1735,
+        "quads": 8779
+      },
+      {
+        "year": 2025,
+        "prices": 8754,
+        "signalsAndRanges": 7519,
+        "volume": 8754,
+        "dollar": 5992,
+        "quads": 8754
+      },
+      {
+        "year": 2026,
+        "prices": 6174,
+        "signalsAndRanges": 5567,
+        "volume": 6174,
+        "dollar": 4184,
+        "quads": 4336
+      }
+    ],
+    "calendar_day": [
+      {
+        "year": 2021,
+        "prices": 107,
+        "signalsAndRanges": 106,
+        "volume": 107,
+        "dollar": 0,
+        "quads": 0
+      },
+      {
+        "year": 2022,
+        "prices": 365,
+        "signalsAndRanges": 275,
+        "volume": 365,
+        "dollar": 0,
+        "quads": 0
+      },
+      {
+        "year": 2023,
+        "prices": 363,
+        "signalsAndRanges": 0,
+        "volume": 363,
+        "dollar": 0,
+        "quads": 363
+      },
+      {
+        "year": 2024,
+        "prices": 363,
+        "signalsAndRanges": 15,
+        "volume": 363,
+        "dollar": 73,
+        "quads": 363
+      },
+      {
+        "year": 2025,
+        "prices": 364,
+        "signalsAndRanges": 311,
+        "volume": 364,
+        "dollar": 252,
+        "quads": 364
+      },
+      {
+        "year": 2026,
+        "prices": 255,
+        "signalsAndRanges": 229,
+        "volume": 255,
+        "dollar": 175,
+        "quads": 179
+      }
+    ],
+    "daily": [
+      {
+        "year": 2021,
+        "prices": 76,
+        "signalsAndRanges": 76,
+        "volume": 76,
+        "dollar": 0,
+        "quads": 0
+      },
+      {
+        "year": 2022,
+        "prices": 251,
+        "signalsAndRanges": 188,
+        "volume": 251,
+        "dollar": 0,
+        "quads": 0
+      },
+      {
+        "year": 2023,
+        "prices": 250,
+        "signalsAndRanges": 0,
+        "volume": 250,
+        "dollar": 0,
+        "quads": 250
+      },
+      {
+        "year": 2024,
+        "prices": 252,
+        "signalsAndRanges": 11,
+        "volume": 252,
+        "dollar": 72,
+        "quads": 252
+      },
+      {
+        "year": 2025,
+        "prices": 250,
+        "signalsAndRanges": 215,
+        "volume": 250,
+        "dollar": 247,
+        "quads": 250
+      },
+      {
+        "year": 2026,
+        "prices": 175,
+        "signalsAndRanges": 159,
+        "volume": 175,
+        "dollar": 174,
+        "quads": 123
+      }
+    ]
+  },
+  "sourceCoverage": {
+    "reports": 673,
+    "verifiedReports": 654,
+    "description": "654 reports have verified Trend and range evidence. Source history is discontinuous; gaps longer than two weeks: 2022-10-05 to 2024-12-16; 2025-01-15 to 2025-02-05; 2025-05-01 to 2025-05-28; 2026-06-04 to 2026-06-29. Publisher reports exist within the mailbox gap, but the worked January 2023 recovery did not establish historical receipt evidence. These observations remain excluded under the agreed timing rule. Price and volume coverage remains separately visible.",
+    "longGaps": [
+      {
+        "startAt": "2022-10-05T04:00:00Z",
+        "endAt": "2024-12-16T12:17:56Z"
+      },
+      {
+        "startAt": "2025-01-15T05:00:00Z",
+        "endAt": "2025-02-05T11:50:06Z"
+      },
+      {
+        "startAt": "2025-05-01T04:00:00Z",
+        "endAt": "2025-05-28T11:09:04Z"
+      },
+      {
+        "startAt": "2026-06-04T04:00:00Z",
+        "endAt": "2026-06-29T10:56:47Z"
+      }
+    ]
+  },
+  "sourceRecoveryAudit": {
+    "schemaVersion": 1,
+    "status": "verified_historical",
+    "source": "Hedgeye original Crypto Quant / Bitcoin Trend Tracker reports",
+    "asOf": "2026-09-15T18:00:00Z",
+    "requestedStartDate": "2021-09-15",
+    "requestedEndDate": "2026-09-15",
+    "olderCandidateMessages": 395,
+    "actualOlderReports": 388,
+    "verifiedOlderReports": 385,
+    "excludedOlderReports": [
+      {
+        "date": "2022-02-08",
+        "reason": "Original BTC risk-range image returned HTTP 403."
+      },
+      {
+        "date": "2022-02-14",
+        "reason": "The original table has a blacked-out asset header; BTC identity is not verified."
+      },
+      {
+        "date": "2025-04-08",
+        "reason": "The original table has a blacked-out asset header; BTC identity is not verified."
+      }
+    ],
+    "reportVersions": 673,
+    "uniqueReportDates": 670,
+    "verifiedReports": 654,
+    "verifiedRangeReports": 654,
+    "visuallyReviewedReports": 130,
+    "firstVerifiedAt": "2021-09-15T10:58:50Z",
+    "lastVerifiedAt": "2026-09-15T11:08:18Z",
+    "interruptions": [
+      {
+        "startAt": "2022-02-08T11:28:39Z",
+        "endAt": "2022-02-09T11:26:35Z",
+        "affectedReportDates": 1,
+        "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+      },
+      {
+        "startAt": "2022-02-14T13:09:05Z",
+        "endAt": "2022-02-15T11:34:24Z",
+        "affectedReportDates": 1,
+        "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+      },
+      {
+        "startAt": "2022-10-05T04:00:00Z",
+        "endAt": "2024-12-16T12:17:56Z",
+        "affectedReportDates": 552,
+        "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY"
+      },
+      {
+        "startAt": "2025-01-15T05:00:00Z",
+        "endAt": "2025-02-05T11:50:06Z",
+        "affectedReportDates": 14,
+        "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY"
+      },
+      {
+        "startAt": "2025-04-08T13:06:17Z",
+        "endAt": "2025-04-09T12:44:03Z",
+        "affectedReportDates": 1,
+        "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+      },
+      {
+        "startAt": "2025-05-01T04:00:00Z",
+        "endAt": "2025-05-28T11:09:04Z",
+        "affectedReportDates": 18,
+        "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY"
+      },
+      {
+        "startAt": "2025-08-06T13:14:19Z",
+        "endAt": "2025-08-07T11:33:34Z",
+        "affectedReportDates": 1,
+        "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+      },
+      {
+        "startAt": "2025-10-06T11:10:55Z",
+        "endAt": "2025-10-07T10:42:03Z",
+        "affectedReportDates": 1,
+        "reason": "BTC_SOURCE_TABLE_UNRECOVERED"
+      },
+      {
+        "startAt": "2026-06-04T04:00:00Z",
+        "endAt": "2026-06-29T10:56:47Z",
+        "affectedReportDates": 16,
+        "reason": "EXPECTED_REPORT_NOT_FOUND_IN_SOURCE_INVENTORY;TRUSTED_RECEIPT_TIME_UNAVAILABLE"
+      }
+    ],
+    "publisherArchiveAccess": "Original article, date-filtered archive, and publisher search returned HTTP 403 from available access; no connected browser was available. This does not establish that the publisher lacks older reports.",
+    "timingConvention": "Availability is the later of exact original publication time and trusted Google receipt; unknown report days interrupt previous-state carry.",
+    "quadRecovery": {
+      "newActualQuarterStart": "2023-Q1",
+      "newActualQuarterEnd": "2025-Q1",
+      "existingLatestVintageActualQuarterStart": "2024-Q3",
+      "existingLatestVintageActualQuarterEnd": "2026-Q2",
+      "unverifiedEarlierQuarters": "2021-Q3 through 2022-Q4",
+      "basis": "Retrospective published actual-quarter classifications; forecast cells excluded."
+    }
+  },
+  "publisherArchiveFollowup": {
+    "originalReportsAvailable": true,
+    "historicalReceiptVerified": false,
+    "sampleDate": "2023-01-31",
+    "reconstructedSignalsIncluded": 0,
+    "reason": "The authenticated publisher archive contains historical reports, including the January 31, 2023 original. Its printed publication time and versioned source image do not establish a historical receipt. The approved receipt requirement is unchanged; these reports remain excluded, so the study gap reflects unavailable verified entry-timing evidence rather than proof that reports did not exist."
+  },
+  "originalPeriodComparison": {
+    "startAt": "2025-07-28T00:00:00Z",
+    "endAt": "2026-09-15T18:00:00Z",
+    "originalHourlyObservations": 9944,
+    "expandedHourlyObservationsInOriginalWindow": 9941,
+    "excludedHours": [
+      "2025-10-25T15:00:00Z",
+      "2026-05-08T01:00:00Z",
+      "2026-05-08T07:00:00Z"
+    ],
+    "addedHours": [],
+    "overlappingOpenCloseDisagreements": 0,
+    "explanation": "The expanded study requires all four constituent 15-minute candles per hour. An original native hourly candle is excluded here when a constituent is missing; no prices are filled. The original study remains separately reproducible."
+  },
+  "volume": {
+    "hourly": {
+      "source": "Coin Metrics",
+      "metric": "volume_reported_spot_usd_1d",
+      "unit": "USD",
+      "dayTimeZone": "UTC",
+      "lookbackDays": 15,
+      "availabilityLagHours": 1,
+      "vintage": "latest_retrieved",
+      "coveredIntervals": 43812,
+      "unavailableIntervals": 0,
+      "coveredEligibleEntries": 22648,
+      "methodology": [
+        "Volume is Coin Metrics exchange-reported Bitcoin spot turnover in USD across covered markets; it is not total market activity or perpetual/ETF volume.",
+        "Below average means the latest completed UTC day is strictly below the average of its preceding 15 completed UTC days, including weekends. The evaluated day is excluded from its own average.",
+        "A UTC volume day becomes usable one hour after its following midnight. Missing days or lookback inputs remain unavailable; no older observation is carried forward.",
+        "Historical volumes are the latest retrieved vintage. Original publication and revision timestamps are unavailable, so this proxy does not reproduce an exact historical live feed.",
+        "Sensitivity checks use one additional day of lag and Coinbase BTC-USD spot volume in BTC with the same complete UTC-day rule. These checks keep the fixed 15-day threshold."
+      ]
+    },
+    "calendar_day": {
+      "source": "Coin Metrics",
+      "metric": "volume_reported_spot_usd_1d",
+      "unit": "USD",
+      "dayTimeZone": "UTC",
+      "lookbackDays": 15,
+      "availabilityLagHours": 1,
+      "vintage": "latest_retrieved",
+      "coveredIntervals": 1817,
+      "unavailableIntervals": 0,
+      "coveredEligibleEntries": 936,
+      "methodology": [
+        "Volume is Coin Metrics exchange-reported Bitcoin spot turnover in USD across covered markets; it is not total market activity or perpetual/ETF volume.",
+        "Below average means the latest completed UTC day is strictly below the average of its preceding 15 completed UTC days, including weekends. The evaluated day is excluded from its own average.",
+        "A UTC volume day becomes usable one hour after its following midnight. Missing days or lookback inputs remain unavailable; no older observation is carried forward.",
+        "Historical volumes are the latest retrieved vintage. Original publication and revision timestamps are unavailable, so this proxy does not reproduce an exact historical live feed.",
+        "Sensitivity checks use one additional day of lag and Coinbase BTC-USD spot volume in BTC with the same complete UTC-day rule. These checks keep the fixed 15-day threshold."
+      ]
+    },
+    "daily": {
+      "source": "Coin Metrics",
+      "metric": "volume_reported_spot_usd_1d",
+      "unit": "USD",
+      "dayTimeZone": "UTC",
+      "lookbackDays": 15,
+      "availabilityLagHours": 1,
+      "vintage": "latest_retrieved",
+      "coveredIntervals": 1254,
+      "unavailableIntervals": 0,
+      "coveredEligibleEntries": 649,
+      "methodology": [
+        "Volume is Coin Metrics exchange-reported Bitcoin spot turnover in USD across covered markets; it is not total market activity or perpetual/ETF volume.",
+        "Below average means the latest completed UTC day is strictly below the average of its preceding 15 completed UTC days, including weekends. The evaluated day is excluded from its own average.",
+        "A UTC volume day becomes usable one hour after its following midnight. Missing days or lookback inputs remain unavailable; no older observation is carried forward.",
+        "Historical volumes are the latest retrieved vintage. Original publication and revision timestamps are unavailable, so this proxy does not reproduce an exact historical live feed.",
+        "Sensitivity checks use one additional day of lag and Coinbase BTC-USD spot volume in BTC with the same complete UTC-day rule. These checks keep the fixed 15-day threshold."
+      ]
+    }
+  },
+  "quadOverlay": {
+    "hourly": {
+      "basis": "retrospective_actual",
+      "country": "United States",
+      "source": "hedgeye-published-global-quads",
+      "sourceAsOf": "2026-08-12",
+      "publishedAt": null,
+      "availableAt": "2026-09-09T18:02:55.426921Z",
+      "quarterAssignments": [
+        {
+          "quarter": "2023-Q1",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-01-01T05:00:00Z",
+          "periodEnd": "2023-04-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-04-01T04:00:00Z",
+          "periodEnd": "2023-07-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q3",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-07-01T04:00:00Z",
+          "periodEnd": "2023-10-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q4",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2023-10-01T04:00:00Z",
+          "periodEnd": "2024-01-01T05:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q1",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2024-01-01T05:00:00Z",
+          "periodEnd": "2024-04-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2024-04-01T04:00:00Z",
+          "periodEnd": "2024-07-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q3",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2024-07-01T04:00:00Z",
+          "periodEnd": "2024-10-01T04:00:00Z"
+        },
+        {
+          "quarter": "2024-Q4",
+          "quad": 3,
+          "kind": "actual",
+          "periodStart": "2024-10-01T04:00:00Z",
+          "periodEnd": "2025-01-01T05:00:00Z"
+        },
+        {
+          "quarter": "2025-Q1",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2025-01-01T05:00:00Z",
+          "periodEnd": "2025-04-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2025-04-01T04:00:00Z",
+          "periodEnd": "2025-07-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q3",
+          "quad": 2,
+          "kind": "actual",
+          "periodStart": "2025-07-01T04:00:00Z",
+          "periodEnd": "2025-10-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q4",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2025-10-01T04:00:00Z",
+          "periodEnd": "2026-01-01T05:00:00Z"
+        },
+        {
+          "quarter": "2026-Q1",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2026-01-01T05:00:00Z",
+          "periodEnd": "2026-04-01T04:00:00Z"
+        },
+        {
+          "quarter": "2026-Q2",
+          "quad": 3,
+          "kind": "actual",
+          "periodStart": "2026-04-01T04:00:00Z",
+          "periodEnd": "2026-07-01T04:00:00Z"
+        }
+      ],
+      "excludedQuarters": [
+        {
+          "quarter": "2026-Q3",
+          "quad": 4,
+          "kind": "estimate",
+          "periodStart": "2026-07-01T04:00:00Z",
+          "periodEnd": "2026-10-01T04:00:00Z"
+        }
+      ],
+      "classifiedIntervals": 30622,
+      "unclassifiedIntervals": 13190,
+      "classifiedEligibleEntries": 11624,
+      "unclassifiedEligibleEntries": 11024,
+      "supplementalSources": [
+        {
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "addedQuarters": [
+            "2023-Q1",
+            "2023-Q2",
+            "2023-Q3",
+            "2023-Q4",
+            "2024-Q1",
+            "2024-Q2"
+          ],
+          "matchedQuarters": [
+            "2024-Q3",
+            "2024-Q4",
+            "2025-Q1"
+          ]
+        }
+      ]
+    },
+    "calendar_day": {
+      "basis": "retrospective_actual",
+      "country": "United States",
+      "source": "hedgeye-published-global-quads",
+      "sourceAsOf": "2026-08-12",
+      "publishedAt": null,
+      "availableAt": "2026-09-09T18:02:55.426921Z",
+      "quarterAssignments": [
+        {
+          "quarter": "2023-Q1",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-01-01T05:00:00Z",
+          "periodEnd": "2023-04-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-04-01T04:00:00Z",
+          "periodEnd": "2023-07-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q3",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-07-01T04:00:00Z",
+          "periodEnd": "2023-10-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q4",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2023-10-01T04:00:00Z",
+          "periodEnd": "2024-01-01T05:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q1",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2024-01-01T05:00:00Z",
+          "periodEnd": "2024-04-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2024-04-01T04:00:00Z",
+          "periodEnd": "2024-07-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q3",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2024-07-01T04:00:00Z",
+          "periodEnd": "2024-10-01T04:00:00Z"
+        },
+        {
+          "quarter": "2024-Q4",
+          "quad": 3,
+          "kind": "actual",
+          "periodStart": "2024-10-01T04:00:00Z",
+          "periodEnd": "2025-01-01T05:00:00Z"
+        },
+        {
+          "quarter": "2025-Q1",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2025-01-01T05:00:00Z",
+          "periodEnd": "2025-04-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2025-04-01T04:00:00Z",
+          "periodEnd": "2025-07-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q3",
+          "quad": 2,
+          "kind": "actual",
+          "periodStart": "2025-07-01T04:00:00Z",
+          "periodEnd": "2025-10-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q4",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2025-10-01T04:00:00Z",
+          "periodEnd": "2026-01-01T05:00:00Z"
+        },
+        {
+          "quarter": "2026-Q1",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2026-01-01T05:00:00Z",
+          "periodEnd": "2026-04-01T04:00:00Z"
+        },
+        {
+          "quarter": "2026-Q2",
+          "quad": 3,
+          "kind": "actual",
+          "periodStart": "2026-04-01T04:00:00Z",
+          "periodEnd": "2026-07-01T04:00:00Z"
+        }
+      ],
+      "excludedQuarters": [
+        {
+          "quarter": "2026-Q3",
+          "quad": 4,
+          "kind": "estimate",
+          "periodStart": "2026-07-01T04:00:00Z",
+          "periodEnd": "2026-10-01T04:00:00Z"
+        }
+      ],
+      "classifiedIntervals": 1269,
+      "unclassifiedIntervals": 548,
+      "classifiedEligibleEntries": 479,
+      "unclassifiedEligibleEntries": 457,
+      "supplementalSources": [
+        {
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "addedQuarters": [
+            "2023-Q1",
+            "2023-Q2",
+            "2023-Q3",
+            "2023-Q4",
+            "2024-Q1",
+            "2024-Q2"
+          ],
+          "matchedQuarters": [
+            "2024-Q3",
+            "2024-Q4",
+            "2025-Q1"
+          ]
+        }
+      ]
+    },
+    "daily": {
+      "basis": "retrospective_actual",
+      "country": "United States",
+      "source": "hedgeye-published-global-quads",
+      "sourceAsOf": "2026-08-12",
+      "publishedAt": null,
+      "availableAt": "2026-09-09T18:02:55.426921Z",
+      "quarterAssignments": [
+        {
+          "quarter": "2023-Q1",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-01-01T05:00:00Z",
+          "periodEnd": "2023-04-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-04-01T04:00:00Z",
+          "periodEnd": "2023-07-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q3",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2023-07-01T04:00:00Z",
+          "periodEnd": "2023-10-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2023-Q4",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2023-10-01T04:00:00Z",
+          "periodEnd": "2024-01-01T05:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q1",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2024-01-01T05:00:00Z",
+          "periodEnd": "2024-04-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2024-04-01T04:00:00Z",
+          "periodEnd": "2024-07-01T04:00:00Z",
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "retrospectiveOnly": true
+        },
+        {
+          "quarter": "2024-Q3",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2024-07-01T04:00:00Z",
+          "periodEnd": "2024-10-01T04:00:00Z"
+        },
+        {
+          "quarter": "2024-Q4",
+          "quad": 3,
+          "kind": "actual",
+          "periodStart": "2024-10-01T04:00:00Z",
+          "periodEnd": "2025-01-01T05:00:00Z"
+        },
+        {
+          "quarter": "2025-Q1",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2025-01-01T05:00:00Z",
+          "periodEnd": "2025-04-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q2",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2025-04-01T04:00:00Z",
+          "periodEnd": "2025-07-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q3",
+          "quad": 2,
+          "kind": "actual",
+          "periodStart": "2025-07-01T04:00:00Z",
+          "periodEnd": "2025-10-01T04:00:00Z"
+        },
+        {
+          "quarter": "2025-Q4",
+          "quad": 4,
+          "kind": "actual",
+          "periodStart": "2025-10-01T04:00:00Z",
+          "periodEnd": "2026-01-01T05:00:00Z"
+        },
+        {
+          "quarter": "2026-Q1",
+          "quad": 1,
+          "kind": "actual",
+          "periodStart": "2026-01-01T05:00:00Z",
+          "periodEnd": "2026-04-01T04:00:00Z"
+        },
+        {
+          "quarter": "2026-Q2",
+          "quad": 3,
+          "kind": "actual",
+          "periodStart": "2026-04-01T04:00:00Z",
+          "periodEnd": "2026-07-01T04:00:00Z"
+        }
+      ],
+      "excludedQuarters": [
+        {
+          "quarter": "2026-Q3",
+          "quad": 4,
+          "kind": "estimate",
+          "periodStart": "2026-07-01T04:00:00Z",
+          "periodEnd": "2026-10-01T04:00:00Z"
+        }
+      ],
+      "classifiedIntervals": 875,
+      "unclassifiedIntervals": 379,
+      "classifiedEligibleEntries": 333,
+      "unclassifiedEligibleEntries": 316,
+      "supplementalSources": [
+        {
+          "sourceAsOf": "2025-07-22",
+          "publishedAt": "2025-07-22T11:23:00Z",
+          "receivedAt": "2025-07-22T11:26:56Z",
+          "availableAt": "2025-07-22T11:26:56Z",
+          "reviewedAt": "2026-09-15T23:15:37.000556+00:00",
+          "addedQuarters": [
+            "2023-Q1",
+            "2023-Q2",
+            "2023-Q3",
+            "2023-Q4",
+            "2024-Q1",
+            "2024-Q2"
+          ],
+          "matchedQuarters": [
+            "2024-Q3",
+            "2024-Q4",
+            "2025-Q1"
+          ]
+        }
+      ]
+    }
+  },
+  "dollarCoverage": {
+    "pairedDailyObservations": 1297,
+    "pairedHourlyReturns": 11787,
+    "targetRows": 45256,
+    "indicatorEligibleHours": 11911,
+    "featureCounts": {
+      "corr15Level": 44747,
+      "corr30Level": 44243,
+      "corr120Return": 17304,
+      "usdSessionMoveBp": 11911,
+      "usdHourMoveBp": 11786
+    },
+    "missingFeatureCounts": {
+      "corr15Level": 509,
+      "corr30Level": 1013,
+      "corr120Return": 27952,
+      "usdSessionMoveBp": 33345,
+      "usdHourMoveBp": 33470
+    },
+    "referencesOlderThan48Hours": 2526,
+    "exclusionCounts": {
+      "No DXY bar ending exactly one hour before BTC hour": 33345
+    },
+    "availabilityPolicy": "Daily observations use collector availability (next New York midnight for DXY; next UTC midnight for BTC) plus one hour. Full hourly bars use bar end plus one hour. No historical publication timestamps or exact official DXY closing times are asserted.",
+    "referenceAgeBasis": "Hours since completed daily reference became conservatively available, not hours since the final index tick.",
+    "priceLagHours": 1,
+    "dailyCorrelationBasis": "Aligned daily closing price levels; Pearson, full precision",
+    "returnCorrelationWindow": 120,
+    "returnCorrelationMaxAgeDays": 21
+  },
+  "dollarHourlyStart": "2024-09-17T00:00:00Z",
+  "inputsAndScripts": [
+    {
+      "path": "artifacts/btc-five-year-study/source-signals/signals.json",
+      "sha256": "0e218401404e6a1bffe52e369961381c1dee85925428e16a5d41bfcbd914bba9"
+    },
+    {
+      "path": "artifacts/btc-five-year-study/publisher-timing-review.json",
+      "sha256": "4a5ac4dd273b9de4437ac95568e84943abdf5126ea626e7dc27ca7f9ed3604e7"
+    },
+    {
+      "path": "artifacts/btc-five-year-study/source-prices/fetch-manifest.json",
+      "sha256": "99352432de4b39b8398f5378e208f4056eb080b9c242543160590e0de96ffc74"
+    },
+    {
+      "path": "artifacts/btc-five-year-study/source-volume/daily.json",
+      "sha256": "c9920bdad4ddd1c29754af421caeb9897c1adba590405709ef6c0b274a8d48b5"
+    },
+    {
+      "path": "artifacts/btc-five-year-study/source-volume/fetch-manifest.json",
+      "sha256": "ec3d28eb10c89d515495e958576956fde8afda25773956524b1c0840321c2cfe"
+    },
+    {
+      "path": "artifacts/btc-five-year-study/source-usd/manifest.json",
+      "sha256": "2a7af95a5f431382248571285ec5de795d4e872cab452f73da6f8845bfe807c3"
+    },
+    {
+      "path": "artifacts/btc-five-year-study/source-signals/source-manifest.json",
+      "sha256": "4d8826c1f5d21bb03f4bbeb452a000ed9d8d21e679c51272b1747060972d7485"
+    },
+    {
+      "path": "artifacts/btc-five-year-study/original-study/archive-manifest.json",
+      "sha256": "8b5e1af968b4718aa2a13bbd59c9984c34b66853468bd632da07e9b7fd50ed24"
+    },
+    {
+      "path": "artifacts/btc-interval-experiment/source-quads/global-quads-history.json",
+      "sha256": "9cb745f1f6182314a31fda2a608d461679e6dcfb386312cb745600de5ee8fb29"
+    },
+    {
+      "path": "scripts/research/btc_range_entry_experiment.py",
+      "sha256": "dd5f32049db7bf9b464eb074f38ec28c379848fcf1f3c765497b70b105d0282b"
+    },
+    {
+      "path": "scripts/research/btc_usd_features.py",
+      "sha256": "8b12cfee994b54dc0959e1de2f0bcf64f858d40735defb16dd7bdaf3c3ced1a6"
+    },
+    {
+      "path": "scripts/research/btc_quad_recovery.py",
+      "sha256": "78a9067362495762c40b761019eef7566b2e7ad8294f58279313c36564ee1a12"
+    },
+    {
+      "path": "scripts/research/btc_quad_overlay.py",
+      "sha256": "2d8b10d7b16e3dca0623f99155594bc903d298332bb2df2fe8aefdf233b76209"
+    },
+    {
+      "path": "scripts/research/btc_multiyear_prices.py",
+      "sha256": "181d55174eecc664a123db58c177520ed8b4235643c4cc449c38919b1b14681f"
+    },
+    {
+      "path": "scripts/research/btc_price_history.py",
+      "sha256": "94493a9b5ecc1dbd7d8b21e4b62f877ec788eaa62727e7272fad6b92fc30ec9b"
+    },
+    {
+      "path": "scripts/research/btc_volume_statistics.py",
+      "sha256": "000eeba2a01b73f333edce84b744d4fed040bf7195d030c16dadfd413604f576"
+    },
+    {
+      "path": "scripts/research/btc_hourly_bias.py",
+      "sha256": "d3d660e733c8bcb558d373b53c4119e191da824330af689357487dbcde7ea78d"
+    },
+    {
+      "path": "scripts/research/btc_usd_experiment.py",
+      "sha256": "0e1b0a548451861482e4c33a92026164bb7c66a7ce40db8c225dae0781fe075a"
+    },
+    {
+      "path": "scripts/research/btc_signal_history.py",
+      "sha256": "9d2ddd77e253b515dd59ccada3dc2984f9d9231c9dd5bf77a0f22109339a0052"
+    },
+    {
+      "path": "scripts/research/btc_reproduce_original.py",
+      "sha256": "0c77a65e321beb616cd65893cd3dd657843d5fefa353462e8f9785669bc54a37"
+    },
+    {
+      "path": "scripts/research/btc_volume_history.py",
+      "sha256": "3eaee0f77f0722978d3363b0480afa0283c94e1055c38019e5004fc11243bf05"
+    },
+    {
+      "path": "scripts/research/btc_usd_history.py",
+      "sha256": "c268f37de6fb04311435f8dfdc7d4994341dd25129dd89c8aea85fc74cee8788"
+    },
+    {
+      "path": "scripts/research/btc_interval_study.py",
+      "sha256": "c5b16153d08a9d3bbdf0f1dbe1f6b3aaebd64be82f8a7b235311810527ae83a4"
+    },
+    {
+      "path": "scripts/research/btc_nyse_sessions.py",
+      "sha256": "f0bf69820044dc1ec241cca64cccfeec9c84c3a06764743f18336c77ec3cf90a"
+    },
+    {
+      "path": "scripts/research/btc_five_year_study.py",
+      "sha256": "4e9edba92044277dfb1beb8db48a90f028e95c91b630d09504b9ae3593e780c4"
+    },
+    {
+      "path": "src/utils/usEquityMarketCalendar.cjs",
+      "sha256": "db616e0ff5e452272803e84cb9660c3cfe21849c2a4a8835ec757dff14daf6e4"
+    },
+    {
+      "path": "src/services/bitcoinResearchService.js",
+      "sha256": "d380b1832e9e969279f3ca300a7e857fd0d48dc9f51a26ac06897d90c9061551"
+    }
+  ],
+  "publicPrivacy": "No original subscriber report content, message IDs, mail links, source images or raw provider bodies exported.",
+  "elapsedSeconds": 105.291
+}

@@ -153,9 +153,18 @@ class SetupBoardRenderTests(unittest.TestCase):
                  "publishedAt": "2026-10-06T11:48:50+00:00", "eventTicker": "KXCPIYOY-26SEP"},
                 {"reportMonth": "2026-10", "available": True, "lower": 3.69, "base": 3.8, "upper": 3.91,
                  "publishedAt": "2026-10-06T11:48:50+00:00", "eventTicker": None}]}]})
-        self.assertIn("| CPI YoY · Sep 2026 | Sep | 3.63% | 3.74% | 3.85% | Oct 6 |", report)
-        self.assertIn("| CPI YoY · Oct 2026 | N/A | 3.69% | 3.80% | 3.91% | Oct 6 |", report)
+        self.assertIn("| CPI YoY · Sep 2026 | Sep | 3.63% | 3.74% | 3.85% | Oct 6 04:48 PDT |", report)
+        self.assertIn("| CPI YoY · Oct 2026 | N/A | 3.69% | 3.80% | 3.91% | Oct 6 04:48 PDT |", report)
         self.assertIn("Sources: HedgAI Signals, Cboe volatility indices, Kalshi", report)
+
+    def test_sources_line_gives_every_publication_the_same_date_and_time(self):
+        report = render_setup_board({"rows": [], "sources": {
+            "riskRanges": "2026-10-15T11:37:00.000Z", "cryptoQuant": "2026-10-15T11:40:00.000Z",
+            "inflationNowcast": "2026-10-14T13:29:20+00:00"}})
+        self.assertIn("Sources: Risk Ranges Oct 15 04:37 PDT, Crypto Quant Oct 15 04:40 PDT, "
+                      "Inflation Nowcast Oct 14 06:29 PDT, HedgAI Signals", report)
+        # A publication with only a date keeps its date; no time is invented.
+        self.assertIn("Sources: Risk Ranges Oct 15, HedgAI", render_setup_board({"rows": [], "sources": {"riskRanges": "2026-10-15"}}))
 
     def test_saved_legacy_and_new_captures_use_their_own_renderer(self):
         sections = [{"id": "setup-board", "board": board()}]

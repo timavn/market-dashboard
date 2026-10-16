@@ -144,6 +144,37 @@ test('CPI lists every nowcast month from the current Kalshi release, with N/A wh
     [['2026-09', 3.74, 'KXCPIYOY-26SEP'], ['2026-10', 3.8, null]]);
 });
 
+test('CPI shows the newest nowcast month before Kalshi lists it, and drops months BLS already released', () => {
+  const board = buildSetupBoard({
+    asOf: '2026-10-15T13:00:00Z',
+    nowcast: { publishedAt: '2026-10-14T13:29:20+00:00', data: { forecasts: [
+      { reportMonth: '2026-09', releaseAt: '2026-10-14T12:30:00Z', scenarios: { lower: 3.6, base: 3.7, upper: 3.8 } },
+      { reportMonth: '2026-10', releaseAt: '2026-11-10T13:30:00Z', publishedAt: '2026-10-14T13:29:16+00:00',
+        scenarios: { lower: '3.69', base: '3.8', upper: '3.91' } },
+    ] } },
+    eventsBySeries: { KXCPIYOY: [{ event_ticker: 'KXCPIYOY-26NOV' }, { event_ticker: 'KXCPIYOY-26DEC' }] },
+  });
+  const cpi = board.rows.find((row) => row.id === 'cpi');
+  assert.deepEqual(cpi.forecasts.map((row) => [row.reportMonth, row.available, row.base, row.eventTicker]),
+    [['2026-10', true, 3.8, null], ['2026-11', false, undefined, 'KXCPIYOY-26NOV']]);
+  assert.equal(cpi.forecasts[0].publishedAt, '2026-10-14T13:29:16+00:00');
+});
+
+test('Risk Ranges and Crypto Quant sources carry the email send time, not the midnight placeholder', () => {
+  const board = buildSetupBoard({
+    riskRanges: { publishedAt: '2026-10-15T11:37:00.000Z', manifest: { publicationDate: '2026-10-15' } },
+    cryptoQuant: { date: '2026-10-15', publishedAt: '2026-10-15T00:00:00+00:00',
+      article: { bodyText: 'HEDGEYE … 10/15/2026 07:40 AM EDT …' } },
+  });
+  assert.equal(board.sources.riskRanges, '2026-10-15T11:37:00.000Z');
+  assert.equal(board.sources.cryptoQuant, '2026-10-15T11:40:00.000Z');
+  const { emailPublishedAt } = require('./predictionSetupBoard.cjs');
+  assert.equal(emailPublishedAt({ article: { bodyText: '1/15/2026 07:37 AM ET' } }), '2026-01-15T12:37:00.000Z');
+  assert.equal(emailPublishedAt({ publishedAt: '2026-10-15T00:00:00+00:00' }), null);
+  // Without an email time the board keeps the publication date rather than inventing one.
+  assert.equal(buildSetupBoard({ cryptoQuant: { date: '2026-10-15' } }).sources.cryptoQuant, '2026-10-15');
+});
+
 test('silver volatility comes from Cboe VXSLV alongside the dashboard volatility snapshot', () => {
   assert.deepEqual(require('./predictionSetupBoard.cjs').extraCboeSeries(), [{ name: 'VXSLV', symbol: 'VXSLV' }]);
   const board = buildSetupBoard({ volatility: { VXSLV: { lastPx: 37.33, dayChangePct: 1.63, fifteenDayChangePct: -4.2,
