@@ -115,3 +115,25 @@ test('summarises each market with the highest-priority Alpha Code and the price 
   assert.equal(research.markets.bitcoin.alphaCode.approximate, true);
   assert.equal(research.markets.bitcoin.alphaCode.priceVsTrade, 'below');
 });
+
+test('every statement naming a market is a mention, with the part of it about that market as context', () => {
+  const text = [
+    'USD – All the while, USD (UUP) is giving us another Buying Opportunity; neither our Fed Front-Runner (UST 2yr Signal) nor Oil Signal have changed this week – both are Bullish TRADE and TREND',
+    'Immediate-term @Hedgeye Risk Ranges : SP500 = 7701-7850; UST 10yr Yield = 5.06-5.36%',
+    'BULLISH: U.S. Dollar (USD), Software (IGV), Invesco QQQ Trust (QQQ), Microsoft (MSFT), Bitcoin (BTC).',
+    'He also confirmed shorting British pounds against the dollar . (2:11) (16:06)',
+    'Gold Spot Price (GOLD) 4090-4216 (bearish)',
+  ].join('\n');
+  const findings = extractFromText(text, { product: 'top-3-things', references });
+  const context = (market, kind) => findings.filter((item) => item.market === market && (!kind || item.kind === kind)).map((item) => item.context);
+  // USD states no level or direction here, so it is a mention; the heading "USD –" is dropped.
+  assert.deepEqual(context('usd', 'mention'), ['All the while, USD (UUP) is giving us another Buying Opportunity', 'BULLISH: U.S. Dollar (USD)',
+    'He also confirmed shorting British pounds against the dollar.']);
+  // An unnamed clause continues the markets before it.
+  assert.deepEqual(context('ust2y'), ['Neither our Fed Front-Runner (UST 2yr Signal) nor Oil Signal have changed this week – both are Bullish TRADE and TREND']);
+  assert.deepEqual(context('ust10y'), ['Immediate-term @Hedgeye Risk Ranges: UST 10yr Yield = 5.06-5.36%']);
+  assert.deepEqual(context('bitcoin'), ['BULLISH: Bitcoin (BTC)']);
+  // The levels table is read as data, not as a mention.
+  assert.deepEqual(context('gold'), []);
+  assert.equal(findings.find((item) => item.market === 'usd').excerpt.startsWith('USD – All the while'), true);
+});

@@ -185,6 +185,45 @@ function statements(text) {
 }
 
 const excerptOf = (statement) => (statement.length > 320 ? `${statement.slice(0, 317)}…` : statement);
+
+// Where one statement's clauses meet: semicolons, spaced dashes, ", and" before a new clause, and sentence ends
+// the statement split kept together (a closing quote, or the " . " some summaries leave), never the "U.S." in U.S. Dollar.
+const CLAUSE_BREAK = /(\s*;\s*|\s+[–—-]\s+|,\s+and\s+(?=[a-z])|\s+\.\s+(?=[A-Z])|(?<=[a-z0-9%)][.!?]|[.!?][”"’'])\s+(?=[A-Z]))/;
+// "BULLISH: U.S. Dollar (USD), Software (IGV), …" lists one market per item.
+const LIST_ITEM = /(,\s+)/;
+// Early Look's levels table ("Gold Spot Price (GOLD) 4090-4216 (bearish)") is read as data by structuredFindings.
+const LEVELS_ROW = /\([A-Z0-9/]+\)\s+[\d.,]+\s*[-–]\s*[\d.,]+%?\s*\((?:bullish|bearish|neutral)\)\s*$/i;
+// Video summaries stamp each point with its time in the show: "(2:11) (16:06)".
+const SHOW_TIMES = /\s*\(\d{1,2}:\d{2}(?::\d{2})?\)/g;
+/**
+ * The part of a statement about one market, in the statement's own words: the
+ * clauses that name it, the unnamed clauses that continue them ("– both are
+ * Bullish TRADE and TREND"), and a leading label ("Risk Ranges:") that names no market.
+ */
+function contextFor(statement, market) {
+  const lead = statement.match(/^([^:;]{3,60}?)\s*:\s+/);
+  const labelled = lead && !mentions(lead[1]).some((item) => item.market);
+  const body = labelled ? statement.slice(lead[0].length) : statement;
+  const list = labelled && body.split(LIST_ITEM).length >= 5;
+  const parts = body.split(list ? LIST_ITEM : CLAUSE_BREAK);
+  let inherited = [];
+  let kept = '';
+  let last = -2;
+  for (let index = 0; index < parts.length; index += 2) {
+    const clause = parts[index];
+    const named = mentions(clause);
+    const markets = named.length ? named.map((item) => item.market) : list ? [] : inherited;
+    inherited = markets;
+    // A bare name heading the statement ("USD – …") labels it; it is not a clause.
+    const bare = !list && named.length && !named.reduceRight((text, item) => text.slice(0, item.index) + text.slice(item.end), clause).replace(/[\s()[\],.:–—-]/g, '');
+    if (bare || !markets.includes(market)) continue;
+    kept += last === index - 2 ? (kept ? parts[index - 1].replace(/^\s+\.\s+$/, '. ') : '') + clause : (kept ? ' … ' : '') + clause;
+    last = index;
+  }
+  const text = (kept ? `${labelled ? `${lead[1].trim()}: ` : ''}${kept}` : statement)
+    .replace(SHOW_TIMES, '').replace(/\s+([.,;:])(?=\s|$)/g, '$1').replace(list ? /[\s,;:.–—-]+$/ : /[\s,;:–—-]+$/, '');
+  return excerptOf(text.charAt(0).toUpperCase() + text.slice(1));
+}
 const titleCase = (word) => word ? word[0].toUpperCase() + word.slice(1).toLowerCase() : word;
 
 /**
@@ -197,6 +236,7 @@ function extractFromText(text, { product, references = {} } = {}) {
   let carry = null;
   let rosterUntil = -1;
   lines.forEach((statement, lineIndex) => {
+    const first = findings.length;
     // "The Code = TRADE first, then TREND …" or "this morning's Alpha Codes" opens a roster of "SPX = 7651/7501" lines.
     if (/\bTRADE\s+first\b|\balpha\s+codes\b/i.test(statement)) rosterUntil = lineIndex + 12;
     const found = mentions(statement);
@@ -351,6 +391,13 @@ function extractFromText(text, { product, references = {} } = {}) {
           trade: titleCase(both[1]), trend: titleCase(both[1]) });
       }
     }
+    // Every tracked market the statement names is a mention, whether or not it states a level or direction.
+    for (const item of LEVELS_ROW.test(statement) ? [] : tracked) {
+      if (findings.slice(first).some((finding) => finding.market === item.market)) continue;
+      findings.push({ market: item.market, fit: item.fit, instrument: item.fit === 'exact' ? null : (item.ticker || item.instrument),
+        instrumentLabel: item.label || (item.fit === 'proxy' ? item.ticker : null), product, excerpt: excerptOf(statement), kind: 'mention' });
+    }
+    for (const finding of findings.slice(first)) finding.context = contextFor(statement, finding.market);
   });
   return findings;
 }
@@ -483,7 +530,7 @@ function buildMorningResearch({ snapshots = {}, marketDate = null, references = 
   for (const finding of findings) {
     const entry = markets[finding.market] ||= { findings: [] };
     const duplicate = entry.findings.find((item) => item.product === finding.product && item.kind === finding.kind
-      && item.instrument === finding.instrument && ['trade', 'trend', 'level', 'low', 'high', 'side', 'from', 'to']
+      && item.instrument === finding.instrument && ['trade', 'trend', 'level', 'low', 'high', 'side', 'from', 'to', 'excerpt']
         .every((key) => item[key] === finding[key]));
     if (duplicate) continue;
     const { market, ...rest } = finding;
@@ -515,4 +562,4 @@ function buildMorningResearch({ snapshots = {}, marketDate = null, references = 
 
 const PROXY_TICKERS = Object.keys(PROXIES);
 
-module.exports = { PRODUCTS, PROXY_TICKERS, buildMorningResearch, extractFromText, positionFindings, structuredFindings, statements };
+module.exports = { PRODUCTS, PROXY_TICKERS, buildMorningResearch, contextFor, extractFromText, positionFindings, structuredFindings, statements };

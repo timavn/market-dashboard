@@ -88,7 +88,7 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertNotIn("Wait", report)
         self.assertNotIn("Buy", report)
         self.assertIn("| Ethereum | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(2406;2825;2300;0;) | ASOF(N/A;,;,;,Crypto Quant) |", report)
-        self.assertIn("Prices are front-month futures; Kalshi settles on Pyth spot.", report)
+        self.assertNotIn("front-month futures", report)
         self.assertIn("Nasdaq-100 30,883; its bar shows the COMPQ range and Nasdaq Composite price.", report)
 
     def test_withheld_price_shows_na_and_names_the_rejected_quote(self):
@@ -117,10 +117,20 @@ class SetupBoardRenderTests(unittest.TestCase):
         data["rows"][0]["research"] = {"alphaCode": {"trade": 4180, "trend": 4120, "approximate": True, "productLabel": "The Macro Show",
                                                      "unit": None},
                                        "findings": [{"product": "the-macro-show", "productLabel": "The Macro Show", "kind": "alphaCode",
-                                                     "trade": 4180, "trend": 4120, "approximate": True, "fit": "exact", "excerpt": "Gold …"},
+                                                     "trade": 4180, "trend": 4120, "approximate": True, "fit": "exact",
+                                                     "excerpt": "Gold Alpha Code 4180/4120; Silver at 57", "context": "Gold Alpha Code 4180/4120"},
                                                     {"product": "etf-pro", "productLabel": "ETF Pro", "kind": "position", "side": "Long",
                                                      "fit": "proxy", "instrumentLabel": "GLD"}]}
-        data["usd"]["research"] = {"findings": []}
+        data["research"]["products"].append({"key": "real-time-alert", "label": "Real-Time Alerts", "status": "read",
+                                             "publishedAt": "2026-10-16T15:39:00.000Z"})
+        data["usd"]["research"] = {"findings": [
+            {"product": "real-time-alert", "productLabel": "Real-Time Alerts", "kind": "mention", "fit": "exact", "excerpt": "BUY SIGNAL UUP",
+             "context": "BUY SIGNAL UUP"},
+            # The alert's own position repeats what its prose already says.
+            {"product": "real-time-alert", "productLabel": "Real-Time Alerts", "kind": "position", "side": "Long", "action": "Buy",
+             "name": "UUP", "fit": "proxy", "instrumentLabel": "UUP", "eventTime": "2026-10-16T15:42:24+00:00"},
+            {"product": "the-macro-show", "productLabel": "The Macro Show", "kind": "position", "side": "Long", "name": "U.S. Dollar (USD)",
+             "fit": "exact"}]}
         report = render_setup_board(data)
         self.assertIn("| Market | Tick | Trade | Trend | Alpha Code | Price and Risk Range | As of (PT) |", report)
         # Gold 4216.3 sits above both levels; UST 2Y has only a Trend level.
@@ -128,17 +138,23 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertIn("| BIAS(Bullish;;) | ALPHA(;4.40;;above;%;0;Top 3 Things) |", report)
         self.assertIn("| WTI | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | N/A |", report)
         metals = json.loads(report.split("## Metals", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
-        self.assertEqual(metals["markets"][0], {"market": "US Dollar"})
-        self.assertEqual(metals["markets"][1]["items"], [
-            {"product": "The Macro Show", "time": "07:55", "facts": [{"text": "Alpha Code ~4,180 / 4,120", "tone": "key"}], "quotes": ["Gold …"]},
-            {"product": "ETF Pro", "facts": [{"text": "Long GLD", "tone": "positive"}]}])
+        # One entry per mention in time order: the part of the sentence about the market, with the sentence when trimmed.
+        self.assertEqual(metals["markets"][0], {"market": "US Dollar", "entries": [
+            {"product": "The Macro Show", "time": "07:55", "context": "Long U.S. Dollar (USD)"},
+            {"product": "Real-Time Alerts", "time": "08:39", "context": "BUY SIGNAL UUP"}]})
+        self.assertEqual(metals["markets"][1]["entries"], [
+            {"product": "The Macro Show", "time": "07:55", "context": "Gold Alpha Code 4180/4120",
+             "source": "Gold Alpha Code 4180/4120; Silver at 57"},
+            {"product": "ETF Pro", "context": "Long GLD"}])
+        self.assertIn('{"market":"WTI","entries":[]}', report)
         rates = json.loads(report.split("## Rates", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
-        self.assertEqual(rates["markets"], [{"market": "UST 2Y", "items": [{"product": "Top 3 Things", "time": "05:31", "facts": [
-            {"text": "Trend level 4.40%", "tone": "key"}, {"text": "Trade Bullish", "tone": "positive"},
-            {"text": "Trend Bullish", "tone": "positive"}], "quotes": [excerpt]}]}])
+        # Two findings from one sentence are one mention; the board's own Risk Range is not one.
+        self.assertEqual(rates["markets"], [{"market": "UST 2Y", "entries": [
+            {"product": "Top 3 Things", "time": "05:31", "context": excerpt}]}])
         # The US Dollar's research appears with the first section only.
         self.assertNotIn('"market":"US Dollar"', report.split("## Crypto", 1)[1])
-        self.assertIn("Research read for Oct 16: Top 3 Things 05:31, The Macro Show 07:55. Not published yet: ETF Pro.", report)
+        self.assertIn("Research read for Oct 16: Top 3 Things 05:31, The Macro Show 07:55, Real-Time Alerts 08:39. "
+                      "Not published yet: ETF Pro.", report)
 
     def test_boards_without_morning_research_keep_their_layout(self):
         report = render_setup_board(board())

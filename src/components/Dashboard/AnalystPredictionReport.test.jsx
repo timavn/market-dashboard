@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import ReactMarkdown from 'react-markdown';
 import AnalystPredictionReport from './AnalystPredictionReport';
@@ -230,26 +230,36 @@ test('Alpha Code cells stack Trade and Trend with the price above or below each,
   expect(container).not.toHaveTextContent(/ALPHA\(/);
 });
 
-test('analyst-research blocks list each product’s facts with their source sentences and the quiet markets', () => {
+test('analyst-research blocks list one row per mention, its context and source, and each quiet market', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Crypto" />);
   const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
   const research = { markets: [
-    { market: 'Bitcoin', items: [{ product: 'The Macro Show', time: '07:55', facts: [
-      { text: 'Alpha Code ~83,000 / 78,000', tone: 'key' }, { text: 'Trade Bearish', tone: 'negative' }, { text: 'Long', tone: 'positive' }],
-    quotes: ['Bitcoin held approximately $83,000 as trade support and $78,000 as trend support.'] }] },
-    { market: 'Ethereum' },
+    { market: 'Bitcoin', entries: [
+      { product: 'The Macro Show', time: '07:55', context: 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend',
+        source: 'Cooper noted that Keith sold all Ethereum on Tuesday. Bitcoin remained a minimum-sized long with bearish trade but bullish trend' },
+      { product: 'The Macro Show', time: '07:55', context: 'Long Bitcoin (BTC)' }] },
+    { market: 'Ethereum', entries: [] },
+    // Reports saved before entries keep their facts and quotes.
+    { market: 'Solana', items: [{ product: 'Crypto Quant', facts: [{ text: 'Trend Bullish', tone: 'positive' }], quotes: ['SOL is bullish.'] }] },
   ] };
   const node = { children: [{ tagName: 'code', properties: { className: ['language-analyst-research'] },
     children: [{ type: 'text', value: JSON.stringify(research) }] }] };
   render(<Pre node={node}><code>ignored</code></Pre>);
-  const section = screen.getByRole('region', { name: 'Morning research' });
-  expect(section).toHaveTextContent('BitcoinThe Macro Show07:55Alpha Code ~83,000 / 78,000Trade BearishLong');
-  expect(screen.getByText('Alpha Code ~83,000 / 78,000')).toHaveClass('is-key');
-  expect(screen.getByText('Trade Bearish')).toHaveClass('is-negative');
-  const source = screen.getByText('Source');
-  expect(source.parentElement).toHaveProperty('open', false);
+  const table = within(screen.getByRole('region', { name: 'Morning research' })).getByRole('table');
+  const rows = within(table).getAllByRole('row').map(row => [...row.cells].map(cell => cell.textContent));
+  expect(rows).toEqual([
+    ['Market', 'Product', 'PT', 'Context', ''],
+    ['Bitcoin', 'The Macro Show', '07:55', 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend', 'Source'],
+    ['The Macro Show', '07:55', 'Long Bitcoin (BTC)', ''],
+    ['Ethereum', 'Not mentioned'],
+    ['Solana', 'Crypto Quant', '—', 'Trend Bullish', 'Source'],
+  ]);
+  expect(within(table).getByText('bearish')).toHaveClass('is-negative');
+  expect(within(table).getByText('Long')).toHaveClass('is-positive');
+  const [source] = within(table).getAllByRole('button', { name: 'Source' });
+  expect(source).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(source);
-  expect(screen.getByText(/as trade support/)).toBeVisible();
-  expect(screen.getByText('Not mentioned this morning: Ethereum')).toBeInTheDocument();
+  expect(source).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByText(/sold all Ethereum/)).toBeVisible();
 });

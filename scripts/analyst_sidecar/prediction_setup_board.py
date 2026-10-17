@@ -299,29 +299,48 @@ def _fact_text(item: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]
 
 
 def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Per market, what each of the morning's products says, in product priority order, with source sentences."""
+    """Per market, one entry per mention in the morning's products, in time order.
+
+    A sentence's entry carries the part of it about that market (the extractor's
+    trimmed context) and the full sentence as its source; data a product publishes
+    without prose (levels tables, positions, trend changes) reads as its facts.
+    """
     research = board.get("research")
     if not isinstance(research, dict):
         return None
-    published = {product.get("label"): product.get("publishedAt") for product in research.get("products") or []}
+    products = research.get("products") or []
+    published = {product.get("label"): product.get("publishedAt") for product in products}
+    order = {product.get("label"): index for index, product in enumerate(products)}
+    clock = lambda value: (lambda when: when.rsplit(" ", 1)[-1] if ":" in when else None)(_pacific(value)) if value else None
     markets = []
     for row in rows:
-        items: dict[str, dict[str, Any]] = {}
+        entries: dict[tuple[str, str], dict[str, Any]] = {}
         for finding in (row.get("research") or {}).get("findings") or []:
+            label = finding.get("productLabel") or finding.get("product") or "Research"
+            time = clock(finding.get("eventTime") or published.get(label))
+            excerpt = finding.get("excerpt")
+            if excerpt:
+                context = finding.get("context") or excerpt
+                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context,
+                                                      **({"source": excerpt} if excerpt != context else {})})
+                continue
             facts = _fact_text(finding, row)
             if not facts:
                 continue
-            label = finding.get("productLabel") or finding.get("product") or "Research"
-            when = _pacific(published.get(label)) if published.get(label) else None
-            item = items.setdefault(label, {"product": label, "time": when.rsplit(" ", 1)[-1] if when and ":" in when else when,
-                                            "facts": [], "quotes": []})
-            for fact in facts:
-                if fact not in item["facts"]:
-                    item["facts"].append(fact)
-            if finding.get("excerpt") and finding["excerpt"] not in item["quotes"]:
-                item["quotes"].append(finding["excerpt"])
-        clean = lambda item: {key: value for key, value in item.items() if value not in (None, [], "")}
-        markets.append({"market": row.get("label"), **({"items": [clean(item) for item in items.values()]} if items else {})})
+            if finding.get("kind") == "position" and finding.get("name"):
+                # A position the product's own prose already names ("BUY SIGNAL UUP") adds nothing.
+                names = {finding["name"], finding.get("instrumentLabel"), *re.findall(r"\(([A-Z0-9.]+)\)", finding["name"])} - {None}
+                if any(key[0] == label and (entry.get("source") or entry["context"]) and any(name in (entry.get("source") or entry["context"]) for name in names)
+                       for key, entry in entries.items()):
+                    continue
+                action = finding.get("action")
+                verb = f"{action} {finding.get('side')}" if action in ("Added", "Removed") else action or finding.get("side")
+                context = f"{verb} {finding['name']}" + (" (inverse to yield)" if finding.get("inverse") else "")
+            else:
+                context = (f"{finding['source']}: " if finding.get("source") else "") + " · ".join(fact["text"] for fact in facts)
+            entries.setdefault((label, context), {"product": label, "time": time, "context": context})
+        ordered = sorted(entries.values(), key=lambda entry: (entry["time"] is None, entry["time"] or "", order.get(entry["product"], 99)))
+        markets.append({"market": row.get("label"), "entries": [{key: value for key, value in entry.items() if value} for entry in ordered]})
     return {"markets": markets} if markets else None
 
 
@@ -390,8 +409,6 @@ def render_setup_board(board: dict[str, Any]) -> str:
         lines += _table(["Market", "Tick", "Trade", "Trend", *(["Alpha Code"] if with_research else []),
                          "Price and Risk Range", "As of (PT)"], table)
         notes = []
-        if any((row.get("price") or {}).get("fit") == "proxy" for row in members):
-            notes.append("Prices are front-month futures; Kalshi settles on Pyth spot.")
         for row in members:
             if row.get("rangePrice") and row.get("range"):
                 notes.append(f"{row['label']} {_number((row.get('price') or {}).get('value'))}; its bar shows the "
