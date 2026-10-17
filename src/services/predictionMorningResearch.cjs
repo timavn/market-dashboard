@@ -505,8 +505,23 @@ function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
   if (product === 'market-structure') {
     const signals = (Array.isArray(data.signals) ? data.signals : []).filter((row) => row?.label && row?.value)
       .map((row) => ({ label: String(row.label), value: String(row.value), tone: row.tone || null }));
+    // The signal matrix is a chart; the note's opening paragraph is the product's own reading of it.
+    const note = String(body).split(/\n\s*\n/).map((paragraph) => paragraph.replace(/\s+/g, ' ').trim()).find((paragraph) => paragraph.length > 40);
     if (signals.length) findings.push({ market: 'sp500', product, kind: 'structure', signals, fit: 'exact', instrument: null, instrumentLabel: null,
-      sourceText: `Signal matrix: ${signals.map((row) => `${row.label} ${row.value}`).join('; ')}` });
+      sourceText: note || `Signal matrix: ${signals.map((row) => `${row.label} ${row.value}`).join('; ')}` });
+    // Levels read from the note's gamma and volatility charts.
+    const number = (value) => (Number.isFinite(value) ? value : null);
+    const band = data.chartMetrics?.spxProbableVolatilityGamma || {};
+    const throttle = data.chartMetrics?.spxGammaVolatilityThrottle || {};
+    const levels = { zeroGamma: number(band.zeroGamma), lowerPvBand: number(band.lowerPvBand), upperPvBand: number(band.upperPvBand),
+      strikesInPlay: (Array.isArray(band.strikesInPlay) ? band.strikesInPlay : []).filter(Number.isFinite),
+      gammaThrottle: number(throttle.gammaThrottle), realizedVolatility: number(throttle.tenDayRealizedVolatility) };
+    if (Object.values(levels).some((value) => (Array.isArray(value) ? value.length : value !== null))) {
+      const charts = [band, throttle].filter((chart) => chart.label)
+        .map((chart) => `${chart.label}${chart.source ? ` (${chart.source}` : ''}${chart.chartDate ? `${chart.source ? ', ' : ' ('}chart ${chart.chartDate}` : ''}${chart.source || chart.chartDate ? ')' : ''}`);
+      findings.push({ market: 'sp500', product, kind: 'structureLevels', ...levels, fit: 'exact', instrument: null, instrumentLabel: null,
+        sourceText: `Read from the ${charts.join(' and ')} chart${charts.length > 1 ? 's' : ''}` });
+    }
   }
   return findings;
 }

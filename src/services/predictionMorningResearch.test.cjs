@@ -156,3 +156,19 @@ test('every statement naming a market is a mention, with the part of it about th
   assert.deepEqual(context('gold'), []);
   assert.equal(findings.find((item) => item.market === 'usd').excerpt.startsWith('USD – All the while'), true);
 });
+
+test('Market Structure carries its chart levels, and its note as the signals source', () => {
+  const findings = structuredFindings({ article: { bodyText: 'Market makers remain broadly neutral ahead of today’s options expiration.\n\nThat said, …' },
+    data: { signals: [{ label: 'SPX Gamma Exposure', value: 'Neutral', tone: 'neutral' }], chartMetrics: {
+      spxProbableVolatilityGamma: { label: 'SPX Probable Volatility / Gamma By Strike', source: 'Intrinio/Tier1Alpha.com', chartDate: '2026-10-15',
+        zeroGamma: 7736, lowerPvBand: 7660, upperPvBand: 7886, strikesInPlay: [7700, 7750] },
+      spxGammaVolatilityThrottle: { label: 'SPX Gamma Volatility Throttle', source: 'Tier1Alpha.com', chartDate: '2026-10-15',
+        gammaThrottle: 0.64, tenDayRealizedVolatility: 9.63 } } } }, 'market-structure');
+  const [signals, levels] = findings;
+  assert.equal(signals.sourceText, 'Market makers remain broadly neutral ahead of today’s options expiration.');
+  assert.deepEqual({ ...levels, sourceText: undefined }, { market: 'sp500', product: 'market-structure', kind: 'structureLevels', zeroGamma: 7736,
+    lowerPvBand: 7660, upperPvBand: 7886, strikesInPlay: [7700, 7750], gammaThrottle: 0.64, realizedVolatility: 9.63, fit: 'exact',
+    instrument: null, instrumentLabel: null, sourceText: undefined });
+  assert.equal(levels.sourceText, 'Read from the SPX Probable Volatility / Gamma By Strike (Intrinio/Tier1Alpha.com, chart 2026-10-15) and '
+    + 'SPX Gamma Volatility Throttle (Tier1Alpha.com, chart 2026-10-15) charts');
+});

@@ -237,3 +237,10 @@ test('the loader reads the market date’s products and reports them as their ow
   assert.equal(board.sourceStatus.morningResearch, 'ready');
   assert.equal(board.rows.find((row) => row.id === 'ust10y').research.findings[0].kind, 'alphaCode');
 });
+
+test('a morning product with no printed send time shows when the dashboard read it', () => {
+  const board = buildSetupBoard({ marketDate: '2026-10-16', morningSnapshots: {
+    'market-structure': { date: '2026-10-16', publishedAt: '2026-10-16T00:00:00+00:00', scrapedAt: '2026-10-16T10:30:29+00:00',
+      data: { signals: [{ label: 'SPX Gamma Exposure', value: 'Neutral', tone: 'neutral' }] } } } });
+  assert.equal(board.research.products.find((item) => item.key === 'market-structure').publishedAt, '2026-10-16T10:30:29+00:00');
+});

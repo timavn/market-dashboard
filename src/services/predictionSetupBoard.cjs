@@ -263,6 +263,9 @@ function cpiForecasts(nowcast, currentEvent, eventsBySeries, asOf) {
  * against the live prices on this board. Saved boards without morning
  * products keep their original shape.
  */
+// A product that prints no send time (Market Structure) shows when the dashboard read it.
+const readAt = (snapshot) => emailPublishedAt(snapshot) || (Number.isFinite(Date.parse(snapshot?.scrapedAt)) ? snapshot.scrapedAt : null);
+
 function morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, marketDate }) {
   if (!morningSnapshots) return null;
   const references = {};
@@ -284,7 +287,7 @@ function morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, mar
   const riskRangeTickers = Object.fromEntries(UNIVERSE.markets.filter((market) => market.hedgeye.riskRange?.product === 'risk-ranges')
     .map((market) => [market.hedgeye.riskRange.ticker, market.id]).concat([[UNIVERSE.usd.riskRangeTicker, 'usd']]));
   return buildMorningResearch({ snapshots: { ...morningSnapshots, 'crypto-quant': morningSnapshots['crypto-quant'] || cryptoQuant },
-    marketDate, references, prices, riskRangeTickers, publishedAt: emailPublishedAt });
+    marketDate, references, prices, riskRangeTickers, publishedAt: readAt });
 }
 
 function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations,

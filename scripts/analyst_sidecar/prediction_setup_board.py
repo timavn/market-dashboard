@@ -263,27 +263,27 @@ TONE = {"Bullish": "positive", "Bearish": "negative", "Long": "positive", "Short
 
 
 def _fact_text(item: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]]:
-    """Display facts for one finding; a range identical to the board's own Risk Range adds nothing."""
+    """Display facts for one finding, each read as "Label: value"; a range identical to the board's own Risk Range adds nothing."""
     kind, unit = item.get("kind"), item.get("unit")
     fmt = lambda value: f"{_level(value, unit)}{'%' if unit == '%' else ''}"
     who = f"{item['instrumentLabel']} " if item.get("instrumentLabel") and item.get("instrumentLabel") != "spot" else ""
     approx = "~" if item.get("approximate") else ""
     if kind == "alphaCode":
-        return [{"text": f"{who}Alpha Code {approx}{fmt(item.get('trade'))} / {fmt(item.get('trend'))}", "tone": "key"}]
+        return [{"text": f"{who}Alpha Code: {approx}{fmt(item.get('trade'))} / {fmt(item.get('trend'))}", "tone": "key"}]
     if kind in ("tradeLevel", "trendLevel"):
-        return [{"text": f"{who}{'Trade' if kind == 'tradeLevel' else 'Trend'} level {approx}{fmt(item.get('level'))}", "tone": "key"}]
+        return [{"text": f"{who}{'Trade' if kind == 'tradeLevel' else 'Trend'} level: {approx}{fmt(item.get('level'))}", "tone": "key"}]
     if kind == "riskRange":
         board_range = row.get("range") or {}
         same_instrument = not item.get("instrument") or item.get("instrument") == board_range.get("ticker")
         if same_instrument and board_range.get("low") == item.get("low") and board_range.get("high") == item.get("high"):
             return []
         spot = " (spot)" if item.get("instrumentLabel") == "spot" else ""
-        facts = [{"text": f"{who}Risk Range{spot} {fmt(item.get('low'))}–{fmt(item.get('high'))}", "tone": None}]
+        facts = [{"text": f"{who}Risk Range{spot}: {fmt(item.get('low'))}–{fmt(item.get('high'))}", "tone": None}]
         if item.get("trend"):
-            facts.append({"text": f"{who}Trend {item['trend']}", "tone": TONE.get(item["trend"])})
+            facts.append({"text": f"{who}Trend: {item['trend']}", "tone": TONE.get(item["trend"])})
         return facts
     if kind == "signal":
-        return [{"text": f"{who}{label} {item[key]}", "tone": TONE.get(item[key])}
+        return [{"text": f"{who}{label}: {item[key]}", "tone": TONE.get(item[key])}
                 for key, label in (("trade", "Trade"), ("trend", "Trend")) if item.get(key)]
     if kind == "position":
         action = f"{item['action']} " if item.get("action") and item.get("action") not in ("Buy", "Short") else ""
@@ -291,10 +291,25 @@ def _fact_text(item: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]
         inverse = " (inverse to yield)" if item.get("inverse") else ""
         return [{"text": f"{action}{item.get('side')}{target}{inverse}", "tone": None if item.get("inverse") else TONE.get(item.get("side"))}]
     if kind == "trendChange":
-        return [{"text": f"Trend changed {item.get('from') or 'N/A'} → {item.get('to') or 'N/A'}", "tone": TONE.get(item.get("to"))}]
+        return [{"text": f"Trend: {item.get('from') or 'N/A'} → {item.get('to') or 'N/A'}", "tone": TONE.get(item.get("to"))}]
     if kind == "structure":
-        return [{"text": f"{signal['label']} {signal['value']}", "tone": TONE.get(signal.get("tone"))}
+        return [{"text": f"{signal['label']}: {signal['value']}", "tone": TONE.get(signal.get("tone"))}
                 for signal in item.get("signals") or []]
+    if kind == "structureLevels":
+        number = lambda value: f"{value:,.0f}" if abs(value) >= 1000 else f"{value:g}"
+        present = lambda key: isinstance(item.get(key), (int, float)) and not isinstance(item.get(key), bool)
+        facts = []
+        if present("zeroGamma"):
+            facts.append(f"Zero gamma: {number(item['zeroGamma'])}")
+        if present("lowerPvBand") and present("upperPvBand"):
+            facts.append(f"PV band: {number(item['lowerPvBand'])}–{number(item['upperPvBand'])}")
+        if item.get("strikesInPlay"):
+            facts.append("Strikes in play: " + ", ".join(number(value) for value in item["strikesInPlay"]))
+        if present("gammaThrottle"):
+            facts.append(f"Gamma throttle: {number(item['gammaThrottle'])}")
+        if present("realizedVolatility"):
+            facts.append(f"10D realized vol: {number(item['realizedVolatility'])}%")
+        return [{"text": fact, "tone": None} for fact in facts]
     return []
 
 
@@ -337,7 +352,7 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
                 verb = f"{action} {finding.get('side')}" if action in ("Added", "Removed") else action or finding.get("side")
                 context = f"{verb} {finding['name']}" + (" (inverse to yield)" if finding.get("inverse") else "")
             else:
-                context = (f"{finding['source']}: " if finding.get("source") else "") + " · ".join(fact["text"] for fact in facts)
+                context = " · ".join(fact["text"] for fact in facts)
             entries.setdefault((label, context), {"product": label, "time": time, "context": context, "source": finding.get("sourceText")})
         ordered = sorted(entries.values(), key=lambda entry: (entry["time"] is None, entry["time"] or "", order.get(entry["product"], 99)))
         markets.append({"market": row.get("label"), "entries": [{key: value for key, value in entry.items() if value} for entry in ordered]})

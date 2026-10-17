@@ -107,6 +107,18 @@ class SetupBoardRenderTests(unittest.TestCase):
             {"key": "the-macro-show", "label": "The Macro Show", "status": "read", "publishedAt": "2026-10-16T14:55:00.000Z"},
             {"key": "etf-pro", "label": "ETF Pro", "status": "missing"}]}
         excerpt = "UST 2yr holding TRADE/TREND Signal Supports (TREND all the way down at 4.40%)"
+        data["research"]["products"] += [{"key": "risk-ranges", "label": "Risk Ranges", "status": "read", "publishedAt": "2026-10-16T11:28:00.000Z"},
+                                         {"key": "market-structure", "label": "Market Structure", "status": "read",
+                                          "publishedAt": "2026-10-16T10:30:29+00:00"}]
+        data["rows"][1]["research"] = {"findings": [
+            {"product": "risk-ranges", "productLabel": "Risk Ranges", "kind": "trendChange", "from": "Neutral", "to": "Bullish", "fit": "exact",
+             "sourceText": "Trend change: COPPER changed from Neutral to Bullish"}]}
+        data["rows"][2]["research"] = {"findings": [
+            {"product": "market-structure", "productLabel": "Market Structure", "kind": "structure", "fit": "exact",
+             "signals": [{"label": "SPX Gamma Exposure", "value": "Neutral", "tone": "neutral"}], "sourceText": "Market makers remain broadly neutral."},
+            {"product": "market-structure", "productLabel": "Market Structure", "kind": "structureLevels", "fit": "exact", "zeroGamma": 7736,
+             "lowerPvBand": 7660, "upperPvBand": 7886, "strikesInPlay": [7700, 7750], "gammaThrottle": 0.64, "realizedVolatility": 9.63,
+             "sourceText": "Read from the SPX Probable Volatility / Gamma By Strike chart"}]}
         data["rows"][3]["research"] = {"findings": [
             {"product": "top-3-things", "productLabel": "Top 3 Things", "kind": "trendLevel", "level": 4.4, "unit": "%", "fit": "exact",
              "excerpt": excerpt},
@@ -147,15 +159,22 @@ class SetupBoardRenderTests(unittest.TestCase):
             {"product": "The Macro Show", "time": "07:55", "context": "Gold Alpha Code 4180/4120",
              "source": "Gold Alpha Code 4180/4120; Silver at 57"},
             {"product": "ETF Pro", "context": "Long GLD"}])
-        self.assertIn('{"market":"WTI","entries":[]}', report)
+        self.assertIn('{"market":"Ethereum","entries":[]}', report)
+        # Published data reads "Label: value", with the line it was printed in as its source.
+        self.assertIn('{"market":"WTI","entries":[{"product":"Risk Ranges","time":"04:28","context":"Trend: Neutral → Bullish",'
+                      '"source":"Trend change: COPPER changed from Neutral to Bullish"}]}', report)
+        self.assertIn('{"product":"Market Structure","time":"03:30","context":"SPX Gamma Exposure: Neutral",'
+                      '"source":"Market makers remain broadly neutral."}', report)
+        self.assertIn('"context":"Zero gamma: 7,736 · PV band: 7,660–7,886 · Strikes in play: 7,700, 7,750 · Gamma throttle: 0.64 · '
+                      '10D realized vol: 9.63%"', report)
         rates = json.loads(report.split("## Rates", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
         # Two findings from one sentence are one mention; the board's own Risk Range is not one.
         self.assertEqual(rates["markets"], [{"market": "UST 2Y", "entries": [
             {"product": "Top 3 Things", "time": "05:31", "context": excerpt, "source": excerpt}]}])
         # The US Dollar's research appears with the first section only.
         self.assertNotIn('"market":"US Dollar"', report.split("## Crypto", 1)[1])
-        self.assertIn("Research read for Oct 16: Top 3 Things 05:31, The Macro Show 07:55, Real-Time Alerts 08:39. "
-                      "Not published yet: ETF Pro.", report)
+        self.assertIn("Research read for Oct 16: Top 3 Things 05:31, The Macro Show 07:55, Risk Ranges 04:28, Market Structure 03:30, "
+                      "Real-Time Alerts 08:39. Not published yet: ETF Pro.", report)
 
     def test_boards_without_morning_research_keep_their_layout(self):
         report = render_setup_board(board())
