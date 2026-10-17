@@ -95,6 +95,25 @@ test('maps published positions and structured product data to markets', () => {
   assert.deepEqual(changes.map(({ market, from, to }) => ({ market, from, to })), [{ market: 'copper', from: 'Neutral', to: 'Bullish' }]);
 });
 
+test('published data carries the line or list the product printed it in as its source', () => {
+  const [usd] = positionFindings({ data: { longs: ['U.S. Dollar (USD)'], rawLongsText: 'U.S. Dollar (USD), Software (IGV),' } }, 'the-macro-show');
+  assert.equal(usd.sourceText, 'Longs: U.S. Dollar (USD), Software (IGV)');
+  const [alert] = positionFindings({ data: { alerts: [{ action: 'BUY', ticker: 'UUP',
+    headline: 'Real-Time Alert: Macro Buy Signal (USD, Rates, QQQ): US Dollar (UUP) -KM' }] } }, 'real-time-alert');
+  assert.equal(alert.sourceText, 'Real-Time Alert: Macro Buy Signal (USD, Rates, QQQ): US Dollar (UUP) -KM');
+  const [gold] = structuredFindings({ data: { 'GOLD SPOT PRICE (GOLD)': { lrr: 4090, hrr: 4216, trend: 'BEARISH', originalName: 'Gold Spot Price (GOLD)' } },
+    article: { bodyText: 'Our Levels\nGold Spot Price (GOLD) 4090-4216 (bearish)\nBest of luck' } }, 'early-look');
+  assert.equal(gold.sourceText, 'Our Levels: Gold Spot Price (GOLD) 4090-4216 (bearish)');
+  const [copper] = structuredFindings({ trendChanges: [{ ticker: 'COPPER', oldTrend: 'NEUTRAL', newTrend: 'BULLISH' }],
+    article: { bodyText: 'TREND CHANGE: \n\n COPPER changed from Neutral to Bullish \n\n TSLA changed from Neutral to Bearish' } },
+  'risk-ranges', { riskRangeTickers: { COPPER: 'copper' } });
+  assert.equal(copper.sourceText, 'Trend change: COPPER changed from Neutral to Bullish');
+  // Without the email text, the change reads from its own data.
+  const [bare] = structuredFindings({ trendChanges: [{ ticker: 'COPPER', oldTrend: 'NEUTRAL', newTrend: 'BULLISH' }] },
+    'risk-ranges', { riskRangeTickers: { COPPER: 'copper' } });
+  assert.equal(bare.sourceText, 'Trend change: COPPER changed from Neutral to Bullish');
+});
+
 test('summarises each market with the highest-priority Alpha Code and the price against it', () => {
   const article = (bodyText) => ({ date: '2026-10-16', article: { bodyText } });
   const research = buildMorningResearch({

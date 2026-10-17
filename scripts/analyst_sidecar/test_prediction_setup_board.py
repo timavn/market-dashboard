@@ -130,7 +130,7 @@ class SetupBoardRenderTests(unittest.TestCase):
             {"product": "real-time-alert", "productLabel": "Real-Time Alerts", "kind": "position", "side": "Long", "action": "Buy",
              "name": "UUP", "fit": "proxy", "instrumentLabel": "UUP", "eventTime": "2026-10-16T15:42:24+00:00"},
             {"product": "the-macro-show", "productLabel": "The Macro Show", "kind": "position", "side": "Long", "name": "U.S. Dollar (USD)",
-             "fit": "exact"}]}
+             "fit": "exact", "sourceText": "Longs: U.S. Dollar (USD), Software (IGV)"}]}
         report = render_setup_board(data)
         self.assertIn("| Market | Tick | Trade | Trend | Alpha Code | Price and Risk Range | As of (PT) |", report)
         # Gold 4216.3 sits above both levels; UST 2Y has only a Trend level.
@@ -138,10 +138,11 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertIn("| BIAS(Bullish;;) | ALPHA(;4.40;;above;%;0;Top 3 Things) |", report)
         self.assertIn("| WTI | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | N/A |", report)
         metals = json.loads(report.split("## Metals", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
-        # One entry per mention in time order: the part of the sentence about the market, with the sentence when trimmed.
+        # One entry per mention in time order: the part of the sentence about the market, with the sentence as its source;
+        # published data carries the line or list it was printed in.
         self.assertEqual(metals["markets"][0], {"market": "US Dollar", "entries": [
-            {"product": "The Macro Show", "time": "07:55", "context": "Long U.S. Dollar (USD)"},
-            {"product": "Real-Time Alerts", "time": "08:39", "context": "BUY SIGNAL UUP"}]})
+            {"product": "The Macro Show", "time": "07:55", "context": "Long U.S. Dollar (USD)", "source": "Longs: U.S. Dollar (USD), Software (IGV)"},
+            {"product": "Real-Time Alerts", "time": "08:39", "context": "BUY SIGNAL UUP", "source": "BUY SIGNAL UUP"}]})
         self.assertEqual(metals["markets"][1]["entries"], [
             {"product": "The Macro Show", "time": "07:55", "context": "Gold Alpha Code 4180/4120",
              "source": "Gold Alpha Code 4180/4120; Silver at 57"},
@@ -150,7 +151,7 @@ class SetupBoardRenderTests(unittest.TestCase):
         rates = json.loads(report.split("## Rates", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
         # Two findings from one sentence are one mention; the board's own Risk Range is not one.
         self.assertEqual(rates["markets"], [{"market": "UST 2Y", "entries": [
-            {"product": "Top 3 Things", "time": "05:31", "context": excerpt}]}])
+            {"product": "Top 3 Things", "time": "05:31", "context": excerpt, "source": excerpt}]}])
         # The US Dollar's research appears with the first section only.
         self.assertNotIn('"market":"US Dollar"', report.split("## Crypto", 1)[1])
         self.assertIn("Research read for Oct 16: Top 3 Things 05:31, The Macro Show 07:55, Real-Time Alerts 08:39. "

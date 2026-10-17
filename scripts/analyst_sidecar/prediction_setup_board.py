@@ -303,7 +303,8 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
 
     A sentence's entry carries the part of it about that market (the extractor's
     trimmed context) and the full sentence as its source; data a product publishes
-    without prose (levels tables, positions, trend changes) reads as its facts.
+    without prose (levels tables, positions, trend changes) reads as its facts, with
+    the line or list the product printed it in as its source.
     """
     research = board.get("research")
     if not isinstance(research, dict):
@@ -321,8 +322,7 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
             excerpt = finding.get("excerpt")
             if excerpt:
                 context = finding.get("context") or excerpt
-                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context,
-                                                      **({"source": excerpt} if excerpt != context else {})})
+                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context, "source": excerpt})
                 continue
             facts = _fact_text(finding, row)
             if not facts:
@@ -330,7 +330,7 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
             if finding.get("kind") == "position" and finding.get("name"):
                 # A position the product's own prose already names ("BUY SIGNAL UUP") adds nothing.
                 names = {finding["name"], finding.get("instrumentLabel"), *re.findall(r"\(([A-Z0-9.]+)\)", finding["name"])} - {None}
-                if any(key[0] == label and (entry.get("source") or entry["context"]) and any(name in (entry.get("source") or entry["context"]) for name in names)
+                if any(key[0] == label and key[1] == entry.get("source") and any(name in key[1] for name in names)
                        for key, entry in entries.items()):
                     continue
                 action = finding.get("action")
@@ -338,7 +338,7 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
                 context = f"{verb} {finding['name']}" + (" (inverse to yield)" if finding.get("inverse") else "")
             else:
                 context = (f"{finding['source']}: " if finding.get("source") else "") + " · ".join(fact["text"] for fact in facts)
-            entries.setdefault((label, context), {"product": label, "time": time, "context": context})
+            entries.setdefault((label, context), {"product": label, "time": time, "context": context, "source": finding.get("sourceText")})
         ordered = sorted(entries.values(), key=lambda entry: (entry["time"] is None, entry["time"] or "", order.get(entry["product"], 99)))
         markets.append({"market": row.get("label"), "entries": [{key: value for key, value in entry.items() if value} for entry in ordered]})
     return {"markets": markets} if markets else None

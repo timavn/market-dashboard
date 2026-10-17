@@ -414,6 +414,9 @@ function positionMarket(name) {
 }
 
 const SIDE = { long: 'Long', longs: 'Long', short: 'Short', shorts: 'Short', neutral: 'Neutral', neutrals: 'Neutral' };
+// Where data a product publishes without prose came from, in the product's own words where it prints them.
+const lineWith = (text, needle) => String(text || '').split(/\r?\n/).map((line) => line.trim()).find((line) => needle && line.includes(needle)) || null;
+const listText = (items) => items.map((item) => (typeof item === 'string' ? item : item?.ticker || item?.name)).filter(Boolean).join(', ');
 
 function positionFindings(snapshot, product) {
   const data = snapshot?.data || {};
@@ -426,17 +429,22 @@ function positionFindings(snapshot, product) {
   };
   if (product === 'the-macro-show' || product === 'the-call') {
     for (const key of ['longs', 'shorts', 'neutrals']) {
-      for (const name of Array.isArray(data[key]) ? data[key] : []) add(typeof name === 'string' ? name : name?.ticker || name?.name, SIDE[key]);
+      const names = Array.isArray(data[key]) ? data[key] : [];
+      const raw = { longs: data.rawLongsText, shorts: data.rawShortsText, neutrals: data.rawNeutralText }[key];
+      const sourceText = `${titleCase(key)}: ${String(raw || listText(names)).trim().replace(/,$/, '')}`;
+      for (const name of names) add(typeof name === 'string' ? name : name?.ticker || name?.name, SIDE[key], { sourceText });
     }
   }
   if (product === 'etf-pro') {
     for (const change of Array.isArray(data.changes) ? data.changes : []) {
       add(change?.ticker, SIDE[String(change?.side || change?.call || '').toLowerCase()],
-        { action: change?.action === 'REMOVE' ? 'Removed' : change?.action === 'ADD' ? 'Added' : null });
+        { action: change?.action === 'REMOVE' ? 'Removed' : change?.action === 'ADD' ? 'Added' : null,
+          sourceText: [data.headline, [change?.action, change?.call || change?.side, change?.etf, change?.ticker && `(${change.ticker})`]
+            .filter(Boolean).join(' ')].filter(Boolean).join(': ') });
     }
     for (const [key, side] of [['fullBookLongs', 'Long'], ['fullBookShorts', 'Short']]) {
       for (const ticker of Array.isArray(data[key]) ? data[key] : []) {
-        if (!findings.some((item) => item.name === ticker)) add(ticker, side);
+        if (!findings.some((item) => item.name === ticker)) add(ticker, side, { sourceText: `Full book ${side.toLowerCase()}s: ${listText(data[key])}` });
       }
     }
   }
@@ -444,7 +452,8 @@ function positionFindings(snapshot, product) {
     for (const alert of Array.isArray(data.alerts) ? data.alerts : [data.alert].filter(Boolean)) {
       const action = String(alert?.action || '').toUpperCase();
       const side = { BUY: 'Long', SHORT: 'Short', SELL: 'Sold', COVER: 'Covered' }[action];
-      add(alert?.ticker || alert?.name, side, { action: titleCase(action), eventTime: alert?.eventTime || null });
+      add(alert?.ticker || alert?.name, side, { action: titleCase(action), eventTime: alert?.eventTime || null,
+        sourceText: alert?.headline || `${action} ${alert?.ticker || alert?.name}` });
     }
   }
   return findings;
@@ -453,6 +462,7 @@ function positionFindings(snapshot, product) {
 /** Structured ranges and signals that products publish as data. */
 function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
   const data = snapshot?.data || {};
+  const body = snapshot?.article?.bodyText || '';
   const findings = [];
   if (product === 'early-look') {
     // "Our Levels": immediate-term Risk Ranges with the TREND in brackets.
@@ -467,7 +477,8 @@ function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
       findings.push({ market, product, kind: 'riskRange', low, high, trend: titleCase(row.trend) || null,
         fit: ticker === 'COMPQ' ? 'related' : 'exact', instrument: ticker === 'COMPQ' ? 'COMPQ' : null,
         instrumentLabel: ticker === 'COMPQ' ? 'Nasdaq Composite' : (/SPOT PRICE/i.test(name) ? 'spot' : null),
-        unit: MARKETS[market]?.yield ? '%' : null, source: 'Our Levels' });
+        unit: MARKETS[market]?.yield ? '%' : null, source: 'Our Levels',
+        sourceText: `Our Levels: ${lineWith(body, row?.originalName) || `${row?.originalName || name} ${low}-${high}${row.trend ? ` (${String(row.trend).toLowerCase()})` : ''}`}` });
     }
   }
   if (product === 'crypto-quant') {
@@ -477,7 +488,8 @@ function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
       const high = Number(row?.sellTrade);
       if (!row || !Number.isFinite(low) || !Number.isFinite(high) || low >= high) continue;
       findings.push({ market, product, kind: 'riskRange', low, high, trend: titleCase(row.trend) || null, fit: 'exact', instrument: null,
-        instrumentLabel: null, unit: null, source: 'Buy/Sell Trade' });
+        instrumentLabel: null, unit: null, source: 'Buy/Sell Trade',
+        sourceText: `${ticker}: Buy Trade ${low}, Sell Trade ${high}${row.trend ? `, Trend ${titleCase(row.trend)}` : ''}` });
     }
   }
   if (product === 'risk-ranges') {
@@ -485,13 +497,16 @@ function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
       const market = riskRangeTickers[String(change?.ticker || '').toUpperCase()];
       if (!market) continue;
       findings.push({ market, product, kind: 'trendChange', from: titleCase(change.oldTrend) || null, to: titleCase(change.newTrend) || null,
-        fit: 'exact', instrument: null, instrumentLabel: null });
+        fit: 'exact', instrument: null, instrumentLabel: null,
+        sourceText: `Trend change: ${lineWith(body, `${change.ticker} changed from`)
+          || `${change.ticker} changed from ${titleCase(change.oldTrend)} to ${titleCase(change.newTrend)}`}` });
     }
   }
   if (product === 'market-structure') {
     const signals = (Array.isArray(data.signals) ? data.signals : []).filter((row) => row?.label && row?.value)
       .map((row) => ({ label: String(row.label), value: String(row.value), tone: row.tone || null }));
-    if (signals.length) findings.push({ market: 'sp500', product, kind: 'structure', signals, fit: 'exact', instrument: null, instrumentLabel: null });
+    if (signals.length) findings.push({ market: 'sp500', product, kind: 'structure', signals, fit: 'exact', instrument: null, instrumentLabel: null,
+      sourceText: `Signal matrix: ${signals.map((row) => `${row.label} ${row.value}`).join('; ')}` });
   }
   return findings;
 }
