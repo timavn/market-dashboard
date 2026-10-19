@@ -96,6 +96,11 @@ test('attaches each market group volatility gauge with its Hedgeye range when pu
   assert.deepEqual(row('gold').volatility, { symbol: 'GVZ', label: 'Cboe Gold ETF Volatility', value: null, regimeKey: 'GVZ', unavailable: true });
   assert.equal(row('ust10y').volatility.symbol, 'MOVE');
   assert.equal(row('copper').volatility, null);
+  // A last-verified display reading (MOVE while its refresh is delayed) keeps its value and its own date.
+  const delayed = buildSetupBoard({ volatility: { MOVE: { lastPx: 101.103, dayChangePct: -1.35, fifteenDayChangePct: -3.32,
+    monthChangePct: 25.24, availability: 'reference', freshness: 'refresh-delayed', asOf: '2026-10-16T20:17:30.000Z' } } });
+  assert.deepEqual(delayed.rows.find((item) => item.id === 'ust10y').volatility, { symbol: 'MOVE', label: 'ICE BofA MOVE Index',
+    value: 101.103, changePct: -1.35, d15: -3.32, m1: 25.24, asOf: '2026-10-16T20:17:30.000Z', regimeKey: 'MOVE' });
   assert.deepEqual(board.sections.map((section) => section.label), ['Metals', 'Crypto', 'Oil', 'Indices', 'Rates', 'CPI']);
 });
 

@@ -210,8 +210,12 @@
 .analyst-drivers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 4px 0 6px; align-items: start; }
 .analyst-drivers.has-volatility { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 /* Side by side when they fit; otherwise each table takes the full width. */
-.analyst-drivers--tables { display: flex; flex-wrap: wrap; align-items: stretch; }
-.analyst-drivers__asof { flex: 1 0 100%; text-align: right; color: var(--dashboard-muted-text, #667085); line-height: 1.2; }
+.analyst-drivers--tables { position: relative; display: flex; flex-wrap: wrap; align-items: stretch; }
+/* The as-of note shares the section title's line instead of taking a row of its own. */
+.analyst-drivers__asof {
+  position: absolute; right: 0; bottom: calc(100% + 9px);
+  color: var(--dashboard-muted-text, #667085); line-height: 1.2; white-space: nowrap;
+}
 /* vs USD gets enough width for four outlined readings; volatility gives up its slack name column. */
 .analyst-drivers--tables > table[aria-label="Volatility"] { flex: 3 1 400px; min-width: 0; }
 .analyst-drivers--tables > table[aria-label="Correlation with the US Dollar"] { flex: 2 1 300px; min-width: 0; }
@@ -263,8 +267,14 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-research__time,
 .analyst-research__quiet { color: var(--dashboard-muted-text, #667085); }
 .analyst-research__time { font-variant-numeric: tabular-nums; }
-.analyst-research__tone.is-positive { color: var(--dashboard-positive, #059669); }
-.analyst-research__tone.is-negative { color: var(--dashboard-negative, #dc2626); }
+/* Reported data (Market Structure signals and levels, Alpha Codes) lists one fact per line, values aligned. */
+.analyst-panel-v2 .analyst-prediction-report .analyst-research__facts {
+  display: grid; grid-template-columns: fit-content(55%) minmax(0, 1fr); column-gap: 10px; margin: 0; padding: 0; list-style: none;
+}
+.analyst-panel-v2 .analyst-prediction-report .analyst-research__facts > li { display: contents; }
+.analyst-research__fact-label { color: var(--dashboard-muted-text, #667085); }
+.analyst-research__fact-label::before { content: '•'; margin-right: 5px; color: var(--analyst-border, #c9d1db); }
+.analyst-research__fact-value { color: var(--analyst-ink, #172033); font-variant-numeric: tabular-nums; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research td.analyst-research__source { text-align: right; }
 .analyst-research__source button {
   padding: 0; border: 0; background: none; font: inherit; color: var(--dashboard-muted-text, #667085); cursor: pointer;

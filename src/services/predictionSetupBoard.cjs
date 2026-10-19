@@ -120,8 +120,9 @@ function volatilityReading(market, { volatility, quotes, riskRanges }) {
   const unavailable = { symbol: spec.symbol, label: spec.label, value: null, regimeKey: spec.regimeKey || null, unavailable: true };
   if (spec.source === 'volatility-snapshot') {
     const row = volatility?.[spec.key];
-    // Verified session closes ("historical") stay visible with their own date.
-    if (!['available', 'historical'].includes(row?.availability)) return unavailable;
+    // Verified session closes ("historical") and last-verified display readings ("reference",
+    // e.g. MOVE while its refresh is delayed) stay visible with their own date.
+    if (!['available', 'historical', 'reference'].includes(row?.availability)) return unavailable;
     value = finite(row.lastPx);
     changePct = finite(row.dayChangePct);
     d15 = finite(row.fifteenDayChangePct);

@@ -162,11 +162,14 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertIn('{"market":"Ethereum","entries":[]}', report)
         # Published data reads "Label: value", with the line it was printed in as its source.
         self.assertIn('{"market":"WTI","entries":[{"product":"Risk Ranges","time":"04:28","context":"Trend: Neutral → Bullish",'
-                      '"source":"Trend change: COPPER changed from Neutral to Bullish"}]}', report)
+                      '"source":"Trend change: COPPER changed from Neutral to Bullish","facts":["Trend: Neutral → Bullish"]}]}', report)
         self.assertIn('{"product":"Market Structure","time":"03:30","context":"SPX Gamma Exposure: Neutral",'
-                      '"source":"Market makers remain broadly neutral."}', report)
+                      '"source":"Market makers remain broadly neutral.","facts":["SPX Gamma Exposure: Neutral"]}', report)
         self.assertIn('"context":"Zero gamma: 7,736 · PV band: 7,660–7,886 · Strikes in play: 7,700, 7,750 · Gamma throttle: 0.64 · '
                       '10D realized vol: 9.63%"', report)
+        # Reported data also lists one line per fact, so it reads as data rather than a sentence.
+        self.assertIn('"facts":["Zero gamma: 7,736","PV band: 7,660–7,886","Strikes in play: 7,700, 7,750","Gamma throttle: 0.64",'
+                      '"10D realized vol: 9.63%"]', report)
         rates = json.loads(report.split("## Rates", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
         # Two findings from one sentence are one mention; the board's own Risk Range is not one.
         self.assertEqual(rates["markets"], [{"market": "UST 2Y", "entries": [

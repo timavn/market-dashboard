@@ -36,6 +36,15 @@ test('shows volatility with regime and implied move, and USD correlations as a 1
   expect(screen.getByText('vs USD as of Oct 12 close')).toBeInTheDocument();
 });
 
+test('a reading from an earlier session keeps its date under its regime', () => {
+  render(<AnalystPredictionDrivers drivers={parsePredictionDrivers(JSON.stringify({ volatility: [
+    { symbol: 'MOVE', market: 'Rates', level: '101.10', d1: -1.35, d15: -3.32, m1: 25.24, regimeKey: 'MOVE', regimeValue: 101.103,
+      implied: '±6.4 bp', note: 'Oct 16 close' }] }))} />);
+  const [move] = within(screen.getByRole('table', { name: 'Volatility' })).getAllByRole('row').slice(1);
+  expect(move.cells[5].textContent).toMatch(/Oct 16 close$/);
+  expect(move).toHaveTextContent('MOVERates101.10-1.4%-3.3%+25.2%');
+});
+
 test('saved reviews keep their earlier cell layout, including correlation periods', () => {
   render(<AnalystPredictionDrivers drivers={parsePredictionDrivers(
     '{"cells":[{"label":"Kalshi","value":"Oct 13 5pm ET"},{"label":"Gold vs USD","kind":"correlation","value":"-0.75","unit":"15D","sub":"30D -0.91","note":"Oct 12 close"}]}')} />);

@@ -230,7 +230,7 @@ test('Alpha Code cells stack Trade and Trend with the price above or below each,
   expect(container).not.toHaveTextContent(/ALPHA\(/);
 });
 
-test('analyst-research blocks list one row per mention, its context and source, and each quiet market', () => {
+test('analyst-research blocks list one row per mention, its context, time and source, and each quiet market', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Crypto" />);
   const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
@@ -249,17 +249,64 @@ test('analyst-research blocks list one row per mention, its context and source, 
   const table = within(screen.getByRole('region', { name: 'Morning research' })).getByRole('table');
   const rows = within(table).getAllByRole('row').map(row => [...row.cells].map(cell => cell.textContent));
   expect(rows).toEqual([
-    ['Market', 'Product', 'PT', 'Context', ''],
-    ['Bitcoin', 'The Macro Show', '07:55', 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend', 'Source'],
-    ['The Macro Show', '07:55', 'Long Bitcoin (BTC)', ''],
+    ['Market', 'Product', 'Context', 'PT', ''],
+    ['Bitcoin', 'The Macro Show', 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend', '07:55', 'Source'],
+    ['The Macro Show', 'Long Bitcoin (BTC)', '07:55', ''],
     ['Ethereum', 'Not mentioned'],
-    ['Solana', 'Crypto Quant', '—', 'Trend Bullish', 'Source'],
+    ['Solana', 'Crypto Quant', 'Trend Bullish', '—', 'Source'],
   ]);
-  expect(within(table).getByText('bearish')).toHaveClass('is-negative');
-  expect(within(table).getByText('Long')).toHaveClass('is-positive');
+  expect(within(table).getByText('bearish')).toHaveClass('analyst-process--negative');
+  expect(within(table).getByText('Long')).toHaveClass('analyst-process--positive');
   const [source] = within(table).getAllByRole('button', { name: 'Source' });
   expect(source).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(source);
   expect(source).toHaveAttribute('aria-expanded', 'true');
-  expect(screen.getByText(/sold all Ethereum/)).toBeVisible();
+  expect(table.querySelector('blockquote')).toHaveTextContent(/sold all Ethereum/);
+  expect(within(table.querySelector('blockquote')).getByText('Ethereum')).toHaveClass('analyst-process--ticker');
+});
+
+test('research excerpts color securities, quads, directions and signed moves as the other reports do', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Indices" />);
+  const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const research = { markets: [{ market: 'Nasdaq-100', entries: [
+    { product: 'Early Look', time: '04:25',
+      context: 'Since Bitcoin still has a positive correlation to USD, we stayed with both that and QQQ despite their -1.3% and -4.5% corrections last week.' },
+    { product: 'Early Look', time: '04:25', context: 'Late-stage #Quad2 than #Quad4; WTI was up 10% while the Russell is down almost 11.3% and SP500 = 7611-7852' }] }] };
+  const node = { children: [{ tagName: 'code', properties: { className: ['language-analyst-research'] },
+    children: [{ type: 'text', value: JSON.stringify(research) }] }] };
+  render(<Pre node={node}><code>ignored</code></Pre>);
+  const table = within(screen.getByRole('region', { name: 'Morning research' })).getByRole('table');
+  ['Bitcoin', 'USD', 'QQQ', 'WTI', 'Russell', 'SP500'].forEach(name => expect(within(table).getByText(name)).toHaveClass('analyst-process--ticker'));
+  ['-1.3%', '-4.5%', '11.3%'].forEach(move => expect(within(table).getByText(move)).toHaveClass('analyst-process--negative'));
+  expect(within(table).getByText('10%')).toHaveClass('analyst-process--positive');
+  expect(within(table).getByText('Quad2')).toHaveClass('analyst-process--quad-2');
+  expect(within(table).getByText('Quad4')).toHaveClass('analyst-process--quad-4');
+  // A range's dash is not a sign.
+  expect(within(table).getByText(/7611-7852/)).not.toHaveClass('analyst-process--negative');
+});
+
+test('reported data lists one fact per line, including saved reports that joined facts into one context', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Indices" />);
+  const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const research = { markets: [{ market: 'S&P 500', entries: [
+    { product: 'Market Structure', time: '03:30',
+      context: 'SPX Gamma Exposure: Negative · Systematic Flow Risk: Bearish · PV Band Risk/Reward: Long · Strategic Allocation: Risk On',
+      facts: ['SPX Gamma Exposure: Negative', 'Systematic Flow Risk: Bearish', 'PV Band Risk/Reward: Long', 'Strategic Allocation: Risk On'] },
+    { product: 'Market Structure', time: '03:30', context: 'Zero gamma: 7,733 · PV band: 7,610–7,852 · Gamma throttle: -5.89' },
+    { product: 'Top 3 Things', time: '05:33', context: 'Immediate-term @Hedgeye Risk Ranges: SP500 = 7611-7852' }] }] };
+  const node = { children: [{ tagName: 'code', properties: { className: ['language-analyst-research'] },
+    children: [{ type: 'text', value: JSON.stringify(research) }] }] };
+  render(<Pre node={node}><code>ignored</code></Pre>);
+  const lists = within(screen.getByRole('region', { name: 'Morning research' })).getAllByRole('list');
+  expect(lists.map(list => within(list).getAllByRole('listitem').map(item => [...item.children].map(span => span.textContent)))).toEqual([
+    [['SPX Gamma Exposure', 'Negative'], ['Systematic Flow Risk', 'Bearish'], ['PV Band Risk/Reward', 'Long'], ['Strategic Allocation', 'Risk On']],
+    [['Zero gamma', '7,733'], ['PV band', '7,610–7,852'], ['Gamma throttle', '-5.89']],
+  ]);
+  expect(within(lists[0]).getByText('Negative')).toHaveClass('analyst-process--negative');
+  expect(within(lists[0]).getByText('Risk On')).toHaveClass('analyst-process--positive');
+  expect(within(lists[0]).getByText('SPX')).toHaveClass('analyst-process--ticker');
+  // A sentence with a colon stays a sentence.
+  expect(screen.getByText(/Immediate-term @Hedgeye Risk Ranges:/).closest('ul')).toBeNull();
 });

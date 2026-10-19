@@ -73,7 +73,9 @@ function VolatilityTable({ rows }) {
         <td className="is-number"><Change value={row.d1} /></td>
         <td className="is-number"><Change value={row.d15} /></td>
         <td className="is-number"><Change value={row.m1} /></td>
-        <td>{regime ? <span className={REGIME_CLASS[regime.color] || ''}>{regime.label}</span>
+        {/* A reading from an earlier session (e.g. MOVE's last verified close) keeps its date under its regime. */}
+        <td>{regime ? <><span className={`analyst-driver__stack ${REGIME_CLASS[regime.color] || ''}`}>{regime.label}</span>
+          {row.note && <span className="analyst-driver__stack analyst-driver__muted">{row.note}</span>}</>
           : <span className="analyst-driver__muted">{row.note || 'N/A'}</span>}</td>
         {implied && <td>{row.implied
           ? row.implied.split(' · ').map(part => <span key={part} className="analyst-driver__stack">{part}</span>)
