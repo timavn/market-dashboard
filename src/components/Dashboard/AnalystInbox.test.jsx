@@ -68,7 +68,7 @@ test('operational attention describes the issue and consequence without position
   expect(screen.queryByText('Current position:')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Systems' }));
   expect(onCitation).toHaveBeenCalledWith(item.payload.presentation.sourceLinks[0].citation);
-  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
   expect(onAcknowledge).toHaveBeenCalledWith('gateway', 'gateway-revision', 2);
 });
 
@@ -193,7 +193,7 @@ test('shows the dated change, portfolio implication, and source evidence without
   expect(screen.getByText('Hedgeye Risk Ranges')).toBeInTheDocument();
   expect(screen.getByText('Sep 10, 2026')).toBeInTheDocument();
   const actions = screen.getByRole('group', { name: 'Alert actions' });
-  expect(within(actions).getByRole('button', { name: 'Acknowledge' })).toBeInTheDocument();
+  expect(within(actions).getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
   expect(within(actions).getAllByRole('button')).toHaveLength(4);
   for (const [index, date] of ['Sep 9', 'Sep 10', 'Sep 14'].entries()) {
     fireEvent.click(within(actions).getByRole('button', { name: `${date} source` }));
@@ -437,10 +437,10 @@ test('keeps source and acknowledgment actions without marking an alert read just
   expect(onAcknowledge).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'View source' }));
   expect(onCitation).toHaveBeenCalledWith(alert.payload.citation);
-  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
   await waitFor(() => expect(onAcknowledge).toHaveBeenCalledWith('amzn'));
   view.rerender(<AnalystInbox findings={[{ ...alert, unread: 0 }]} onCitation={onCitation} onAcknowledge={onAcknowledge} />);
-  expect(screen.queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'AMZN' })).not.toBeInTheDocument();
   expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
 });
@@ -449,13 +449,13 @@ test('shows a restored alert with a retryable acknowledgment after a save error'
   const onAcknowledge = jest.fn();
   render(<AnalystInbox findings={[finding()]} error="Couldn’t mark this alert as read. Try again." onAcknowledge={onAcknowledge} />);
   expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t mark this alert as read. Try again.');
-  expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Dismiss' })).toBeEnabled();
   expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
   expect(onAcknowledge).toHaveBeenCalledWith('amzn');
 });
 
-test('action-required items are pinned first and can only be kept with a reason', () => {
+test('action-required items are pinned first and dismiss with one click', () => {
   const onAcknowledge = jest.fn();
   const urgent = attention('snow', { kind: 'operational', severity: 'action-required', fingerprint: 'snow-fp', materialRevision: 2,
     publicationTime: '2026-09-21T15:30:00Z',
@@ -464,11 +464,7 @@ test('action-required items are pinned first and can only be kept with a reason'
   const headings = screen.getAllByRole('heading').map(heading => heading.textContent);
   expect(headings.slice(0, 3)).toEqual(['Action required', 'SNOW', 'Other items']);
   const card = screen.getByRole('heading', { name: 'SNOW' }).closest('article');
-  expect(within(card).queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument();
-  fireEvent.click(within(card).getByRole('button', { name: 'Keep position…' }));
-  const keep = within(card).getByRole('button', { name: 'Keep' });
-  expect(keep).toBeDisabled();
-  fireEvent.change(within(card).getByRole('textbox', { name: 'Reason for keeping the position' }), { target: { value: 'Hedged until earnings' } });
-  fireEvent.click(keep);
-  expect(onAcknowledge).toHaveBeenCalledWith('snow', 'snow-fp', 2, 'Hedged until earnings');
+  expect(within(card).queryByRole('button', { name: /Keep/ })).not.toBeInTheDocument();
+  fireEvent.click(within(card).getByRole('button', { name: 'Dismiss' }));
+  expect(onAcknowledge).toHaveBeenCalledWith('snow', 'snow-fp', 2);
 });

@@ -13,7 +13,8 @@ import './AnalystSourceLibrary.css';
 
 const SOURCE_SECTIONS = ['manual', 'automated'];
 
-export default function AnalystSourceLibrary({ onClose }) {
+// Embedded in the Analyst home tabs, the library has no header of its own.
+export default function AnalystSourceLibrary({ onClose, embedded = false }) {
   const active = useSurfaceActivity();
   const [section, setSection] = useState('manual');
   const [imports, setImports] = useState([]);
@@ -121,11 +122,11 @@ export default function AnalystSourceLibrary({ onClose }) {
   };
 
   return (
-    <aside className="analyst-drawer analyst-source-library is-open" data-testid="analyst-source-library" aria-label="Source Library">
-      <header>
+    <aside className={embedded ? 'analyst-source-library is-embedded' : 'analyst-drawer analyst-source-library is-open'} data-testid="analyst-source-library" aria-label="Source Library">
+      {!embedded && <header>
         <h2>Source Library</h2>
         <button type="button" className="analyst-icon-button" aria-label="Close source library" onClick={onClose}><X size={16} /></button>
-      </header>
+      </header>}
       <div className="analyst-source-tabs" role="tablist" aria-label="Source sections">
         {SOURCE_SECTIONS.map((tab) => (
           <button key={tab} ref={(element) => { tabsRef.current[tab] = element; }} type="button" role="tab" id={`analyst-source-tab-${tab}`} aria-selected={section === tab} aria-controls={`analyst-source-panel-${tab}`} tabIndex={section === tab ? 0 : -1} onKeyDown={moveTabFocus} onClick={() => setSection(tab)}>

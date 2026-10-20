@@ -41,7 +41,12 @@ beforeEach(() => {
     throw new Error(`Unexpected ${path}`);
   });
 });
-async function open(id) { fireEvent.click(await screen.findByRole('button', { name: `Open conversation: Chat ${id}` })); await screen.findByText(`Only answer ${id.toUpperCase()}`); }
+async function open(id) { fireEvent.click(await historyRows().findByRole('button', { name: `Open conversation: Chat ${id}` })); await screen.findByText(`Only answer ${id.toUpperCase()}`); }
+// History rows live on the Analyst home tab; leave an open chat to reach them.
+const home = () => { const back = screen.queryByRole('button', { name: 'Back to The Analyst' }); if (back) fireEvent.click(back); };
+const historyRows = () => { home(); return screen; };
+// The open chat's title sits in the header beside the way back home.
+const expectSelected = async title => expect(await screen.findByText(title, { selector: '.analyst-chat-title' })).toBeInTheDocument();
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 // Dated Analyst chats are filed under the user's Pacific calendar day.
 const pacificToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles',
@@ -78,7 +83,7 @@ test.each(['complete', 'running'])('%s Predictive Markets Review starts with mar
   conversations = { prediction: { ...make('prediction', saved), kind: 'prediction-markets-review', title: 'Predictive Markets Review', trading_date: '2026-09-18' } };
   conversations.prediction.messages[0].state = state;
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
   await screen.findByText(/### Silver/);
   const report = screen.getByRole('log', { name: 'Conversation' });
   expect(report).not.toHaveTextContent('Missing data');
@@ -97,7 +102,7 @@ test('prediction reviews retain verified comparisons and explicit follow-ups wit
     { id: 'answer', role: 'assistant', state: 'complete', text: 'The higher threshold has lower quoted implied odds.' },
   );
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
   await screen.findByText(/### Silver/);
   const report = screen.getByRole('log', { name: 'Conversation' });
   expect(report).toHaveTextContent('implied 57%');
@@ -110,7 +115,7 @@ test('prediction report removes its private marker only at render and preserves 
   const saved = '<!-- analyst-prediction-research-rollup -->\n\n## Interactive Brokers\n\n### CPI\n\n| Metric | Published reading |\n|---|---|\n| Forecast | 0.2% |\n\n## Kalshi\n\n### Ethereum\n\nTrend Neutral.';
   conversations = { prediction: { ...make('prediction', saved), kind: 'prediction-markets-review', title: 'Predictive Markets Review' } };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
   await screen.findByText(/## Interactive Brokers/);
   const report = screen.getByRole('article', { name: 'Predictive Markets Review' });
   expect(report).not.toHaveTextContent('analyst-prediction-research-rollup');
@@ -130,16 +135,17 @@ test('empty legacy Miscellaneous rows stay hidden while an explicitly saved sele
   };
   localStorage.setItem('analyst.workspace.selected', JSON.stringify('misc'));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Predictive Markets Review' });
-  expect(screen.getAllByRole('button', { name: /^Open conversation:/ }).map(button => button.textContent)).toEqual([
-    'Portfolio Review1 message', 'Balance Review1 message', 'Predictive Markets Review1 message', 'Chat a1 message',
-  ]);
-  expect(screen.queryByRole('button', { name: 'Open conversation: Miscellaneous' })).not.toBeInTheDocument();
+  await expectSelected('Miscellaneous');
   expect(screen.queryByRole('group', { name: 'Start a review' })).not.toBeInTheDocument();
   expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue('');
   expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/misc'));
   expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
+  await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  expect(historyRows().getAllByRole('button', { name: /^Open conversation:/ }).map(button => button.textContent)).toEqual([
+    'Portfolio Review1 message', 'Balance Review1 message', 'Predictive Markets Review1 message', 'Chat a1 message',
+  ]);
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Miscellaneous' })).not.toBeInTheDocument();
 });
 
 test('populated Miscellaneous remains available and sends into its existing conversation', async () => {
@@ -154,14 +160,14 @@ test('populated Miscellaneous remains available and sends into its existing conv
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Miscellaneous' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Miscellaneous' }));
   await screen.findByText('Earlier miscellaneous answer');
   const input = screen.getByRole('textbox', { name: 'Message The Analyst' });
   fireEvent.change(input, { target: { value: 'A question for today' } });
   fireEvent.click(screen.getByRole('button', { name: 'Send' }));
   await screen.findByText('A question for today');
   expect(api.request).toHaveBeenCalledWith('/messages', { text: 'A question for today', conversationId: 'misc', requestId: 'misc-first-message' });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Open conversation: Miscellaneous' })).toHaveTextContent('2 messages'));
+  await waitFor(() => expect(historyRows().getByRole('button', { name: 'Open conversation: Miscellaneous' })).toHaveTextContent('2 messages'));
 });
 
 test('server-owned portfolio refresh opens the returned review and preserves its originating chat', async () => {
@@ -223,7 +229,7 @@ test('completed manual history survives reload and exhausted reads with only nav
     return request(path, body, method);
   });
   const view = render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Manual Portfolio Update' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Manual Portfolio Update' }));
   await screen.findByText('Private captured account report');
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep my unsent question' } });
   const transcript = screen.getByRole('log');
@@ -241,23 +247,18 @@ test('completed manual history survives reload and exhausted reads with only nav
   cold = true;
   api.request.mockClear();
   render(<AnalystPanel />);
-  expect(screen.getByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).toHaveClass('is-active');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toBeVisible();
+  await expectSelected('Manual Portfolio Update');
   expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('IB Gateway');
   expect(screen.getByRole('textbox')).toHaveValue('Keep my unsent question');
   expect(screen.getByRole('log').scrollTop).toBe(173);
   expect(screen.queryByText('Private captured account report')).not.toBeInTheDocument();
-  await screen.findByRole('button', { name: 'Retry history' });
   await screen.findByRole('button', { name: 'Retry conversation' });
-  expect(api.request.mock.calls.filter(([path]) => path.startsWith('/conversations?'))).toHaveLength(3);
+  await waitFor(() => expect(api.request.mock.calls.filter(([path]) => path.startsWith('/conversations?'))).toHaveLength(3));
   expect(api.request.mock.calls.filter(([path]) => path === '/conversations/manual')).toHaveLength(3);
-  expect(screen.getByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).toHaveTextContent('3 messages');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
-  expect(screen.queryByText('No saved conversations.')).not.toBeInTheDocument();
 
   cold = false;
   fireEvent.click(screen.getByRole('button', { name: 'Retry conversation' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Retry history' }));
   await screen.findByText('Private captured account report');
   await act(async () => sourceRead.resolve({ conversationId: 'manual', basis: 'manual',
     reviewKind: 'portfolio-cross-verification', runId: 'saved-manual-capture', turnId: 'saved-manual-turn', state: 'ready',
@@ -265,6 +266,12 @@ test('completed manual history survives reload and exhausted reads with only nav
   expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Oct 8');
   expect(screen.getByRole('textbox')).toHaveValue('Keep my unsent question');
   expect(screen.getByRole('log').scrollTop).toBe(173);
+  // The saved rows and the history retry sit on the Analyst home.
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).toHaveTextContent('3 messages');
+  expect(screen.queryByText('No saved conversations.')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry history' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry history' })).not.toBeInTheDocument());
   expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
 });
 
@@ -341,7 +348,7 @@ test('reload automatically retries transient history and selected reads without 
   });
   api.request.mockClear();
   render(<AnalystPanel />);
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
+  await expectSelected('Chat a');
   await screen.findByText('Only answer A');
   await waitFor(() => expect(reads).toEqual({ history: 3, conversation: 3 }));
   expect(screen.queryByRole('button', { name: 'Retry conversation' })).not.toBeInTheDocument();
@@ -357,14 +364,14 @@ test('verified sidebar rows survive list omissions and reload until an exact del
     ? Promise.resolve({ conversations: [conversations.b], cursor: 0 }) : request(path, body, method));
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'unopened', type: 'complete' }) }));
   await waitFor(() => expect(api.request.mock.calls.filter(([path]) => path.startsWith('/conversations?'))).toHaveLength(2));
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
+  await expectSelected('Chat a');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.sidebar')).some(row => row.id === 'a')).toBe(true);
   view.unmount();
   render(<AnalystPanel />);
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
+  await expectSelected('Chat a');
   await screen.findByText('Only answer A');
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 2, conversation_id: 'a', type: 'deleted' }) }));
-  expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.sidebar')).some(row => row.id === 'a')).toBe(false);
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBeNull();
 });
@@ -378,7 +385,7 @@ test.each(['ANALYST_CONVERSATION_NOT_FOUND', 'ANALYST_CONVERSATION_DELETED'])('a
       status: serverCode === 'ANALYST_CONVERSATION_DELETED' ? 410 : 404 }))
     : request(path, body, method));
   render(<AnalystPanel />);
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open conversation: Chat deleted' })).not.toBeInTheDocument());
+  await waitFor(() => expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat deleted' })).not.toBeInTheDocument());
   expect(api.request.mock.calls.filter(([path]) => path === '/conversations/deleted')).toHaveLength(1);
   expect(JSON.parse(localStorage.getItem('analyst.workspace.sidebar')).some(row => row.id === 'deleted')).toBe(false);
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBeNull();
@@ -403,9 +410,9 @@ test.each(['code-less 404', 'archived'])('a %s read keeps the saved receipt, dra
   expect(JSON.parse(localStorage.getItem('analyst.workspace.drafts')).a).toBe('Unsent question for A');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.scrolls')).a).toBe(141);
   expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue('Unsent question for A');
-  // Archived rows are excluded from history, never treated as deleted.
+  // Archived rows are excluded from history, never treated as deleted. The
+  // open chat hides history, so the saved receipt is what proves it here.
   const listed = failure !== 'archived';
-  expect(Boolean(screen.queryByRole('button', { name: 'Open conversation: Chat a' }))).toBe(listed);
   expect(JSON.parse(localStorage.getItem('analyst.workspace.sidebar')).some(row => row.id === 'a')).toBe(listed);
   unreadable = false;
   conversations.a = { ...conversations.a, archived: false };
@@ -473,24 +480,26 @@ test('a completed list-only snapshot replaces a persisted acceptance state befor
   conversations.a = { ...conversations.a, revision: 1, activeTurn: { id: 'accepted-turn', request_id: 'accepted-request', state: 'accepted' } };
   const view = render(<AnalystPanel />);
   await open('a');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('Responding…');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('Responding…');
   const request = api.request.getMockImplementation();
   const completed = { id: 'a', title: 'Chat a', kind: 'chat', created_at: '2026-09-04T14:00:00Z', revision: 2, state: 'complete', message_count: 3, archived: false };
   api.request.mockImplementation((path, body, method) => path.startsWith('/conversations?')
     ? Promise.resolve({ conversations: [completed, conversations.b], cursor: 0 }) : request(path, body, method));
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'unopened', type: 'complete' }) }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('3 messages'));
+  await waitFor(() => expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('3 messages'));
   const stored = JSON.parse(localStorage.getItem('analyst.workspace.sidebar')).find(row => row.id === 'a');
   expect(stored.state).toBe('complete');
   expect(stored.activeTurn).toBeUndefined();
   view.unmount();
   api.request.mockImplementation((path, body, method) => path.startsWith('/conversations')
     ? Promise.reject(Object.assign(new Error('API warming up.'), { code: 'HTTP_503' })) : request(path, body, method));
+  // Reading the row went home; reopen Chat a across the reload.
+  localStorage.setItem('analyst.workspace.selected', JSON.stringify('a'));
   render(<AnalystPanel />);
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('3 messages');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
+  await expectSelected('Chat a');
   await screen.findByRole('button', { name: 'Retry conversation' });
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).not.toHaveTextContent('Responding…');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('3 messages');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).not.toHaveTextContent('Responding…');
 });
 
 test('live event recovery refreshes completed selected history after cold-start reads exhaust', async () => {
@@ -502,15 +511,14 @@ test('live event recovery refreshes completed selected history after cold-start 
     ? Promise.reject(Object.assign(new Error('API warming up.'), { code: 'HTTP_503' })) : request(path, body, method));
   render(<AnalystPanel />);
   await waitFor(() => expect(api.events).toHaveBeenCalledWith('latest'));
-  await screen.findByRole('button', { name: 'Retry history' });
   await screen.findByRole('button', { name: 'Retry conversation' }, { timeout: 2000 });
   cold = false;
   const unavailable = stream.addEventListener.mock.calls.find(([name]) => name === 'unavailable')[1];
   const ready = stream.addEventListener.mock.calls.find(([name]) => name === 'ready')[1];
   act(() => { unavailable(); ready({ data: JSON.stringify({ cursor: 142_281 }) }); });
   await screen.findByText('Only answer A');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat b' })).toBeVisible();
+  await expectSelected('Chat a');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat b' })).toBeVisible();
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry history' })).not.toBeInTheDocument());
   expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
 });
@@ -546,9 +554,9 @@ test.each(['before', 'after'])('a live-tail handshake %s initial snapshots resol
   });
   if (order === 'after') act(() => ready({ data: JSON.stringify({ cursor: 20 }) }));
   await screen.findByText('Completed in the subscription gap');
-  expect(await screen.findByRole('button', { name: 'Open conversation: Chat c' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
+  await expectSelected('Chat a');
   expect(screen.getByRole('log').scrollTop).toBe(121);
+  expect(await historyRows().findByRole('button', { name: 'Open conversation: Chat c' })).toBeVisible();
   expect(historyReads).toBe(2);
   expect(detailReads).toBe(2);
   expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
@@ -577,7 +585,7 @@ test('a later sidebar snapshot cannot skip streamed completion while an older se
   await act(async () => detail.resolve({ conversation: original, cursor: 21 }));
   await screen.findByText('Streamed completion after the detail snapshot');
   expect(detailReads).toBe(2);
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
+  await expectSelected('Chat a');
 });
 
 test.each(['draft', 'activeTurn', 'running', 'accepted'])('empty Miscellaneous with %s remains accessible without being selected automatically', async activity => {
@@ -586,9 +594,9 @@ test.each(['draft', 'activeTurn', 'running', 'accepted'])('empty Miscellaneous w
   else if (activity === 'activeTurn') conversations.misc.activeTurn = { id: 'misc-turn' };
   else conversations.misc.state = activity;
   render(<AnalystPanel />);
-  expect(await screen.findByRole('button', { name: 'Open conversation: Miscellaneous' })).toBeVisible();
+  expect(await historyRows().findByRole('button', { name: 'Open conversation: Miscellaneous' })).toBeVisible();
   expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Miscellaneous' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Miscellaneous' }));
   await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue(activity === 'draft' ? 'An unsent question' : ''));
 });
 
@@ -601,7 +609,7 @@ test('operational inbox source evidence shows the concern without raw API plumbi
       sourceLinks: [{ label: 'Systems', citation }] } } };
   api.request.mockImplementation((path, body, method) => path === '/inbox' ? Promise.resolve({ attentionVersion: 1, findings: [alert], unread: 1 }) : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(screen.getByRole('button', { name: 'Inbox', exact: true }));
+  fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
   fireEvent.click(await screen.findByRole('button', { name: 'Systems', exact: true }));
   const evidence = screen.getByRole('dialog', { name: 'Citation source' });
   expect(evidence).toHaveTextContent('Portfolio holdings and balances cannot refresh.');
@@ -624,7 +632,7 @@ test('inbox shows the named source signal and preserves acknowledgment and citat
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  fireEvent.click(screen.getByRole('button', { name: 'Inbox', exact: true }));
+  fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
   await screen.findByRole('heading', { name: 'IBIT' });
   const inbox = screen.getByRole('region', { name: 'Portfolio inbox' });
   expect(within(inbox).queryByRole('heading', { name: 'Portfolio inbox' })).not.toBeInTheDocument();
@@ -634,121 +642,18 @@ test('inbox shows the named source signal and preserves acknowledgment and citat
   expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
     type: 'analyst-inbox', detail: { findings: [alert], unread: 1, actionRequired: 0 },
   }));
-  expect(screen.getByRole('button', { name: 'Inbox', exact: true })).toHaveTextContent('Inbox (1)');
+  expect(screen.getByRole('tab', { name: /^Inbox/ })).toHaveTextContent('Inbox· 1');
   expect(api.request.mock.calls.some(([path]) => path === '/monitor')).toBe(false);
   expect(screen.queryByText(/pending verification|does not confirm a trade|signal change/i)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'View source' }));
   expect(screen.getByRole('dialog', { name: 'Citation source' })).toHaveTextContent('IBIT trade BULLISH');
   expect(screen.getByRole('link', { name: 'Open original report ↗' })).toHaveAttribute('href', alert.payload.citation.sourceUri);
   fireEvent.click(screen.getByRole('textbox', { name: 'Message The Analyst' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/inbox/alert/read', { acknowledge: true }));
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument());
-  expect(screen.getByRole('button', { name: 'Inbox', exact: true })).toHaveTextContent(/^Inbox$/);
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument());
+  expect(screen.getByRole('tab', { name: /^Inbox/ })).toHaveTextContent(/^Inbox$/);
   dispatch.mockRestore();
-});
-
-test.each(['chat', 'portfolio-review'])('Inbox toggles beside a selected %s without replacing its transcript, composer, draft or scroll', async kind => {
-  conversations.a.kind = kind;
-  render(<AnalystPanel />);
-  await open('a');
-  const transcript = screen.getByRole('log', { name: 'Conversation' });
-  const message = within(transcript).getByText('Only answer A');
-  const input = screen.getByRole('textbox', { name: 'Message The Analyst' });
-  const inboxButton = screen.getByRole('button', { name: 'Inbox', exact: true });
-  fireEvent.change(input, { target: { value: 'Keep my unsent question' } });
-  fireEvent.scroll(transcript, { target: { scrollTop: 175 } });
-  await waitFor(() => expect(JSON.parse(localStorage.getItem('analyst.workspace.scrolls')).a).toBe(175));
-
-  fireEvent.click(inboxButton);
-  const drawer = screen.getByRole('complementary', { name: 'Inbox' });
-  const inboxScroll = within(drawer).getByRole('region', { name: 'Inbox messages' });
-  const inbox = within(drawer).getByRole('region', { name: 'Portfolio inbox' });
-  expect(transcript).not.toContainElement(inbox);
-  expect(screen.getByRole('log', { name: 'Conversation' })).toBe(transcript);
-  expect(within(transcript).getByText('Only answer A')).toBe(message);
-  expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toBe(input);
-  expect(input).toHaveValue('Keep my unsent question');
-  expect(transcript.scrollTop).toBe(175);
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('a');
-  fireEvent.scroll(inboxScroll, { target: { scrollTop: 90 } });
-  expect(transcript.scrollTop).toBe(175);
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.scrolls')).a).toBe(175);
-
-  fireEvent.click(screen.getByRole('button', { name: 'Close Inbox' }));
-  expect(screen.queryByRole('complementary', { name: 'Inbox' })).not.toBeInTheDocument();
-  expect(screen.getByRole('log', { name: 'Conversation' })).toBe(transcript);
-  expect(within(transcript).getByText('Only answer A')).toBe(message);
-  expect(input).toHaveValue('Keep my unsent question');
-  expect(transcript.scrollTop).toBe(175);
-  fireEvent.click(inboxButton);
-  fireEvent.click(inboxButton);
-  expect(screen.queryByRole('region', { name: 'Portfolio inbox' })).not.toBeInTheDocument();
-  expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
-});
-
-test('Inbox stays open through history selection, New Chat and launching another review', async () => {
-  const request = api.request.getMockImplementation();
-  conversations.review = { ...make('review', 'A review opened with Inbox'), kind: 'prediction-markets-review', title: 'Predictive Markets Review' };
-  api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review'
-    ? Promise.resolve({ conversation: conversations.review }) : request(path, body, method));
-  render(<AnalystPanel />);
-  await open('a');
-  fireEvent.click(screen.getByRole('button', { name: 'Inbox', exact: true }));
-  const inbox = screen.getByRole('region', { name: 'Portfolio inbox' });
-  await open('b');
-  expect(inbox).toBeInTheDocument();
-  expect(screen.getByRole('log', { name: 'Conversation' })).toHaveTextContent('Only answer B');
-  fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
-  expect(inbox).toBeInTheDocument();
-  expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
-  expect(await screen.findByText('A review opened with Inbox')).toBeVisible();
-  expect(inbox).toBeInTheDocument();
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('review');
-  expect(api.request.mock.calls.filter(([path]) => path === '/daily/prediction-markets-review')).toHaveLength(1);
-});
-
-test('a pending new chat is accepted and continues streaming while Inbox scrolls independently', async () => {
-  const pending = deferred();
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((path, body, method) => path === '/messages' ? pending.promise : request(path, body, method));
-  render(<AnalystPanel />);
-  const transcript = screen.getByRole('log', { name: 'Conversation' });
-  const input = screen.getByRole('textbox', { name: 'Message The Analyst' });
-  Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1200 });
-  fireEvent.change(input, { target: { value: 'Keep responding while I read Inbox' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-  const sent = api.request.mock.calls.find(([path]) => path === '/messages')[1];
-  fireEvent.click(screen.getByRole('button', { name: 'Inbox', exact: true }));
-  const inbox = screen.getByRole('region', { name: 'Portfolio inbox' });
-  const inboxScroll = screen.getByRole('region', { name: 'Inbox messages' });
-  expect(transcript).toHaveTextContent(sent.text);
-  expect(screen.getByRole('status', { name: 'Response running' })).toBeVisible();
-  fireEvent.change(input, { target: { value: 'My next question' } });
-  conversations.sent = { ...make('sent', ''), revision: 2, activeTurn: { id: 'reply-turn', request_id: sent.requestId },
-    messages: [{ id: 'sent-user', role: 'user', text: sent.text, turn_id: 'reply-turn' },
-      { id: 'sent-answer', role: 'assistant', text: 'The response is arriving', state: 'running', turn_id: 'reply-turn' }] };
-  await act(async () => pending.resolve({ conversation: conversations.sent }));
-  expect(await within(transcript).findByText('The response is arriving')).toBeVisible();
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('sent');
-  expect(inbox).toBeInTheDocument();
-  expect(input).toHaveValue('My next question');
-  fireEvent.scroll(inboxScroll, { target: { scrollTop: 100 } });
-  Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 1600 });
-  conversations.sent = { ...conversations.sent, revision: 3, messages: [...conversations.sent.messages.slice(0, 1),
-    { ...conversations.sent.messages[1], text: 'The response continues beside Inbox' }] };
-  act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'sent' }) }));
-  expect(await within(transcript).findByText('The response continues beside Inbox')).toBeVisible();
-  expect(transcript.scrollTop).toBe(1600);
-  expect(inboxScroll.scrollTop).toBe(100);
-  conversations.sent = { ...conversations.sent, revision: 4, activeTurn: null, lastTurn: { id: 'reply-turn', state: 'complete', request_id: sent.requestId },
-    messages: [...conversations.sent.messages.slice(0, 1), { ...conversations.sent.messages[1], state: 'complete', text: 'The completed answer remains beside Inbox' }] };
-  act(() => stream.onmessage({ data: JSON.stringify({ seq: 2, conversation_id: 'sent' }) }));
-  expect(await within(transcript).findByText('The completed answer remains beside Inbox')).toBeVisible();
-  expect(inbox).toBeInTheDocument();
-  expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-  expect(api.request.mock.calls.filter(([path]) => path === '/messages')).toHaveLength(1);
 });
 
 test('new chat creates no row; search is server-side and review actions remain available', async () => {
@@ -760,7 +665,6 @@ test('new chat creates no row; search is server-side and review actions remain a
     ['Portfolio Review', 'Portfolio reviewP', 'P'], ['Predictive Markets Review', 'Predictive marketsM', 'M'], ['Manual Portfolio Update', 'Manual portfolio updateU', 'U']]);
   expect(screen.queryByText(/Waiting for|Research ready|Market Situation Report/i)).not.toBeInTheDocument();
   expect(api.request.mock.calls.some(([path]) => path === '/daily')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'needle in archived body' } });
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations?q=needle%20in%20archived%20body&archived=false'));
   expect(api.request.mock.calls.some(([path]) => path === '/messages')).toBe(false);
@@ -770,10 +674,11 @@ test('history has no archive controls and keeps legacy hidden conversations hidd
   conversations.old = { ...make('old', 'Archived answer'), archived: true };
   render(<AnalystPanel />);
   await open('a');
-  expect(screen.getByRole('heading', { name: 'Chats' })).toBeVisible();
+  home();
+  expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.queryByRole('checkbox', { name: 'Show archived' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Archive conversation/ })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Open conversation: Chat old' })).not.toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat old' })).not.toBeInTheDocument();
   expect(api.request.mock.calls.some(([path, , method]) => path.includes('archived=true') || method === 'PATCH')).toBe(false);
   expect(Object.keys(conversations)).toEqual(['a', 'b', 'old']);
 });
@@ -800,7 +705,7 @@ test('Manual Portfolio Update starts one complete cross-verification chat and pr
   });
   expectReviewProgress();
   expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('IB Gateway');
-  expect(screen.getByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).toHaveTextContent('Starting…');
+  await expectSelected('Manual Portfolio Update');
   expect(input).toHaveValue('Keep my next question');
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily'))).toBe(false);
 
@@ -824,7 +729,7 @@ test('saved Manual Portfolio Update uses section sources without changing its ca
         citations: [{ id: 'source', product: 'real-time-alert', title: 'Captured AAPL publication' }] }], message_count: 2 };
   const original = JSON.parse(JSON.stringify(conversations.manual));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat manual' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat manual' }));
   const sources = await screen.findAllByRole('button', { name: '[1] Real Time Alert' });
   expect(sources).toHaveLength(2);
   expect(screen.getByRole('log', { name: 'Conversation' })).not.toHaveTextContent('【');
@@ -887,7 +792,7 @@ test('reload recovers the exact accepted manual request before its POST receipt 
   expectReviewProgress();
   expect(screen.getByRole('textbox')).toHaveValue('Keep my next question');
   await act(async () => recovery.resolve({ status: 'accepted', turn: conversations.manual.activeTurn, conversation: conversations.manual }));
-  expect(await screen.findByRole('button', { name: 'Open conversation: Chat manual' })).toHaveClass('is-active');
+  await expectSelected('Chat manual');
   expect(screen.getByRole('textbox')).toHaveValue('Keep my next question');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.outbox'))).toBeNull();
@@ -913,7 +818,7 @@ test('a lost manual POST response recovers its accepted chat despite a failed hi
   render(<AnalystPanel />);
   fireEvent.click(screen.getByRole('button', { name: 'Manual Portfolio Update', exact: true }));
   await screen.findByText('Captured manual response');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat manual' })).toHaveClass('is-active');
+  await expectSelected('Chat manual');
   expect(screen.queryByText('POST acknowledgment lost.')).not.toBeInTheDocument();
   expect(api.request.mock.calls.filter(([path]) => path === '/messages')).toHaveLength(1);
 });
@@ -931,9 +836,9 @@ test('a late manual acceptance leaves a newer selected chat in place and retains
     lastTurn: { id: 'manual-turn', request_id: submission.requestId, state: 'complete' } };
   await act(async () => pending.resolve({ conversation: conversations.manual }));
   expect(screen.getByRole('log')).toHaveTextContent('Only answer B');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat manual' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).not.toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('b');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat manual' })).toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).not.toBeInTheDocument();
 });
 
 test('a failed manual capture keeps its Sources visible and Retry starts manual verification in the same chat', async () => {
@@ -951,7 +856,7 @@ test('a failed manual capture keeps its Sources visible and Retry starts manual 
         : { id: 'ibGateway', label: 'IB Gateway', status: 'ready', observedAt: '2026-10-09T15:40:00Z' }] })
       : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat manual' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat manual' }));
   await waitFor(() => expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Disconnected'));
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
@@ -967,7 +872,7 @@ test('a failed manual capture keeps its Sources visible and Retry starts manual 
   await act(async () => retry.resolve({ conversation: conversations.manual }));
   await screen.findByText('Retried manual findings');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
-  expect(screen.queryByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).not.toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).not.toBeInTheDocument();
 });
 
 test('a missing restored manual request settles its local shell without an automatic resubmission', async () => {
@@ -1068,28 +973,28 @@ test.each([
   api.request.mockImplementation((path, body, method) => path === `/daily/${kind}`
     ? Promise.resolve({ conversation: conversations.a }) : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Resume Chat a' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
   fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message The Analyst' }), { key });
   fireEvent.keyDown(screen.getByRole('dialog', { name: 'The Analyst', exact: true }), { key, metaKey: true });
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.keyDown(screen.getByRole('button', { name: 'Resume Chat a' }), { key });
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Open conversation: Chat a' }), { key });
   await screen.findByText('Only answer A');
   expect(api.request).toHaveBeenCalledWith(`/daily/${kind}`, { requestId: expect.stringMatching(/^review-start:/) });
 });
 
-test('the landing lists recent conversations newest first and opens one', async () => {
+test('the Chats tab lists saved conversations with their status and opens one', async () => {
   conversations.b = { ...conversations.b, kind: 'prediction-markets-review', title: 'Predictive Markets Review', updated_at: '2026-09-05T20:41:00Z' };
   conversations.a = { ...conversations.a, state: 'running' };
   render(<AnalystPanel />);
-  const recent = await screen.findByRole('region', { name: 'Recent' });
-  const cells = () => [...recent.querySelectorAll('tbody tr')].map(row => within(row).getAllByRole('cell').map(cell => cell.textContent));
-  await waitFor(() => expect(cells()).toHaveLength(2));
-  const [first, second] = cells();
-  expect(first).toEqual(['MARKETS', 'Predictive Markets Review', '09/05 16:41', '1 msg']);
-  expect(second).toEqual(['CHAT', 'Chat a', '09/04 10:00', 'Running']);
-  fireEvent.click(within(recent).getByRole('button', { name: 'Resume Chat a' }));
+  expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true');
+  const chats = screen.getByRole('tabpanel');
+  await waitFor(() => expect(within(chats).getAllByRole('button', { name: /^Open conversation:/ })).toHaveLength(2));
+  expect(within(chats).getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('1 message');
+  expect(within(chats).getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('Responding…');
+  fireEvent.click(within(chats).getByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText('Only answer A');
-  expect(screen.queryByRole('region', { name: 'Recent' })).not.toBeInTheDocument();
+  await expectSelected('Chat a');
+  expect(screen.queryByRole('tablist', { name: 'Analyst home' })).not.toBeInTheDocument();
 });
 
 test.each([
@@ -1142,12 +1047,12 @@ test.each([
   expect(report.querySelector('.analyst-record-date')).toBeNull();
 });
 
-test.each(['New Chat', 'history'])('%s navigation leaves a pending launch and its late response cannot select the review', async destination => {
+test.each(['Back to The Analyst', 'history'])('%s navigation leaves a pending launch and its late response cannot select the review', async destination => {
   const pending = deferred();
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending.promise : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Chat b' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat b' });
   fireEvent.click(screen.getByRole('button', { name: 'Portfolio Review', exact: true }));
   expectReviewProgress();
   if (destination === 'history') await open('b');
@@ -1157,40 +1062,8 @@ test.each(['New Chat', 'history'])('%s navigation leaves a pending launch and it
   await act(async () => pending.resolve({ conversation: conversations.review }));
   expect(screen.queryByText('Late launched review')).not.toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe(destination === 'history' ? 'b' : null);
-  const destinationContent = destination === 'New Chat' ? screen.getByRole('group', { name: 'Start a review' }) : screen.getByText('Only answer B');
+  const destinationContent = destination === 'Back to The Analyst' ? screen.getByRole('group', { name: 'Start a review' }) : screen.getByText('Only answer B');
   expect(destinationContent).toBeInTheDocument();
-});
-
-test('opening Inbox beside a pending Portfolio Review keeps Sources and the reader position through completion', async () => {
-  const position = reportPosition('Review completed beside Inbox');
-  try {
-    const pending = deferred();
-    const request = api.request.getMockImplementation();
-    api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending.promise : request(path, body, method));
-    render(<AnalystPanel />);
-    fireEvent.click(screen.getByRole('button', { name: 'Portfolio Review', exact: true }));
-    const transcript = expectReviewProgress();
-    fireEvent.click(screen.getByRole('button', { name: 'Inbox', exact: true }));
-    const inbox = screen.getByRole('region', { name: 'Portfolio inbox' });
-    expect(transcript).not.toContainElement(inbox);
-    expect(expectReviewProgress()).toBe(transcript);
-    expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toBeDisabled();
-
-    conversations.review = { ...make('review', ''), kind: 'portfolio-review', title: 'Portfolio Review', messages: [], activeTurn: { id: 'review-turn' } };
-    await act(async () => pending.resolve({ conversation: conversations.review }));
-    expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('review');
-    expect(expectReviewProgress()).toBe(transcript);
-    expect(inbox).toBeInTheDocument();
-
-    conversations.review = { ...conversations.review, activeTurn: null, lastTurn: { id: 'review-turn', state: 'complete' },
-      messages: [{ id: 'completed', role: 'assistant', state: 'complete', text: 'Review completed beside Inbox' }] };
-    act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'review' }) }));
-    expect(await within(transcript).findByText('Review completed beside Inbox')).toBeVisible();
-    expect(transcript.scrollTop).toBe(0);
-    expect(inbox).toBeInTheDocument();
-    expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-    expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
-  } finally { position.mockRestore(); }
 });
 
 test('duplicate clicks share one pending launch and a newer different review keeps its loading shell', async () => {
@@ -1203,7 +1076,7 @@ test('duplicate clicks share one pending launch and a newer different review kee
   const start = screen.getByRole('button', { name: 'Portfolio Review', exact: true });
   act(() => { start.click(); start.click(); });
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to The Analyst' }));
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
   expectReviewProgress();
   conversations.portfolio = { ...make('portfolio', 'Older portfolio response'), kind: 'portfolio-review' };
@@ -1226,14 +1099,14 @@ test('acceptance clears launch progress without waiting for the history list req
   api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review' ? pending.promise
     : blockHistory && path.startsWith('/conversations?') ? history.promise : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Chat a' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
   expectReviewProgress();
   blockHistory = true;
   conversations.review = { ...make('review', 'Saved review returned immediately'), kind: 'prediction-markets-review' };
   await act(async () => pending.resolve({ conversation: conversations.review }));
   expect(screen.getByText('Saved review returned immediately')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat review' })).toHaveClass('is-active');
+  await expectSelected('Chat review');
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
   expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toBeEnabled();
   await act(async () => history.resolve({ conversations: Object.values(conversations), cursor: 0 }));
@@ -1247,7 +1120,7 @@ test('a completed metadata-only acceptance counts review posts without a history
   api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review' ? pending.promise
     : accepted && path.startsWith('/conversations?') ? history.promise : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Chat a' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
   accepted = true;
   conversations.review = { ...make('review', ''), title: 'Predictive Markets Review', kind: 'prediction-markets-review',
@@ -1255,7 +1128,7 @@ test('a completed metadata-only acceptance counts review posts without a history
       { id: 'explanation', role: 'assistant', state: 'complete', text: 'Additional balance findings', reviewPostId: 'base', reviewNarrative: true }] };
   delete conversations.review.message_count;
   await act(async () => pending.resolve({ conversation: conversations.review }));
-  const row = screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  const row = historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
   expect(row).toHaveTextContent('1 message');
   expect(row).not.toHaveTextContent('undefined');
   await act(async () => history.resolve({ conversations: Object.values(conversations), cursor: 0 }));
@@ -1265,18 +1138,18 @@ test('a completed metadata-only acceptance counts review posts without a history
 test.each([
   ['portfolio-review', 'Portfolio Review'],
   ['prediction-markets-review', 'Predictive Markets Review'],
-])('%s appears selected in history before server acceptance or a list refresh', async (kind, label) => {
+])('%s shows its Starting slot in history before server acceptance or a list refresh', async (kind, label) => {
   const pending = deferred();
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === `/daily/${kind}` ? pending.promise : request(path, body, method));
   render(<AnalystPanel />);
   fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
-  const row = screen.getByRole('button', { name: `Open conversation: ${label}` });
-  expect(row).toHaveClass('is-active');
-  expect(row).toHaveTextContent('Starting…');
-  expect(screen.getByRole('button', { name: `Update review: ${label}` })).toBeDisabled();
   expectReviewProgress();
   expect(api.request.mock.calls.some(([path]) => path.includes('/conversations/pending-review:'))).toBe(false);
+  // Leaving for the history keeps the pending launch in its Starting slot.
+  const row = historyRows().getByRole('button', { name: `Open conversation: ${label}` });
+  expect(row).toHaveTextContent('Starting…');
+  expect(screen.getByRole('button', { name: `Update review: ${label}` })).toBeDisabled();
   // A history request that began before acceptance must leave the local start.
   await screen.findByRole('button', { name: 'Open conversation: Chat a' });
   expect(row).toBeVisible();
@@ -1285,7 +1158,8 @@ test.each([
   await act(async () => pending.resolve({ conversation: conversations.review }));
   expect(screen.getAllByRole('button', { name: `Open conversation: ${label}` })).toHaveLength(1);
   expect(screen.getByRole('button', { name: `Open conversation: ${label}` })).toHaveTextContent('Queued…');
-  expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: `Open conversation: ${label}` }));
+  expect(await screen.findByRole('button', { name: 'Stop' })).toBeEnabled();
 });
 
 test('a Starting review cannot be deleted and its late receipt opens the one accepted chat without any delete', async () => {
@@ -1293,21 +1167,23 @@ test('a Starting review cannot be deleted and its late receipt opens the one acc
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review' ? pending.promise : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Chat a' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
-  const row = screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  const row = historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
   expect(row).toHaveTextContent('Starting…');
   // Refresh and trash stay beside each other; neither acts until the start is accepted.
   expect([...row.closest('.analyst-conversation-row').querySelectorAll('button')].map(button => button.getAttribute('aria-label')))
     .toEqual(['Open conversation: Predictive Markets Review', 'Update review: Predictive Markets Review', 'Delete conversation: Predictive Markets Review']);
-  expect(screen.getByRole('button', { name: 'Delete conversation: Predictive Markets Review' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Predictive Markets Review' }));
+  expect(historyRows().getByRole('button', { name: 'Delete conversation: Predictive Markets Review' })).toBeDisabled();
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Predictive Markets Review' }));
+  // Reopen the Starting slot so its late receipt can select the accepted chat.
+  fireEvent.click(row);
   conversations.review = { ...make('review', 'Late accepted Predictive capture'), title: 'Predictive Markets Review', kind: 'prediction-markets-review' };
   await act(async () => pending.resolve({ conversation: conversations.review }));
   await screen.findByText('Late accepted Predictive capture');
-  expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
-  expect(screen.getByRole('button', { name: 'Delete conversation: Predictive Markets Review' })).toBeEnabled();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('review');
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+  expect(historyRows().getByRole('button', { name: 'Delete conversation: Predictive Markets Review' })).toBeEnabled();
   expect(api.request.mock.calls.some(([, , method]) => method === 'DELETE')).toBe(false);
 });
 
@@ -1316,7 +1192,7 @@ test.each(['late success', 'lost response'])('a Predictive launch reconciles a d
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review' ? pending.promise : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Chat a' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
   const requestId = api.request.mock.calls.find(([path]) => path === '/daily/prediction-markets-review')[1].requestId;
   const transcript = expectReviewProgress();
@@ -1326,7 +1202,6 @@ test.each(['late success', 'lost response'])('a Predictive launch reconciles a d
     activeTurn: { id: 'accepted-turn', state: 'accepted', request_id: 'daily-turn:captured-run' } };
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'review' }) }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
-  expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('review');
   expect(transcript.scrollTop).toBe(75);
 
@@ -1340,9 +1215,9 @@ test.each(['late success', 'lost response'])('a Predictive launch reconciles a d
   if (response === 'lost response') await act(async () => pending.reject(new Error('The Analyst request timed out.')));
   else await act(async () => pending.resolve({ conversation: conversations.review }));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
   expect(transcript.scrollTop).toBe(125);
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/prediction-markets-review')).toHaveLength(1);
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
 });
 
 test('a Predictive launch does not adopt another review request from the sidebar', async () => {
@@ -1350,20 +1225,21 @@ test('a Predictive launch does not adopt another review request from the sidebar
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review' ? pending.promise : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Chat a' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
   const requestId = api.request.mock.calls.find(([path]) => path === '/daily/prediction-markets-review')[1].requestId;
   conversations.other = { ...make('other', 'Independent captured review'), title: 'Other Predictive review',
     kind: 'prediction-markets-review', reviewRequestId: 'review-start:another-request' };
+  const reads = api.request.mock.calls.filter(([path]) => path.startsWith('/conversations?')).length;
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'other' }) }));
-  await screen.findByRole('button', { name: 'Open conversation: Other Predictive review' });
-  expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveClass('is-active');
+  await waitFor(() => expect(api.request.mock.calls.filter(([path]) => path.startsWith('/conversations?')).length).toBeGreaterThan(reads));
   expect(screen.queryByText('Independent captured review')).not.toBeInTheDocument();
   expectReviewProgress();
   conversations.review = { ...make('review', 'Requested captured review'), title: 'Predictive Markets Review',
     kind: 'prediction-markets-review', reviewRequestId: requestId };
   await act(async () => pending.resolve({ conversation: conversations.review }));
   await screen.findByText('Requested captured review');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Other Predictive review' })).toBeVisible();
 });
 
 test.each(['accepted', 'failed'])('starting today\'s Predictive review uses its existing sidebar slot before the POST is %s', async outcome => {
@@ -1376,14 +1252,15 @@ test.each(['accepted', 'failed'])('starting today\'s Predictive review uses its 
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review' ? pending.promise : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
-  const row = screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  const row = historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
   expect(row).toHaveTextContent('Starting…');
-  expect(row).toHaveClass('is-active');
   expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
   expect(screen.getByRole('button', { name: 'Open conversation: Previous Predictive Review' })).toBeVisible();
   expect(conversations.today).toBe(captured);
+  // The history slot reopens the pending start.
+  fireEvent.click(row);
   expectReviewProgress();
   if (outcome === 'accepted') {
     await act(async () => pending.resolve({ conversation: captured }));
@@ -1393,11 +1270,11 @@ test.each(['accepted', 'failed'])('starting today\'s Predictive review uses its 
   }
   expect(screen.queryByRole('alert')?.textContent || '').toBe(outcome === 'failed' ? 'Could not start the review.' : '');
   if (outcome === 'failed') {
-    fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+    fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
     await screen.findByText('Saved current-day Predictive capture');
   }
-  expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
-  expect(screen.getByRole('button', { name: 'Open conversation: Previous Predictive Review' })).toBeVisible();
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Previous Predictive Review' })).toBeVisible();
 });
 
 test('a review started after 9 p.m. Pacific reuses the Pacific day\'s slot and history groups by Pacific day', async () => {
@@ -1421,10 +1298,12 @@ test('a review started after 9 p.m. Pacific reuses the Pacific day\'s slot and h
     expect(group('Yesterday')).toEqual(['Open conversation: Chat earlier']);
     fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
     expect(JSON.parse(localStorage.getItem('analyst.workspace.launches'))).toEqual([expect.objectContaining({ tradingDate: '2026-10-09' })]);
-    expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+    expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
+    fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
     await act(async () => { pending.resolve({ conversation: conversations.today }); await jest.advanceTimersByTimeAsync(300); });
     expect(screen.getByText('Saved Pacific-day Predictive capture')).toBeInTheDocument();
+    home();
     expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
     expect(group('Today')).toContain('Open conversation: Predictive Markets Review');
   } finally { jest.useRealTimers(); }
@@ -1437,7 +1316,7 @@ test.each(['accepted', 'reviewing', 'complete'])('an empty %s Predictive body le
     messages: [{ id: 'capture-post', role: 'assistant', state, text: '', reviewBodyIncluded: false,
       created_at: '2026-09-04T14:00:00Z', reviewRunId: 'capture-run' }] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   const transcript = screen.getByRole('log', { name: 'Conversation' });
   await within(transcript).findByRole('region', { name: 'Review sources' });
   expect(transcript.querySelector('[data-message-id="capture-post"]')).toBeNull();
@@ -1448,22 +1327,21 @@ test('server review phases update the existing post and retain generic response 
   conversations.a = { ...conversations.a, kind: 'balance-review', revision: 1, reviewPhase: 'queued',
     activeTurn: { id: 'review-turn', state: 'accepted' }, messages: [] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
-  const row = screen.getByRole('button', { name: 'Open conversation: Chat a' });
-  await waitFor(() => expect(row).toHaveTextContent('Queued…'));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
+  const status = () => screen.getByRole('status', { name: 'Response running' });
+  await waitFor(() => expect(status()).toHaveTextContent('Queued…'));
   for (const [index, phase, label] of [[2, 'acquiring', 'Gathering sources…'], [3, 'rendering', 'Writing review…'], [4, 'summarizing', 'Summarizing…']]) {
     conversations.a = { ...conversations.a, revision: index, reviewPhase: phase, messages: [{
       id: 'single-review-post', role: 'assistant', state: 'reviewing', text: 'Progressive verified findings', reviewRunId: 'run-1',
     }] };
     act(() => stream.onmessage({ data: JSON.stringify({ seq: index, conversation_id: 'a' }) }));
-    await waitFor(() => expect(row).toHaveTextContent(label));
+    await waitFor(() => expect(status()).toHaveTextContent(label));
     expect(within(screen.getByRole('log')).getAllByText('Progressive verified findings')).toHaveLength(1);
-    expect(screen.getByRole('status', { name: 'Response running' })).toHaveTextContent(label);
   }
   conversations.a = { ...conversations.a, revision: 5, reviewPhase: null, activeTurn: { id: 'followup-turn', state: 'running' } };
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 5, conversation_id: 'a' }) }));
-  await waitFor(() => expect(row).toHaveTextContent('Responding…'));
-  expect(screen.getByRole('status', { name: 'Response running' })).not.toHaveTextContent('Summarizing…');
+  await waitFor(() => expect(status()).not.toHaveTextContent('Summarizing…'));
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('Responding…');
 });
 
 test('an accepted start survives a failed history refresh without an error or duplicate submission', async () => {
@@ -1474,12 +1352,12 @@ test('an accepted start survives a failed history refresh without an error or du
     : accepted && path.startsWith('/conversations?') ? Promise.reject(new Error('History request timed out.'))
     : request(path, body, method));
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Chat a' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
   accepted = true;
   conversations.review = { ...make('review', 'Accepted report'), title: 'Predictive Markets Review', kind: 'prediction-markets-review' };
   await act(async () => pending.resolve({ conversation: conversations.review }));
-  expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveClass('is-active');
+  await expectSelected('Predictive Markets Review');
   expect(screen.getByText('Accepted report')).toBeVisible();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/prediction-markets-review')).toHaveLength(1);
@@ -1494,9 +1372,9 @@ test('lightweight accepted refresh preserves the same captured brief until a ful
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending.promise : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByRole('row', { name: /IGV/ });
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   conversations.a = { ...conversations.a, revision: 2, briefsIncluded: false, activeTurn: { id: 'refresh-turn' }, reviewPhase: 'queued',
     messages: [{ id: 'captured-message', role: 'assistant', state: 'complete', text: 'Saved report' }] };
   await act(async () => pending.resolve({ conversation: conversations.a }));
@@ -1516,7 +1394,7 @@ test('a rejected compact capture clears previously verified metrics even when it
   conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1,
     messages: [{ id: 'captured-message', role: 'assistant', state: 'complete', text: 'Saved report', portfolioBrief: capturedBrief }] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await findPortfolioExposureAmount('$1,234.00');
   const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
   const exposureTable = within(exposure).getByRole('table', { name: 'Portfolio exposure' });
@@ -1544,7 +1422,7 @@ test('Portfolio sections keep their slots and tables from an empty loading post 
   conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1,
     activeTurn: { id: 'stable-turn' }, reviewRunId: 'stable-run', reviewPhase: 'acquiring', messages: [pending] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   const transcript = screen.getByRole('log', { name: 'Conversation' });
   await waitFor(() => expect(transcript.querySelector('[data-message-id="stable-post"]')).toBeInTheDocument());
   Object.defineProperties(transcript, { scrollHeight: { configurable: true, value: 1800 }, clientHeight: { configurable: true, value: 500 } });
@@ -1614,7 +1492,7 @@ test('a metadata-only partial revision rehydrates the exact active compact book 
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText('First captured research');
   const metadata = { ...post, text: 'New verified book report' }; delete metadata.portfolioBrief;
   conversations.a = { ...conversations.a, revision: 2, messages: [metadata] };
@@ -1654,7 +1532,7 @@ test('a cold sidebar refresh defers duplicated historical exports until compact 
       return request(path, body, method);
     });
     render(<AnalystPanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(await historyRows().findByRole('button', { name: 'Update review: Chat a' }));
     await waitFor(() => expect(screen.getByRole('status', { name: 'Response running' })).toHaveTextContent('Queued…'));
     expect(screen.getByRole('region', { name: 'Review sources' })).toBeVisible();
     expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toBeEnabled();
@@ -1690,7 +1568,7 @@ test('latest-only progress keeps each warm saved body and its citation bound to 
           blocks: [{ type: 'paragraph', text: 'Original saved research reading.', citationIds: [citation.id] }] }] } } };
   conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [saved] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await findPortfolioExposureAmount('$100.00');
   const article = screen.getByRole('article', { name: 'Portfolio Review summary' });
   conversations.a = { ...conversations.a, revision: 2, briefsIncluded: false, briefScope: 'latest',
@@ -1717,7 +1595,7 @@ test('opening a cold completed Portfolio reads its latest compact primary withou
       metrics: { grossExposure: 250 }, holdings: [] } };
   conversations.a = { ...conversations.a, kind: 'portfolio-review', activeTurn: null, briefsIncluded: false, messages: [old, latest] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await findPortfolioExposureAmount('$250.00');
   const placeholder = screen.getByRole('log', { name: 'Conversation' }).querySelector('[data-message-id="old-post"]');
   expect(placeholder).toHaveClass('analyst-captured-report-placeholder', 'portfolio-brief-centered');
@@ -1752,7 +1630,7 @@ test('an older failed post keeps its published partial report and status line wh
           metrics: { grossExposure: 100 }, holdings: [] } }] } })
       : request(path, body, method));
     render(<AnalystPanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+    fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
     await findPortfolioExposureAmount('$250.00');
     const placeholder = screen.getByRole('log', { name: 'Conversation' }).querySelector('[data-message-id="failed-post"]');
     expect(within(placeholder).queryByRole('note')).not.toBeInTheDocument();
@@ -1792,7 +1670,7 @@ test('a rejected exact saved-body read settles its existing report slots without
       return request(path, body, method);
     });
     render(<AnalystPanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+    fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
     await findPortfolioExposureAmount('$250.00');
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     const placeholder = transcript.querySelector('[data-message-id="old-post"]');
@@ -1825,7 +1703,7 @@ test('a rejected exact saved-body read settles its existing report slots without
     expect(portfolioExposureAmount('$250.00')).toBeVisible();
     expect(api.request.mock.calls.some(([path]) => path === '/daily/portfolio-review')).toBe(false);
     await open('b');
-    fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
+    fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Chat a' }));
     await findPortfolioExposureAmount('$250.00');
     const reopened = transcript.querySelector('[data-message-id="old-post"]');
     act(() => observers.at(-1).callback([{ target: reopened, isIntersecting: true }]));
@@ -1859,7 +1737,7 @@ test('cold history waits for the fresh primary and an exact viewport read cannot
       return request(path, body, method);
     });
     render(<AnalystPanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(await historyRows().findByRole('button', { name: 'Update review: Chat a' }));
     await waitFor(() => expect(api.request.mock.calls.some(([path]) => path.includes('briefScope=latest'))).toBe(true));
     expect(observers).toHaveLength(0);
     expect(api.request.mock.calls.some(([path]) => path.includes('briefMessageId='))).toBe(false);
@@ -1906,11 +1784,11 @@ test.each(['ready', 'partial', 'checking', 'unavailable'])('a blank managed runn
       return request(path, body, method);
     });
     render(<AnalystPanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+    fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
     await findPortfolioExposureAmount('$100.00');
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     Object.defineProperties(transcript, { scrollHeight: { configurable: true, value: 1800 }, clientHeight: { configurable: true, value: 500 } });
-    fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
     conversations.a = { ...conversations.a, briefsIncluded: false, revision: 2, activeTurn: { id: 'new-turn' },
       reviewRunId: 'new-run', reviewPhase: 'acquiring', messages: [saved, pending] };
     await act(async () => receipt.resolve({ conversation: conversations.a }));
@@ -1956,11 +1834,10 @@ test('a saved Balance Review stays readable and deletable but can no longer be r
       text: '# Balance Review\n\n**Net liquidation:** $100.00', balancePrimary: { available: true, runId: 'saved-run' } },
   ] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Balance Review' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Balance Review' }));
   await screen.findByText(/\$100\.00/);
-  expect(screen.queryByRole('button', { name: 'Update review: Balance Review' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Delete conversation: Balance Review' })).toBeEnabled();
-  fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
+  expect(historyRows().queryByRole('button', { name: 'Update review: Balance Review' })).not.toBeInTheDocument();
+  expect(historyRows().getByRole('button', { name: 'Delete conversation: Balance Review' })).toBeEnabled();
   expect(within(screen.getByRole('group', { name: 'Start a review' })).queryByRole('button', { name: 'Balance Review' })).not.toBeInTheDocument();
   expect(api.request.mock.calls.some(([path]) => path === '/daily/balance-review')).toBe(false);
 });
@@ -1975,11 +1852,11 @@ test.each(['unavailable', 'foreign-run', 'old-capture'])('Balance %s cannot quie
         text: '# Balance Review\n\n**Net liquidation:** $100.00', balancePrimary: { available: true, runId: 'saved-run' } }, pending,
     ] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText(/\$100\.00/);
   expect(screen.getByRole('status', { name: 'Response running' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('Gathering');
   expect(screen.getByRole('button', { name: 'Stop' })).toBeVisible();
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('Gathering');
 });
 
 test.each(['ready', 'partial', 'checking', 'unavailable'])('captured book with %s balance refreshes only its matching active run and never waits for archive readiness', async balanceStatus => {
@@ -2008,7 +1885,7 @@ test.each(['ready', 'partial', 'checking', 'unavailable'])('captured book with %
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(packets).toBe(1));
   expect(screen.getByText('IB Gateway').closest('li')).toHaveTextContent('Checking');
   expect(screen.getByText('IB Gateway').closest('li')).not.toHaveTextContent('Connected');
@@ -2041,7 +1918,7 @@ test('settled Portfolio requests do not certify an unavailable primary, and late
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(reads).toBe(2));
   expect(screen.getByText('IB Gateway').closest('li')).toHaveTextContent('Checking');
   expect(screen.queryByText('Captured book')).not.toBeInTheDocument();
@@ -2066,9 +1943,9 @@ test('a refresh renders its first compact brief while preserving an older comple
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? receipt.promise : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await findPortfolioExposureAmount('$100.00');
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   const pending = { id: 'fresh-report', role: 'assistant', state: 'reviewing', text: '',
     reviewPostId: 'fresh-post', reviewRunId: 'fresh-run' };
   const olderMetadata = { ...original }; delete olderMetadata.portfolioBrief;
@@ -2125,7 +2002,7 @@ test('saved balance automatic findings share one exceptions section while follow
     { id: 'followup', role: 'assistant', state: 'complete', text: '## Review notes\n\nThe requested follow-up explanation remains available.' },
   ];
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   const combined = await screen.findByText(/# Balance Review/);
   expect(combined).toHaveTextContent('Borrowing balance unavailable.');
   expect(combined).toHaveTextContent('Reconcile the unexpected borrow fee.');
@@ -2140,7 +2017,7 @@ test('Balance Review uses the Sources date without a duplicate dated caption or 
     { id: 'report', role: 'assistant', state: 'complete', text: '# Balance Review\n\nPartial · USD\n\n**Observed:** 2026-09-18T17:33:54Z\n\n**Net liquidation:** $175,378.64\n\n## Exceptions & Data Status\n\n- Borrowing balance unavailable.' },
   ] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Balance Review' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Balance Review' }));
   const report = await screen.findByText(/# Balance Review/);
   expect(report).toHaveTextContent('Net liquidation:');
   expect(report).toHaveTextContent('Borrowing balance unavailable.');
@@ -2166,7 +2043,7 @@ test('daily rollup source footers open the full original excerpt with only the a
     ],
   }] } };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   const driverSection = await screen.findByRole('region', { name: 'Today’s market drivers' });
   expect(driverSection.lastChild).toHaveTextContent('Sources: Top 3 Things, Early Look');
   fireEvent.click(within(driverSection).getByRole('button', { name: 'Source: Daily drivers · Sep 18, 2026' }));
@@ -2196,14 +2073,14 @@ test('source popup has no X, keeps inside clicks, and dismisses on other Analyst
   expect(screen.queryByRole('dialog', { name: 'Citation source' })).not.toBeInTheDocument();
   expect(onClose).not.toHaveBeenCalled();
   fireEvent.click(sourceButton);
-  fireEvent.click(screen.getByRole('button', { name: 'Sources', exact: true }));
-  expect(screen.queryByRole('dialog', { name: 'Citation source' })).not.toBeInTheDocument();
-  const library = await screen.findByTestId('analyst-source-library');
-  fireEvent.click(sourceButton);
   popup = screen.getByRole('dialog', { name: 'Citation source' });
-  fireEvent.click(within(library).getByRole('heading', { name: 'Source Library' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to The Analyst' }));
   expect(popup).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
+  const library = await screen.findByTestId('analyst-source-library');
   expect(library).toBeVisible();
+  expect(within(library).queryByRole('heading', { name: 'Source Library' })).not.toBeInTheDocument();
+  expect(within(library).queryByRole('button', { name: 'Close source library' })).not.toBeInTheDocument();
   expect(onClose).not.toHaveBeenCalled();
 });
 
@@ -2219,8 +2096,6 @@ test('retained Analyst reopens its selected conversation, clears source popups, 
   await open('a');
   const analyst = screen.getByRole('dialog', { name: 'The Analyst', exact: true });
   fireEvent.change(screen.getByRole('textbox', { name: 'Message The Analyst' }), { target: { value: 'Keep this draft' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sources', exact: true }));
-  await screen.findByTestId('analyst-source-library');
   fireEvent.click(screen.getByRole('button', { name: '[1] Published evidence' }));
   expect(screen.getByRole('dialog', { name: 'Citation source' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Dashboard backdrop' }));
@@ -2237,65 +2112,6 @@ test('retained Analyst reopens its selected conversation, clears source popups, 
   expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue('Keep this draft');
 });
 
-test('hidden ResizeObserver widths preserve the expanded sidebar across retained hide and reopen', async () => {
-  const originalObserver = global.ResizeObserver;
-  let reportSize;
-  global.ResizeObserver = jest.fn(callback => {
-    reportSize = width => callback([{ contentRect: { width } }]);
-    return { observe: jest.fn(), disconnect: jest.fn() };
-  });
-  try {
-    conversations.a.kind = 'portfolio-review';
-    conversations.a.messages[0].portfolioBrief = { available: true, holdings: [], metrics: {} };
-    localStorage.setItem('analyst.workspace.selected', JSON.stringify('a'));
-    const viewFor = visible => <PersistentSurface active={visible}><AnalystPanel /></PersistentSurface>;
-    const { rerender } = render(viewFor(true));
-    fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
-    await screen.findByRole('article', { name: 'Portfolio Review summary' });
-    await waitFor(() => expect(reportSize).toEqual(expect.any(Function)));
-    act(() => reportSize(800));
-    const sidebar = screen.getByTestId('analyst-conversation-rail');
-    expect(sidebar).toHaveClass('is-open');
-    rerender(viewFor(false));
-    act(() => { reportSize(0); reportSize(-1); reportSize(Number.NaN); });
-    expect(sidebar).toHaveClass('is-open');
-    rerender(viewFor(true));
-    act(() => reportSize(800));
-    expect(screen.getByTestId('analyst-conversation-rail')).toBe(sidebar);
-    expect(sidebar).toHaveClass('is-open');
-    expect(screen.getByRole('button', { name: 'Collapse conversation sidebar' })).toBeVisible();
-    act(() => reportSize(639));
-    expect(sidebar).toHaveClass('is-collapsed');
-    expect(screen.getByRole('button', { name: 'Expand conversation sidebar' })).toBeVisible();
-  } finally { global.ResizeObserver = originalObserver; }
-});
-
-test('portfolio report sidebar responds to the space beside Inbox rather than the combined window width', async () => {
-  const originalObserver = global.ResizeObserver;
-  let reportSize;
-  global.ResizeObserver = jest.fn(callback => {
-    reportSize = width => callback([{ contentRect: { width } }]);
-    return { observe: jest.fn(), disconnect: jest.fn() };
-  });
-  try {
-    conversations.a.kind = 'portfolio-review';
-    conversations.a.messages[0].portfolioBrief = { available: true, holdings: [], metrics: {} };
-    render(<AnalystPanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
-    await screen.findByRole('article', { name: 'Portfolio Review summary' });
-    await waitFor(() => expect(reportSize).toEqual(expect.any(Function)));
-    act(() => reportSize(1000));
-    expect(screen.getByTestId('analyst-conversation-rail')).toHaveClass('is-open');
-    fireEvent.click(screen.getByRole('button', { name: 'Inbox', exact: true }));
-    const drawer = screen.getByRole('complementary', { name: 'Inbox' });
-    jest.spyOn(drawer, 'getBoundingClientRect').mockReturnValue({ width: 380 });
-    act(() => reportSize(1000));
-    expect(screen.getByTestId('analyst-conversation-rail')).toHaveClass('is-collapsed');
-    expect(screen.getByRole('article', { name: 'Portfolio Review summary' })).toBeVisible();
-    expect(drawer).toBeVisible();
-  } finally { global.ResizeObserver = originalObserver; }
-});
-
 test('one product source button preserves both immutable publications and independent highlights in a stacked popup', async () => {
   const priorText = 'Equity volatility remained elevated during the prior session.';
   const currentText = 'Equity volatility declined materially during the current session.';
@@ -2309,7 +2125,7 @@ test('one product source button preserves both immutable publications and indepe
     ],
   }] } };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Source: Risk Ranges', exact: true }));
   const popup = screen.getByRole('dialog', { name: 'Citation source' });
   const entries = within(popup).getAllByRole('article');
@@ -2333,7 +2149,7 @@ test.each([
 ])('%s history counts one message and refreshes to two messages', async (title, kind) => {
   conversations.a = { ...conversations.a, title, kind };
   render(<AnalystPanel />);
-  const row = await screen.findByRole('button', { name: `Open conversation: ${title}` });
+  const row = await historyRows().findByRole('button', { name: `Open conversation: ${title}` });
   expect(within(row).getByText('1 message', { exact: true })).toBeInTheDocument();
 
   conversations.a = {
@@ -2374,7 +2190,7 @@ test('Portfolio Review opens the last saved closing report with a historical dat
   expect(screen.queryByRole('button', { name: 'Show earlier messages' })).not.toBeInTheDocument();
   view.unmount();
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Portfolio Review' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Portfolio Review' }));
   await screen.findByText('Friday closing portfolio review');
   expect(screen.getByRole('note')).toHaveTextContent('Historical snapshot');
   expect(api.request.mock.calls.some(([path]) => path === '/messages')).toBe(false);
@@ -2402,7 +2218,7 @@ test('a disconnected refresh retains saved position exceptions until a verified 
   ];
   localStorage.setItem('analyst.workspace.selected', JSON.stringify('a'));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByRole('row', { name: /IGV/ });
   expect(screen.getByRole('note')).toHaveTextContent('The latest refresh could not verify holdings. Showing the last saved portfolio below.');
   expect(screen.queryByText('Verified portfolio evidence is unavailable for this saved review.')).not.toBeInTheDocument();
@@ -2427,13 +2243,13 @@ test.each([2, 3])('terminal review detail revision %s clears a stale running sid
   });
   render(<AnalystPanel />);
   await open('a');
-  const button = screen.getByRole('button', { name: 'Update review: Chat a' });
+  const button = historyRows().getByRole('button', { name: 'Update review: Chat a' });
   await waitFor(() => expect(button).toBeEnabled());
   fireEvent.click(button);
   fireEvent.click(button);
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/prediction-markets-review')).toHaveLength(1);
   expect(api.request).toHaveBeenCalledWith('/daily/prediction-markets-review', expect.objectContaining({ refresh: true, conversationId: 'a' }));
-  expect(button).toBeDisabled();
+  expect(historyRows().getByRole('button', { name: 'Update review: Chat a' })).toBeDisabled();
 });
 
 test.each(['older detail', 'active detail', 'partial detail'])('%s cannot clear authoritative running sidebar state', async scenario => {
@@ -2447,7 +2263,7 @@ test.each(['older detail', 'active detail', 'partial detail'])('%s cannot clear 
     ? Promise.resolve({ conversations: [row], cursor: 0 }) : request(path, body, method));
   render(<AnalystPanel />);
   await open('a');
-  const button = screen.getByRole('button', { name: 'Update review: Chat a' });
+  const button = historyRows().getByRole('button', { name: 'Update review: Chat a' });
   expect(button).toBeDisabled();
   fireEvent.click(button);
   expect(api.request.mock.calls.some(([path]) => path === '/daily/prediction-markets-review')).toBe(false);
@@ -2466,12 +2282,12 @@ test('opening a historical placeholder never starts a review; its refresh button
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
   await waitFor(() => expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument());
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Update review: Chat a' })).toBeDisabled());
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+  await waitFor(() => expect(historyRows().getByRole('button', { name: 'Update review: Chat a' })).toBeDisabled());
   expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) });
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
   await waitFor(() => expect(screen.queryByText(/market.*closed|reviews resume|No saved portfolio review/i)).not.toBeInTheDocument());
@@ -2488,10 +2304,10 @@ test.each([false, true])('explicitly refreshing an empty placeholder never steal
     ? pending.promise
     : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) });
   expectReviewProgress();
   expect(screen.queryByText('Loading the latest portfolio review…')).not.toBeInTheDocument();
@@ -2511,10 +2327,10 @@ test('a failed explicit placeholder refresh keeps the error notice and never ret
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending.promise : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) });
   expectReviewProgress();
   expect(screen.queryByText('Loading the latest portfolio review…')).not.toBeInTheDocument();
@@ -2525,19 +2341,17 @@ test('a failed explicit placeholder refresh keeps the error notice and never ret
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
 });
 
-test('a delayed historical placeholder response stays selected beside Inbox without starting recovery', async () => {
+test('a delayed historical placeholder response stays selected without starting recovery', async () => {
   const details = deferred();
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/conversations/a' ? details.promise : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a'));
-  fireEvent.click(screen.getByRole('button', { name: 'Inbox', exact: true }));
   conversations.a = { ...conversations.a, kind: 'portfolio-review', referenceReview: { targetDate: '2026-09-04', missing: true }, messages: [] };
   await act(async () => details.resolve({ conversation: conversations.a }));
-  expect(screen.getByRole('region', { name: 'Portfolio inbox' })).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('a');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
+  await expectSelected('Chat a');
   expect(api.request.mock.calls.some(([path]) => path === '/daily/portfolio-review')).toBe(false);
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
 });
@@ -2548,18 +2362,19 @@ test('explicit placeholder refreshes deduplicate by conversation while the reope
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending[body.conversationId].promise : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', expect.objectContaining({ refresh: true, conversationId: 'a' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat b' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Chat b' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/b?includeBriefs=false&briefScope=latest'));
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat b' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat b' }));
   expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', expect.objectContaining({ refresh: true, conversationId: 'b' }));
+  // A duplicate refresh from the history is ignored and leaves the home view open.
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
   expectReviewProgress();
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(2);
   conversations.a = { ...conversations.a, referenceReview: null, messages: [{ id: 'finished-a', role: 'assistant', state: 'complete', text: 'Selected recovered review A' }] };
@@ -2577,10 +2392,10 @@ test('reopening the same empty history entry never creates or refreshes a review
   conversations.a.referenceReview = { targetDate: '2026-09-04', missing: true };
   conversations.a.messages = [];
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
-  fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to The Analyst' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request.mock.calls.filter(([path]) => path === '/conversations/a?includeBriefs=false&briefScope=latest')).toHaveLength(2));
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/') || path === '/messages')).toBe(false);
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('a');
@@ -2620,11 +2435,11 @@ test('every history row has one trash button beside refresh and no archive actio
   render(<AnalystPanel />);
   await open('a');
   expect(screen.queryByRole('button', { name: /^Archive conversation/ })).not.toBeInTheDocument();
-  const buttons = id => [...screen.getByRole('button', { name: `Open conversation: ${id}` }).closest('.analyst-conversation-row')
+  const buttons = id => [...historyRows().getByRole('button', { name: `Open conversation: ${id}` }).closest('.analyst-conversation-row')
     .querySelectorAll('button')].map(button => button.getAttribute('aria-label'));
   expect(buttons('Chat a')).toEqual(['Open conversation: Chat a', 'Delete conversation: Chat a']);
   expect(buttons('Portfolio Review')).toEqual(['Open conversation: Portfolio Review', 'Update review: Portfolio Review', 'Delete conversation: Portfolio Review']);
-  expect(screen.getByRole('button', { name: 'Delete conversation: Chat a' })).toBeEnabled();
+  expect(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' })).toBeEnabled();
   expect(api.request.mock.calls.some(([, , method]) => method === 'DELETE')).toBe(false);
 });
 
@@ -2635,7 +2450,8 @@ test.each(['Update review: Chat a', 'Retry'])('%s explicitly refreshes the selec
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? Promise.resolve({ conversation: conversations.a }) : request(path, body, method));
   render(<AnalystPanel />);
   await open('a');
-  fireEvent.click(screen.getByRole('button', { name: button, exact: true }));
+  // Retry sits in the open chat; Update review sits on its history row.
+  fireEvent.click((button === 'Retry' ? screen : historyRows()).getByRole('button', { name: button, exact: true }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) }));
 });
 test('saved history remains readable with event-stream outage', async () => {
@@ -2663,12 +2479,13 @@ test.each(['portfolio-review', 'prediction-markets-review'])('refreshing %s show
   render(<AnalystPanel />);
   await open('a');
   await open('b');
-  const refresh = screen.getByRole('button', { name: 'Update review: Chat a' });
-  fireEvent.click(refresh);
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   expectReviewProgress();
   expect(screen.getByText('Only answer A')).toBeInTheDocument();
+  const refresh = historyRows().getByRole('button', { name: 'Update review: Chat a' });
   fireEvent.click(refresh);
   expect(refresh).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText('Only answer A');
   expect(screen.queryByRole('button', { name: 'Update review', exact: true })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Show earlier messages' })).not.toBeInTheDocument();
@@ -2687,7 +2504,7 @@ test.each(['portfolio-review', 'prediction-markets-review'])('refreshing %s show
   await screen.findByText('Updated report');
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
   expect(screen.getByText('Only answer A')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('2 messages');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('2 messages');
 });
 
 test('completing a review keeps its captured source rows visible during the final source check', async () => {
@@ -2729,21 +2546,19 @@ test('portfolio refresh progress and failure preserve the saved report and Sourc
     : path === '/conversations/a/sources' ? Promise.resolve({ conversationId: 'a', runId: 'saved-run', basis: 'review', state: 'complete', items: sourceItems })
       : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(screen.getByRole('article', { name: 'Portfolio Review summary' })).toHaveAttribute('data-message-id', 'a-message'));
+  await within(await screen.findByRole('region', { name: 'Review sources' })).findByText('Connected');
+  const presentationClass = screen.getByTestId('analyst-panel').className;
+  // Starting a refresh from the history reopens the report with its Sources in place.
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
-  const sources = await screen.findByRole('region', { name: 'Review sources' });
-  await within(sources).findByText('Connected');
+  expect(report).toHaveAttribute('data-message-id', 'a-message');
+  expect(screen.getByTestId('analyst-panel')).toHaveAttribute('class', presentationClass);
+  const sources = screen.getByRole('region', { name: 'Review sources' });
   const header = sources.querySelector('header');
   const list = sources.querySelector('ul');
-  const sourceRow = within(sources).getByRole('listitem');
-  const presentationClass = screen.getByTestId('analyst-panel').className;
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
-  expect(screen.getByRole('article', { name: 'Portfolio Review summary' })).toBe(report);
-  expect(screen.getByTestId('analyst-panel')).toHaveAttribute('class', presentationClass);
-  expect(sources.querySelector('header')).toBe(header);
-  expect(sources.querySelector('ul')).toBe(list);
-  expect(within(sources).getByText('IB Gateway').closest('li')).toBe(sourceRow);
+  const sourceRow = within(sources).getByText('IB Gateway').closest('li');
   expect(within(sources).getAllByRole('listitem')).toHaveLength(22);
   expect(within(header).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
   expect(within(sourceRow).getByText('Checking')).toBeVisible();
@@ -2776,9 +2591,9 @@ test('a sidebar timeout after an accepted review refresh does not mark the revie
   });
   render(<AnalystPanel />);
   await open('a');
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   await screen.findByText('Completed refreshed portfolio report');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Update review: Chat a' })).toBeEnabled());
+  await waitFor(() => expect(historyRows().getByRole('button', { name: 'Update review: Chat a' })).toBeEnabled());
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.queryByText('The Analyst request timed out.')).not.toBeInTheDocument();
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
@@ -2791,9 +2606,9 @@ test('a failed refresh keeps its request ID for retry and clears old source chec
     ? Promise.reject(new Error('Could not start the review.')) : original(path, body, method));
   render(<AnalystPanel />);
   await open('a');
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   await screen.findByText('Could not start the review.');
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
   await screen.findByText('Could not start the review.');
   const requests = api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review');
   expect(requests).toHaveLength(2);
@@ -2871,12 +2686,12 @@ test('an explicit Portfolio refresh keeps the reader position through its loadin
     const request = api.request.getMockImplementation();
     api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? receipt.promise : request(path, body, method));
     render(<AnalystPanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+    fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
     await findPortfolioExposureAmount('$100.00');
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     Object.defineProperties(transcript, { scrollHeight: { configurable: true, value: 750 }, clientHeight: { configurable: true, value: 500 } });
     fireEvent.scroll(transcript, { target: { scrollTop: 225 } });
-    fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
     expect(transcript.scrollTop).toBe(225);
     const pending = { id: 'fresh-report', role: 'assistant', state: 'reviewing', text: '',
       reviewPostId: 'fresh-post', reviewRunId: 'fresh-run', turn_id: 'fresh-turn' };
@@ -2925,7 +2740,7 @@ test.each(['portfolio-review', 'prediction-markets-review'])('%s refresh complet
     api.request.mockImplementation((path, body, method) => path === `/daily/${kind}` ? pending.promise : request(path, body, method));
     render(<AnalystPanel />);
     await open('a');
-    fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     conversations.a = { ...conversations.a, revision: 2, lastTurn: { id: 'new-turn', state: 'complete' }, messages: [...conversations.a.messages,
       { id: 'completed', role: 'assistant', state: 'complete', text: 'Completed before acceptance' }] };
@@ -2935,7 +2750,7 @@ test.each(['portfolio-review', 'prediction-markets-review'])('%s refresh complet
     fireEvent.scroll(transcript, { target: { scrollTop: 225 } });
     await act(async () => pending.resolve({ conversation: conversations.a }));
     expect(transcript.scrollTop).toBe(225);
-    expect(screen.getByRole('button', { name: 'Update review: Chat a' })).toBeEnabled();
+    expect(historyRows().getByRole('button', { name: 'Update review: Chat a' })).toBeEnabled();
   } finally { position.mockRestore(); }
 });
 
@@ -2948,7 +2763,7 @@ test('leaving a refreshing report for history cancels its automatic completion s
     api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending.promise : request(path, body, method));
     render(<AnalystPanel />);
     await open('a');
-    fireEvent.click(screen.getByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
     await open('b');
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     fireEvent.scroll(transcript, { target: { scrollTop: 125 } });
@@ -2979,13 +2794,13 @@ test('loaded review sources remain visible when switching reviews and reopening 
   await open('b');
   await screen.findByText('Prediction source');
 
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Chat a' }));
   expect(screen.getByText('Portfolio source')).toBeVisible();
   expect(screen.getByText('Sep 4 08:00 PDT')).toBeVisible();
   expect(screen.queryByText('Checking sources…')).not.toBeInTheDocument();
   expect(screen.queryByText('Prediction source')).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat b' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Chat b' }));
   expect(screen.getByText('Prediction source')).toBeVisible();
   expect(screen.getByText('Unavailable')).toBeVisible();
   expect(screen.queryByText('Checking sources…')).not.toBeInTheDocument();
@@ -3023,9 +2838,9 @@ test('one click deletes only that chat and its draft, and it never returns throu
   const view = render(<AnalystPanel />);
   await open('a');
   fireEvent.change(screen.getByRole('textbox', { name: 'Message The Analyst' }), { target: { value: 'Removed draft' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
+  await waitFor(() => expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
   expect(api.request).toHaveBeenCalledWith('/conversations/a', undefined, 'DELETE');
   expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 9, type: 'deleted', conversation_id: 'a' }) }));
@@ -3034,12 +2849,12 @@ test('one click deletes only that chat and its draft, and it never returns throu
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 10, type: 'complete', conversation_id: 'a' }) }));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
   expect(screen.getByText('Only answer B')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.drafts')).a).toBeUndefined();
   view.unmount();
   render(<AnalystPanel />);
   await open('b');
-  expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
   expect(api.request.mock.calls.filter(([, , method]) => method === 'DELETE')).toHaveLength(1);
 });
 
@@ -3048,12 +2863,12 @@ test('reload, reconnect and history refresh never delete or hide a saved chat', 
   await open('a');
   view.unmount();
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Open conversation: Chat a' });
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
   act(() => stream.onerror?.());
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 20, type: 'complete', conversation_id: 'b' }) }));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat b' })).toBeEnabled();
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeEnabled();
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat b' })).toBeEnabled();
   expect(api.request.mock.calls.some(([, , method]) => method === 'DELETE')).toBe(false);
 });
 
@@ -3065,27 +2880,27 @@ test('a slow delete keeps a disabled Deleting row in place and a stale refresh c
     : request(path, body, method));
   render(<AnalystPanel />);
   await open('a');
-  const order = () => screen.getAllByRole('button', { name: /^Open conversation:/ }).map(button => button.getAttribute('aria-label'));
+  const order = () => historyRows().getAllByRole('button', { name: /^Open conversation:/ }).map(button => button.getAttribute('aria-label'));
   const before = order();
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
   // The row stays in place, so a repeated click cannot land on the next row.
-  const row = screen.getByRole('button', { name: 'Open conversation: Chat a' });
+  const row = historyRows().getByRole('button', { name: 'Open conversation: Chat a' });
   expect(order()).toEqual(before);
   expect(row).toBeDisabled();
   expect(row).toHaveTextContent('Deleting…');
   expect(row.closest('.analyst-conversation-row')).toHaveClass('is-deleting');
-  expect(screen.getByRole('button', { name: 'Delete conversation: Chat a' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
+  expect(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' })).toBeDisabled();
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
   expect(screen.queryByText('Only answer A')).not.toBeInTheDocument();
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 10, conversation_id: 'a' }) }));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 500)); });
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
   expect(order()).toEqual(before);
   expect(screen.queryByText('Only answer A')).not.toBeInTheDocument();
   await open('b');
   await act(async () => finishDelete());
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
   expect(screen.getByText('Only answer B')).toBeInTheDocument();
+  await waitFor(() => expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
   expect(api.request.mock.calls.filter(([, , method]) => method === 'DELETE')).toHaveLength(1);
 });
 
@@ -3093,17 +2908,17 @@ test('a fast delete acknowledgment holds the disabled row long enough that a rep
   conversations.c = make('c', 'Only answer C');
   render(<AnalystPanel />);
   await open('a');
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
   // A double or triple click lands on the same in-place row, never on Chat b below it.
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
+  await waitFor(() => expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
   expect(api.request.mock.calls.filter(([, , method]) => method === 'DELETE').map(([path]) => path)).toEqual(['/conversations/a']);
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat b' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat c' })).toBeEnabled();
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat b' })).toBeEnabled();
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat c' })).toBeEnabled();
 });
 
 test.each([false, true])('a failed delete confirmed by GET restores the row and draft, offers Retry delete, and does not steal navigation (switch: %s)', async switched => {
@@ -3116,18 +2931,20 @@ test.each([false, true])('a failed delete confirmed by GET restores the row and 
   render(<AnalystPanel />);
   await open('a');
   fireEvent.change(screen.getByRole('textbox', { name: 'Message The Analyst' }), { target: { value: 'Keep my draft' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
   if (switched) await open('b');
   await act(async () => failDelete());
   expect(api.request.mock.calls.filter(([path, , method]) => path === '/conversations/a' && method !== 'DELETE').length).toBeGreaterThanOrEqual(2);
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toBeEnabled();
   expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t delete the conversation. It’s still saved. Try again.');
-  expect(screen.getByText(switched ? 'Only answer B' : 'Only answer A')).toBeInTheDocument();
+  // Deleting from the history left Chat a; the failure keeps whatever view followed.
+  expect(Boolean(screen.queryByText('Only answer B'))).toBe(switched);
+  expect(Boolean(screen.queryByRole('group', { name: 'Start a review' }))).toBe(!switched);
   expect(JSON.parse(localStorage.getItem('analyst.workspace.drafts')).a).toBe('Keep my draft');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeEnabled();
   // Retry is one more click on the same delete.
   fireEvent.click(screen.getByRole('button', { name: 'Retry deleting conversation: Chat a' }));
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
+  await waitFor(() => expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(api.request.mock.calls.filter(([path, , method]) => path === '/conversations/a' && method === 'DELETE')).toHaveLength(2);
 });
@@ -3140,12 +2957,12 @@ test('server deletion confirmation wins over a lost HTTP response', async () => 
     : request(path, body, method));
   render(<AnalystPanel />);
   await open('a');
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
   delete conversations.a;
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 11, type: 'deleted', conversation_id: 'a' }) }));
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeDisabled();
   await act(async () => failDelete());
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
+  await waitFor(() => expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
@@ -3156,18 +2973,18 @@ test('a committed delete with a lost HTTP response is confirmed by GET 404 witho
   const view = render(<AnalystPanel />);
   await open('a');
   fireEvent.change(screen.getByRole('textbox', { name: 'Message The Analyst' }), { target: { value: 'Delete this draft too' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
   await open('b');
   delete conversations.a;
   await act(async () => pending.reject(new Error('Connection lost after commit')));
-  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
-  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.getByText('Only answer B')).toBeInTheDocument();
+  await waitFor(() => expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument(), { timeout: 3000 });
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.drafts')).a).toBeUndefined();
   view.unmount();
   render(<AnalystPanel />);
   await open('b');
-  expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/') || path === '/messages')).toBe(false);
 });
 
@@ -3183,7 +3000,7 @@ test('unavailable deletion verification reports uncertainty without claiming the
   render(<AnalystPanel />);
   await open('a');
   fireEvent.change(screen.getByRole('textbox', { name: 'Message The Analyst' }), { target: { value: 'Preserve uncertain draft' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
   await open('b');
   verificationUnavailable = true;
   await act(async () => pending.reject(new Error('Connection lost')));
@@ -3194,7 +3011,7 @@ test('unavailable deletion verification reports uncertainty without claiming the
   delete conversations.a;
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 13, type: 'deleted', conversation_id: 'a' }) }));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
 });
 
 test('a stuck review is stopped and run again from Refresh without deleting it', async () => {
@@ -3211,16 +3028,16 @@ test('a stuck review is stopped and run again from Refresh without deleting it',
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Portfolio Review' }));
   // While the review is active, Stop is the way out; refresh waits for it.
+  expect(await historyRows().findByRole('button', { name: 'Update review: Portfolio Review' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Portfolio Review' }));
   expect(await screen.findByRole('button', { name: 'Stop' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Update review: Portfolio Review' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Update review: Portfolio Review' })).toBeEnabled());
-  expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Update review: Portfolio Review' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument());
+  await waitFor(() => expect(historyRows().getByRole('button', { name: 'Update review: Portfolio Review' })).toBeEnabled());
+  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Portfolio Review' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) }));
-  expect(screen.getAllByRole('button', { name: 'Open conversation: Portfolio Review' })).toHaveLength(1);
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Portfolio Review' })).toHaveLength(1);
   expect(api.request.mock.calls.some(([, , method]) => method === 'DELETE')).toBe(false);
 });
 
@@ -3241,13 +3058,13 @@ test('Balance narrative retry revalidates its exact captured primary and stays q
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText(/Verified current account\./);
   fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   await screen.findByRole('button', { name: 'Stop' });
   await waitFor(() => expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument());
   expect(screen.getByText(/Verified current account\./)).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('1 message');
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toHaveTextContent('1 message');
   expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest');
   expect(api.request.mock.calls.some(([path]) => path === '/daily/balance-review')).toBe(false);
 });
@@ -3263,7 +3080,7 @@ test.each(['foreign-post', 'foreign-run', 'ordinary-followup', 'unverified', 'ne
     messages: [report, ...(failure === 'new-capture' ? [{ id: 'new-capture', role: 'assistant', state: 'running', text: '',
       reviewRunId: 'new-run', reviewPostId: 'new-post', turn_id: 'new-turn' }] : [])] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText(/Verified current account\./);
   expect(screen.getByRole('status', { name: 'Response running' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Stop' })).toBeVisible();
@@ -3381,7 +3198,7 @@ test.each(['send', 'review'])('late %s completion after closing preserves the ex
   expect(Boolean(screen.queryByRole('group', { name: 'Start a review' }))).toBe(operation === 'send');
   expect(Boolean(screen.queryByText('Late completed answer'))).toBe(operation === 'review');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe(operation === 'send' ? null : 'finished');
-  if (operation === 'send') fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat finished' }));
+  if (operation === 'send') fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat finished' }));
   expect(await screen.findByText('Late completed answer')).toBeVisible();
 });
 
@@ -3439,13 +3256,15 @@ test('removes the duplicate gray title and does not submit an IME composition or
   expect(api.request.mock.calls.filter(([path]) => path === '/messages')).toHaveLength(0);
 });
 
-test('sidebar search keeps the event stream open and unrelated Inbox errors do not interrupt responses', async () => {
+test('history search keeps the event stream open and unrelated Inbox errors do not interrupt responses', async () => {
   render(<AnalystPanel />);
   await open('a');
   const closeCount = stream.close.mock.calls.length;
+  home();
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Chat' } });
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations?q=Chat&archived=false'));
   expect(stream.close).toHaveBeenCalledTimes(closeCount);
+  await open('a');
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/inbox' ? Promise.reject(new Error('Inbox unavailable')) : request(path, body, method));
   conversations.a = { ...conversations.a, activeTurn: { id: 'a-turn' }, messages: [...conversations.a.messages, { id: 'more', role: 'assistant', state: 'running', text: 'Still responding' }] };
@@ -3518,9 +3337,11 @@ test('a temporary history refresh failure keeps the loaded chat usable without a
   await open('a');
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path.startsWith('/conversations?') ? Promise.reject(new Error('History request timed out.')) : request(path, body, method));
+  home();
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Chat' } });
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations?q=Chat&archived=false'));
-  expect(screen.getByText('Only answer A')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
+  expect(await screen.findByText('Only answer A')).toBeVisible();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
 });
@@ -3574,9 +3395,9 @@ test('snapshot subscription delivers newer selected response changes and unopene
     stream.onmessage({ data: JSON.stringify({ seq: 142_283, conversation_id: 'c', type: 'created' }) });
   });
   await screen.findByText('Current response after snapshot');
-  await screen.findByRole('button', { name: 'Open conversation: Chat c' });
-  expect(api.request.mock.calls.some(([path]) => path === '/conversations/c')).toBe(false);
   expect(screen.getByRole('status', { name: 'Response running' })).toBeVisible();
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat c' });
+  expect(api.request.mock.calls.some(([path]) => path === '/conversations/c')).toBe(false);
 });
 
 test('navigation shares a pending transcript and a later response invalidation gets one fresh read', async () => {
@@ -3587,10 +3408,10 @@ test('navigation shares a pending transcript and a later response invalidation g
   api.request.mockImplementation((path, body, method) => path === '/conversations/a'
     ? (++reads === 1 ? first.promise : latest.promise) : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(reads).toBe(1));
   await open('b');
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Chat a' }));
   expect(reads).toBe(1);
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'a', type: 'complete' }) }));
   await act(async () => new Promise(resolve => setTimeout(resolve, 100)));
@@ -3658,7 +3479,7 @@ test('hiding during an invalidated transcript read does not launch queued reads 
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/conversations/a' ? pending.promise : request(path, body, method));
   const view = render(<PersistentSurface active><AnalystPanel /></PersistentSurface>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a'));
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'a', type: 'complete' }) }));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
@@ -3690,7 +3511,7 @@ test('fresh unchanged predictive snapshots reuse parsed reports but same-revisio
   const request = api.request.getMockImplementation();
   api.request.mockImplementation(async (path, body, method) => JSON.parse(JSON.stringify(await request(path, body, method))));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText(/### Silver/);
   await waitFor(() => expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('IB Gateway'));
   ReactMarkdown.mockClear();
@@ -3710,7 +3531,7 @@ test('verified progressive review sections display captured citations before ter
   conversations.a.activeTurn = { id: 'review-turn' };
   conversations.a.messages = [{ id: 'report-post', role: 'assistant', state: 'reviewing', text: '## Verified research\n\nBullish reading', citations: [citation], reviewRunId: 'run-partial' }];
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText(/Verified research/);
   expect(screen.getByRole('status', { name: 'Response running' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '[1] risk-ranges' }));
@@ -3730,7 +3551,7 @@ test('a progressive Portfolio capture renders its structured report without pars
         }] },
       } }] };
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await findPortfolioExposureAmount('$1,234.00');
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveTextContent('$1,234.00');
@@ -3749,7 +3570,7 @@ test('a legacy Portfolio report hides internal markers and its redundant title w
   conversations.a.kind = 'portfolio-review';
   conversations.a.messages[0].text = saved;
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   const body = await screen.findByText(/Captured exposure/);
   expect(body.closest('.analyst-message')).toHaveClass('analyst-portfolio-markdown');
   expect(body).toHaveTextContent('## Exposure & risk');
@@ -3786,14 +3607,14 @@ test('compact Portfolio sources load evidence from the original post only when o
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((url, body, method) => url === path ? evidence.promise : request(url, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   const sourceButton = await screen.findByRole('button', { name: 'Source: Captured publication · Sep 4, 2026' });
   expect(api.request.mock.calls.some(([url]) => url === path)).toBe(false);
   fireEvent.click(sourceButton);
   const popup = screen.getByRole('dialog', { name: 'Citation source' });
   expect(popup).toHaveTextContent('Captured publication');
   expect(popup.querySelector('article')).toHaveAttribute('aria-busy', 'true');
-  expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
+  await expectSelected('Chat a');
   await act(async () => evidence.resolve({ citation: { ...source, excerpt: 'Captured published reading for the verified security. Saved publication context.' } }));
   expect(popup).toHaveTextContent('Captured published reading for the verified security. Saved publication context.');
   expect(popup.querySelector('article')).not.toHaveAttribute('aria-busy');
@@ -3829,7 +3650,7 @@ test('a closed event stream at cold start reconnects with capped backoff and rec
       ? Promise.reject(Object.assign(new Error('API warming up.'), { code: 'HTTP_503', status: 503 })) : request(path, body, method));
     render(<AnalystPanel />);
     await act(async () => jest.advanceTimersByTimeAsync(700));
-    expect(screen.getByRole('button', { name: 'Retry history' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Retry conversation' })).toBeVisible();
     // A 503 answer to the stream request closes an EventSource permanently.
     act(() => { streams[0].readyState = 2; streams[0].onerror(); });
     expect(streams).toHaveLength(1);
@@ -3846,8 +3667,7 @@ test('a closed event stream at cold start reconnects with capped backoff and rec
     act(() => { streams[2].readyState = 1; streams[2].onopen(); ready({ data: JSON.stringify({ cursor: 77 }) }); });
     await act(async () => jest.advanceTimersByTimeAsync(300));
     expect(screen.getByText('Only answer A')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open conversation: Chat a' })).toHaveClass('is-active');
-    expect(screen.queryByRole('button', { name: 'Retry history' })).not.toBeInTheDocument();
+    await expectSelected('Chat a');
     // Later reconnects resume after the observed cursor instead of replaying old events.
     act(() => { streams[2].readyState = 2; streams[2].onerror(); });
     await act(async () => jest.advanceTimersByTimeAsync(1000));
@@ -3855,6 +3675,8 @@ test('a closed event stream at cold start reconnects with capped backoff and rec
     expect(streams[3].after).toBe(77);
     expect(streams.slice(0, 3).every(stream => stream.close.mock.calls.length > 0)).toBe(true);
     expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
+    expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Retry history' })).not.toBeInTheDocument();
   } finally { jest.useRealTimers(); }
 });
 
@@ -3869,7 +3691,6 @@ test('history and the selected chat retry automatically with capped backoff whil
       ? Promise.reject(Object.assign(new Error('API warming up.'), { code: 'ANALYST_REQUEST_TIMEOUT' })) : request(path, body, method));
     render(<AnalystPanel />);
     await act(async () => jest.advanceTimersByTimeAsync(5000));
-    expect(screen.getByRole('button', { name: 'Retry history' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Retry conversation' })).toBeVisible();
     const lists = () => api.request.mock.calls.filter(([path]) => path.startsWith('/conversations?')).length;
     const before = lists();
@@ -3880,9 +3701,10 @@ test('history and the selected chat retry automatically with capped backoff whil
     cold = false;
     await act(async () => jest.advanceTimersByTimeAsync(16_000));
     expect(screen.getByText('Only answer A')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Retry history' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue('Draft kept through the outage');
     expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
+    expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Retry history' })).not.toBeInTheDocument();
   } finally { jest.useRealTimers(); }
 });
 
@@ -3898,7 +3720,7 @@ test('source-progress events revalidate only the selected review Sources without
       { id: 'risk-ranges', label: 'Risk Ranges', status, ...(status === 'ready' ? { publishedAt: '2026-10-09' } : {}) }] })
     : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText('Progressive Predictive findings');
   const reads = predicate => api.request.mock.calls.filter(([path]) => predicate(path)).length;
   await waitFor(() => expect(reads(path => path === '/conversations/a/sources')).toBe(1));
@@ -3946,12 +3768,12 @@ test('a model phase after settled Sources stays in the Sources header for Balanc
       { id: 'interestStatus', label: 'Interest accruals', status: 'ready', observedAt: '2026-10-09T15:00:00Z' }] })
     : request(path, body, method));
   render(<AnalystPanel />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Open conversation: Chat a' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText('Captured balance report');
   await waitFor(() => expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Interest accruals'));
   const header = () => screen.getByRole('region', { name: 'Review sources' }).querySelector('header');
   expect(within(header()).getByRole('status', { name: 'Response running' })).toHaveTextContent('Summarizing…');
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Manual Portfolio Update' }));
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Manual Portfolio Update' }));
   await waitFor(() => expect(within(header()).getByRole('status', { name: 'Response running' })).toHaveTextContent('Writing verification…'));
   expect(screen.getAllByRole('status', { name: 'Response running' })).toHaveLength(1);
 });
@@ -3966,20 +3788,21 @@ describe('review starts across a reload', () => {
     persist();
     localStorage.setItem('analyst.workspace.selected', JSON.stringify(`pending-review:${requestId}`));
     render(<AnalystPanel />);
-    const row = screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
-    expect(row).toHaveClass('is-active');
-    expect(row).toHaveTextContent('Starting…');
     expect(within(expectReviewProgress()).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
+    const row = historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+    expect(row).toHaveTextContent('Starting…');
     await waitFor(() => expect(api.request.mock.calls.some(([path]) => path.startsWith('/conversations?'))).toBe(true));
     // Within its start budget, a history snapshot without the request keeps the slot.
     expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
+    // The Starting slot reopens the restored start.
+    fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
     conversations.review = { ...make('review', 'Restored captured Predictive review'), title: 'Predictive Markets Review', kind,
       trading_date: pacificToday(), reviewRequestId: requestId };
     act(() => stream.onmessage({ data: JSON.stringify({ seq: 3, conversation_id: 'review' }) }));
     await screen.findByText('Restored captured Predictive review');
-    expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
     expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('review');
     expect(JSON.parse(localStorage.getItem('analyst.workspace.launches'))).toEqual([]);
+    expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
     // Request lookups resolve turn IDs only; they cannot confirm a review start.
     expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/') || path === '/messages' || path.startsWith('/requests/'))).toBe(false);
   });
@@ -3990,15 +3813,15 @@ describe('review starts across a reload', () => {
     const request = api.request.getMockImplementation();
     api.request.mockImplementation((path, body, method) => path === `/daily/${kind}` ? pending.promise : request(path, body, method));
     render(<AnalystPanel />);
-    expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
+    expect(historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
     fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
     expect(api.request).toHaveBeenCalledWith(`/daily/${kind}`, { requestId });
-    expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
     conversations.review = { ...make('review', 'Accepted once'), title: 'Predictive Markets Review', kind, reviewRequestId: requestId };
     await act(async () => pending.resolve({ conversation: conversations.review }));
     await screen.findByText('Accepted once');
     expect(api.request.mock.calls.filter(([path]) => path === `/daily/${kind}`)).toHaveLength(1);
     expect(JSON.parse(localStorage.getItem('analyst.workspace.launches'))).toEqual([]);
+    expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
   });
 
   test('history after the start budget without the exact request clears the slot and restores today\'s saved row', async () => {
@@ -4008,14 +3831,13 @@ describe('review starts across a reload', () => {
     conversations.review = { ...make('review', 'Earlier Predictive review'), title: 'Predictive Markets Review', kind,
       trading_date: pacificToday(), state: 'complete', reviewRequestId: 'review-start:earlier-request' };
     render(<AnalystPanel />);
-    expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
+    expect(within(expectReviewProgress()).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
     await screen.findByRole('alert');
     expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t confirm the review start. Start it again.');
+    expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
     const rows = screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' });
     expect(rows).toHaveLength(1);
     expect(rows[0]).not.toHaveTextContent('Starting…');
-    expect(rows[0]).not.toHaveClass('is-active');
-    expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
     expect(JSON.parse(localStorage.getItem('analyst.workspace.launches'))).toEqual([]);
     expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBeNull();
     expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/') || path.startsWith('/requests/'))).toBe(false);
@@ -4031,17 +3853,18 @@ describe('review starts across a reload', () => {
         trading_date: pacificToday(), state: 'running', reviewRequestId: 'review-start:other-request' };
       render(<AnalystPanel />);
       await act(async () => jest.advanceTimersByTimeAsync(1000));
-      expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
+      const starting = () => within(expectReviewProgress()).getByRole('status', { name: 'Response running' });
+      expect(starting()).toHaveTextContent('Starting…');
       const lists = () => api.request.mock.calls.filter(([path]) => path.startsWith('/conversations?')).length;
       const before = lists();
       await act(async () => jest.advanceTimersByTimeAsync(38_000));
       expect(lists()).toBe(before);
-      expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
+      expect(starting()).toHaveTextContent('Starting…');
       await act(async () => jest.advanceTimersByTimeAsync(2000));
       expect(lists()).toBe(before + 1);
       expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('review');
-      expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveClass('is-active');
-      expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).not.toHaveTextContent('Starting…');
+      await expectSelected('Predictive Markets Review');
+      expect(historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).not.toHaveTextContent('Starting…');
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       expect(JSON.parse(localStorage.getItem('analyst.workspace.launches'))).toEqual([]);
       expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
@@ -4058,16 +3881,16 @@ describe('review starts across a reload', () => {
         ? Promise.reject(Object.assign(new Error('API warming up.'), { code: 'HTTP_503', status: 503 })) : request(path, body, method));
       const view = render(<AnalystPanel />);
       await act(async () => jest.advanceTimersByTimeAsync(0));
-      expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
+      expect(within(expectReviewProgress()).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
       await act(async () => jest.advanceTimersByTimeAsync(61_000));
-      expect(screen.queryByRole('button', { name: 'Open conversation: Predictive Markets Review' })).not.toBeInTheDocument();
       expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t confirm the review start. Start it again.');
+      expect(historyRows().queryByRole('button', { name: 'Open conversation: Predictive Markets Review' })).not.toBeInTheDocument();
       expect(JSON.parse(localStorage.getItem('analyst.workspace.launches'))).toEqual([]);
       view.unmount();
       persist(new Date(Date.now() - 11 * 60_000).toISOString());
       localStorage.setItem('analyst.workspace.selected', JSON.stringify(`pending-review:${requestId}`));
       render(<AnalystPanel />);
-      expect(screen.queryByRole('button', { name: 'Open conversation: Predictive Markets Review' })).not.toBeInTheDocument();
+      expect(historyRows().queryByRole('button', { name: 'Open conversation: Predictive Markets Review' })).not.toBeInTheDocument();
       expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
     } finally { jest.useRealTimers(); }
   });

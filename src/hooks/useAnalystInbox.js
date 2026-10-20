@@ -66,7 +66,7 @@ export default function useAnalystInbox() {
     return entry.promise;
   }, [publish]);
 
-  // An action-required finding is only acknowledged with the reason for keeping the position.
+  // Dismissing clears any alert, action-required included, until its research changes again.
   const acknowledge = useCallback(async (id, displayedFingerprint, displayedMaterialRevision, keptReason) => {
     const current = snapshot.current.findings.find(finding => finding.id === id);
     const fingerprint = displayedFingerprint || fingerprintOf(current);

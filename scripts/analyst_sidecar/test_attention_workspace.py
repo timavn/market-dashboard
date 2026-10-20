@@ -232,23 +232,21 @@ class AttentionWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.row()['id'], old['id'])
 
 
-    def test_action_required_needs_a_kept_reason_and_survives_holdings_outage(self):
+    def test_action_required_dismisses_without_a_reason_and_survives_holdings_outage(self):
         urgent = {**finding(), 'severity': 'action-required'}
         self.publish([urgent], ['portfolio'])
+        # Reading alone never clears an urgent instruction.
         self.assertEqual(self.store.dispatch('finding-read', {'id': urgent['id']})['acknowledged'], False)
-        result = self.store.dispatch('finding-read', {'id': urgent['id'], 'acknowledge': True, 'fingerprint': 'same'})
-        self.assertEqual(result, {'ok': True, 'acknowledged': False, 'reasonRequired': True})
         self.assertEqual(self.row()['unread'], 1)
         # An incomplete scan (holdings unavailable) does not hide the instruction.
         self.publish([], [])
         self.assertEqual(self.row()['state'], 'open')
         self.assertEqual(self.row()['unread'], 1)
-        kept = self.store.dispatch('finding-read', {'id': urgent['id'], 'acknowledge': True, 'fingerprint': 'same',
-                                                     'keptReason': 'Hedged with puts until earnings'})
-        self.assertTrue(kept['acknowledged'])
+        dismissed = self.store.dispatch('finding-read', {'id': urgent['id'], 'acknowledge': True, 'fingerprint': 'same'})
+        self.assertTrue(dismissed['acknowledged'])
         self.publish([urgent], ['portfolio'])
         self.assertEqual(self.row()['unread'], 0)
-        self.assertEqual(self.row()['payload']['kept']['reason'], 'Hedged with puts until earnings')
+        self.assertNotIn('reason', self.row()['payload']['kept'])
         # A complete scan without the instruction (position closed) resolves it.
         self.publish([], ['portfolio'])
         self.assertEqual(self.row()['state'], 'resolved')

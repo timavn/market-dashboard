@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Archive, ArrowUp, ChevronLeft, ChevronRight, Loader, MessageSquare, Plus, RefreshCw, Search, Send, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Loader, RefreshCw, Search, Send, Square, Trash2 } from 'lucide-react';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 import { Message, SourceLibrary } from './AnalystConversationPanel';
 import { useSurfaceActivity } from '../common/PersistentSurface';
 import { PortfolioResearchUpdates, PortfolioReviewPlaceholder } from './AnalystPortfolioBrief';
-import AnalystInboxDrawer from './AnalystInboxDrawer';
+import AnalystInbox from './AnalystInbox';
 import { safeResearchUrl } from '../../utils/researchSourceUrl';
 import useAnalystInbox from '../../hooks/useAnalystInbox';
 import { balanceReviewMessages } from './balanceReviewPresentation';
@@ -112,25 +112,7 @@ const landingActions = [
   { kind: 'prediction-markets-review', label: 'Predictive markets', key: 'M' },
   { kind: manualVerificationKind, label: 'Manual portfolio update', key: 'U', name: 'Manual Portfolio Update' },
 ];
-const recentTypes = { 'portfolio-review': ['PORTFOLIO', 'portfolio'], 'prediction-markets-review': ['MARKETS', 'markets'],
-  'balance-review': ['BALANCE', 'portfolio'], [manualVerificationKind]: ['UPDATE', 'update'], audit: ['AUDIT', 'update'] };
-const recentType = kind => recentTypes[kind] || ['CHAT', 'chat'];
-const easternStamp = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const recentTime = row => Date.parse(row.updated_at || row.created_at) || 0;
-const recentStamp = row => {
-  const time = recentTime(row);
-  if (!time) return '—';
-  const parts = Object.fromEntries(easternStamp.formatToParts(new Date(time)).map(part => [part.type, part.value]));
-  return `${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
-};
-const recentStatus = row => {
-  if (row.pending) return ['Starting', 'running'];
-  if (row.activeTurn || ['running', 'accepted'].includes(row.state)) return ['Running', 'running'];
-  if (['failed', 'interrupted'].includes(row.state)) return ['Failed', 'failed'];
-  const count = sidebarMessageCount(row);
-  return count ? [`${count} ${count === 1 ? 'msg' : 'msgs'}`, null] : ['—', null];
-};
-const RECENT_LIMIT = 5;
+const landingTabs = [['chats', 'Chats'], ['inbox', 'Inbox'], ['sources', 'Sources']];
 const ResponseDots = ({ phase }) => <div className={`analyst-running-dots${phase ? ' has-phase' : ''}`} role="status" aria-label="Response running" aria-description={phase}><span /><span /><span />{phase && <small>{phase}</small>}</div>;
 const acceptedConversation = (entities, request) => request && Object.values(entities).find(conversation =>
   (!request.conversationId || conversation.id === request.conversationId)
@@ -245,7 +227,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const [query, setQuery] = useState('');
   const sidebarScope = useRef({ query });
   sidebarScope.current = { query };
-  const [sidebar, setSidebar] = useState(true);
+  const [landingTab, setLandingTab] = useState('chats');
   const [drafts, setDrafts] = useState(() => {
     const drafts = saved('drafts', {});
     const outbox = saved('outbox', null);
@@ -270,7 +252,6 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const [sending, setSending] = useState(false);
   const [pendingSend, setPendingSend] = useState(null);
   const sendInFlight = useRef(false);
-  const [library, setLibrary] = useState(false);
   const [citation, setCitation] = useState(null);
   const citationGeneration = useRef(0);
   const openCitation = useCallback((source, context) => {
@@ -287,7 +268,6 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   }, []);
   useEffect(() => { if (!citation) citationGeneration.current += 1; }, [citation]);
   const citationSurface = useRef();
-  const [inboxOpen, setInboxOpen] = useState(false);
   const { inbox, inboxError, loadInbox, acknowledge } = useAnalystInbox();
   const [refreshingIds, setRefreshingIds] = useState([]);
   // An unacknowledged review start survives a reload as the same Starting slot.
@@ -747,7 +727,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     attemptLoad();
     return () => { stopped = true; clearTimeout(timer); };
   }, [active, historyLoaded, selected, load, refreshingIds]);
-  useEffect(() => { if (!active) { setCitation(null); setLibrary(false); } }, [active]);
+  useEffect(() => { if (!active) setCitation(null); }, [active]);
   useEffect(() => {
     if (!active || !citation) return undefined;
     // The dashboard backdrop owns closing the Analyst window. Only dismiss
@@ -850,7 +830,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   useEffect(() => {
     // Retained windows preserve the selected chat and its reader position.
     // Invalidate pending navigation so a late acknowledgment cannot move it.
-    if (!active) { latestTailCursor.current = null; navigation.current += 1; setInboxOpen(false); }
+    if (!active) { latestTailCursor.current = null; navigation.current += 1; }
   }, [active]);
   // One click permanently deletes a saved chat. Only the trash button calls
   // this; nothing deletes a chat automatically. A Starting… row has no saved
@@ -1075,20 +1055,6 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const hasBrief = Boolean(portfolioBrief);
   const portfolioPresentation = hasBrief || conversation?.kind === 'portfolio-review'
     || rows.find(row => row.id === selected)?.kind === 'portfolio-review' || launchingReview?.kind === 'portfolio-review';
-  useEffect(() => {
-    if (!portfolioPresentation || !panel.current || typeof ResizeObserver === 'undefined') return undefined;
-    let narrow = false;
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry?.contentRect?.width;
-      if (!Number.isFinite(width) || width <= 0) return;
-      const inboxWidth = panel.current.querySelector('.analyst-inbox-drawer')?.getBoundingClientRect().width || 0;
-      const next = width - inboxWidth < 640;
-      if (next && !narrow) setSidebar(false);
-      narrow = next;
-    });
-    observer.observe(panel.current);
-    return () => observer.disconnect();
-  }, [portfolioPresentation, inboxOpen]);
   const running = Boolean(conversation?.activeTurn);
   const selectedSend = pendingSend && pendingSend.conversationId === selected && (selected || pendingSend.navigation === navigation.current) ? pendingSend : null;
   const acceptedPendingTurn = selectedSend && [conversation?.activeTurn, conversation?.lastTurn].find(turn => turn?.request_id === selectedSend.requestId);
@@ -1369,10 +1335,11 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const selectedRecoveryFailure = requestRecoveryFailed && (requestRecoveryFailed.conversationId === selected
     || manualOpening(requestRecoveryFailed)?.id === selected) ? requestRecoveryFailed : null;
   const landing = !selected && !selectedSend && !launchingReview;
+  // A starting review has no saved row yet; its pending opening carries the title.
+  const selectedTitle = conversation?.title || launchingReview?.title || [...rows, ...pendingDisplayRows].find(row => row.id === selected)?.title || '';
   const manualBusy = sending || running || Boolean(launchingReview);
   const startLanding = kind => kind === manualVerificationKind
     ? submit(manualPortfolioUpdatePrompt, { operation: manualVerificationKind }) : launch(kind);
-  const recentRows = landing ? [...visibleRows].sort((a, b) => recentTime(b) - recentTime(a)).slice(0, RECENT_LIMIT) : [];
   const landingShortcut = e => {
     if (!landing || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;
     if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
@@ -1383,28 +1350,11 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   };
   return <section ref={panel} className={`analyst-panel analyst-panel-v2${portfolioPresentation ? ' has-portfolio-brief' : ''}`} data-testid="analyst-panel" role="dialog" aria-label="The Analyst" onKeyDown={landingShortcut}>
     <div className="analyst-workspace">
-      <aside className={`analyst-conversation-rail ${sidebar ? 'is-open' : 'is-collapsed'}`} data-testid="analyst-conversation-rail">
-        <header className="analyst-sidebar-header"><div className="analyst-sidebar-top-actions">
-          <button className="analyst-sidebar-icon-button is-sidebar-toggle" aria-label={sidebar ? 'Collapse conversation sidebar' : 'Expand conversation sidebar'} onClick={() => setSidebar(!sidebar)}>{sidebar ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}</button>
-          <h2 className="analyst-sidebar-title">Chats</h2>
-          <button className="analyst-sidebar-icon-button is-primary" aria-label="New Chat" onClick={() => choose(null)}><Plus size={15} /><span>New chat</span></button>
-          <button className="analyst-sidebar-icon-button is-close" aria-label="Close The Analyst" onClick={onClose}><X size={17} /></button>
-        </div></header>
-        <div className="analyst-conversation-content" aria-hidden={!sidebar}>
-          <label className="analyst-conversation-search"><Search size={14} /><input type="search" aria-label="Search conversations" placeholder="Search all history…" value={query} onChange={e => setQuery(e.target.value)} /></label>
-          <div className="analyst-conversation-list">{groups.map(group => <section key={group.key} className="analyst-conversation-date-group"><h3 className="analyst-conversation-date-heading">{group.label}</h3>{group.items.map(row => {
-            // A row being deleted keeps its place until the server acknowledges.
-            const rowDeleting = deletingIds.includes(row.id);
-            const rowStarting = Boolean(row.pending) || refreshingIds.includes(row.id);
-            return <div key={row.id} className={`analyst-conversation-row has-delete-action${reviews.some(([kind]) => kind === row.kind) ? ' has-refresh-action' : ''}${row.id === selected ? ' is-active' : ''}${rowDeleting ? ' is-deleting' : ''}`}>
-            <button className={`analyst-conversation-item${row.id === selected ? ' is-active' : ''}`} aria-label={`Open conversation: ${row.title}`} disabled={rowDeleting} onClick={() => choose(row.id)}><span className="analyst-conversation-copy"><strong>{row.title}</strong><SidebarStatus row={row} conversation={entities[row.id]} starting={rowStarting} deleting={rowDeleting} /></span></button>
-            {reviews.some(([kind]) => kind === row.kind) && <button className="analyst-conversation-refresh" title="Update review" aria-label={`Update review: ${row.title}`} disabled={rowDeleting || rowStarting || Boolean(entities[row.id]?.activeTurn) || ['running', 'accepted'].includes(row.state)} onClick={() => refreshReview(row)}><RefreshCw size={12} /></button>}
-            <button className="analyst-conversation-delete" title="Delete conversation" aria-label={`Delete conversation: ${row.title}`} disabled={rowDeleting || rowStarting} onClick={() => deleteConversation(row.id)}><Trash2 size={12} /></button>
-          </div>; })}</section>)}{historyReadFailed ? <p className="analyst-conversation-empty">History unavailable. <button type="button" onClick={() => list().catch(e => setHistoryError(e.message))}>Retry history</button></p> : !visibleRows.length && <p className="analyst-conversation-empty">{query ? 'No matching conversations.' : 'No saved conversations.'}</p>}</div>
-        </div>
-        <nav className="analyst-sidebar-footer"><button aria-label="Inbox" aria-expanded={inboxOpen} aria-controls="analyst-inbox-drawer" className={inbox.actionRequired > 0 ? 'has-action-required' : inbox.unread > 0 ? 'has-notification' : undefined} onClick={() => setInboxOpen(open => !open)}><MessageSquare size={15} /><span>Inbox {inbox.unread > 0 ? `(${inbox.unread})` : ''}</span></button><button aria-label="Sources" onClick={() => setLibrary(true)}><Archive size={15} /><span>Sources</span></button></nav>
-      </aside>
       <main className={`analyst-chat analyst-chat-v2${landing ? ' is-landing' : ''}`}>
+        {!landing && <header className="analyst-chat-header">
+          <button type="button" className="analyst-chat-back" aria-label="Back to The Analyst" onClick={() => choose(null)}><ArrowLeft size={14} /><span>The Analyst</span></button>
+          {selectedTitle && <span className="analyst-chat-title">{selectedTitle}</span>}
+        </header>}
         <div ref={transcript} onScroll={e => { const node = e.currentTarget; followReply.current = !sourcesAnchoredReview(selectedKind) && responsePending && node.scrollHeight - node.scrollTop - node.clientHeight < 80; scrolls.current[selected || 'landing'] = node.scrollTop; clearTimeout(scrollSaveTimer.current); scrollSaveTimer.current = setTimeout(() => save('scrolls', scrolls.current), 150); }} className={`analyst-transcript analyst-transcript-v2${selected || selectedSend || launchingReview ? '' : ' is-landing'}`} role="log" aria-label="Conversation" aria-live="polite">
           {launchingReview ? <div className="analyst-message-list"><AnalystReviewSources reviewKind={launchingReview.kind} loading phase="Starting…" />
             {launchingReview.kind === 'portfolio-review' && <PortfolioReviewPlaceholder />}</div>
@@ -1458,26 +1408,33 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
               </button>;
             })}
           </div>
-          {recentRows.length > 0 && <section className="analyst-landing-recent" aria-labelledby="analyst-landing-recent-title">
-            <h2 id="analyst-landing-recent-title">Recent</h2>
-            <table>
-              <thead><tr><th scope="col">Type</th><th scope="col">Title</th><th scope="col">Updated</th><th scope="col">Status</th></tr></thead>
-              <tbody>{recentRows.map(row => {
-                const [type, typeTone] = recentType(row.kind);
-                const [status, statusTone] = recentStatus(row);
-                return <tr key={row.id}>
-                  <td className={`is-${typeTone}`}>{type}</td>
-                  <td><button type="button" aria-label={`Resume ${row.title}`} onClick={() => choose(row.id)}>{row.title}</button></td>
-                  <td className="is-numeric">{recentStamp(row)}</td>
-                  <td className={statusTone ? `is-${statusTone}` : 'is-muted'}>{status}</td>
-                </tr>;
-              })}</tbody>
-            </table>
-          </section>}
+          <section className="analyst-landing-tabs">
+            <div className="analyst-landing-tabbar">
+              <div role="tablist" aria-label="Analyst home">
+                {landingTabs.map(([key, label]) => <button key={key} type="button" role="tab" id={`analyst-landing-tab-${key}`} aria-selected={landingTab === key} aria-controls="analyst-landing-tabpanel"
+                  className={key === 'inbox' ? `analyst-landing-tab${inbox.actionRequired > 0 ? ' has-action-required' : inbox.unread > 0 ? ' has-notification' : ''}` : 'analyst-landing-tab'} onClick={() => setLandingTab(key)}>
+                  {label}{key === 'inbox' && inbox.actionRequired > 0 && <span className="analyst-landing-tab-alert" title="Action required">{inbox.actionRequired}</span>}
+                  {key === 'inbox' && inbox.unread > 0 && <span className="analyst-landing-tab-count" title="Unread">· {inbox.unread}</span>}
+                </button>)}
+              </div>
+              {landingTab === 'chats' && <label className="analyst-conversation-search"><Search size={13} /><input type="search" aria-label="Search conversations" placeholder="Search all history…" value={query} onChange={e => setQuery(e.target.value)} /></label>}
+            </div>
+            <div id="analyst-landing-tabpanel" role="tabpanel" aria-labelledby={`analyst-landing-tab-${landingTab}`} className={`analyst-landing-tabpanel is-${landingTab}`}>
+              {landingTab === 'chats' ? <div className="analyst-conversation-list">{groups.map(group => <section key={group.key} className="analyst-conversation-date-group"><h3 className="analyst-conversation-date-heading">{group.label}</h3>{group.items.map(row => {
+              // A row being deleted keeps its place until the server acknowledges.
+              const rowDeleting = deletingIds.includes(row.id);
+              const rowStarting = Boolean(row.pending) || refreshingIds.includes(row.id);
+              return <div key={row.id} className={`analyst-conversation-row has-delete-action${reviews.some(([kind]) => kind === row.kind) ? ' has-refresh-action' : ''}${row.id === selected ? ' is-active' : ''}${rowDeleting ? ' is-deleting' : ''}`}>
+              <button className={`analyst-conversation-item${row.id === selected ? ' is-active' : ''}`} aria-label={`Open conversation: ${row.title}`} disabled={rowDeleting} onClick={() => choose(row.id)}><span className="analyst-conversation-copy"><strong>{row.title}</strong><SidebarStatus row={row} conversation={entities[row.id]} starting={rowStarting} deleting={rowDeleting} /></span></button>
+              {reviews.some(([kind]) => kind === row.kind) && <button className="analyst-conversation-refresh" title="Update review" aria-label={`Update review: ${row.title}`} disabled={rowDeleting || rowStarting || Boolean(entities[row.id]?.activeTurn) || ['running', 'accepted'].includes(row.state)} onClick={() => refreshReview(row)}><RefreshCw size={12} /></button>}
+              <button className="analyst-conversation-delete" title="Delete conversation" aria-label={`Delete conversation: ${row.title}`} disabled={rowDeleting || rowStarting} onClick={() => deleteConversation(row.id)}><Trash2 size={12} /></button>
+            </div>; })}</section>)}{historyReadFailed ? <p className="analyst-conversation-empty">History unavailable. <button type="button" onClick={() => list().catch(e => setHistoryError(e.message))}>Retry history</button></p> : !visibleRows.length && <p className="analyst-conversation-empty">{query ? 'No matching conversations.' : 'No saved conversations.'}</p>}</div>
+                : landingTab === 'inbox' ? <AnalystInbox findings={inbox.findings} error={inboxError} onCitation={openCitation} onAcknowledge={acknowledge} />
+                  : <SourceLibrary embedded />}
+            </div>
+          </section>
         </div>}
       </main>
-      {inboxOpen && <AnalystInboxDrawer findings={inbox.findings} error={inboxError} onCitation={openCitation} onAcknowledge={acknowledge} onClose={() => setInboxOpen(false)} />}
-      {library && <SourceLibrary onClose={() => setLibrary(false)} />}
       {citation && <aside ref={citationSurface} className="analyst-source-detail" role="dialog" aria-label="Citation source"><header><span>Source evidence</span></header>{citation.map((source, index) => <article className="analyst-source-publication-entry" key={source.id || index} aria-busy={source.evidenceLoading || undefined}>
         <strong>{source.title || source.product}</strong>
         {(source.publicationDate || source.publishedAt) && <p>{formatResearchSourceDate(source.publicationDate || source.publishedAt)}</p>}

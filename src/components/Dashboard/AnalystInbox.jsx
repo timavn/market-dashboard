@@ -38,20 +38,6 @@ function staleHoldingLabel(payload) {
     : `${side} (holdings currently unavailable)`;
 }
 
-function KeepPosition({ onKeep }) {
-  const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState('');
-  if (!open) return <button className="analyst-inbox-keep" type="button" onClick={() => setOpen(true)}>Keep position…</button>;
-  return <form className="analyst-inbox-keep-form" onSubmit={event => { event.preventDefault(); if (reason.trim()) onKeep(reason.trim()); }}>
-    <label>
-      <span className="sr-only">Reason for keeping the position</span>
-      <input autoFocus maxLength={500} value={reason} placeholder="Why keep it?" onChange={event => setReason(event.target.value)} />
-    </label>
-    <button type="submit" disabled={!reason.trim()}>Keep</button>
-    <button type="button" onClick={() => { setOpen(false); setReason(''); }}>Cancel</button>
-  </form>;
-}
-
 function attentionContent(finding, now) {
   if (!activeAttentionFinding(finding, now)) return null;
   const payload = finding.payload || finding;
@@ -149,11 +135,8 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
                 : payload.citation && <button type="button" onClick={() => onCitation(payload.citation)}>View source</button>}
             </div>
           </div>
-          {required && <p className="analyst-inbox-clears">Clears when the position is closed.</p>}
-          {Boolean(finding.unread) && (required
-            ? <KeepPosition onKeep={reason => onAcknowledge(finding.id, payload.fingerprint || finding.fingerprint, payload.materialRevision ?? finding.materialRevision, reason)} />
-            : <button className="analyst-inbox-acknowledge" type="button" onClick={() => modern
-              ? onAcknowledge(finding.id, payload.fingerprint || finding.fingerprint, payload.materialRevision ?? finding.materialRevision) : onAcknowledge(finding.id)}>Acknowledge</button>)}
+          {Boolean(finding.unread) && <button className="analyst-inbox-acknowledge" type="button" onClick={() => modern
+            ? onAcknowledge(finding.id, payload.fingerprint || finding.fingerprint, payload.materialRevision ?? finding.materialRevision) : onAcknowledge(finding.id)}>Dismiss</button>}
         </footer>
       </article>
       </React.Fragment>;

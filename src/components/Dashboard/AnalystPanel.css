@@ -1005,60 +1005,116 @@
 .analyst-landing-actions button:focus-visible { position: relative; outline: 2px solid var(--landing-accent); outline-offset: -2px; }
 .analyst-landing-actions button:disabled { cursor: default; color: var(--landing-faint); }
 
-.analyst-landing-recent { margin-top: 22px; }
-.analyst-landing-recent h2 {
-  margin: 0 0 4px;
+/* Chats, Inbox and Sources share one tabbed area under the actions. */
+.analyst-landing-tabs { margin-top: 22px; }
+.analyst-landing-tabbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--landing-line);
+}
+.analyst-landing-tabbar [role="tablist"] { display: flex; gap: 18px; }
+.analyst-landing-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: -1px;
+  padding: 6px 1px;
   color: var(--landing-muted);
   font-size: 8px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  line-height: 14px;
+  text-align: center;
 }
-.analyst-landing-recent table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; }
-.analyst-landing-recent th {
-  padding: 4px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.analyst-landing-tab:hover { color: var(--landing-ink); }
+.analyst-landing-tab[aria-selected="true"] { color: var(--landing-ink); border-bottom-color: var(--landing-ink); }
+.analyst-landing-tab:focus-visible { outline: 2px solid var(--landing-accent); outline-offset: 1px; }
+.analyst-landing-tab-alert {
+  min-width: 14px;
+  padding: 0 4px;
+  color: #a61b1b;
+  background: #fdecec;
+  border-radius: 7px;
+.analyst-landing-tab-count { color: var(--landing-faint); font-family: var(--landing-mono); font-size: 8px; }
+.analyst-landing-tab.has-notification:not([aria-selected="true"]) { color: #2f5e8e; }
+.analyst-panel-v2 .analyst-landing-tabbar .analyst-conversation-search {
+  min-height: 24px;
+  width: min(220px, 45%);
+  margin: 0 0 4px;
+  padding: 0 8px;
   color: var(--landing-faint);
-  border-bottom: 1px solid var(--landing-ink);
-  font-weight: 400;
-  text-align: left;
+  border-color: var(--landing-line);
 }
-.analyst-landing-recent th:nth-child(1) { width: 16%; }
-.analyst-landing-recent th:nth-child(3) { width: 18%; }
-.analyst-landing-recent th:nth-child(4),
-.analyst-landing-recent td:nth-child(4) { width: 14%; text-align: right; }
-.analyst-landing-recent td {
+.analyst-landing-tabpanel { padding-top: 10px; }
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-list { overflow: visible; padding: 0; }
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-date-heading { position: static; margin-bottom: 2px; font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase; }
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-row { margin: 0; border: 0; border-bottom: 1px solid var(--landing-rule); }
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-row:hover { background: var(--landing-bar); }
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-item { min-height: 30px; }
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-copy { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-copy strong {
   overflow: hidden;
-  padding: 0;
-  color: var(--landing-ink);
-  border-bottom: 1px solid var(--landing-rule);
+  min-width: 0;
+  padding: 6px 0;
+  background: transparent;
+  border: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.analyst-landing-recent td button {
-  display: block;
-  width: 100%;
-  overflow: hidden;
-  padding: 6px 8px 6px 0;
-  color: inherit;
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-copy small { flex: none; padding: 0 30px 0 0; color: var(--landing-faint); }
+.analyst-panel-v2 .analyst-landing-tabpanel .has-refresh-action .analyst-conversation-copy small { padding-right: 50px; }
+.analyst-panel-v2 .analyst-landing-tabpanel :is(.analyst-conversation-refresh, .analyst-conversation-delete) { top: 5px; bottom: auto; }
+.analyst-landing-tabpanel .analyst-inbox { padding: 4px 0 0; }
+.analyst-source-library.is-embedded { display: block; background: transparent; }
+.analyst-source-library.is-embedded .analyst-source-tabs { margin: 10px 0 0; }
+.analyst-source-library.is-embedded .analyst-source-body { padding: 12px 0 0; overflow: visible; }
+
+/* Inside a conversation the header leads back to the Analyst home. */
+.analyst-chat-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px max(16px, calc((100% - 820px) / 2));
+  border-bottom: 1px solid var(--analyst-line);
+  background: #fff;
+}
+.analyst-chat-back {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px 3px 2px;
+  color: #405066;
   background: transparent;
   border: 0;
   cursor: pointer;
   font: inherit;
-  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.analyst-chat-back:hover { color: var(--analyst-ink); text-decoration: underline; }
+.analyst-chat-back:focus-visible { outline: 2px solid #64748b; outline-offset: 1px; }
+.analyst-chat-title {
+  overflow: hidden;
+  color: var(--analyst-ink);
+  font-size: 11px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.analyst-landing-recent tbody tr:hover { background: var(--landing-bar); }
-.analyst-landing-recent td button:hover { color: var(--landing-accent); text-decoration: underline; }
-.analyst-landing-recent td button:focus-visible { outline: 2px solid var(--landing-accent); outline-offset: -2px; }
-.analyst-landing-recent .is-numeric { color: var(--landing-muted); font-family: var(--landing-mono); font-size: 8px; }
-.analyst-landing-recent .is-portfolio { color: var(--landing-accent); }
-.analyst-landing-recent .is-markets { color: #5b4a9e; }
-.analyst-landing-recent .is-chat,
-.analyst-landing-recent .is-update,
-.analyst-landing-recent .is-muted { color: var(--landing-muted); }
-.analyst-landing-recent .is-running { color: var(--landing-accent); }
-.analyst-landing-recent .is-failed { color: #b42318; }
+.analyst-chat-title::before { content: '/'; margin-right: 10px; color: #a3adbb; font-weight: 400; }
 .analyst-panel-v2 .analyst-message-list {
   display: grid;
   gap: 12px;

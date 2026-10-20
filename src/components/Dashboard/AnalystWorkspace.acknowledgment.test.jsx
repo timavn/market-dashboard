@@ -23,9 +23,10 @@ const finding = (symbol, unread = 1) => ({
 });
 let findings, saves;
 const snapshot = () => ({ findings: findings.map(row => ({ ...row })), unread: findings.filter(row => row.unread).length });
-const inboxButton = () => screen.getByRole('button', { name: 'Inbox', exact: true });
+const inboxButton = () => screen.getByRole('tab', { name: /^Inbox/ });
+const sourcesTab = () => screen.getByRole('tab', { name: 'Sources' });
 const visibleSymbols = () => within(screen.getByRole('region', { name: 'Portfolio inbox' })).queryAllByRole('heading').map(heading => heading.textContent);
-const acknowledgeFirst = () => fireEvent.click(screen.getAllByRole('button', { name: 'Acknowledge' })[0]);
+const acknowledgeFirst = () => fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0]);
 const poll = () => act(async () => { jest.advanceTimersByTime(5000); });
 const finishSave = async (id, index = 0) => {
   findings.find(row => row.id === id).unread = 0;
@@ -67,20 +68,20 @@ afterEach(() => {
 test('acknowledging successive alerts removes each entire row and updates counts before either save finishes', async () => {
   const dispatch = jest.spyOn(window, 'dispatchEvent');
   await openInbox();
-  expect(inboxButton()).toHaveTextContent('Inbox (3)');
+  expect(inboxButton()).toHaveTextContent('Inbox· 3');
   expect(inboxButton()).toHaveClass('has-notification');
 
   acknowledgeFirst();
   expect(visibleSymbols()).toEqual(['CHTR', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox (2)');
+  expect(inboxButton()).toHaveTextContent('Inbox· 2');
   expect(inboxButton()).toHaveClass('has-notification');
-  expect(screen.getAllByRole('button', { name: 'Acknowledge' })[0]).toBeEnabled();
+  expect(screen.getAllByRole('button', { name: 'Dismiss' })[0]).toBeEnabled();
 
   acknowledgeFirst();
   expect(visibleSymbols()).toEqual(['HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox (1)');
+  expect(inboxButton()).toHaveTextContent('Inbox· 1');
   expect(inboxButton()).toHaveClass('has-notification');
-  expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Dismiss' })).toBeEnabled();
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   expect(api.request).toHaveBeenCalledWith('/inbox/sjm/read', { acknowledge: true });
   expect(api.request).toHaveBeenCalledWith('/inbox/chtr/read', { acknowledge: true });
@@ -97,13 +98,13 @@ test('inbox notification follows unread alerts through arrival, opening, optimis
   render(<AnalystPanel />);
   await poll();
   expect(inboxButton()).not.toHaveClass('has-notification');
-  expect(screen.getByRole('button', { name: 'Sources', exact: true })).not.toHaveClass('has-notification');
+  expect(sourcesTab()).not.toHaveClass('has-notification');
 
   findings.push(finding('SJM'));
   await poll();
   expect(inboxButton()).toHaveClass('has-notification');
   expect(screen.queryByRole('region', { name: 'Portfolio inbox' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Sources', exact: true })).not.toHaveClass('has-notification');
+  expect(sourcesTab()).not.toHaveClass('has-notification');
 
   fireEvent.click(inboxButton());
   expect(visibleSymbols()).toEqual(['SJM']);
@@ -128,7 +129,7 @@ test('inbox notification follows unread alerts through arrival, opening, optimis
   await poll();
   expect(inboxButton()).toHaveClass('has-notification');
   expect(visibleSymbols()).toEqual(['CHTR']);
-  expect(screen.getByRole('button', { name: 'Sources', exact: true })).not.toHaveClass('has-notification');
+  expect(sourcesTab()).not.toHaveClass('has-notification');
 });
 
 test('a stale poll cannot restore an acknowledged alert after a newer poll confirms the save', async () => {
@@ -149,7 +150,7 @@ test('a stale poll cannot restore an acknowledged alert after a newer poll confi
 
   await act(async () => { oldPoll.resolve(staleSnapshot); });
   expect(visibleSymbols()).toEqual(['CHTR', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox (2)');
+  expect(inboxButton()).toHaveTextContent('Inbox· 2');
 
   // A genuinely new source revision can reuse the finding ID and become unread again.
   findings[0] = { ...findings[0], unread: 1, payload: {
@@ -159,7 +160,7 @@ test('a stale poll cannot restore an acknowledged alert after a newer poll confi
   } };
   await poll();
   expect(visibleSymbols()).toEqual(['SJM', 'CHTR', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox (3)');
+  expect(inboxButton()).toHaveTextContent('Inbox· 3');
 });
 
 test('a failed save restores only its alert in queue order and lets the user retry immediately', async () => {
@@ -169,9 +170,9 @@ test('a failed save restores only its alert in queue order and lets the user ret
   await act(async () => { saves.get('sjm')[0].reject(new Error('offline')); });
 
   expect(visibleSymbols()).toEqual(['SJM', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox (2)');
+  expect(inboxButton()).toHaveTextContent('Inbox· 2');
   expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t mark this alert as read. Try again.');
-  expect(screen.getAllByRole('button', { name: 'Acknowledge' })[0]).toBeEnabled();
+  expect(screen.getAllByRole('button', { name: 'Dismiss' })[0]).toBeEnabled();
   acknowledgeFirst();
   expect(visibleSymbols()).toEqual(['HIMS']);
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -181,14 +182,14 @@ test('a failed save restores only its alert in queue order and lets the user ret
   expect(visibleSymbols()).toEqual(['HIMS']);
 });
 
-test('closing and reopening the inbox keeps a pending acknowledgment dismissed', async () => {
+test('leaving and reopening the inbox tab keeps a pending acknowledgment dismissed', async () => {
   await openInbox();
   acknowledgeFirst();
-  fireEvent.click(inboxButton());
+  fireEvent.click(screen.getByRole('tab', { name: 'Chats' }));
   expect(screen.queryByRole('region', { name: 'Portfolio inbox' })).not.toBeInTheDocument();
   fireEvent.click(inboxButton());
   expect(visibleSymbols()).toEqual(['CHTR', 'HIMS']);
-  expect(screen.getAllByRole('button', { name: 'Acknowledge' })[0]).toBeEnabled();
+  expect(screen.getAllByRole('button', { name: 'Dismiss' })[0]).toBeEnabled();
   await poll();
   expect(visibleSymbols()).toEqual(['CHTR', 'HIMS']);
   await finishSave('sjm');
@@ -203,6 +204,6 @@ test('a server-confirmed acknowledgment stays dismissed when its delayed HTTP re
   await act(async () => { saves.get('sjm')[0].reject(new Error('connection lost after commit')); });
 
   expect(visibleSymbols()).toEqual(['CHTR', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox (2)');
+  expect(inboxButton()).toHaveTextContent('Inbox· 2');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });

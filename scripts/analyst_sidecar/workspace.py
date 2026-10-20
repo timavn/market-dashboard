@@ -1304,14 +1304,15 @@ class WorkspaceStore:
                     if not current or current_payload.get('materialRevision') != p['materialRevision']:
                         return {'ok': True, 'acknowledged': False}
                 if current_payload.get('severity') == 'action-required':
-                    # Reading an urgent instruction never clears it. Keeping the
-                    # position is an explicit decision recorded with its reason.
+                    # Reading an urgent instruction never clears it; only an
+                    # explicit dismissal does. A reason is optional.
                     reason = p.get('keptReason')
-                    if not p.get('acknowledge') or not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
-                        return {'ok': True, 'acknowledged': False, 'reasonRequired': True}
+                    if not p.get('acknowledge') or (reason is not None and (not isinstance(reason, str) or len(reason) > 500)):
+                        return {'ok': True, 'acknowledged': False}
                     if p.get('fingerprint') is not None and db.execute('SELECT fingerprint FROM findings WHERE id=?', (p['id'],)).fetchone()['fingerprint'] != p['fingerprint']:
                         return {'ok': True, 'acknowledged': False}
-                    kept = {**current_payload, 'kept': {'reason': reason.strip(), 'at': now(), 'materialRevision': current_payload.get('materialRevision')}}
+                    kept = {**current_payload, 'kept': {'at': now(), 'materialRevision': current_payload.get('materialRevision'),
+                                                        **({'reason': reason.strip()} if reason and reason.strip() else {})}}
                     db.execute('UPDATE findings SET unread=0,acknowledged_at=?,payload=? WHERE id=?', (now(), json.dumps(kept), p['id']))
                     self.event(db, 'inbox')
                     return {'ok': True, 'acknowledged': True}

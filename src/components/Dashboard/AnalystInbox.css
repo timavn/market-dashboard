@@ -97,15 +97,3 @@
 .analyst-inbox-finding.is-action-required { border-color: #d64545; border-left-width: 3px; }
 .analyst-inbox-finding.is-action-required .analyst-inbox-heading { background: #fdecec; border-bottom-color: #f2c4c4; }
 .analyst-inbox-finding.is-action-required .analyst-inbox-symbol { color: #a61b1b; font-weight: 600; }
-.analyst-inbox-clears { grid-column: 1 / -1; margin: 0; color: var(--analyst-muted, #6b7280); font-size: 9px; }
-.analyst-inbox-footer .analyst-inbox-keep { border-color: #d64545; color: #a61b1b; white-space: nowrap; }
-.analyst-inbox-keep-form { display: flex; gap: 4px; align-items: center; }
-.analyst-inbox-keep-form input {
-  width: 150px;
-  padding: 3px 6px;
-  border: 1px solid #cdd5dd;
-  font: inherit;
-  font-size: 9px;
-}
-.analyst-inbox-keep-form input:focus-visible { outline: 2px solid var(--analyst-accent, #087b80); outline-offset: 1px; }
-.analyst-inbox-footer .analyst-inbox-keep-form button:disabled { cursor: default; opacity: 0.5; }
