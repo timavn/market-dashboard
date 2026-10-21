@@ -66,7 +66,7 @@ export default function useAnalystInbox() {
     return entry.promise;
   }, [publish]);
 
-  // Dismissing clears any alert, action-required included, until its research changes again.
+  // Dismissing clears any alert, action-required included, for the rest of the Pacific day unless its message changes.
   const acknowledge = useCallback(async (id, displayedFingerprint, displayedMaterialRevision, keptReason) => {
     const current = snapshot.current.findings.find(finding => finding.id === id);
     const fingerprint = displayedFingerprint || fingerprintOf(current);

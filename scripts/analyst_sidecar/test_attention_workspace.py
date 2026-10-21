@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,7 +61,7 @@ class AttentionWorkspaceTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM finding_revisions').fetchone()[0], 1)
 
-    def test_material_change_and_verified_recurrence_reopen_once(self):
+    def test_material_change_reopens_and_same_day_recurrence_stays_dismissed(self):
         self.publish([finding()], ['portfolio'])
         self.store.dispatch('finding-read', {'id': finding()['id'], 'acknowledge': True, 'fingerprint': 'same'})
         self.publish([finding('changed')], ['portfolio'])
@@ -68,8 +69,9 @@ class AttentionWorkspaceTests(unittest.TestCase):
         self.store.dispatch('finding-read', {'id': finding()['id'], 'acknowledge': True, 'fingerprint': 'changed'})
         self.publish([], ['portfolio'])
         self.assertEqual(self.row()['state'], 'resolved')
+        # The same message recurring on the day it was dismissed stays dismissed.
         self.publish([finding('changed')], ['portfolio'])
-        self.assertEqual(self.row()['unread'], 1)
+        self.assertEqual(self.row()['unread'], 0)
         self.assertEqual(self.row()['payload']['materialRevision'], 3)
 
     def test_ack_of_old_revision_cannot_hide_newer_issue(self):
@@ -79,12 +81,17 @@ class AttentionWorkspaceTests(unittest.TestCase):
         self.assertFalse(result['acknowledged'])
         self.assertEqual(self.row()['unread'], 1)
 
-    def test_delayed_ack_cannot_hide_recurrence_with_same_fingerprint(self):
+    def test_delayed_dismissal_covers_a_recurrence_of_the_same_message_but_not_a_changed_one(self):
         self.publish([finding()], ['portfolio'])
         self.publish([], ['portfolio'])
         self.publish([finding()], ['portfolio'])
         result = self.store.dispatch('finding-read', {'id': finding()['id'], 'acknowledge': True,
                                                     'fingerprint': 'same', 'materialRevision': 1})
+        self.assertTrue(result['acknowledged'])
+        self.assertEqual(self.row()['unread'], 0)
+        self.publish([finding('changed')], ['portfolio'])
+        result = self.store.dispatch('finding-read', {'id': finding()['id'], 'acknowledge': True,
+                                                    'fingerprint': 'same', 'materialRevision': 3})
         self.assertFalse(result['acknowledged'])
         self.assertEqual(self.row()['unread'], 1)
 
@@ -250,6 +257,31 @@ class AttentionWorkspaceTests(unittest.TestCase):
         # A complete scan without the instruction (position closed) resolves it.
         self.publish([], ['portfolio'])
         self.assertEqual(self.row()['state'], 'resolved')
+
+
+    def test_dismissal_holds_through_reopening_scans_until_the_next_pacific_day(self):
+        urgent = {**finding(), 'severity': 'action-required'}
+        self.publish([urgent], ['portfolio'])
+        shown = self.row()['payload']['materialRevision']
+        # A scan reopens the same alert between display and the click.
+        self.publish([], ['portfolio'])
+        self.publish([urgent], ['portfolio'])
+        result = self.store.dispatch('finding-read', {'id': urgent['id'], 'acknowledge': True, 'fingerprint': 'same',
+                                                       'materialRevision': shown})
+        self.assertTrue(result['acknowledged'])
+        until = self.row()['payload']['dismissed']['until']
+        self.assertTrue(until.endswith(('T07:00:00Z', 'T08:00:00Z')))  # Pacific midnight in UTC
+        for _ in range(3):
+            self.publish([], ['portfolio'])
+            self.publish([urgent], ['portfolio'])
+            self.assertEqual(self.row()['unread'], 0)
+        # The next day the alert comes back.
+        with self.store.connect() as db:
+            payload = {**self.row()['payload'], 'dismissed': {'at': '2026-01-01T00:00:00Z', 'until': '2026-01-02T08:00:00Z'}}
+            db.execute('UPDATE findings SET payload=? WHERE id=?', (json.dumps(payload), urgent['id']))
+        self.publish([], ['portfolio'])
+        self.publish([urgent], ['portfolio'])
+        self.assertEqual(self.row()['unread'], 1)
 
 
 if __name__ == '__main__':

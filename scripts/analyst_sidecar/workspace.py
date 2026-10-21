@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, time as day_start, timedelta, timezone
 import json
 import logging
 from pathlib import Path
 import re
 import sqlite3
 import time
+from zoneinfo import ZoneInfo
 from uuid import uuid4, uuid5, NAMESPACE_URL
 
 LOGGER = logging.getLogger('market_dashboard.analyst.workspace')
@@ -44,6 +45,23 @@ RESPONSE_TIMEOUT_ERROR = 'The response exceeded its time limit. Retry is availab
 
 def now():
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+
+DISMISSAL_ZONE = ZoneInfo('America/Los_Angeles')
+
+
+def dismissal_until(at=None):
+    """A dismissed alert stays quiet until the next Pacific midnight."""
+    local = (at or datetime.now(timezone.utc)).astimezone(DISMISSAL_ZONE)
+    midnight = datetime.combine(local.date() + timedelta(days=1), day_start(), DISMISSAL_ZONE)
+    return midnight.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+
+def dismissed_today(payload, observed, fingerprint):
+    """Same-day dismissal covers the same message; a changed instruction is new."""
+    dismissed = payload.get('dismissed') or {}
+    until = dismissed.get('until')
+    return isinstance(until, str) and until > observed and dismissed.get('fingerprint') == fingerprint
 
 
 def stable(value):
@@ -366,9 +384,16 @@ class WorkspaceStore:
                 finding['publicationTime'] = old_payload.get('publicationTime') or finding.get('publicationTime')
                 finding['presentation'] = dict(finding['presentation'])
                 finding['presentation']['date'] = finding.get('sourceReportDate') or (old_payload.get('presentation') or {}).get('date') or finding['presentation'].get('date')
+            dismissed = old_payload.get('dismissed') if dismissed_today(old_payload, observed, finding['fingerprint']) else None
+            if dismissed:
+                finding['dismissed'] = dismissed
             if old and (material or old['state'] != 'open') and not reset:
                 archive(old, 'material-change' if material else 'verification-restored')
             unread = promotion['unread'] if promotion else (1 if reset or material else old['unread'])
+            # A scan that reopens or revises an alert the PM dismissed today
+            # does not bring it back until the next day.
+            if dismissed and not reset:
+                unread = 0
             db.execute('''INSERT INTO findings(id,source_id,symbol,action,state,unread,created_at,updated_at,fingerprint,payload)
               VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id,
               symbol=excluded.symbol,action=excluded.action,state=excluded.state,unread=excluded.unread,
@@ -1300,24 +1325,30 @@ class WorkspaceStore:
             if operation == 'finding-read':
                 current = db.execute('SELECT payload FROM findings WHERE id=?', (p['id'],)).fetchone()
                 current_payload = json.loads(current['payload']) if current else {}
+                current_fingerprint = (db.execute('SELECT fingerprint FROM findings WHERE id=?', (p['id'],)).fetchone() or {'fingerprint': None})['fingerprint']
                 if p.get('materialRevision') is not None:
-                    if not current or current_payload.get('materialRevision') != p['materialRevision']:
+                    # A scan can reopen the same alert between display and click;
+                    # the same fingerprint means the PM dismissed what is current.
+                    same_content = p.get('fingerprint') is not None and current_fingerprint == p['fingerprint']
+                    if not current or (current_payload.get('materialRevision') != p['materialRevision'] and not same_content):
                         return {'ok': True, 'acknowledged': False}
+                dismissal = {'at': now(), 'until': dismissal_until(), 'fingerprint': current_fingerprint} if p.get('acknowledge') else None
                 if current_payload.get('severity') == 'action-required':
                     # Reading an urgent instruction never clears it; only an
                     # explicit dismissal does. A reason is optional.
                     reason = p.get('keptReason')
                     if not p.get('acknowledge') or (reason is not None and (not isinstance(reason, str) or len(reason) > 500)):
                         return {'ok': True, 'acknowledged': False}
-                    if p.get('fingerprint') is not None and db.execute('SELECT fingerprint FROM findings WHERE id=?', (p['id'],)).fetchone()['fingerprint'] != p['fingerprint']:
+                    if p.get('fingerprint') is not None and current_fingerprint != p['fingerprint']:
                         return {'ok': True, 'acknowledged': False}
-                    kept = {**current_payload, 'kept': {'at': now(), 'materialRevision': current_payload.get('materialRevision'),
+                    kept = {**current_payload, 'dismissed': dismissal, 'kept': {'at': now(), 'materialRevision': current_payload.get('materialRevision'),
                                                         **({'reason': reason.strip()} if reason and reason.strip() else {})}}
                     db.execute('UPDATE findings SET unread=0,acknowledged_at=?,payload=? WHERE id=?', (now(), json.dumps(kept), p['id']))
                     self.event(db, 'inbox')
                     return {'ok': True, 'acknowledged': True}
-                changed = db.execute('UPDATE findings SET unread=0,acknowledged_at=CASE WHEN ? THEN ? ELSE acknowledged_at END WHERE id=? AND (? IS NULL OR fingerprint=?)',
-                                     (bool(p.get('acknowledge')), now(), p['id'], p.get('fingerprint'), p.get('fingerprint'))).rowcount
+                payload = json.dumps({**current_payload, 'dismissed': dismissal}) if dismissal and current else None
+                changed = db.execute('UPDATE findings SET unread=0,acknowledged_at=CASE WHEN ? THEN ? ELSE acknowledged_at END,payload=COALESCE(?,payload) WHERE id=? AND (? IS NULL OR fingerprint=?)',
+                                     (bool(p.get('acknowledge')), now(), payload, p['id'], p.get('fingerprint'), p.get('fingerprint'))).rowcount
                 self.event(db, 'inbox')
                 return {'ok': True, 'acknowledged': bool(changed)}
             if operation == 'finding':
