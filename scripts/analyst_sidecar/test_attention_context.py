@@ -1,9 +1,12 @@
+import asyncio
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from attention_context import capture_attention_context
+from portfolio_sizing import PortfolioSizingReader
+from test_portfolio_brief import reference_payload
 
 NOW = datetime(2026, 9, 22, 16, tzinfo=timezone.utc)
 ASOF = '2026-09-22T16:00:00Z'
@@ -34,10 +37,37 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
         args = dict(market_date_reader=AsyncMock(return_value='2026-09-22'), holdings_reader=AsyncMock(return_value=book()),
                     portfolio_reader=AsyncMock(return_value=book()), universe_reader=AsyncMock(return_value={'bySymbol': {}, 'scanComplete': True}),
                     symbols_reader=symbols_reader, documents_reader=Mock(return_value={'products': []}), projector=project,
-                    sizing_reader=Mock(read_cached=Mock(return_value={})), research_index=Mock(), now=NOW)
+                    sizing_reader=Mock(read_current=AsyncMock(return_value={'bySymbol': {}, 'complete': True})), research_index=Mock(), now=NOW)
         args.update(overrides)
         with patch('attention_context.attach_finding_source_reports', side_effect=lambda value, _: value):
             return await capture_attention_context(**args)
+
+    async def test_thirty_second_scans_never_claim_holdings_complete_without_sizing(self):
+        # Regression: sizing inputs expired after 60s and were only re-read once
+        # gone, so every other 30s scan lacked them. XLK's TREND_BREAK then
+        # vanished from a scan still claiming the portfolio complete, and the
+        # Inbox resolved and reopened it on alternate scans.
+        clock = {'now': NOW}
+        reader = PortfolioSizingReader('http://api', AsyncMock(side_effect=lambda symbols: reference_payload(symbols)),
+                                       clock=lambda: clock['now'])
+        scans = []
+        for scan in range(6):
+            clock['now'] = now = NOW + timedelta(seconds=30.5 * scan)
+            value = {**book(('XLK',)), 'asOf': now.isoformat().replace('+00:00', 'Z')}
+            result = await self.capture(holdings_reader=AsyncMock(return_value=value), portfolio_reader=AsyncMock(return_value=value),
+                                        sizing_reader=reader, now=now)
+            scans.append((result['holdings']['researchComplete'], bool(result['holdings']['ruleHoldings'][0]['sizingInputs'])))
+            await asyncio.gather(*reader.pending.values())
+        # Before the fix: [(True, False), (True, True), (True, False), ...]
+        self.assertEqual(scans, [(True, True)] * 6)
+
+    async def test_unanswered_sizing_read_is_not_a_complete_portfolio_scan(self):
+        reader = PortfolioSizingReader('http://api', AsyncMock(side_effect=OSError('metrics offline')))
+        result = await self.capture(sizing_reader=reader)
+        self.assertEqual(result['holdings']['ruleHoldings'][0]['sizingInputs'], {})
+        self.assertFalse(result['holdings']['researchComplete'])
+        self.assertFalse(result['complete'])
+        self.assertTrue(result['holdings']['complete'])
 
     async def test_independent_complete_book_is_used_when_valuation_fails(self):
         result = await self.capture(portfolio_reader=AsyncMock(side_effect=OSError('provider')))

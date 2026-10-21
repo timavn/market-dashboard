@@ -1132,6 +1132,32 @@ class PortfolioSizingReaderTests(unittest.IsolatedAsyncioTestCase):
         await reader.read(["IGV"], as_of)
         self.assertIn("IGV", reader.cache)
 
+    async def test_cached_inputs_are_refreshed_before_thirty_second_scans_reach_expiry(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        start = datetime.now(timezone.utc)
+        clock = {"now": start}
+        request = AsyncMock(side_effect=lambda symbols: reference_payload(symbols))
+        reader = PortfolioSizingReader("http://api", request, clock=lambda: clock["now"])
+        as_of = start.isoformat()
+        scans = []
+        for scan in range(6):
+            clock["now"] = start + timedelta(seconds=30.5 * scan)
+            scans.append("IGV" in reader.read_cached(["IGV"], as_of)["bySymbol"])
+            await asyncio.gather(*reader.pending.values())
+        # Only the cold first scan waits; expiry used to empty every other scan.
+        self.assertEqual(scans, [False] + [True] * 5)
+
+    async def test_answer_without_verified_inputs_is_covered_but_failure_is_not(self):
+        from unittest.mock import AsyncMock
+        request = AsyncMock(return_value={})
+        reader = PortfolioSizingReader("http://api", request)
+        as_of = datetime.now(timezone.utc).isoformat()
+        self.assertEqual(await reader.read_current(["IGV"], as_of), {"bySymbol": {}, "complete": True})
+        reader.cache.clear()
+        request.side_effect = RuntimeError("source unavailable")
+        self.assertEqual(await reader.read_current(["IGV"], as_of), {"bySymbol": {}, "complete": False})
+
     async def test_failed_batch_does_not_discard_other_securities(self):
         async def request(symbols):
             if "BAD" in symbols:

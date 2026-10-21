@@ -79,10 +79,18 @@ def verified_sizing_inputs(payload, symbol, now=None):
             "historicalOnly": True, "executable": False}
 
 
+# Inputs stay usable for MAX_AGE_SECONDS. A refresh starts once they are
+# REFRESH_AFTER_SECONDS old, so 30-second attention scans never reach an expired
+# cache and alternately lose every sizing-based finding.
+MAX_AGE_SECONDS = 60
+REFRESH_AFTER_SECONDS = 20
+
+
 class PortfolioSizingReader:
-    def __init__(self, base_url, request=None):
+    def __init__(self, base_url, request=None, clock=None):
         self.base_url = base_url.rstrip("/")
         self.request = request
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.cache = {}
         self.pending = {}
 
@@ -91,23 +99,54 @@ class PortfolioSizingReader:
         observed = datetime.fromisoformat(as_of.replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York"))
         return observed.date().isoformat(), observed.hour * 60 + observed.minute >= 975
 
-    def read_cached(self, symbols, as_of):
-        """Alerts use recently verified inputs while a new read runs in the background."""
-        now = datetime.now(timezone.utc)
+    def _cached(self, symbols, as_of):
+        now = self.clock()
         window = self._window(as_of)
-        valid = {symbol: entry["inputs"] for symbol in symbols
-                 if (entry := self.cache.get(symbol)) and entry["window"] == window
-                 and (now - entry["capturedAt"]).total_seconds() <= 60}
-        missing = tuple(sorted(set(symbols) - set(valid)))
-        if missing and missing not in self.pending:
-            task = asyncio.create_task(self.read(list(missing), as_of))
-            self.pending[missing] = task
+        ages = {symbol: (now - entry["capturedAt"]).total_seconds() for symbol in symbols
+                if (entry := self.cache.get(symbol)) and entry["window"] == window}
+        ages = {symbol: age for symbol, age in ages.items() if age <= MAX_AGE_SECONDS}
+        # A source that answered without verified inputs is cached empty; it is
+        # covered, but contributes no inputs.
+        valid = {symbol: self.cache[symbol]["inputs"] for symbol in ages if self.cache[symbol]["inputs"]}
+        missing = set(symbols) - set(ages)
+        aging = {symbol for symbol, age in ages.items() if age > REFRESH_AFTER_SECONDS}
+        return valid, missing, aging
+
+    def _refresh(self, symbols, as_of):
+        key = tuple(sorted(symbols))
+        if key not in self.pending:
+            task = asyncio.create_task(self.read(list(key), as_of))
+            self.pending[key] = task
             def finished(done):
-                self.pending.pop(missing, None)
+                self.pending.pop(key, None)
                 if not done.cancelled():
                     done.exception()
             task.add_done_callback(finished)
-        return {"bySymbol": valid}
+        return self.pending[key]
+
+    def read_cached(self, symbols, as_of):
+        """Alerts use recently verified inputs while a new read runs in the background."""
+        valid, missing, aging = self._cached(symbols, as_of)
+        if missing or aging:
+            self._refresh(missing | aging, as_of)
+        return {"bySymbol": valid, "complete": not missing}
+
+    async def read_current(self, symbols, as_of, timeout=15):
+        """Like read_cached, but waits for symbols with no usable entry.
+
+        complete is False when the source did not answer for every symbol, so a
+        caller can tell missing inputs from an unavailable source.
+        """
+        valid, missing, aging = self._cached(symbols, as_of)
+        if missing or aging:
+            task = self._refresh(missing | aging, as_of)
+            if missing:
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout)
+                except Exception:
+                    pass
+                valid, missing, _ = self._cached(symbols, as_of)
+        return {"bySymbol": valid, "complete": not missing}
 
     async def read(self, symbols, as_of):
         symbols = sorted(set(symbols))
@@ -128,7 +167,7 @@ class PortfolioSizingReader:
                             payload = response.json()
                         return {symbol: verified_sizing_inputs(payload, symbol) for symbol in selected}
                     except Exception:
-                        return {symbol: {} for symbol in selected}
+                        return {symbol: None for symbol in selected}
 
             tasks = [asyncio.create_task(batch(symbols[offset:offset + 6])) for offset in range(0, len(symbols), 6)]
             try:
@@ -139,12 +178,14 @@ class PortfolioSizingReader:
                     if not task.done():
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
-        now = datetime.now(timezone.utc)
+        now = self.clock()
         window = self._window(as_of)
-        output = {symbol: captured.get(symbol, {}) for symbol in symbols}
+        # A failed or timed-out batch is not an answer; only answers are cached.
+        unavailable = [symbol for symbol in symbols if captured.get(symbol) is None]
+        output = {symbol: captured.get(symbol) or {} for symbol in symbols}
         for symbol, inputs in output.items():
             self.cache.pop(symbol, None)
-            if inputs:
+            if symbol not in unavailable:
                 self.cache[symbol] = {"inputs": inputs, "window": window, "capturedAt": now}
-        self.cache = {symbol: entry for symbol, entry in self.cache.items() if (now - entry["capturedAt"]).total_seconds() <= 60}
-        return {"bySymbol": output, "asOf": now.isoformat(), "historicalOnly": True, "executable": False}
+        self.cache = {symbol: entry for symbol, entry in self.cache.items() if (now - entry["capturedAt"]).total_seconds() <= MAX_AGE_SECONDS}
+        return {"bySymbol": output, "unavailable": unavailable, "asOf": now.isoformat(), "historicalOnly": True, "executable": False}

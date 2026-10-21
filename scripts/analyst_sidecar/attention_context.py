@@ -97,7 +97,12 @@ async def capture_attention_context(*, market_date_reader, holdings_reader, port
         held_research = await read("held_research", read_all_held, 8)
         if held_research:
             intelligence = {**universe, "bySymbol": {**(universe.get("bySymbol") or {}), **(held_research.get("bySymbol") or {})}}
-    sizing = sizing_reader.read_cached(held, source.get("asOf")) if held and valuation_ok else {}
+    sizing = {}
+    if held and valuation_ok:
+        # Sizing decides TREND_BREAK, MAX and risk-cap findings. Without it those
+        # findings vanish, so a scan the source did not answer cannot be complete.
+        sizing = await read("sizing", lambda: sizing_reader.read_current(held, source.get("asOf"), timeout=10), 12) or {}
+    sizing_complete = not held or not valuation_ok or sizing.get("complete") is True
     weights = current_holding_weights(valuation, current_time) if valuation_ok else []
     rules = rule_holdings(metrics, intelligence, (sizing or {}).get("bySymbol")) if book_ok else []
     # Weight and NLV must have full account/valuation provenance, not a first
@@ -140,11 +145,11 @@ async def capture_attention_context(*, market_date_reader, holdings_reader, port
         "asOf": current_time.isoformat().replace("+00:00", "Z"), "marketDate": market_date,
         "holdings": {"liveVerified": book_ok, "complete": book_ok, "asOf": book.get("asOf") if book_ok else None,
                      "positions": positions, "currentHoldings": weights, "ruleHoldings": rules,
-                     "researchComplete": bool(held_research is not None or not held)},
+                     "researchComplete": bool((held_research is not None or not held) and sizing_complete)},
         "research": intelligence, "documents": documents or {},
         "events": [row["event"] for row in enriched.get("findings", [])],
         "account": {"verified": balance_fresh, "asOf": balance.get("asOf"), "issues": exceptions,
                     "historyVerified": (safe_balance_data.get("interestStatus") or {}).get("available") is True},
         "diagnostics": diagnostics,
-        "complete": bool(book_ok and universe.get("scanComplete") is True and (held_research is not None or not held)),
+        "complete": bool(book_ok and universe.get("scanComplete") is True and (held_research is not None or not held) and sizing_complete),
     }
