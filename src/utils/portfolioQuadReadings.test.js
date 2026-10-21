@@ -2,6 +2,7 @@ import {
   PORTFOLIO_QUAD_READINGS_KEY,
   currentPortfolioQuadReadings,
   loadPortfolioQuadReadings,
+  publishedQuadReadings,
   quadReadingDate,
 } from './portfolioQuadReadings';
 
@@ -47,4 +48,17 @@ test('a new published update supersedes an older manual reading but preserves a 
   } finally {
     localStorage.removeItem(PORTFOLIO_QUAD_READINGS_KEY);
   }
+});
+
+test('a reading parsed from the emails for this month supersedes an older bundled reference', () => {
+  const october = { quad: 2, asOf: '2026-10-13', source: 'hedgeye-published', sourceLabel: 'ETF Pro · October 13, 2026 · Quad Path: October #Quad2', sourceUrl: 'https://mail.google.com/mail/#all/1a1363b72b765da0' };
+  const payload = { schemaVersion: 1, readings: { '2026-10': october, '2026-11': { ...october, quad: 1 } } };
+  expect(publishedQuadReadings(payload, '2026-10-21')).toEqual({ usMonthly: october });
+  expect(publishedQuadReadings(payload, '2026-12-01')).toEqual({});
+  expect(publishedQuadReadings({ readings: payload.readings }, '2026-10-21')).toEqual({});
+  const loaded = loadPortfolioQuadReadings(publishedQuadReadings(payload, '2026-10-21'));
+  expect(loaded.usMonthly).toBe(october);
+  expect(currentPortfolioQuadReadings(loaded, '2026-10-21').usMonthly).toBe(october);
+  // A forecast for next month published this month is not yet that month's reading.
+  expect(currentPortfolioQuadReadings(loadPortfolioQuadReadings(publishedQuadReadings(payload, '2026-11-02')), '2026-11-02').usMonthly).toBeNull();
 });

@@ -33,7 +33,15 @@ export function currentPortfolioQuadReadings(readings, today = quadReadingDate()
   }));
 }
 
-export function loadPortfolioQuadReadings() {
+// The /api/hedgeye/monthly-quad reading for this month, shaped as a published reading.
+export function publishedQuadReadings(payload, today = quadReadingDate()) {
+  const usMonthly = payload?.schemaVersion === 1 ? payload.readings?.[today.slice(0, 7)] : null;
+  return usMonthly ? { usMonthly } : {};
+}
+
+// `fetched` holds readings parsed from the emails; the newer of it and the bundled
+// reference is the published reading for each scope.
+export function loadPortfolioQuadReadings(fetched = {}) {
   let saved = {};
   try {
     saved = JSON.parse(window.localStorage.getItem(PORTFOLIO_QUAD_READINGS_KEY)) || {};
@@ -42,7 +50,8 @@ export function loadPortfolioQuadReadings() {
     // browser storage is unavailable or corrupt.
   }
   return Object.fromEntries(QUAD_READING_SCOPES.map(({ id }) => {
-    const published = HEDGEYE_QUAD_READINGS[id];
+    const bundled = HEDGEYE_QUAD_READINGS[id];
+    const published = (fetched?.[id]?.asOf || '') > (bundled?.asOf || '') ? fetched[id] : bundled;
     const override = saved[id];
     // A newer published update supersedes an older manually entered reading.
     const useOverride = Object.prototype.hasOwnProperty.call(saved, id)

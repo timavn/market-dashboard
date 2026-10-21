@@ -5715,6 +5715,22 @@ app.get('/api/hedgeye/snapshot/global-quads', async (_req, res) => {
     return res.status(503).json({ error: 'Global Quads unavailable' });
   }
 });
+const { loadMonthlyQuads } = require('./src/services/monthlyQuadService.cjs');
+app.get('/api/hedgeye/monthly-quad', async (_req, res) => {
+  try {
+    const result = await researchResponseCache.get('monthly-quad', () => loadMonthlyQuads({
+      listEvents: async (since) => {
+        const { items, error } = await getResearchEventLedgerItems('etf-pro', { sinceEventTime: since });
+        if (error) throw new Error(error);
+        return items;
+      },
+      readArtifact: (s3Key) => getCachedHermesArtifactText({ s3Key }),
+    }));
+    return res.json(result.value);
+  } catch (_error) {
+    return res.status(503).json({ error: 'Monthly Quad unavailable' });
+  }
+});
 app.get('/api/hedgeye/global-quads/source/:sourceId', async (req, res) => {
   if (!/^[a-f0-9]{64}$/.test(req.params.sourceId)) return res.sendStatus(404);
   try {

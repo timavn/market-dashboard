@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { EXPOSURE_DIMENSIONS, QUAD_PLAYBOOK } from '../../constants/quadExposureCatalog';
+import { usePublishedQuadReadings } from '../../hooks/usePublishedQuadReadings';
 import {
   PORTFOLIO_QUAD_READINGS_KEY,
   QUAD_READING_SCOPES,
@@ -12,7 +13,10 @@ import './PortfolioQuadReference.css';
 const QUADS = [1, 2, 3, 4];
 
 export default function PortfolioQuadReference() {
-  const [readings, setReadings] = useState(loadPortfolioQuadReadings);
+  const published = usePublishedQuadReadings();
+  const publishedRef = useRef(published);
+  publishedRef.current = published;
+  const [readings, setReadings] = useState(() => loadPortfolioQuadReadings(published));
   const [today, setToday] = useState(quadReadingDate);
   const [referenceQuad, setReferenceQuad] = useState(null);
   const [saveError, setSaveError] = useState(false);
@@ -25,7 +29,7 @@ export default function PortfolioQuadReference() {
     const refreshDate = () => setToday(quadReadingDate());
     const onStorage = (event) => {
       if (event.key === PORTFOLIO_QUAD_READINGS_KEY || event.key === null) {
-        setReadings(loadPortfolioQuadReadings());
+        setReadings(loadPortfolioQuadReadings(publishedRef.current));
       }
     };
     const interval = window.setInterval(refreshDate, 60000);
@@ -37,6 +41,8 @@ export default function PortfolioQuadReference() {
       window.removeEventListener('storage', onStorage);
     };
   }, []);
+
+  useEffect(() => { if (published) setReadings(loadPortfolioQuadReadings(published)); }, [published]);
 
   const updateReading = (scope, value) => {
     const updatedToday = quadReadingDate();
