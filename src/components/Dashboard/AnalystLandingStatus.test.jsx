@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import AnalystLandingStatus, { usQuad } from './AnalystLandingStatus';
+import AnalystLandingStatus, { landingQuads, usQuad } from './AnalystLandingStatus';
 import { useGlobalQuads } from '../../hooks/useGlobalQuads';
 
 jest.mock('../../hooks/useGlobalQuads', () => ({ useGlobalQuads: jest.fn() }));
@@ -9,7 +9,8 @@ jest.mock('../../hooks/useGlobalQuads', () => ({ useGlobalQuads: jest.fn() }));
 const quads = quad => ({ data: { data: { groups: { g20: { columns: [], rows: [
   { country: 'China', values: { '2026-Q4': { quad: 1 } } },
   { country: 'United States', values: { '2026-Q3': { quad: 3 }, '2026-Q4': { quad } } },
-] } } } } });
+] }, global: { columns: [], rows: [{ country: 'MODE/MEAN', values: { '2026-Q4': { quad: 3 } } }] } } } } });
+const reading = (quad, asOf) => ({ quad, asOf, source: 'manual-hedgeye' });
 
 test('the US quad is read from the current Eastern quarter', () => {
   expect(usQuad(quads(2).data, new Date('2026-10-16T16:00:00Z'))).toBe(2);
@@ -18,15 +19,29 @@ test('the US quad is read from the current Eastern quarter', () => {
   expect(usQuad(undefined)).toBeNull();
 });
 
-test('the status line shows holdings, the verified close, regime, and open setups', async () => {
+test('a current dated reading wins over the Global Quads table; monthly has no table fallback', () => {
+  const now = new Date('2026-10-16T16:00:00Z');
+  const stale = { global: reading(1, '2026-09-08'), usQuarterly: reading(1, '2026-08-31'), usMonthly: reading(1, '2026-09-08') };
+  expect(landingQuads(quads(2).data, stale, now)).toMatchObject({ global: { quad: 3 }, quarterly: { quad: 2 }, monthly: null });
+  const current = { global: reading(4, '2026-10-01'), usQuarterly: reading(1, '2026-10-02'), usMonthly: reading(2, '2026-10-06') };
+  expect(landingQuads(quads(2).data, current, now)).toMatchObject({ global: { quad: 4 }, quarterly: { quad: 1 }, monthly: { quad: 2 } });
+});
+
+test('the status line shows the game, holdings, the verified close, and the three quads', async () => {
   jest.useFakeTimers({ now: new Date('2026-10-16T20:30:00Z'), doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
   useGlobalQuads.mockReturnValue(quads(2));
-  global.fetch = jest.fn(async url => ({ ok: true, json: async () => (url.endsWith('/baseline')
-    ? { status: 'ready', sessionDate: '2026-10-15', capturedAt: '2026-10-15T20:31:00Z' }
-    : { rows: [{ setup: { side: 'LONG' } }, { setup: { side: null } }, { id: 'cpi' }, { setup: { side: 'SHORT' } }] }) }));
+  const monthly = { schemaVersion: 1, readings: { '2026-10': { quad: 2, asOf: '2026-10-13', source: 'hedgeye-published',
+    sourceLabel: 'ETF Pro · October 13, 2026 · Quad Path: October #Quad2', sourceUrl: 'https://mail.google.com/mail/#all/1a1363b72b765da0' } } };
+  global.fetch = jest.fn(async url => ({ ok: true, json: async () => (String(url).endsWith('/api/hedgeye/monthly-quad') ? monthly
+    : { status: 'ready', sessionDate: '2026-10-15', capturedAt: '2026-10-15T20:31:00Z' }) }));
   render(<AnalystLandingStatus holdingsCount={42} />);
   const status = screen.getByRole('group', { name: 'Portfolio status' });
-  await waitFor(() => expect(status).toHaveTextContent('HOLDINGS 42VERIFIED CLOSE 10/15REGIME Q2OPEN SETUPS 2'));
-  expect(screen.getByText('CLOSE 10/15')).toHaveClass('is-positive');
+  await waitFor(() => expect(status).toHaveTextContent('GAME 199/251HOLDINGS 42CLOSE 10/15 VERIFIEDGLOBAL QUAD Q3QUARTERLY QUAD Q2MONTHLY QUAD Q2'));
+  expect(screen.getByText('10/15 VERIFIED')).toHaveClass('is-positive');
+  expect(screen.getByText('Q3')).toHaveClass('is-q3');
+  expect(screen.getAllByText('Q2').map(node => node.className)).toEqual(['is-q2', 'is-q2']);
+  expect(screen.getByText('MONTHLY QUAD')).toHaveAttribute('title', 'ETF Pro · October 13, 2026 · Quad Path: October #Quad2 · as of 2026-10-13');
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  window.localStorage.clear();
   jest.useRealTimers();
 });

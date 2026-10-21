@@ -17,12 +17,9 @@ function marketDate(value) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-export function portfolioReviewGreeting(message) {
-  const brief = message?.portfolioBrief;
-  // Bind the opening to this saved review, never today's date or the age of its research.
-  const reviewDate = [brief?.reviewedAt, message?.created_at, brief?.asOf].map(marketDate).find(Boolean);
-  if (!reviewDate) return 'Good morning.';
-  const sessionDate = isTradingDateKey(reviewDate) ? reviewDate : previousTradingDateKey(reviewDate);
+// A non-trading date counts as the most recent session's game.
+export function seasonGame(dateKey) {
+  const sessionDate = isTradingDateKey(dateKey) ? dateKey : previousTradingDateKey(dateKey);
   const year = sessionDate.slice(0, 4);
   let game = 0;
   let totalGames = 0;
@@ -31,5 +28,14 @@ export function portfolioReviewGreeting(message) {
     totalGames += 1;
     if (date <= sessionDate) game += 1;
   }
+  return { game, totalGames, year };
+}
+
+export function portfolioReviewGreeting(message) {
+  const brief = message?.portfolioBrief;
+  // Bind the opening to this saved review, never today's date or the age of its research.
+  const reviewDate = [brief?.reviewedAt, message?.created_at, brief?.asOf].map(marketDate).find(Boolean);
+  if (!reviewDate) return 'Good morning.';
+  const { game, totalGames, year } = seasonGame(reviewDate);
   return `Good morning, this is game ${game}/${totalGames} of the ${year} season.`;
 }
