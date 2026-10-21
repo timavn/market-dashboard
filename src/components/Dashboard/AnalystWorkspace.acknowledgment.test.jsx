@@ -68,18 +68,18 @@ afterEach(() => {
 test('acknowledging successive alerts removes each entire row and updates counts before either save finishes', async () => {
   const dispatch = jest.spyOn(window, 'dispatchEvent');
   await openInbox();
-  expect(inboxButton()).toHaveTextContent('Inbox· 3');
+  expect(inboxButton()).toHaveTextContent('Inbox3');
   expect(inboxButton()).toHaveClass('has-notification');
 
   acknowledgeFirst();
   expect(visibleSymbols()).toEqual(['CHTR', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox· 2');
+  expect(inboxButton()).toHaveTextContent('Inbox2');
   expect(inboxButton()).toHaveClass('has-notification');
   expect(screen.getAllByRole('button', { name: 'Dismiss' })[0]).toBeEnabled();
 
   acknowledgeFirst();
   expect(visibleSymbols()).toEqual(['HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox· 1');
+  expect(inboxButton()).toHaveTextContent('Inbox1');
   expect(inboxButton()).toHaveClass('has-notification');
   expect(screen.getByRole('button', { name: 'Dismiss' })).toBeEnabled();
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
@@ -150,7 +150,7 @@ test('a stale poll cannot restore an acknowledged alert after a newer poll confi
 
   await act(async () => { oldPoll.resolve(staleSnapshot); });
   expect(visibleSymbols()).toEqual(['CHTR', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox· 2');
+  expect(inboxButton()).toHaveTextContent('Inbox2');
 
   // A genuinely new source revision can reuse the finding ID and become unread again.
   findings[0] = { ...findings[0], unread: 1, payload: {
@@ -160,7 +160,7 @@ test('a stale poll cannot restore an acknowledged alert after a newer poll confi
   } };
   await poll();
   expect(visibleSymbols()).toEqual(['SJM', 'CHTR', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox· 3');
+  expect(inboxButton()).toHaveTextContent('Inbox3');
 });
 
 test('a failed save restores only its alert in queue order and lets the user retry immediately', async () => {
@@ -170,7 +170,7 @@ test('a failed save restores only its alert in queue order and lets the user ret
   await act(async () => { saves.get('sjm')[0].reject(new Error('offline')); });
 
   expect(visibleSymbols()).toEqual(['SJM', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox· 2');
+  expect(inboxButton()).toHaveTextContent('Inbox2');
   expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t mark this alert as read. Try again.');
   expect(screen.getAllByRole('button', { name: 'Dismiss' })[0]).toBeEnabled();
   acknowledgeFirst();
@@ -204,6 +204,6 @@ test('a server-confirmed acknowledgment stays dismissed when its delayed HTTP re
   await act(async () => { saves.get('sjm')[0].reject(new Error('connection lost after commit')); });
 
   expect(visibleSymbols()).toEqual(['CHTR', 'HIMS']);
-  expect(inboxButton()).toHaveTextContent('Inbox· 2');
+  expect(inboxButton()).toHaveTextContent('Inbox2');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });

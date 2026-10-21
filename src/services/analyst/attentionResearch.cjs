@@ -13,6 +13,15 @@ const invalid = value => !value || value.connected === false || ['stale', 'isSta
 const dated = (value, now) => Number.isFinite(time(value)) && time(value) <= now.getTime();
 const linked = citation => citation && (citation.id || citation.sourceUri || citation.sourceUrl || citation.url);
 const row = (label, value) => ({ label, text: value });
+const pct = value => `${value.toFixed(2)}%`;
+// Each security has its own MIN / MAX, so a sizing alert states them rather
+// than relying on the reader to remember the band.
+function processLimits(rule) {
+  if (number(rule.minWeight) === null) return null;
+  const basis = rule.sizingBasis === 'Beta sizing' ? number(rule.beta) !== null && `beta ${rule.beta.toFixed(2)}` : rule.sizingBasis;
+  return [`MIN ${pct(rule.minWeight)}`, number(rule.maxWeight) !== null ? `MAX ${pct(rule.maxWeight)}` : 'MAX unavailable', basis,
+    number(rule.atrCapWeight) !== null && `ATR cap ${pct(rule.atrCapWeight)}`].filter(Boolean).join(' · ');
+}
 function freshBook(book, now) {
   return book?.liveVerified === true && book.complete === true && !invalid(book)
     && (!book.freshness || book.freshness === 'live')
@@ -50,6 +59,26 @@ function signalEvidence(holding, field, now) {
   return ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(holding[field]) && source && !invalid(source) && dated(source.publishedAt, now) && linked(source.citation)
     && holding.signalContext?.[field]?.status !== 'indication' && holding.signalContext?.[field]?.status !== 'conflict';
 }
+const DURATIONS = [['tick', 'Tick'], ['trade', 'Trade'], ['trend', 'Trend'], ['tail', 'Tail']];
+const SIGNALS = ['BULLISH', 'BEARISH', 'NEUTRAL'];
+// Every security alert states each duration; one without verified evidence reads N/A.
+function durationRows(context, symbol, now) {
+  const held = (context.holdings?.ruleHoldings || []).find(candidate => symbolOf(candidate.holding) === symbol);
+  const decision = context.research?.bySymbol?.[symbol]?.decision || {};
+  return DURATIONS.map(([field, label]) => {
+    let value = null;
+    if (field === 'tick') {
+      const tick = held?.tick;
+      value = tick && !invalid(tick) && tick.status === 'published' && dated(tick.publishedAt, now) ? tick.value : null;
+    } else if (held && field !== 'tail') {
+      value = signalEvidence(held, field, now) ? held[field] : null;
+    } else {
+      const descriptor = decision[field];
+      value = descriptor?.status === 'available' && !invalid(descriptor) ? descriptor.value : null;
+    }
+    return row(label, SIGNALS.includes(value) ? value[0] + value.slice(1).toLowerCase() : 'N/A');
+  });
+}
 function portfolioFindings(context, now, verified) {
   if (!verified) return [];
   const book = context.holdings;
@@ -74,12 +103,19 @@ function portfolioFindings(context, now, verified) {
     if (!sources.length || !publishedAt) continue;
     const side = candidate.heldSide === 'LONG' ? 'Long' : 'Short';
     let explanation;
-    if (rule.rule === 'TRADE_BREAK') explanation = `Published Trade is ${rule.trade[0]}${rule.trade.slice(1).toLowerCase()}, opposing the ${side} holding. The process gives Trade priority and calls for an exit.`;
-    else if (rule.rule === 'TREND_BREAK') explanation = `Published Trend no longer supports the ${side} holding, which remains above the process MIN. Review the reduction to MIN.`;
-    else if (rule.rule === 'RISK_CAP') explanation = 'The verified ATR risk cap is below the process MIN, so the existing process calls for an exit. This is a risk-cap breach.';
-    else explanation = 'The verified position exceeds the process MAX after the existing beta and ATR limits. Review the excess exposure.';
-    const rows = [...positionRows(state), row('Action', rule.action === 'EXIT' ? `Exit the ${side} position under the process` : 'Reduce position size under the process'), row('Context', explanation)];
-    for (const key of ['trade', 'trend']) if (holding[key]) rows.push(row(key === 'trade' ? 'Trade' : 'Trend', holding[key][0] + holding[key].slice(1).toLowerCase()));
+    if (rule.rule === 'TRADE_BREAK') explanation = `Trade turned ${rule.trade[0]}${rule.trade.slice(1).toLowerCase()} vs ${side} → exit.`;
+    else if (rule.rule === 'TREND_BREAK') explanation = 'Trend broke → reduce to MIN.';
+    else if (rule.rule === 'RISK_CAP') explanation = 'ATR cap below MIN → exit.';
+    else explanation = 'Above MAX → trim to MAX.';
+    const limits = processLimits(rule);
+    const target = rule.action === 'REDUCE' && number(rule.targetWeight) !== null ? rule.targetWeight : null;
+    const rows = [...positionRows(state), ...(limits ? [row('Process limits', limits)] : []),
+      row('Action', rule.action === 'EXIT' ? `Exit ${side}` : target !== null ? `Reduce to ${rule.targetLabel} ${pct(target)}` : 'Reduce size'),
+      // The trim is measured from the holding weight, so it is shown only while holdings are current.
+      ...(target !== null && number(rule.weightPct) !== null && number(rule.reduction) !== null
+        ? [{ ...row('Trim', `${rule.reduction.toFixed(2)} pts (${pct(rule.weightPct)} → ${pct(target)})`), requiresFreshHoldings: true }] : []),
+      row('Context', explanation)];
+    rows.push(...durationRows(context, symbol, now));
     // A published Trade or Trend against the held side contradicts the position.
     // Risk-cap and MAX breaches are sizing reviews, not a contrary source.
     const severity = ['TRADE_BREAK', 'TREND_BREAK'].includes(rule.rule) ? ACTION_REQUIRED : null;
@@ -157,14 +193,15 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
     if (exit && !contextLines.length) continue;
     if (partial && number(event.targetQuantity) !== null && Math.abs(state.quantity) <= Math.abs(event.targetQuantity)) continue;
     const product = event.productLabel || 'The source';
-    const actionText = exit ? `${exit[1]} — review the ${exit[0]} position`
-      : change.action === 'REMOVE' ? `${product} removed ${symbol}${change.side ? ` from its ${change.side} list` : ' (side not stated)'} — exit the ${held} position`
-        : `${product} is now ${change.side} — opposes the ${held} position`;
+    const actionText = exit ? `${exit[1]} → review ${exit[0]}`
+      : change.action === 'REMOVE' ? `${product} removed ${symbol}${change.side ? ` (${change.side})` : ' (side unstated)'} → exit ${held}`
+        : `${product} went ${change.side} vs your ${held} → review`;
     const range = publishedRange(event);
     const headline = text(event.excerpt).startsWith('{') ? '' : text(event.excerpt);
     const rows = [...positionRows(state), row('Action', actionText)];
     if (range) rows.push(row('Published range', range));
     if (contextLines.length || headline) rows.push(row('Context', contextLines.length ? contextLines.join(' ') : headline));
+    rows.push(...durationRows(context, symbol, now));
     const citation = { id: evidence.report?.citationId || `cite_${hash(event.sourceMessageId).slice(0, 24)}`, title: evidence.report?.title || event.productLabel,
       product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`,
       excerpt: directive || evidence.report?.bodyText || event.excerpt };
@@ -194,8 +231,8 @@ function unverifiedInstructionFindings(context, now, verified) {
     product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`, excerpt: event.excerpt } }));
   return [finding({ key: ['unverified-instructions', context.marketDate], material: symbols, symbol: 'Holdings check', kind: 'operational', priority: 0, severity: ACTION_REQUIRED,
     action: 'verify holdings', publishedAt, sourceLinks, state: { assessmentChannel: 'research' },
-    rows: [row('Action', `Confirm whether you hold ${symbols.join(', ')}`),
-      row('Context', `Exit or removal instructions were published today for ${symbols.join(', ')} while current holdings could not be verified.`)] })];
+    rows: [row('Action', `Confirm holdings: ${symbols.join(', ')}`),
+      row('Context', 'Exit/removal published, holdings unverified → confirm before acting.')] })];
 }
 const DIRECT = new Set(['direct', 'direct_alias']);
 const validReference = (reference, now) => reference && !invalid(reference) && reference.qualityStatus === 'indexed' && DIRECT.has(reference.matchType) && dated(reference.publishedAt || reference.marketDate, now) && reference.sourceUrl;
@@ -258,14 +295,14 @@ function passages(context, reference, symbol, sentenceMemo) {
 }
 function thesisWatch(value, side) {
   const checks = [
-    [/\b(?:bond[- ]market volatility|rate[- ]volatility)\b/i, 'Whether the cited rise in bond-market volatility persists; a reversal would weaken the volatility case.'],
-    [/\b(?:oil-cost|airlines)\b/i, 'Whether oil-cost pressure on airlines eases; that would challenge the cited Short case.'],
-    [/\b(?:deteriorating local Quad|cyclicals)\b/i, 'Whether the cited local Quad deterioration and weaker cyclical leadership reverse.'],
-    [/\b(?:Financials and Discretionary)\b/i, 'Whether Financials and Discretionary recover leadership; that would challenge the cited cyclical Short case.'],
-    [/\b(?:higher rates|tightening subsidy)\b/i, 'Whether the cited rate or subsidy pressure eases; that would weaken the Short case.'],
-    [/\b(?:earnings|demand)\b/i, `Whether the next earnings or demand update confirms the cited ${side} thesis.`],
-    [/\b(?:long.duration|momentum (?:breaks|unwind))\b/i, 'Whether momentum recovers or the cited rate pressure eases; either would challenge the Short case.'],
-    [/\b(?:WTI|energy|oil)\b/i, 'Whether the cited oil/energy setup holds in the next published Trade and Trend readings.'],
+    [/\b(?:bond[- ]market volatility|rate[- ]volatility)\b/i, 'Bond vol fades → volatility case weakens.'],
+    [/\b(?:oil-cost|airlines)\b/i, 'Airline oil costs ease → Short case weakens.'],
+    [/\b(?:deteriorating local Quad|cyclicals)\b/i, 'Local Quad and cyclicals recover → case weakens.'],
+    [/\b(?:Financials and Discretionary)\b/i, 'Financials and Discretionary lead again → Short case weakens.'],
+    [/\b(?:higher rates|tightening subsidy)\b/i, 'Rate or subsidy pressure eases → Short case weakens.'],
+    [/\b(?:earnings|demand)\b/i, `Next earnings/demand update confirms → ${side} case holds.`],
+    [/\b(?:long.duration|momentum (?:breaks|unwind))\b/i, 'Momentum recovers or rate pressure eases → Short case weakens.'],
+    [/\b(?:WTI|energy|oil)\b/i, 'Next Trade/Trend still aligned → oil/energy case holds.'],
   ];
   return checks.find(([pattern]) => pattern.test(value))?.[1] || null;
 }
@@ -301,7 +338,7 @@ function opportunityFindings(context, now, verified, conflicts, sentenceMemo) {
     if (!watchText) continue;
     // Held ideas need a specific constructive catalyst too; opposite-side
     // proposals are reviewed as research, never silently converted to exits.
-    const label = state.holdingsVerified && state.quantity ? `Review the ${side} research case` : `Consider a ${side} research idea`;
+    const label = state.holdingsVerified && state.quantity ? `Review ${side} case` : `New ${side} idea → review`;
     const rows = [...positionRows(state), row('Action', label), row('Context', selected.text)];
     const sources = [{ label: reference.productLabel || 'Research source', citation: selected.citation }];
     const contrary = [];
@@ -310,15 +347,15 @@ function opportunityFindings(context, now, verified, conflicts, sentenceMemo) {
       if (descriptor?.status !== 'available' || !['BULLISH', 'BEARISH', 'NEUTRAL'].includes(descriptor.value) || invalid(descriptor)) continue;
       const source = references.find(peer => peer.productId === descriptor.sourceId && (field === 'trade' ? ['trade_signal', 'tracker_trade'].includes(peer.kind) : ['primary_risk_range', 'trend_signal'].includes(peer.kind)));
       if (!source) continue;
-      rows.push(row(field === 'trade' ? 'Trade' : 'Trend', descriptor.value[0] + descriptor.value.slice(1).toLowerCase()));
       sources.push({ label: `${field === 'trade' ? 'Trade' : 'Trend'} source`, citation: citationFor(source) });
       if (descriptor.value !== (side === 'Long' ? 'BULLISH' : 'BEARISH')) contrary.push(`${field === 'trade' ? 'Trade' : 'Trend'} is ${descriptor.value[0]}${descriptor.value.slice(1).toLowerCase()}`);
     }
+    rows.push(...durationRows(context, symbol, now));
     const counter = references.filter(peer => direction(peer) && direction(peer) !== side).flatMap(peer => passages(context, peer, symbol, sentenceMemo)).find(passage => thesis(passage.text));
     if (counter) { rows.push(row('Counterpoint', counter.text)); sources.push({ label: 'Counterpoint source', citation: counter.citation }); }
-    else if (contrary.length) rows.push(row('Counterpoint', `${contrary.join('; ')}. The research case has not established an aligned process setup.`));
+    else if (contrary.length) rows.push(row('Counterpoint', `${contrary.join('; ')} → no aligned setup.`));
     rows.push(row('Watch', watchText));
-    if (verified && !state.quantity) rows.push({ ...row('Portfolio fit', 'This security is not held in the verified book; compare overlapping exposure before considering a position.'), requiresFreshHoldings: true });
+    if (verified && !state.quantity) rows.push({ ...row('Portfolio fit', 'Not held → check overlap before adding.'), requiresFreshHoldings: true });
     output.push(finding({ key: [symbol, 'research-idea', side, reference.productId], material: [side, text(selected.text), contrary, counter?.text || null], symbol, kind: 'opportunity', action: `${side.toLowerCase()} research idea`,
       publishedAt: reference.publishedAt || reference.marketDate, rows, sourceLinks: sources, state: { ...state, researchOnly: true } }));
   }
@@ -339,38 +376,10 @@ function accountFindings(context, now) {
     const publishedAt = history ? history[1] : account.asOf;
     const citation = { id: `cite_${hash(['account', type, history?.[1] || 'current']).slice(0, 28)}`, title: 'Verified Balance Review evidence', product: 'portfolio-balance', publicationDate: String(publishedAt).slice(0, 10), sourceUri: '/api/portfolio/balance', excerpt: issue };
     output.push(finding({ key: ['account', type, history?.[1]], material: [type, history ? issue : type], symbol: type, kind: 'account', priority: 0, action: 'review account issue', publishedAt,
-      rows: [row('Action', history ? 'Reconcile the verified interest discrepancy' : 'Review the funding or margin shortfall'), row('Context', issue)],
+      rows: [row('Action', history ? 'Reconcile interest' : 'Fix funding/margin shortfall'), row('Context', issue)],
       sourceLinks: [{ label: 'Balance evidence', citation }], state: history ? { researchOnly: true } : { requiresFreshBalance: true, balanceVerified: true, balanceVerifiedAt: account.asOf } }));
   }
   return { findings: output, complete: fresh && account.historyVerified === true };
-}
-const MARKET_TOPICS = [
-  ['Yield curve', /\b(?:yield curve|2s10s|2s\/10s|curve inversion|uninversion)\b/i],
-  ['Market structure', /\bgamma\b/i], ['Dollar', /\b(?:U\.?S\.? dollar|dollar index|DXY)\b/i],
-  ['Macro regime', /\bquad\s*[1-4]\b/i], ['Liquidity', /\bliquidity\b/i],
-];
-function marketFindings(context, now, sentenceMemo) {
-  const found = new Map();
-  for (const product of context.documents?.products || []) {
-    if (product.publicationDate !== context.marketDate || !dated(product.publicationDate, now)) continue;
-    for (const fragment of product.excerpts || []) {
-      if (!linked(fragment.citation)) continue;
-      for (const sentence of sentences(fragment.excerpt, sentenceMemo)) {
-        if (!timely(sentence) || !thesis(sentence) || sentence.includes('…') || /\b(?:yesterday|last (?:week|month|year)|in 20\d\d|was|had been)\b/i.test(sentence)) continue;
-        const topic = MARKET_TOPICS.find(([, pattern]) => pattern.test(sentence));
-        if (!topic || found.has(topic[0])) continue;
-        if (topic[0] === 'Macro regime' && !/\b(?:shift|transition|expect|forecast|nowcast|moving|more likely)\b/i.test(sentence)) continue;
-        const watch = sentence.match(/\b(?:watch|if|unless|until)\b.*$/i)?.[0];
-        // Need an explicit decision implication, not just a new numerical reading.
-        if (!watch && !/\b(?:risk|support|pressure|headwind|tailwind|squeeze|position|exposure|volatility|caution)\b/i.test(sentence)) continue;
-        found.set(topic[0], finding({ key: [topic[0], 'published-market-watch'], material: [sentence], symbol: topic[0], kind: 'market', priority: 2,
-          action: 'market watch', publishedAt: fragment.citation.publicationDate || product.publicationDate,
-          rows: [row('Action', 'Watch the published market development'), row('Context', sentence), ...(watch ? [row('Watch', watch)] : [])],
-          sourceLinks: [{ label: fragment.citation.title || product.product, citation: fragment.citation }], state: { researchOnly: true } }));
-      }
-    }
-  }
-  return [...found.values()];
 }
 function evaluateResearchAttention(context = {}, now = new Date()) {
   now = now instanceof Date ? now : new Date(now);
@@ -383,13 +392,12 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   const portfolio = portfolioFindings(context, now, verified);
   const actions = [...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...unverifiedInstructionFindings(context, now, verified)];
   const opportunities = opportunityFindings(context, now, verified, portfolio, sentenceMemo);
-  const markets = marketFindings(context, now, sentenceMemo);
   const accounts = accountFindings(context, now);
   const completeKinds = [];
   if (verified && context.holdings.researchComplete !== false && context.research?.scanComplete === true) completeKinds.push('portfolio');
   if (context.research?.scanComplete === true && Array.isArray(context.documents?.products)) completeKinds.push('opportunity', 'market');
   if (accounts.complete) completeKinds.push('account');
-  const unique = new Map([...portfolio, ...actions, ...opportunities, ...markets, ...accounts.findings].map(item => [item.id, item]));
+  const unique = new Map([...portfolio, ...actions, ...opportunities, ...accounts.findings].map(item => [item.id, item]));
   return { findings: [...unique.values()], diagnostics, complete: completeKinds.includes('portfolio') && completeKinds.includes('opportunity') && completeKinds.includes('market'), completeKinds };
 }
 module.exports = { evaluateResearchAttention, freshBook };

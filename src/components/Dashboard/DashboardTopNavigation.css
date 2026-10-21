@@ -122,30 +122,8 @@
   width: 100%;
 }
 
-.dashboard-top-navigation__section {
-  background: #f5f6f7;
-  border-bottom: 1px solid var(--navigation-rule);
-  color: var(--navigation-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  padding: 5px 12px;
-}
-
 .dashboard-top-navigation__selection {
   min-width: 10px;
-}
-
-.dashboard-top-navigation__menu .dashboard-top-navigation__item[data-indicator-tone='bullish'] {
-  border-left: 2px solid #177347;
-  color: #177347;
-  padding-left: 10px;
-}
-
-.dashboard-top-navigation__menu .dashboard-top-navigation__item[data-indicator-tone='bearish'] {
-  border-left: 2px solid #ba4141;
-  color: #ba4141;
-  padding-left: 10px;
 }
 
 .dashboard-top-navigation .dashboard-top-navigation__item.has-notification {
@@ -162,21 +140,6 @@
   box-shadow: inset 0 0 0 1px #d64545aa, inset 0 0 14px #e0444433, 0 0 9px #d6333344;
   z-index: 1;
   animation: dashboard-top-navigation-action-required 1.6s ease-in-out infinite;
-}
-
-.dashboard-top-navigation__action-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 16px;
-  height: 16px;
-  margin-left: 6px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: #b42318;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
 }
 
 @keyframes dashboard-top-navigation-action-required {

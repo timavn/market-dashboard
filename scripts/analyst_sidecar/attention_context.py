@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import math
 
 from finding_source_reports import attach_finding_source_reports
+from hedgai_review import portfolio_tick_readings
 from inbox_holdings import current_holding_weights
 from portfolio_brief import rule_holdings
 from portfolio_review import portfolio_metrics, _unverified_evidence
@@ -46,7 +47,7 @@ def _signature(source):
 async def capture_attention_context(*, market_date_reader, holdings_reader, portfolio_reader,
                                     universe_reader, symbols_reader, documents_reader,
                                     projector, sizing_reader, research_index, events=(),
-                                    balance_reader=None, balance_exceptions=None, now=None):
+                                    balance_reader=None, balance_exceptions=None, tick_reader=None, now=None):
     diagnostics = []
 
     async def read(name, callback, timeout):
@@ -63,11 +64,18 @@ async def capture_attention_context(*, market_date_reader, holdings_reader, port
     async def no_balance():
         return None
 
-    book, valuation, research_result, documents, balance = await asyncio.gather(
+    async def no_ticks():
+        return {}
+
+    # Tick is display-only context for alerts. A missing feed leaves Tick as N/A
+    # and never affects completeness or the Trade/Trend rule inputs.
+    tick_cutoff = (now or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z")
+    book, valuation, research_result, documents, balance, tick_overlay = await asyncio.gather(
         read("holdings", holdings_reader, 12), read("valuations", portfolio_reader, 20),
         read("research", research, 35),
         read("documents", lambda: asyncio.to_thread(documents_reader), 20),
         read("balance", balance_reader or no_balance, 15),
+        read("tick", (lambda: tick_reader(tick_cutoff)) if tick_reader else no_ticks, 10),
     )
     current_time = now or datetime.now(timezone.utc)
     book = book or {}
@@ -108,7 +116,14 @@ async def capture_attention_context(*, market_date_reader, holdings_reader, port
     # Weight and NLV must have full account/valuation provenance, not a first
     # account's summary or marks from a partly valued book.
     weights_by_key = {(row["holding"], row["heldSide"]): row.get("currentHolding") for row in weights}
+    try:
+        ticks, _ = portfolio_tick_readings(tick_overlay, as_of=tick_cutoff) if tick_overlay else ({}, [])
+    except Exception as exc:
+        ticks = {}
+        diagnostics.append({"component": "tick", "status": "unavailable", "reason": type(exc).__name__})
     for row in rules:
+        if ticks.get(row["holding"]):
+            row["tick"] = ticks[row["holding"]]
         weight = weights_by_key.get((row["holding"], row["heldSide"])) or {}
         row["weightPct"] = weight.get("weightPct")
         if not weight:

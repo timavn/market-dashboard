@@ -90,10 +90,11 @@
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.06em;
+  text-align: center;
   text-transform: uppercase;
 }
 .analyst-inbox-urgent-heading { color: #a61b1b; }
 .analyst-inbox-ordinary-heading { margin-top: 6px; color: var(--analyst-muted, #6b7280); }
-.analyst-inbox-finding.is-action-required { border-color: #d64545; border-left-width: 3px; }
+.analyst-inbox-finding.is-action-required { border-color: #d64545; }
 .analyst-inbox-finding.is-action-required .analyst-inbox-heading { background: #fdecec; border-bottom-color: #f2c4c4; }
 .analyst-inbox-finding.is-action-required .analyst-inbox-symbol { color: #a61b1b; font-weight: 600; }

@@ -76,7 +76,8 @@ export function evaluatePortfolioRule(holding, asOf) {
     }
   }
   const sizingBasis = decision.sizingBand.policy ? `${decision.sizingBand.policy.label} policy` : 'Beta sizing';
-  const base = { ...holding, sizingBasis,
+  const base = { ...holding, sizingBasis, beta: decision.sizingBand.effectiveBeta ?? null,
+    atrCapWeight: decision.atrRiskCap.available ? decision.atrRiskCap.capWeight : null,
     weightPct: weight, trade, trend, minWeight: decision.minWeight, maxWeight, weightStatus, weightDeviation, targetWeight: null, reduction: null };
   if (!heldSignal) return { ...base, status: 'verification', reason: 'Position side unavailable' };
   if (decision.research.action === 'EXIT') return {

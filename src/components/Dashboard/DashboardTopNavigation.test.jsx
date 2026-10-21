@@ -10,19 +10,10 @@ jest.mock('./MarketEventsQuickReference', () => ({ __esModule: true, default: ({
   <button type="button" data-compact={compact}>Market Events</button>
 ) }));
 
-const market = (marketId, label, sectionLabel, extra = {}) => ({
-  id: `predictionMonitor-${marketId}`, group: 'primary', label, sectionLabel, onSelect: jest.fn(), ...extra,
-});
-const markets = () => [
-  market('silver', 'Silver', 'Metals', { menuGroup: 'perpetual' }),
-  market('gold', 'Gold', 'Metals', { menuGroup: 'perpetual' }),
-  market('bitcoin', 'BTC', 'Crypto', { menuGroup: 'perpetual' }),
-  market('ethereum', 'ETH', 'Crypto', { menuGroup: 'perpetual' }),
-  market('wti', 'WTI', 'Energy'),
-  market('brent', 'Brent', 'Energy'),
-  market('sp500', 'SP500', 'Equities'),
-  market('cpi', 'CPI', 'Economic Data'),
-  market('gdp', 'GDP', 'Economic Data'),
+const portfolioWindows = () => [
+  { id: 'portfolio', label: 'Portfolio', group: 'primary', onSelect: jest.fn() },
+  { id: 'exposureLab', label: 'Exposure Lab', group: 'primary', onSelect: jest.fn() },
+  { id: 'balance', label: 'Balance', group: 'primary', onSelect: jest.fn() },
 ];
 
 beforeEach(() => {
@@ -49,13 +40,10 @@ const settleInboxRequest = async () => {
   await act(async () => { await analystWorkspaceApi.request.mock.results.at(-1).value; });
 };
 
-test('preserves every destination in bottom dock groups and descriptive market sections', () => {
-  const destinations = [['x', 'X.com'], ['tldr', 'TL;DR'], ['process', 'Process'], ['dashboardGuide', 'Dashboard Guide'], ['exposureGuide', 'Exposure Guide'], ['portfolio', 'Portfolio'], ['exposureLab', 'Exposure Lab'], ['balance', 'Balance'], ['contractPnl', 'Contract P&L']];
-  const marketItems = [...markets(), market('new-market', 'New market', 'Other Markets')];
-  const predictionItems = marketItems.filter((item) => item.menuGroup !== 'perpetual');
+test('preserves every destination in bottom dock groups', () => {
+  const destinations = [['x', 'X.com'], ['tldr', 'TL;DR'], ['process', 'Process'], ['dashboardGuide', 'Dashboard Guide'], ['exposureGuide', 'Exposure Guide'], ['portfolio', 'Portfolio'], ['exposureLab', 'Exposure Lab'], ['balance', 'Balance']];
   const items = [
     ...destinations.map(([id, label]) => ({ id, label, group: 'primary', onSelect: jest.fn() })),
-    ...marketItems,
     { id: 'system', label: 'Systems', group: 'utility', onSelect: jest.fn() },
     { id: 'analyst', label: 'The Analyst', group: 'utility', onSelect: jest.fn() },
   ];
@@ -63,12 +51,14 @@ test('preserves every destination in bottom dock groups and descriptive market s
 
   const navigation = screen.getByRole('navigation', { name: 'Workspace navigation' });
   expect(within(navigation).getAllByRole('button').map((button) => button.getAttribute('aria-label') || button.textContent))
-    .toEqual(['Portfolio', 'Prediction Markets', 'Perpetual Futures', 'Market Events', 'Research', 'The Analyst', 'Systems']);
+    .toEqual(['Portfolio', 'Market Events', 'Research', 'The Analyst', 'Systems']);
   expect(screen.queryByRole('button', { name: 'Market Dashboard' })).not.toBeInTheDocument();
   expect(within(navigation).queryByRole('button', { name: 'Dashboard', exact: true })).not.toBeInTheDocument();
+  expect(within(navigation).queryByRole('button', { name: 'Prediction Markets' })).not.toBeInTheDocument();
+  expect(within(navigation).queryByRole('button', { name: 'Perpetual Futures' })).not.toBeInTheDocument();
   expect(within(navigation).getByRole('button', { name: 'Market Events' })).toHaveAttribute('data-compact', 'true');
   for (const [id, label] of destinations) {
-    const group = ['portfolio', 'exposureLab', 'balance', 'contractPnl'].includes(id) ? 'Portfolio' : 'Research';
+    const group = ['portfolio', 'exposureLab', 'balance'].includes(id) ? 'Portfolio' : 'Research';
     fireEvent.click(within(navigation).getByRole('button', { name: group, exact: true }));
     fireEvent.click(within(screen.getByRole('menu', { name: group })).getByRole(group === 'Research' ? 'menuitem' : 'menuitemcheckbox', { name: label }));
     expect(items.find((item) => item.label === label).onSelect).toHaveBeenCalledTimes(1);
@@ -77,19 +67,6 @@ test('preserves every destination in bottom dock groups and descriptive market s
   }
   fireEvent.click(within(navigation).getByRole('button', { name: 'Systems' }));
   expect(items.find((item) => item.id === 'system').onSelect).toHaveBeenCalledTimes(1);
-  expect(within(navigation).queryByRole('button', { name: 'CPI' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Prediction Markets' }));
-  const menu = screen.getByRole('menu', { name: 'Prediction Markets' });
-  expect(within(menu).getAllByRole('menuitemcheckbox')).toHaveLength(predictionItems.length);
-  for (const item of predictionItems) {
-    const section = within(menu).getByRole('group', { name: `${item.sectionLabel} prediction markets` });
-    expect(section).toHaveAttribute('data-navigation-section', item.sectionLabel);
-    expect(within(section).getByRole('menuitemcheckbox', { name: item.label })).toBeInTheDocument();
-  }
-  fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'CPI' }));
-  expect(predictionItems.find((item) => item.label === 'CPI').onSelect).toHaveBeenCalledTimes(1);
-  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Prediction Markets' })).toHaveFocus();
 });
 
 test('keeps multiple panel states, focus refs, warm intent and system readiness intact', () => {
@@ -98,12 +75,11 @@ test('keeps multiple panel states, focus refs, warm intent and system readiness 
   render(<DashboardTopNavigation
     items={[
       { id: 'process', label: 'Process', group: 'primary', buttonRef: processRef, isProcessToggle: true },
-      { id: 'portfolio', label: 'Portfolio', group: 'primary' },
       { id: 'system', label: 'Systems', group: 'utility' },
-      ...markets(),
+      ...portfolioWindows(),
     ]}
-    activeItemId="predictionMonitor-gdp"
-    activeItemIds={['portfolio', 'predictionMonitor-gdp', 'predictionMonitor-cpi']}
+    activeItemId="balance"
+    activeItemIds={['portfolio', 'balance']}
     onItemIntent={onItemIntent}
     systemReadinessStatus="offline"
   />);
@@ -117,65 +93,33 @@ test('keeps multiple panel states, focus refs, warm intent and system readiness 
   expect(screen.getByRole('button', { name: 'Systems' })).toHaveAttribute('data-readiness-status', 'offline');
   expect(screen.getByText('System status: offline')).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Prediction Markets' }));
-  expect(screen.getByRole('menuitemcheckbox', { name: 'GDP' })).toHaveAttribute('aria-current', 'page');
-  expect(screen.getByRole('menuitemcheckbox', { name: 'GDP' })).toHaveFocus();
-  expect(screen.getByRole('menuitemcheckbox', { name: 'CPI' })).toHaveAttribute('aria-checked', 'true');
-  expect(screen.getByRole('menuitemcheckbox', { name: 'WTI' })).toHaveAttribute('aria-checked', 'false');
-  expect(onItemIntent).not.toHaveBeenCalledWith('predictionMonitor-gdp');
+  fireEvent.click(screen.getByRole('button', { name: 'Portfolio' }));
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Balance' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Balance' })).toHaveFocus();
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Portfolio' })).toHaveAttribute('aria-checked', 'true');
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Exposure Lab' })).toHaveAttribute('aria-checked', 'false');
+  expect(onItemIntent).not.toHaveBeenCalledWith('balance');
   fireEvent.keyDown(document.activeElement, { key: 'ArrowUp' });
-  expect(onItemIntent).toHaveBeenCalledWith('predictionMonitor-cpi');
-});
-
-test.each([
-  ['Perpetual Futures', 'perpetual futures', [['Metals', ['Silver', 'Gold']], ['Crypto', ['BTC', 'ETH']]]],
-  ['Prediction Markets', 'prediction markets', [['Energy', ['WTI', 'Brent']], ['Equities', ['SP500']], ['Economic Data', ['CPI', 'GDP']]]],
-])('groups %s destinations under descriptive headings and traverses across sections with the keyboard', (menuName, groupSuffix, sections) => {
-  const items = markets();
-  const onItemIntent = jest.fn();
-  render(<DashboardTopNavigation items={items} onItemIntent={onItemIntent} />);
-  const trigger = screen.getByRole('button', { name: menuName, exact: true });
-  fireEvent.click(trigger);
-  const menu = screen.getByRole('menu', { name: menuName });
-  expect(within(menu).getAllByRole('group')).toHaveLength(sections.length);
-  expect(within(menu).queryByText(/^T\d+$/)).not.toBeInTheDocument();
-  expect(onItemIntent).not.toHaveBeenCalled();
-  for (const [sectionName, labels] of sections) {
-    const section = within(menu).getByRole('group', { name: `${sectionName} ${groupSuffix}` });
-    expect(section).toHaveAttribute('data-navigation-section', sectionName);
-    expect(within(section).getByText(sectionName, { exact: true })).toBeInTheDocument();
-    expect(within(section).getAllByRole('menuitemcheckbox').map((option) => option.getAttribute('aria-label')))
-      .toEqual(labels);
-  }
-  const labels = sections.flatMap(([, sectionLabels]) => sectionLabels);
-  for (const label of labels) {
-    expect(within(menu).getByRole('menuitemcheckbox', { name: label })).toHaveFocus();
-    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
-  }
-  expect(within(menu).getByRole('menuitemcheckbox', { name: labels[0] })).toHaveFocus();
-  for (const item of items) expect(item.onSelect).not.toHaveBeenCalled();
-  fireEvent.keyDown(document.activeElement, { key: 'Escape' });
-  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-  expect(trigger).toHaveFocus();
+  expect(onItemIntent).toHaveBeenCalledWith('exposureLab');
 });
 
 test('supports keyboard opening, wraparound, Home/End, typeahead, selection and focus restoration', () => {
-  const items = markets();
+  const items = portfolioWindows();
   render(<DashboardTopNavigation items={items} />);
-  const trigger = screen.getByRole('button', { name: 'Prediction Markets' });
+  const trigger = screen.getByRole('button', { name: 'Portfolio' });
   trigger.focus();
   fireEvent.keyDown(trigger, { key: 'ArrowUp' });
-  expect(screen.getByRole('menuitemcheckbox', { name: 'GDP' })).toHaveFocus();
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Balance' })).toHaveFocus();
   fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
-  expect(screen.getByRole('menuitemcheckbox', { name: 'WTI' })).toHaveFocus();
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Portfolio' })).toHaveFocus();
   fireEvent.keyDown(document.activeElement, { key: 'End' });
-  expect(screen.getByRole('menuitemcheckbox', { name: 'GDP' })).toHaveFocus();
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Balance' })).toHaveFocus();
   fireEvent.keyDown(document.activeElement, { key: 'Home' });
-  expect(screen.getByRole('menuitemcheckbox', { name: 'WTI' })).toHaveFocus();
-  fireEvent.keyDown(document.activeElement, { key: 'c' });
-  expect(screen.getByRole('menuitemcheckbox', { name: 'CPI' })).toHaveFocus();
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Portfolio' })).toHaveFocus();
+  fireEvent.keyDown(document.activeElement, { key: 'e' });
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Exposure Lab' })).toHaveFocus();
   fireEvent.keyDown(document.activeElement, { key: 'Enter' });
-  expect(items.find((item) => item.label === 'CPI').onSelect).toHaveBeenCalledTimes(1);
+  expect(items.find((item) => item.label === 'Exposure Lab').onSelect).toHaveBeenCalledTimes(1);
   expect(trigger).toHaveFocus();
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   fireEvent.keyDown(trigger, { key: 'ArrowDown' });
@@ -184,10 +128,10 @@ test('supports keyboard opening, wraparound, Home/End, typeahead, selection and 
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
 });
 
-test('closes on outside pointer actions and Tab without selecting a market', () => {
-  const items = markets();
+test('closes on outside pointer actions and Tab without selecting a window', () => {
+  const items = portfolioWindows();
   render(<DashboardTopNavigation items={items} />);
-  const trigger = screen.getByRole('button', { name: 'Prediction Markets' });
+  const trigger = screen.getByRole('button', { name: 'Portfolio' });
   fireEvent.click(trigger);
   fireEvent.pointerDown(document.body);
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
@@ -200,44 +144,22 @@ test('closes on outside pointer actions and Tab without selecting a market', () 
 
 test.each(['Enter', ' '])('keyboard selection with %s passes through workspace click capture before selecting', (key) => {
   const navigationEvents = [];
-  const cpi = market('cpi', 'CPI', 'Economic Data', { onSelect: () => navigationEvents.push('select-cpi') });
+  const balance = { id: 'balance', label: 'Balance', group: 'primary', onSelect: () => navigationEvents.push('select-balance') };
   render(
     <div onClickCapture={(event) => {
-      if (event.target.closest('button')?.dataset.navigationItemId === cpi.id) navigationEvents.push('close-process');
+      if (event.target.closest('button')?.dataset.navigationItemId === balance.id) navigationEvents.push('close-process');
     }}>
-      <DashboardTopNavigation items={[cpi]} />
+      <DashboardTopNavigation items={[balance]} />
     </div>,
   );
-  const trigger = screen.getByRole('button', { name: 'Prediction Markets' });
+  const trigger = screen.getByRole('button', { name: 'Portfolio' });
   fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-  fireEvent.keyDown(screen.getByRole('menuitemcheckbox', { name: 'CPI' }), { key });
-  expect(navigationEvents).toEqual(['close-process', 'select-cpi']);
+  fireEvent.keyDown(screen.getByRole('menuitemcheckbox', { name: 'Balance' }), { key });
+  expect(navigationEvents).toEqual(['close-process', 'select-balance']);
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   expect(trigger).toHaveFocus();
 });
 
-test('keeps research indicators separate from readiness and adds no quote status', () => {
-  const description = 'Aligned bearish Trade and Trend in the upper Risk Range third.';
-  render(<DashboardTopNavigation
-    items={[
-      market('wti', 'WTI', 'Energy', { indicatorTone: 'bearish', indicatorDescription: description, title: 'WTI Prediction Monitor' }),
-      market('gold', 'Gold', 'Metals', { menuGroup: 'perpetual', indicatorTone: 'warning', indicatorDescription: 'Unverified signal' }),
-      { id: 'system', label: 'Systems', group: 'utility' },
-    ]}
-    systemReadinessStatus="offline"
-  />);
-  fireEvent.click(screen.getByRole('button', { name: 'Prediction Markets' }));
-  const wti = screen.getByRole('menuitemcheckbox', { name: 'WTI' });
-  expect(wti).toHaveAttribute('data-indicator-tone', 'bearish');
-  expect(wti).toHaveAccessibleDescription(description);
-  expect(wti).toHaveAttribute('title', `WTI Prediction Monitor. ${description}`);
-  expect(wti).not.toHaveAttribute('data-readiness-status');
-  fireEvent.click(screen.getByRole('button', { name: 'Perpetual Futures' }));
-  const gold = screen.getByRole('menuitemcheckbox', { name: 'Gold' });
-  expect(gold).not.toHaveAttribute('data-indicator-tone');
-  expect(gold).not.toHaveAttribute('aria-describedby');
-  expect(screen.queryByText(/live|delayed|last close/i)).not.toBeInTheDocument();
-});
 
 test('keeps utility buttons direct without positioning dots and preserves hidden readiness and inbox notifications', () => {
   const onSelect = jest.fn();
@@ -451,14 +373,12 @@ test('does not let an older poll revive a notification after a newer inbox updat
   expect(analyst).not.toHaveClass('has-notification');
 });
 
-
 test('anchors each menu above its dock trigger and keeps it within the viewport', () => {
   render(<DashboardTopNavigation items={[
     { id: 'process', label: 'Process', group: 'primary' },
-    { id: 'portfolio', label: 'Portfolio', group: 'primary' },
-    ...markets(),
+    ...portfolioWindows(),
   ]} />);
-  for (const name of ['Research', 'Portfolio', 'Prediction Markets', 'Perpetual Futures']) {
+  for (const name of ['Research', 'Portfolio']) {
     const trigger = screen.getByRole('button', { name, exact: true });
     jest.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
       top: window.innerHeight - 60, bottom: window.innerHeight - 16,
@@ -487,13 +407,13 @@ test('returns external focus refs to the group trigger after a menu selection', 
 });
 
 test('opens above the whole dock when navigation wraps onto multiple rows', () => {
-  render(<DashboardTopNavigation items={markets()} />);
+  render(<DashboardTopNavigation items={portfolioWindows()} />);
   const dock = screen.getByRole('navigation', { name: 'Workspace navigation' });
   jest.spyOn(dock, 'getBoundingClientRect').mockReturnValue({ top: 500, bottom: 616, height: 116 });
-  const trigger = screen.getByRole('button', { name: 'Prediction Markets' });
+  const trigger = screen.getByRole('button', { name: 'Portfolio' });
   jest.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({ top: 540, bottom: 578, left: 50, height: 38 });
   fireEvent.click(trigger);
-  expect(screen.getByRole('menu', { name: 'Prediction Markets' }))
+  expect(screen.getByRole('menu', { name: 'Portfolio' }))
     .toHaveStyle({ bottom: `${window.innerHeight - 500 + 7}px`, maxHeight: '485px' });
 });
 
@@ -503,18 +423,17 @@ test('uses one labeled menu button per group without selecting or preloading def
     { id: 'process', label: 'Process', group: 'primary', onSelect: jest.fn() },
     { id: 'portfolio', label: 'Portfolio', group: 'primary', onSelect: jest.fn() },
     { id: 'exposureLab', label: 'Exposure Lab', group: 'primary', onSelect: jest.fn() },
-    ...markets(),
     { id: 'system', label: 'Systems', group: 'utility', onSelect: jest.fn() },
     { id: 'analyst', label: 'The Analyst', group: 'utility', onSelect: jest.fn() },
   ];
   const onItemIntent = jest.fn();
   const { rerender } = render(<DashboardTopNavigation items={items} onItemIntent={onItemIntent} />);
   const navigation = screen.getByRole('navigation', { name: 'Workspace navigation' });
-  const groups = ['Research', 'Portfolio', 'Prediction Markets', 'Perpetual Futures'];
-  expect(within(navigation).getAllByRole('button')).toHaveLength(7);
+  const groups = ['Research', 'Portfolio'];
+  expect(within(navigation).getAllByRole('button')).toHaveLength(5);
   expect(within(navigation).queryByRole('button', { name: / menu$/ })).not.toBeInTheDocument();
 
-  for (const activeItemIds of [[], ['process', 'exposureLab', 'predictionMonitor-gdp', 'predictionMonitor-ethereum']]) {
+  for (const activeItemIds of [[], ['process', 'exposureLab']]) {
     rerender(<DashboardTopNavigation items={items} activeItemIds={activeItemIds} onItemIntent={onItemIntent} />);
     for (const name of groups) {
       const trigger = within(navigation).getByRole('button', { name, exact: true });
@@ -549,8 +468,6 @@ test('uses one labeled menu button per group without selecting or preloading def
 test.each([
   ['Research', { id: 'tldr', label: 'TL;DR', group: 'primary' }, 'menuitem'],
   ['Portfolio', { id: 'portfolio', label: 'Portfolio', group: 'primary' }, 'menuitemcheckbox'],
-  ['Prediction Markets', market('cpi', 'CPI', 'Economic Data'), 'menuitemcheckbox'],
-  ['Perpetual Futures', market('gold', 'Gold', 'Metals', { menuGroup: 'perpetual' }), 'menuitemcheckbox'],
 ])('keeps a single-option %s group as a menu and requires explicit option selection', (name, definition, optionRole) => {
   const onSelect = jest.fn();
   const onItemIntent = jest.fn();
@@ -572,117 +489,52 @@ test.each([
 
 test('leaves the current workspace route open while browsing a group and closes it only on option selection', () => {
   const navigationEvents = [];
-  const cpi = market('cpi', 'CPI', 'Economic Data', { onSelect: () => navigationEvents.push('select-cpi') });
+  const balance = { id: 'balance', label: 'Balance', group: 'primary', onSelect: () => navigationEvents.push('select-balance') };
   render(
     <div onClickCapture={(event) => {
       if (event.target.closest('button')?.dataset.navigationItemId) navigationEvents.push('close-process');
     }}>
-      <DashboardTopNavigation items={[cpi]} />
+      <DashboardTopNavigation items={[balance]} />
     </div>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Prediction Markets', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Portfolio', exact: true }));
   expect(navigationEvents).toEqual([]);
-  fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'CPI' }));
-  expect(navigationEvents).toEqual(['close-process', 'select-cpi']);
+  fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Balance' }));
+  expect(navigationEvents).toEqual(['close-process', 'select-balance']);
 });
 
-test('groups metals, BTC and ETH under Perpetual Futures and preserves selection, warm intent and focus', () => {
-  const items = markets();
-  const gold = items.find((item) => item.label === 'Gold');
-  const silver = items.find((item) => item.label === 'Silver');
-  gold.buttonRef = createRef();
-  silver.buttonRef = createRef();
-  const onItemIntent = jest.fn();
-  render(<DashboardTopNavigation items={items} onItemIntent={onItemIntent} activeItemIds={[gold.id]} />);
-  const trigger = screen.getByRole('button', { name: 'Perpetual Futures' });
-  expect(gold.buttonRef.current).toBe(trigger);
-  expect(silver.buttonRef.current).toBe(trigger);
-  fireEvent.click(screen.getByRole('button', { name: 'Prediction Markets' }));
-  expect(within(screen.getByRole('menu', { name: 'Prediction Markets' })).getAllByRole('menuitemcheckbox')
-    .map((item) => item.getAttribute('aria-label'))).toEqual(['WTI', 'Brent', 'SP500', 'CPI', 'GDP']);
-  fireEvent.click(trigger);
-  const menu = screen.getByRole('menu', { name: 'Perpetual Futures' });
-  expect(within(menu).getAllByRole('menuitemcheckbox').map((item) => item.getAttribute('aria-label')))
-    .toEqual(['Silver', 'Gold', 'BTC', 'ETH']);
-  const goldOption = within(menu).getByRole('menuitemcheckbox', { name: 'Gold' });
-  expect(goldOption).toHaveAttribute('aria-checked', 'true');
-  expect(goldOption).toHaveAttribute('data-navigation-item-id', gold.id);
-  fireEvent.keyDown(document.activeElement, { key: 'g' });
-  expect(goldOption).toHaveFocus();
-  expect(onItemIntent).toHaveBeenCalledWith(gold.id);
-  fireEvent.keyDown(goldOption, { key: 'End' });
-  expect(within(menu).getByRole('menuitemcheckbox', { name: 'ETH' })).toHaveFocus();
-  fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
-  expect(within(menu).getByRole('menuitemcheckbox', { name: 'Silver' })).toHaveFocus();
-  fireEvent.keyDown(document.activeElement, { key: 'Enter' });
-  expect(silver.onSelect).toHaveBeenCalledTimes(1);
-  expect(gold.onSelect).not.toHaveBeenCalled();
-  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-  expect(trigger).toHaveFocus();
-  expect(silver.buttonRef.current).toBe(trigger);
-});
-
-test.each(['BTC', 'ETH'])('opens %s from Perpetual Futures and keeps its active state scoped to that group', (label) => {
-  const items = markets();
-  const crypto = items.find((item) => item.label === label);
-  crypto.buttonRef = createRef();
-  const onItemIntent = jest.fn();
-  const { rerender } = render(<DashboardTopNavigation items={items} onItemIntent={onItemIntent} />);
-  const trigger = screen.getByRole('button', { name: 'Perpetual Futures' });
-  expect(crypto.buttonRef.current).toBe(trigger);
-  fireEvent.click(trigger);
-  const option = screen.getByRole('menuitemcheckbox', { name: label });
-  expect(crypto.buttonRef.current).toBe(option);
-  expect(option).toHaveAttribute('aria-checked', 'false');
-  fireEvent.pointerEnter(option);
-  expect(onItemIntent).toHaveBeenCalledWith(crypto.id);
-  fireEvent.click(option);
-  expect(crypto.onSelect).toHaveBeenCalledTimes(1);
-  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-  expect(trigger).toHaveFocus();
-  expect(crypto.buttonRef.current).toBe(trigger);
-
-  rerender(<DashboardTopNavigation items={items} onItemIntent={onItemIntent} activeItemId={crypto.id} activeItemIds={[crypto.id]} />);
-  const perpetualLabel = screen.getByRole('button', { name: 'Perpetual Futures', exact: true });
-  expect(perpetualLabel).toHaveTextContent(/^Perpetual Futures$/);
-  expect(perpetualLabel).toHaveAttribute('aria-pressed', 'true');
-  expect(perpetualLabel).toHaveAttribute('aria-haspopup', 'menu');
-  expect(screen.getByRole('button', { name: 'Prediction Markets', exact: true })).toHaveAttribute('aria-pressed', 'false');
-  fireEvent.click(trigger);
-  expect(screen.getByRole('menuitemcheckbox', { name: label })).toHaveAttribute('aria-checked', 'true');
-  expect(screen.getByRole('menuitemcheckbox', { name: label })).toHaveFocus();
-  expect(crypto.onSelect).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole('menuitemcheckbox', { name: label }));
-  expect(crypto.onSelect).toHaveBeenCalledTimes(2);
-  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-});
-
-test('keeps group labels and active state scoped while opening menus without toggling active markets', () => {
-  const items = markets();
-  const silver = items.find((item) => item.label === 'Silver');
-  const cpi = items.find((item) => item.label === 'CPI');
-  const { rerender } = render(<DashboardTopNavigation items={items} activeItemId={silver.id} activeItemIds={[silver.id]} />);
-  const perpetual = screen.getByRole('button', { name: 'Perpetual Futures', exact: true });
-  const prediction = screen.getByRole('button', { name: 'Prediction Markets', exact: true });
-  expect(perpetual).toHaveTextContent(/^Perpetual Futures$/);
-  expect(perpetual).toHaveAttribute('aria-pressed', 'true');
-  expect(prediction).toHaveAttribute('aria-pressed', 'false');
-  fireEvent.click(perpetual);
-  expect(screen.getByRole('menuitemcheckbox', { name: 'Silver' })).toHaveAttribute('aria-checked', 'true');
-  expect(screen.getByRole('menuitemcheckbox', { name: 'Silver' })).toHaveFocus();
-  expect(silver.onSelect).not.toHaveBeenCalled();
+test('keeps group labels and active state scoped while opening menus without toggling active windows', () => {
+  const items = [
+    { id: 'tldr', label: 'TL;DR', group: 'primary', onSelect: jest.fn() },
+    { id: 'process', label: 'Process', group: 'primary', onSelect: jest.fn() },
+    ...portfolioWindows(),
+  ];
+  const balance = items.find((item) => item.id === 'balance');
+  balance.buttonRef = createRef();
+  const { rerender } = render(<DashboardTopNavigation items={items} activeItemId="balance" activeItemIds={['balance']} />);
+  const portfolio = screen.getByRole('button', { name: 'Portfolio', exact: true });
+  const research = screen.getByRole('button', { name: 'Research', exact: true });
+  expect(balance.buttonRef.current).toBe(portfolio);
+  expect(portfolio).toHaveTextContent(/^Portfolio$/);
+  expect(portfolio).toHaveAttribute('aria-pressed', 'true');
+  expect(research).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(portfolio);
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Balance' })).toHaveAttribute('aria-checked', 'true');
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Balance' })).toHaveFocus();
+  expect(balance.buttonRef.current).toBe(screen.getByRole('menuitemcheckbox', { name: 'Balance' }));
   fireEvent.keyDown(document.activeElement, { key: 'Escape' });
+  expect(balance.buttonRef.current).toBe(portfolio);
 
-  rerender(<DashboardTopNavigation items={items} activeItemId={cpi.id} activeItemIds={[cpi.id]} />);
-  expect(perpetual).toHaveAttribute('aria-pressed', 'false');
-  expect(prediction).toHaveAttribute('aria-pressed', 'true');
-  expect(prediction).toHaveTextContent(/^Prediction Markets$/);
-  fireEvent.click(prediction);
-  expect(screen.getByRole('menuitemcheckbox', { name: 'CPI' })).toHaveAttribute('aria-checked', 'true');
-  expect(screen.getByRole('menuitemcheckbox', { name: 'CPI' })).toHaveFocus();
-  fireEvent.click(perpetual);
-  expect(screen.queryByRole('menu', { name: 'Prediction Markets' })).not.toBeInTheDocument();
-  expect(screen.getByRole('menu', { name: 'Perpetual Futures' })).toBeInTheDocument();
+  rerender(<DashboardTopNavigation items={items} activeItemId="tldr" activeItemIds={['tldr']} />);
+  expect(portfolio).toHaveAttribute('aria-pressed', 'false');
+  expect(research).toHaveAttribute('aria-pressed', 'true');
+  expect(research).toHaveTextContent(/^Research$/);
+  fireEvent.click(research);
+  expect(screen.getByRole('menuitem', { name: 'TL;DR' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('menuitem', { name: 'TL;DR' })).toHaveFocus();
+  fireEvent.click(portfolio);
+  expect(screen.queryByRole('menu', { name: 'Research' })).not.toBeInTheDocument();
+  expect(screen.getByRole('menu', { name: 'Portfolio' })).toBeInTheDocument();
   for (const item of items) expect(item.onSelect).not.toHaveBeenCalled();
 });
 
@@ -695,6 +547,8 @@ test('an action-required finding turns the analyst red and opening it does not c
   expect(analyst).toHaveClass('has-action-required');
   expect(analyst).not.toHaveClass('has-notification');
   expect(analyst).toHaveAccessibleDescription('1 position needs immediate action');
+  // The red highlight carries the alert; the tab shows no count.
+  expect(analyst).toHaveTextContent(/^The Analyst1 position needs immediate action$/);
   fireEvent.click(analyst);
   expect(analyst).toHaveClass('has-action-required');
   announceAnalystInbox({ findings: [{ ...urgent, unread: 0 }], unread: 0 });

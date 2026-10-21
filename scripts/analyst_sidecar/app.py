@@ -18,14 +18,13 @@ import threading
 import time
 import sqlite3
 import sys
-from typing import Annotated, Any, Awaitable, Callable, Literal, Optional
+from typing import Any, Awaitable, Callable, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
-from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -49,8 +48,7 @@ from portfolio_sizing import PortfolioSizingReader
 from daily_research_reader import read_daily_research
 from hedgai_review import read_hedgai_research, accepted_hedgai
 from daily_research_rollup import build_daily_research_rollup, accepted_snapshots, PRODUCTS as DAILY_RESEARCH_PRODUCTS
-from prediction_research_reader import alpha_archive_scan_enabled, capture_prediction_research
-from prediction_research_rollup import build_prediction_research_rollup, accepted_prediction_snapshots, PRODUCTS as PREDICTION_RESEARCH_PRODUCTS
+from prediction_research_reader import alpha_archive_scan_enabled
 from portfolio_rollup_metrics import build_factor_exposure
 from portfolio_pca_review import read_portfolio_pca_review, build_portfolio_pca_section, paused_portfolio_pca_section, portfolio_pca_enabled
 from momo_roster_context import MomoRosterContextReader
@@ -64,11 +62,10 @@ from market import (
     MarketSituationContextReader,
     OpenBBReader,
     PREDICTIVE_REVIEW_UNIVERSE,
-    PredictionMarketReader,
     aclose_shared_clients,
 )
 from pdf_worker_client import run_pdf_operation
-from prediction_review import compact_analysis_markets, prediction_contract_row as _prediction_contract_row
+from prediction_review import prediction_contract_row as _prediction_contract_row
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from local_http_trust import LocalHttpTrust
 
@@ -244,7 +241,6 @@ if _interrupted_review_v2_count:
 pdf_library = PdfLibrary(research_index, REGISTRY)
 ibkr = IbkrReader()
 balance_context = BalanceContextReader()
-prediction_markets = PredictionMarketReader()
 openbb = OpenBBReader()
 portfolio_sizing_reader = PortfolioSizingReader(API_BASE_URL)
 momo_roster_context = MomoRosterContextReader(API_BASE_URL)
@@ -3697,7 +3693,7 @@ async def get_process_context() -> dict[str, Any]:
 
 @mcp.tool(annotations=NETWORK_READ_ONLY)
 async def get_dashboard_context(include_live_channels: bool = True) -> dict[str, Any]:
-    """Read dated dashboard context. Set include_live_channels=false when dedicated portfolio, balance and prediction tools already supply the turn's live evidence; omitted channels remain explicitly unverified."""
+    """Read dated dashboard context. Set include_live_channels=false when dedicated portfolio and balance tools already supply the turn's live evidence; omitted channels remain explicitly unverified."""
     async def supporting(path):
         try:
             async with httpx.AsyncClient(timeout=8) as client:
@@ -3711,8 +3707,8 @@ async def get_dashboard_context(include_live_channels: bool = True) -> dict[str,
     names = ["marketBackdrop", "volatility", "currencies", "correlations", "liquidity", "calendarEvents", "momoRoster", "dailyMarket"]
     readers = [market_situation_context.spx_realized_volatility(), supporting("/api/volatility-snapshot"), supporting("/api/usd/currency-pairs"), supporting("/api/usd/correlations"), supporting("/api/liquidity-indicators"), supporting("/api/market-events"), momo_roster_context.context(), daily_market_context.context()]
     if include_live_channels:
-        names = ["portfolio", "balances", "predictionMonitors", *names]
-        readers = [ibkr.portfolio_context(), balance_context.context(), prediction_markets.fixed_review_universe(), *readers]
+        names = ["portfolio", "balances", *names]
+        readers = [ibkr.portfolio_context(), balance_context.context(), *readers]
     results = await asyncio.gather(*readers, return_exceptions=True)
     data = {name: ({"status": "unavailable", "liveVerified": False, "error": str(value)} if isinstance(value, Exception) else value) for name, value in zip(names, results)}
     if include_live_channels:
@@ -3723,15 +3719,8 @@ async def get_dashboard_context(include_live_channels: bool = True) -> dict[str,
             data["exposure"] = portfolio_metrics(projected)
         else:
             data["portfolio"] = {"status": "unavailable", "liveVerified": False, "data": None}
-        try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                response = await client.post(f"{API_BASE_URL}/internal/analyst/prediction-analysis", headers={"Authorization": f"Bearer {SERVICE_TOKEN}"}, json={"markets": compact_analysis_markets((data["predictionMonitors"].get("data") or {}).get("markets", [])), "portfolio": portfolio, "metrics": data.get("exposure", {}), "balance": data["balances"]})
-                response.raise_for_status()
-                data["predictionMonitors"] = response.json()
-        except Exception:
-            data["predictionMonitors"] = {"status": "unavailable", "reason": "Verified setup analysis is unavailable; sizing withheld."}
     else:
-        for name in ("portfolio", "balances", "predictionMonitors"):
+        for name in ("portfolio", "balances"):
             data[name] = {"status": "unavailable", "classification": "not_requested",
                           "liveVerified": False, "freshness": "unavailable", "data": None}
     data["research"] = research_coverage()
@@ -3805,95 +3794,6 @@ async def get_balance_context() -> dict[str, Any]:
 async def get_live_market_snapshot(symbols: list[str]) -> dict[str, Any]:
     """Request new IBKR broker snapshots and return only fresh live marks; never fall back to another provider."""
     return checked(await ibkr.market_snapshot(symbols))
-
-
-@mcp.tool(annotations=NETWORK_READ_ONLY)
-async def get_prediction_market_snapshot(
-    series_tickers: Annotated[
-        Optional[list[str]],
-        Field(
-            description=(
-                "Optional allowlisted Kalshi series. Omit this field for Options Review "
-                "and for the default full snapshot; never send with market_areas. "
-                "An empty array is treated as omitted."
-            )
-        ),
-    ] = None,
-    include_ladders: Annotated[
-        bool,
-        Field(
-            description="Include supported native contract ladders in the default snapshot."
-        ),
-    ] = True,
-    include_market_setups: Annotated[
-        bool,
-        Field(
-            description=(
-                "Set true for Options Review to bundle the guarded S&P 500, WTI, Nasdaq 100, "
-                "and gold setup screen with the default held-contract snapshot. Do not send "
-                "market_areas when this is true."
-            )
-        ),
-    ] = False,
-    market_areas: Annotated[
-        Optional[list[Literal["sp500", "wti", "nasdaq100", "gold"]]],
-        Field(
-            description=(
-                "Only for the guarded four-market morning report. Omit this field for Options Review "
-                "and general snapshots; never send with series_tickers. An empty array is "
-                "treated as omitted."
-            )
-        ),
-    ] = None,
-    review_universe: Annotated[
-        bool,
-        Field(description="Set true for Predictive Markets Review: return seven pinned monitors, CPI and S&P 500 on Interactive Brokers / ForecastEx, then Nasdaq-100, Gold, Silver, Bitcoin and Ethereum on Kalshi, with independently verified quotes, research and specific gaps. Omit other selectors."),
-    ] = False,
-) -> dict[str, Any]:
-    """Return current prediction data, optionally bundling the guarded broad-market setup screen."""
-    if series_tickers == []:
-        series_tickers = None
-    if market_areas == []:
-        market_areas = None
-    if review_universe:
-        if series_tickers is not None or market_areas is not None or include_market_setups:
-            return compact_json_tool_result(checked(prediction_markets._invalid(
-                "review_universe selects all seven pinned monitors; omit other selectors."
-            )))
-        result = await prediction_markets.fixed_review_universe()
-        result["data"]["markets"] = [
-            _prediction_contract_row(row) for row in result["data"].get("markets") or []
-        ]
-        # The native prices passed their own provenance and TTL checks above.
-        # This verification does not cover dated research or execution capacity.
-        quoted = sum(bool(row.get("quotedLineCount")) for row in result["data"]["markets"])
-        result["liveVerified"] = quoted > 0
-        result["freshness"] = "direct_venue_quotes_with_dated_research" if quoted else "current_monitor"
-        result["data"]["verificationScope"] = "native_quotes_only"
-        result["data"]["quotedMarketCount"] = quoted
-        result["data"]["executionVerified"] = False
-        return compact_json_tool_result(checked(result))
-    result = await prediction_markets.snapshot(
-        series_tickers=series_tickers,
-        include_ladders=include_ladders,
-        market_areas=market_areas,
-        include_market_setups=include_market_setups,
-    )
-    if market_areas is not None and isinstance(result.get("data"), dict):
-        latest = research_index.latest_by_product().get("risk-ranges") or {}
-        result["data"]["researchIndex"] = {
-            "status": runtime_state.get("syncStatus") or "unknown",
-            "lastSyncAt": runtime_state.get("lastSyncAt"),
-            "lastSyncError": runtime_state.get("lastSyncError"),
-            "latestRiskRangesDate": latest.get("publication_date"),
-            "archivalOnly": True,
-            "allowedForCurrentFields": False,
-        }
-        if runtime_state.get("syncStatus") == "failed":
-            result.setdefault("warnings", []).append(
-                "The archival research index sync failed; it is not used to fill any current report field."
-            )
-    return compact_json_tool_result(checked(result))
 
 
 @mcp.tool(annotations=NETWORK_READ_ONLY)
@@ -4307,6 +4207,7 @@ async def workspace_route(request: Request) -> JSONResponse:
                 projector=project_portfolio_context, sizing_reader=portfolio_sizing_reader,
                 research_index=research_index, events=events, balance_reader=balance_context.context,
                 balance_exceptions=_balance_risk_exceptions,
+                tick_reader=lambda cutoff: read_hedgai_research(API_BASE_URL, cutoff),
             )
             result["previousAttention"] = [{**row.get("payload", {}), "state": row.get("state")}
                                            for row in retained.get("findings", [])

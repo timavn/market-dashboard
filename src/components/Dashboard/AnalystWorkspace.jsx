@@ -254,7 +254,18 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const sendInFlight = useRef(false);
   const [citation, setCitation] = useState(null);
   const citationGeneration = useRef(0);
+  // An anchored citation (Inbox Source) opens beside its button; a second click closes it.
+  const [citationAnchor, setCitationAnchor] = useState(null);
+  const citationAnchorRef = useRef(null);
   const openCitation = useCallback((source, context) => {
+    const anchor = context?.anchor || null;
+    if (anchor && citationAnchorRef.current === anchor) {
+      citationAnchorRef.current = null;
+      setCitation(null);
+      return;
+    }
+    citationAnchorRef.current = anchor;
+    setCitationAnchor(anchor);
     const generation = ++citationGeneration.current;
     const publications = citationPublications(source, context).map(publication => ({ ...publication,
       ...(publication.evidenceIncluded === false ? { evidenceLoading: true } : {}) }));
@@ -266,8 +277,36 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
         && publication.captureMessageId === resolved.captureMessageId ? resolved : publication) || null),
     });
   }, []);
-  useEffect(() => { if (!citation) citationGeneration.current += 1; }, [citation]);
+  useEffect(() => { if (!citation) { citationGeneration.current += 1; citationAnchorRef.current = null; } }, [citation]);
   const citationSurface = useRef();
+  useLayoutEffect(() => {
+    const surface = citationSurface.current;
+    if (!citation || !citationAnchor || !surface) return undefined;
+    const place = () => {
+      // A dismissed alert takes its button with it, so its popover closes too.
+      if (!citationAnchor.isConnected) { setCitation(null); return; }
+      const container = surface.offsetParent || surface.parentElement;
+      const bounds = container.getBoundingClientRect();
+      const button = citationAnchor.getBoundingClientRect();
+      const gap = 6;
+      const margin = 8;
+      const below = button.bottom - bounds.top + gap;
+      const above = button.top - bounds.top - gap - surface.offsetHeight;
+      const top = below + surface.offsetHeight <= bounds.height - margin || above < margin ? below : above;
+      const left = Math.max(margin, Math.min(button.left - bounds.left, bounds.width - surface.offsetWidth - margin));
+      surface.style.top = `${Math.max(margin, top)}px`;
+      surface.style.left = `${left}px`;
+    };
+    place();
+    window.addEventListener('resize', place);
+    document.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      document.removeEventListener('scroll', place, true);
+      surface.style.top = '';
+      surface.style.left = '';
+    };
+  }, [citation, citationAnchor]);
   const { inbox, inboxError, loadInbox, acknowledge } = useAnalystInbox();
   const [refreshingIds, setRefreshingIds] = useState([]);
   // An unacknowledged review start survives a reload as the same Starting slot.
@@ -732,7 +771,10 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     if (!active || !citation) return undefined;
     // The dashboard backdrop owns closing the Analyst window. Only dismiss
     // this popup here, and let the original click continue to its destination.
-    const dismiss = event => { if (!citationSurface.current?.contains(event.target)) setCitation(null); };
+    const dismiss = event => {
+      if (citationSurface.current?.contains(event.target) || citationAnchorRef.current?.contains(event.target)) return;
+      setCitation(null);
+    };
     document.addEventListener('click', dismiss, true);
     return () => document.removeEventListener('click', dismiss, true);
   }, [active, citation]);
@@ -1413,11 +1455,14 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
               <div role="tablist" aria-label="Analyst home">
                 {landingTabs.map(([key, label]) => <button key={key} type="button" role="tab" id={`analyst-landing-tab-${key}`} aria-selected={landingTab === key} aria-controls="analyst-landing-tabpanel"
                   className={key === 'inbox' ? `analyst-landing-tab${inbox.actionRequired > 0 ? ' has-action-required' : inbox.unread > 0 ? ' has-notification' : ''}` : 'analyst-landing-tab'} onClick={() => setLandingTab(key)}>
-                  {label}{key === 'inbox' && inbox.actionRequired > 0 && <span className="analyst-landing-tab-alert" title="Action required">{inbox.actionRequired}</span>}
-                  {key === 'inbox' && inbox.unread > 0 && <span className="analyst-landing-tab-count" title="Unread">· {inbox.unread}</span>}
+                  {label}{key === 'inbox' && (inbox.actionRequired > 0 || inbox.unread > 0) && <span className="analyst-landing-tab-counts">
+                    {inbox.actionRequired > 0 && <span className="analyst-landing-tab-alert" title="Action required">{inbox.actionRequired}</span>}
+                    {inbox.actionRequired > 0 && inbox.unread > 0 && <span className="analyst-landing-tab-separator">/</span>}
+                    {inbox.unread > 0 && <span className="analyst-landing-tab-count" title="Unread">{inbox.unread}</span>}
+                  </span>}
                 </button>)}
               </div>
-              {landingTab === 'chats' && <label className="analyst-conversation-search"><Search size={13} /><input type="search" aria-label="Search conversations" placeholder="Search all history…" value={query} onChange={e => setQuery(e.target.value)} /></label>}
+              {landingTab === 'chats' && <label className="analyst-conversation-search"><Search size={13} /><input type="search" aria-label="Search conversations" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /></label>}
             </div>
             <div id="analyst-landing-tabpanel" role="tabpanel" aria-labelledby={`analyst-landing-tab-${landingTab}`} className={`analyst-landing-tabpanel is-${landingTab}`}>
               {landingTab === 'chats' ? <div className="analyst-conversation-list">{groups.map(group => <section key={group.key} className="analyst-conversation-date-group"><h3 className="analyst-conversation-date-heading">{group.label}</h3>{group.items.map(row => {
@@ -1435,13 +1480,18 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
           </section>
         </div>}
       </main>
-      {citation && <aside ref={citationSurface} className="analyst-source-detail" role="dialog" aria-label="Citation source"><header><span>Source evidence</span></header>{citation.map((source, index) => <article className="analyst-source-publication-entry" key={source.id || index} aria-busy={source.evidenceLoading || undefined}>
-        <strong>{source.title || source.product}</strong>
+      {citation && <aside ref={citationSurface} className={`analyst-source-detail${citationAnchor ? ' is-anchored' : ''}`} role="dialog" aria-label="Citation source">{!citationAnchor && <header><span>Source evidence</span></header>}{citation.map((source, index) => {
+        const title = source.title || source.product;
+        const href = source.sourceUri && source.product !== 'dashboard-health' ? safeResearchUrl(source.sourceUri) : null;
+        return <article className="analyst-source-publication-entry" key={source.id || index} aria-busy={source.evidenceLoading || undefined}>
+        {/* The anchored popover is just the publication, its date and the excerpt; its title opens the report. */}
+        <strong>{citationAnchor && href ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">{title} ↗</a> : title}</strong>
         {(source.publicationDate || source.publishedAt) && <p>{formatResearchSourceDate(source.publicationDate || source.publishedAt)}</p>}
-        {source.sourceUri && source.product !== 'dashboard-health' && <p>{safeResearchUrl(source.sourceUri) ? <a className="analyst-source-publication" href={safeResearchUrl(source.sourceUri)} target="_blank" rel="noopener noreferrer">Open original report ↗</a> : source.sourceUri}</p>}
+        {!citationAnchor && source.sourceUri && source.product !== 'dashboard-health' && <p>{href ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a> : source.sourceUri}</p>}
         <AnalystSourceExcerpt excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
         {source.evidenceError && <p>Source evidence unavailable.</p>}
-      </article>)}</aside>}
+      </article>;
+      })}</aside>}
     </div>
   </section>;
 }

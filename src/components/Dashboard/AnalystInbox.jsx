@@ -51,7 +51,15 @@ function attentionContent(finding, now) {
       if (row.label === 'Current position') return { ...row, text: !freshHoldings ? 'Unavailable' : holding.currentPosition.label === 'Closed' ? 'Not held' : holding.currentPosition.label };
       if (row.label === 'Position size') return { ...row, text: freshHoldings && holding.currentHolding?.label || 'Unavailable' };
       return row;
-    });
+    })
+    // One line reads "Long @ 1.97%"; a size that is unavailable is left off.
+    .reduce((merged, row) => {
+      const index = merged.findIndex(item => item.label === 'Current position');
+      if (row.label !== 'Position size' || index < 0) return [...merged, row];
+      const position = merged[index];
+      if (row.text === 'Unavailable' || !['Long', 'Short'].includes(position.text)) return merged;
+      return merged.map((item, i) => i === index ? { ...position, text: `${position.text} @ ${row.text}` } : item);
+    }, []);
   if (!rows.length) return null;
   return { ...presentation, rows, publicationDate: presentation.date || payload.publicationTime,
     sortTime: Date.parse(payload.publicationTime) || Date.parse(presentation.date) || 0 };
@@ -76,15 +84,18 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
   return <section className="analyst-inbox" aria-label="Portfolio inbox">
     {error && <p className="analyst-inbox-error" role="alert">{error}</p>}
     {!alerts.length && <p className="analyst-inbox-empty">No new items requiring attention.</p>}
-    {urgent.length > 0 && <h2 className="analyst-inbox-urgent-heading">Action required</h2>}
+    {urgent.length > 0 && <h2 className="analyst-inbox-urgent-heading">Alerts</h2>}
     {[...urgent, ...ordinary].map(({ finding, content, modern }, index) => {
       const payload = finding.payload || finding;
       const date = publicationLabel(content.publicationDate);
       const updateParts = content.updateParts || [{ text: content.headline, tone: content.tone }];
       const contextLines = [content.detail, ...(content.sourceContext || [])].filter(Boolean);
       const required = isActionRequired(finding);
+      // Every linked publication opens from one Source popover beside the button.
+      const citations = content.sourceLinks?.length ? content.sourceLinks.filter(link => link?.citation && link.label).map(link => link.citation)
+        : payload.citation ? [payload.citation] : [];
       return <React.Fragment key={finding.id}>
-      {!required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Other items</h2>}
+      {!required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Notifications</h2>}
       <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}`}>
         <header className="analyst-inbox-heading">
           <h3 className="analyst-inbox-symbol">{modern ? content.subject : finding.symbol || payload.symbol}</h3>
@@ -92,13 +103,11 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
         </header>
         <dl className="analyst-inbox-copy">
           {modern ? content.rows.map((row, index) => <div key={`${row.label}-${index}`}>
-            <dt>{row.label}: </dt><dd className={row.text === 'Unavailable' ? 'analyst-inbox-signal--neutral' : undefined}><DirectionalText>{row.text}</DirectionalText></dd>
+            <dt>{row.label}: </dt><dd className={['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}><DirectionalText>{row.text}</DirectionalText></dd>
           </div>) : <>
           <div className="analyst-inbox-position">
-            <dt>Current position: </dt><dd><DirectionalText>{content.currentPosition.label}</DirectionalText></dd>
-          </div>
-          <div className="analyst-inbox-holding">
-            <dt>Position size: </dt><dd className={content.currentHolding ? undefined : 'analyst-inbox-signal--neutral'}>{content.currentHolding?.label || 'Unavailable'}</dd>
+            <dt>Current position: </dt><dd><DirectionalText>{content.currentPosition.label}</DirectionalText>
+              {content.currentHolding?.label && ['Long', 'Short'].includes(content.currentPosition.label) && ` @ ${content.currentHolding.label}`}</dd>
           </div>
           <div className="analyst-inbox-action">
             <dt>Action: </dt><dd className={content.positionAction === 'Unavailable' ? 'analyst-inbox-signal--neutral' : undefined}><DirectionalText>{content.updateLabel === 'Action' && content.positionAction !== 'Unavailable'
@@ -131,8 +140,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
           <div className="analyst-inbox-evidence">
             {content.sourceLabel && <span className="analyst-inbox-source">{content.sourceLabel}</span>}
             <div className="analyst-inbox-actions">
-              {content.sourceLinks?.length ? content.sourceLinks.filter(link => link?.citation && link.label).map((link, index) => <button key={`${link.label}-${index}`} type="button" onClick={() => onCitation(link.citation)}>{link.label}</button>)
-                : payload.citation && <button type="button" onClick={() => onCitation(payload.citation)}>View source</button>}
+              {citations.length > 0 && <button type="button" onClick={event => onCitation(citations[0], { relatedSources: citations.slice(1), anchor: event.currentTarget })}>Source</button>}
             </div>
           </div>
           {Boolean(finding.unread) && <button className="analyst-inbox-acknowledge" type="button" onClick={() => modern

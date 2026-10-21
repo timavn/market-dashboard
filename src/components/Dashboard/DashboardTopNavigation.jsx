@@ -7,12 +7,9 @@ import { isActionRequired } from '../../utils/analystInboxAlerts.cjs';
 import MarketEventsQuickReference from './MarketEventsQuickReference';
 import './DashboardTopNavigation.css';
 
-const isMarketItem = (item) => String(item.id).startsWith('predictionMonitor-');
-const PORTFOLIO_ITEM_IDS = new Set(['portfolio', 'exposureLab', 'balance', 'contractPnl']);
+const PORTFOLIO_ITEM_IDS = new Set(['portfolio', 'exposureLab', 'balance']);
 const OCCLUDING_ITEM_IDS = ['process', 'dashboardGuide', 'exposureGuide'];
-const MENU_LABELS = { research: 'Research', portfolio: 'Portfolio', prediction: 'Prediction Markets', perpetual: 'Perpetual Futures' };
-const orderBySection = (items) => [...new Set(items.map((item) => item.sectionLabel || ''))]
-  .flatMap((section) => items.filter((item) => (item.sectionLabel || '') === section));
+const MENU_LABELS = { research: 'Research', portfolio: 'Portfolio' };
 const inboxNotificationIds = (result) => result.findings
   .filter((finding) => (finding?.unread === true || finding?.unread === 1) && typeof finding.id === 'string')
   .map((finding) => finding.id);
@@ -42,17 +39,13 @@ const DashboardTopNavigation = ({
   const menuId = useId();
   const navigationItems = Array.isArray(items) ? items.filter(Boolean) : [];
   const activeIds = new Set(Array.isArray(activeItemIds) ? activeItemIds : activeItemId ? [activeItemId] : []);
-  const marketItems = navigationItems.filter(isMarketItem);
-  const predictionItems = marketItems.filter((item) => item.menuGroup !== 'perpetual');
-  const perpetualItems = marketItems.filter((item) => item.menuGroup === 'perpetual');
-  const primaryItems = navigationItems.filter((item) => !isMarketItem(item) && item.group !== 'utility');
-  const utilityItems = navigationItems.filter((item) => !isMarketItem(item) && item.group === 'utility')
+  const primaryItems = navigationItems.filter((item) => item.group !== 'utility');
+  const utilityItems = navigationItems.filter((item) => item.group === 'utility')
     .sort((left, right) => Number(right.id === 'analyst') - Number(left.id === 'analyst'));
   const researchItems = primaryItems.filter((item) => !PORTFOLIO_ITEM_IDS.has(item.id));
   const portfolioItems = primaryItems.filter((item) => PORTFOLIO_ITEM_IDS.has(item.id));
-  const menuItemsByGroup = { research: researchItems, portfolio: portfolioItems, prediction: orderBySection(predictionItems), perpetual: orderBySection(perpetualItems) };
+  const menuItemsByGroup = { research: researchItems, portfolio: portfolioItems };
   const openMenuItems = menuItemsByGroup[menuOpen] || [];
-  const openMenuSections = [...new Set(openMenuItems.map((item) => item.sectionLabel || ''))];
   // The open Analyst already polls the inbox and announces each change, but
   // only while visible: a Process or guide window pauses its event stream.
   const analystOpen = activeIds.has('analyst') && !OCCLUDING_ITEM_IDS.some((id) => activeIds.has(id));
@@ -200,10 +193,6 @@ const DashboardTopNavigation = ({
 
   const renderItem = (item, inMenu = false) => {
     const isActive = activeIds.has(item.id);
-    const indicatorTone = ['bullish', 'bearish'].includes(item.indicatorTone) ? item.indicatorTone : null;
-    const indicatorDescription = indicatorTone && typeof item.indicatorDescription === 'string'
-      ? item.indicatorDescription.trim() : '';
-    const descriptionId = indicatorDescription ? `${menuId}-${item.id}-research` : undefined;
     const actionRequired = item.id === 'analyst' ? analystActionRequired : 0;
     const hasNotification = item.id === 'analyst' && (actionRequired > 0 || analystNotification.hasNotification);
     const notificationDescriptionId = hasNotification ? `${menuId}-analyst-notification` : undefined;
@@ -222,15 +211,14 @@ const DashboardTopNavigation = ({
         role={inMenu ? checkboxItem ? 'menuitemcheckbox' : 'menuitem' : undefined}
         tabIndex={inMenu ? -1 : undefined}
         aria-label={item.label}
-        aria-describedby={[descriptionId, notificationDescriptionId].filter(Boolean).join(' ') || undefined}
+        aria-describedby={notificationDescriptionId}
         aria-current={activeItemId === item.id ? 'page' : undefined}
         aria-pressed={inMenu ? undefined : isActive}
         aria-checked={checkboxItem ? isActive : undefined}
-        title={indicatorDescription ? `${item.title || item.label}. ${indicatorDescription}` : item.title || item.label}
+        title={item.title || item.label}
         data-navigation-item-id={item.id}
         data-process-toggle={item.isProcessToggle ? 'true' : undefined}
         data-readiness-status={item.id === 'system' ? systemReadinessStatus : undefined}
-        data-indicator-tone={indicatorTone || undefined}
         className={`dashboard-top-navigation__item${inMenu ? ' dashboard-top-navigation__menu-item' : ''}${isActive ? ' is-active' : ''}${actionRequired > 0 ? ' has-action-required' : hasNotification ? ' has-notification' : ''}`}
         onPointerEnter={() => onItemIntent?.(item.id)}
         onFocus={() => {
@@ -244,12 +232,10 @@ const DashboardTopNavigation = ({
         }}
       >
         <span>{item.label}</span>
-        {actionRequired > 0 && <span aria-hidden="true" className="dashboard-top-navigation__action-count">{actionRequired}</span>}
         {hasNotification && <span id={notificationDescriptionId} className="sr-only">{actionRequired > 0
           ? `${actionRequired} ${actionRequired === 1 ? 'position needs' : 'positions need'} immediate action` : 'New analyst messages'}</span>}
         {inMenu && <span aria-hidden="true" className="dashboard-top-navigation__selection">{isActive ? '✓' : ''}</span>}
         {item.id === 'system' && <span className="sr-only">System status: {systemReadinessStatus}</span>}
-        {indicatorDescription && <span id={descriptionId} className="sr-only">{indicatorDescription}</span>}
       </button>
     );
   };
@@ -294,19 +280,14 @@ const DashboardTopNavigation = ({
     <>
       <nav className="dashboard-top-navigation dashboard-bottom-navigation" aria-label="Workspace navigation" data-testid="dashboard-top-navigation">
         <div className="dashboard-top-navigation__links" data-navigation-group="primary">
-          {['portfolio', 'prediction', 'perpetual'].map(renderMenuTrigger)}
+          {renderMenuTrigger('portfolio')}
           <MarketEventsQuickReference compact />
           {renderMenuTrigger('research')}
         </div>
         {utilityItems.length > 0 && <div className="dashboard-top-navigation__utilities" data-navigation-group="utility">{utilityItems.map((item) => renderItem(item))}</div>}
         {menuOpen && createPortal(
           <div ref={menuRef} id={menuId} role="menu" aria-label={MENU_LABELS[menuOpen]} className="dashboard-top-navigation__menu" style={menuPosition} onKeyDown={handleMenuKey}>
-            {['prediction', 'perpetual'].includes(menuOpen) ? openMenuSections.map((section) => (
-              <div key={section} role="group" aria-label={[section, MENU_LABELS[menuOpen].toLowerCase()].filter(Boolean).join(' ')} data-navigation-section={section || undefined}>
-                {section && <div className="dashboard-top-navigation__section" aria-hidden="true">{section}</div>}
-                {openMenuItems.filter((item) => (item.sectionLabel || '') === section).map((item) => renderItem(item, true))}
-              </div>
-            )) : openMenuItems.map((item) => renderItem(item, true))}
+            {openMenuItems.map((item) => renderItem(item, true))}
           </div>, document.body,
         )}
       </nav>

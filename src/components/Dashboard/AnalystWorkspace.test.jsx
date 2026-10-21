@@ -610,7 +610,7 @@ test('operational inbox source evidence shows the concern without raw API plumbi
   api.request.mockImplementation((path, body, method) => path === '/inbox' ? Promise.resolve({ attentionVersion: 1, findings: [alert], unread: 1 }) : request(path, body, method));
   render(<AnalystPanel />);
   fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Systems', exact: true }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Source', exact: true }));
   const evidence = screen.getByRole('dialog', { name: 'Citation source' });
   expect(evidence).toHaveTextContent('Portfolio holdings and balances cannot refresh.');
   expect(evidence).toHaveTextContent('Systems');
@@ -642,12 +642,19 @@ test('inbox shows the named source signal and preserves acknowledgment and citat
   expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
     type: 'analyst-inbox', detail: { findings: [alert], unread: 1, actionRequired: 0 },
   }));
-  expect(screen.getByRole('tab', { name: /^Inbox/ })).toHaveTextContent('Inbox· 1');
+  expect(screen.getByRole('tab', { name: /^Inbox/ })).toHaveTextContent('Inbox1');
   expect(api.request.mock.calls.some(([path]) => path === '/monitor')).toBe(false);
   expect(screen.queryByText(/pending verification|does not confirm a trade|signal change/i)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'View source' }));
-  expect(screen.getByRole('dialog', { name: 'Citation source' })).toHaveTextContent('IBIT trade BULLISH');
-  expect(screen.getByRole('link', { name: 'Open original report ↗' })).toHaveAttribute('href', alert.payload.citation.sourceUri);
+  const source = screen.getByRole('button', { name: 'Source' });
+  fireEvent.click(source);
+  // Inbox Source is a compact popover: publication, date and excerpt, with the title opening the report.
+  const popover = screen.getByRole('dialog', { name: 'Citation source' });
+  expect(popover).toHaveClass('is-anchored');
+  expect(popover).toHaveTextContent('IBIT trade BULLISH');
+  expect(popover).not.toHaveTextContent('Source evidence');
+  expect(within(popover).getByRole('link', { name: 'Bitcoin Tracker ↗' })).toHaveAttribute('href', alert.payload.citation.sourceUri);
+  fireEvent.click(source);
+  expect(screen.queryByRole('dialog', { name: 'Citation source' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('textbox', { name: 'Message The Analyst' }));
   fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/inbox/alert/read', { acknowledge: true }));

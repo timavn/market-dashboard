@@ -31,6 +31,19 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result['account']['historyVerified'])
         self.assertTrue(result['complete'])
 
+    async def test_tick_is_display_context_that_never_blocks_the_scan(self):
+        tick = {'value': 'BULLISH', 'status': 'published', 'position': 'Buy', 'publishedAt': ASOF}
+        overlay = {'book': {'rows': []}}
+        with patch('attention_context.portfolio_tick_readings', return_value=({'IGV': tick}, [])) as readings:
+            result = await self.capture(tick_reader=AsyncMock(return_value=overlay))
+        readings.assert_called_once_with(overlay, as_of=ASOF)
+        self.assertEqual(result['holdings']['ruleHoldings'][0]['tick'], tick)
+        self.assertTrue(result['complete'])
+        failed = await self.capture(tick_reader=AsyncMock(side_effect=RuntimeError('down')))
+        self.assertNotIn('tick', failed['holdings']['ruleHoldings'][0])
+        self.assertIn({'component': 'tick', 'status': 'unavailable', 'reason': 'RuntimeError'}, failed['diagnostics'])
+        self.assertTrue(failed['complete'])
+
     async def capture(self, **overrides):
         async def symbols_reader(symbols, day):
             return {'bySymbol': {symbol: {'directReferences': [], 'decision': {}} for symbol in symbols}}

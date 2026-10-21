@@ -23,7 +23,7 @@ test('fresh full-book process conflicts are evaluated without a new research eve
   const finding = result.findings[0];
   assert.equal(finding.action, 'exit'); assert.equal(finding.kind, 'portfolio');
   assert.equal(finding.holdingsVerified, true); assert.equal(finding.quantity, 10);
-  assert.match(finding.presentation.rows.find(row => row.label === 'Context').text, /Trade priority/);
+  assert.match(finding.presentation.rows.find(row => row.label === 'Context').text, /Trade turned Bearish vs Long → exit/);
   assert.equal(result.complete, true);
 });
 test('fresh holdings cannot upgrade an undated or unlinked Trade into a conflict', () => {
@@ -98,13 +98,13 @@ test('old source instructions and generic unlinked SELL headlines do not refill 
   ctx.events = [{ ...sourceEvent('CORN'), sourceReport: undefined }];
   assert.equal(evaluateResearchAttention(ctx, NOW).findings.length, 0);
 });
-test('source-backed broad market changes need a meaningful implication', () => {
+test('broad market commentary never becomes an Inbox finding', () => {
   const ctx = context(); ctx.documents.products = [{ product: 'the-call', publicationDate: '2026-09-22', excerpts: [
     { excerpt: 'Gamma flipped positive, improving support and reducing squeeze risk in the published market-structure assessment.', citation: cite('market') },
     { excerpt: 'The yield curve narrowed by two basis points.', citation: cite('curve') },
   ] }];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
-  assert.equal(findings.length, 1); assert.equal(findings[0].symbol, 'Market structure'); assert.equal(findings[0].holdingsVerified, undefined);
+  assert.equal(findings.length, 0);
 });
 test('refresh timestamps, source repetitions and small weight changes do not change material identity', () => {
   const ctx = context(); addHolding(ctx); const initial = evaluateResearchAttention(ctx, NOW).findings[0];
@@ -182,16 +182,15 @@ test('one evaluation segments repeated exact report text once while preserving e
     ctx.research.bySymbol[symbol] = { directReferences: [ref, { ...ref, kind: 'position_mention' }] };
   }
   const result = evaluateResearchAttention(ctx, NOW);
-  assert.deepEqual(segmented, lines, 'opportunity peers and the market pass share the same exact-text parse');
+  assert.deepEqual(segmented, lines, 'opportunity peers share the same exact-text parse');
   assert.deepEqual(result.findings.map(item => [item.symbol, item.action]), [
-    ['AAA', 'long research idea'], ['BBB', 'short research idea'], ['Market structure', 'market watch'],
+    ['AAA', 'long research idea'], ['BBB', 'short research idea'],
   ]);
   for (const [symbol, index, sourceUrl] of [['AAA', 0, url], ['BBB', 1, otherUrl]]) {
     const finding = result.findings.find(item => item.symbol === symbol);
     assert.equal(finding.presentation.rows.find(row => row.label === 'Context').text, lines[index]);
     assert.deepEqual(finding.presentation.sourceLinks[0].citation, documentCitation(symbol.toLowerCase(), sourceUrl));
   }
-  assert.equal(result.findings.find(item => item.symbol === 'Market structure').presentation.sourceLinks[0].citation.sourceUri, url);
 
   segmented.length = 0;
   assert.deepEqual(evaluateResearchAttention(ctx, NOW), result, 'a later scan retains identical findings and evidence');
@@ -244,14 +243,14 @@ test('a typed removal of a held side is action-required without report prose', (
     assert.equal(finding.severity, 'action-required'); assert.equal(finding.priority, 0); assert.equal(finding.kind, 'portfolio');
     assert.equal(finding.presentation.rows.find(row => row.label === 'Published range').text, '336–375');
   }
-  assert.match(findings.find(item => item.symbol === 'WING').presentation.rows.find(row => row.label === 'Action').text, /removed WING from its Short list — exit the Short position/);
+  assert.match(findings.find(item => item.symbol === 'WING').presentation.rows.find(row => row.label === 'Action').text, /removed WING \(Short\) → exit Short/);
 });
 test('a removal without a stated side still flags the held position', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: -10 }];
   ctx.events = [changeEvent('SNOW', 'REMOVE', undefined)];
   const [finding] = evaluateResearchAttention(ctx, NOW).findings;
   assert.equal(finding.severity, 'action-required');
-  assert.match(finding.presentation.rows.find(row => row.label === 'Action').text, /side not stated/);
+  assert.match(finding.presentation.rows.find(row => row.label === 'Action').text, /side unstated/);
 });
 test('ETF Pro and Real-Time Alert openings on the opposite side oppose the holding; aligned adds are silent', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLE', quantity: 10 }, { symbol: 'XLU', quantity: 10 }, { symbol: 'TSLA', quantity: -4 }];
@@ -259,7 +258,15 @@ test('ETF Pro and Real-Time Alert openings on the opposite side oppose the holdi
     changeEvent('TSLA', 'BUY', undefined, { productKey: 'real-time-alert', productLabel: 'Real-Time Alert' })];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.deepEqual(findings.map(item => item.symbol).sort(), ['TSLA', 'XLE']);
-  assert.match(findings.find(item => item.symbol === 'XLE').presentation.rows.find(row => row.label === 'Action').text, /ETF Pro is now Short — opposes the Long position/);
+  assert.match(findings.find(item => item.symbol === 'XLE').presentation.rows.find(row => row.label === 'Action').text, /ETF Pro went Short vs your Long → review/);
+});
+test('a Go-Anywhere removal of a held Long is an exit alert; its aligned add is silent', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLK', quantity: 20 }, { symbol: 'HGER', quantity: 30 }];
+  const goAnywhere = { productKey: 'go-anywhere', productLabel: 'Go-Anywhere Portfolio', entityType: 'ticker', eventType: 'position_change' };
+  ctx.events = [changeEvent('XLK', 'REMOVE', 'LONG', goAnywhere), changeEvent('HGER', 'ADD', 'LONG', goAnywhere)];
+  const findings = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual(findings.map(item => [item.symbol, item.severity]), [['XLK', 'action-required']]);
+  assert.equal(findings[0].presentation.rows.find(row => row.label === 'Action').text, 'Go-Anywhere Portfolio removed XLK (Long) → exit Long');
 });
 test('Signal Strength removals apply to held longs only', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'NVDA', quantity: 10 }, { symbol: 'AMD', quantity: -10 }];
@@ -291,4 +298,29 @@ test('unverified holdings turn today’s exits and removals into one urgent hold
   assert.match(urgent[0].presentation.rows[0].text, /SNOW, WING/);
   ctx.holdings.liveVerified = true;
   assert.equal(evaluateResearchAttention(ctx, NOW).findings.some(item => item.kind === 'operational'), false);
+});
+test('a Trend-break sizing alert states the security\'s own MIN, MAX, basis and trim', () => {
+  const ctx = context(); addHolding(ctx, 'XLK');
+  const metric = (value, observations) => ({ value, observations, status: 'available', source: 'Yahoo Finance chart API', asOf: '2026-09-21' });
+  ctx.holdings.currentHoldings[0].currentHolding.weightPct = 1.97;
+  Object.assign(ctx.holdings.ruleHoldings[0], { trade: null, trend: 'NEUTRAL', weightPct: 1.97,
+    sizingInputs: { beta: metric(1.767428, 252), atr14: metric(3.742858, 14), referencePrice: metric(185.44, 1) } });
+  const [finding] = evaluateResearchAttention(ctx, NOW).findings;
+  const rows = Object.fromEntries(finding.presentation.rows.map(item => [item.label, item.text]));
+  assert.equal(finding.state === 'open' && finding.rule.rule, 'TREND_BREAK');
+  assert.match(rows['Process limits'], /^MIN 1\.50% · MAX 3\.00% · beta 1\.77 · ATR cap \d+\.\d{2}%$/);
+  assert.equal(rows.Action, 'Reduce to MIN 1.50%');
+  assert.equal(rows.Trim, '0.47 pts (1.97% → 1.50%)');
+  assert.ok(finding.presentation.rows.find(item => item.label === 'Trim').requiresFreshHoldings);
+  assert.deepEqual(finding.presentation.rows.slice(-4), [['Tick', 'N/A'], ['Trade', 'N/A'], ['Trend', 'Neutral'], ['Tail', 'N/A']].map(([label, text]) => ({ label, text })));
+});
+test('a published Tick fills the Tick line; a stale or future one stays N/A', () => {
+  for (const [tick, expected] of [[{ value: 'BEARISH', status: 'published', publishedAt: '2026-09-22T13:00:00Z' }, 'Bearish'],
+    [{ value: 'BULLISH', status: 'historical', publishedAt: '2026-09-22T13:00:00Z' }, 'N/A'],
+    [{ value: 'BULLISH', status: 'published', publishedAt: '2026-09-23T13:00:00Z' }, 'N/A']]) {
+    const ctx = context(); addHolding(ctx); ctx.holdings.ruleHoldings[0].tick = tick;
+    const [finding] = evaluateResearchAttention(ctx, NOW).findings;
+    assert.equal(finding.presentation.rows.find(item => item.label === 'Tick').text, expected);
+    assert.equal(finding.presentation.rows.find(item => item.label === 'Trade').text, 'Bearish');
+  }
 });
