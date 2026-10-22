@@ -13,7 +13,6 @@ import {
   getPreferredIbkrAccount,
 } from '../../../utils/ibkrConnectionStatus';
 import { resetSessionResourceStore } from '../../../utils/sessionResourceStore';
-import { warmDashboardResource } from '../../../utils/dashboardResourceWarmup';
 import { clearContractPerformanceHistory } from '../../../hooks/useContractPerformance';
 import { installSplitPerformanceFixtureMocks } from '../../../hooks/__fixtures__/contractPerformanceFixtures';
 
@@ -260,12 +259,6 @@ const VERIFIED_COMPARISON = {
 };
 
 const PREDICTION_MARKET_IDS = ['sp500', 'wti', 'nasdaq100', 'gold'];
-const PREDICTION_MARKET_TICKERS = {
-  sp500: { riskRange: 'SPX', trade: 'SPX' },
-  wti: { riskRange: 'WTIC', trade: 'USO' },
-  nasdaq100: { riskRange: 'COMPQ', trade: 'COMPQ' },
-  gold: { riskRange: 'GLD', trade: 'GLD' },
-};
 
 function unavailableMorningReport() {
   return {
@@ -276,106 +269,6 @@ function unavailableMorningReport() {
     marketOrder: [...PREDICTION_MARKET_IDS],
     markets: PREDICTION_MARKET_IDS.map((marketId) => ({ marketId })),
     policy: { recommendationAllowed: false },
-  };
-}
-
-function alignedMorningMarket(marketId, signal, price, {
-  fit = 'calibration',
-  setupEligible = true,
-} = {}) {
-  const now = Date.now();
-  const asOf = new Date(now - 1_000).toISOString();
-  const expiresAt = new Date(now + 60_000).toISOString();
-  const date = new Date(now).toISOString().slice(0, 10);
-  const bullish = signal === 'BULLISH';
-  return {
-    marketId,
-    riskRange: {
-      status: 'available', lrr: 100, hrr: 130, trend: signal, date,
-      ticker: PREDICTION_MARKET_TICKERS[marketId].riskRange, fit, setupEligible,
-      source: 'risk_ranges', asOf, expiresAt, reason: null,
-    },
-    trade: {
-      status: 'available', direction: signal, date,
-      ticker: PREDICTION_MARKET_TICKERS[marketId].trade,
-      source: 'momo-tracker', asOf, expiresAt, reason: null,
-    },
-    reference: {
-      status: 'available', availability: 'live', fit: 'exact', value: price,
-      source: 'ibkr_live', asOf, expiresAt, reason: null,
-    },
-    bias: { status: 'aligned', trade: signal, trend: signal, aligned: true },
-    rangeLocation: { status: 'available', zone: bullish ? 'LRR' : 'HRR', value: price },
-    setup: {
-      status: 'matched', pattern: bullish ? 'BULLISH_AT_LRR' : 'BEARISH_AT_HRR',
-      tradeTrendAligned: true, researchQualified: true, rankEligible: false,
-      recommendationAllowed: false,
-    },
-  };
-}
-
-function alignedMorningReport() {
-  const report = unavailableMorningReport();
-  const markets = {
-    sp500: alignedMorningMarket('sp500', 'BULLISH', 101),
-    wti: alignedMorningMarket('wti', 'BEARISH', 129),
-    nasdaq100: alignedMorningMarket('nasdaq100', 'BULLISH', 101, {
-      fit: 'related_only', setupEligible: false,
-    }),
-    gold: { marketId: 'gold' },
-  };
-  return { ...report, markets: PREDICTION_MARKET_IDS.map((marketId) => markets[marketId]) };
-}
-
-function livePortfolioBalance(accountId = 'U25779973') {
-  const observedAt = new Date().toISOString();
-  return {
-    available: true,
-    status: 'live',
-    source: 'ibkr_live_session',
-    accountId,
-    snapshotId: 'dashboard-balance-1',
-    observedAt,
-    socketVerifiedAt: observedAt,
-    accountValuesObservedAt: observedAt,
-    fromCache: false,
-    currency: 'USD',
-    exposure: {
-      netLiquidation: 200000,
-      longMarketValue: 120000,
-      shortMarketValue: 40000,
-      grossMarketValue: 160000,
-      netMarketValue: 80000,
-      longPercent: 60,
-      shortPercent: 20,
-      grossPercent: 80,
-      netPercent: 40,
-    },
-    activity: { openOrderCount: 0, sameDayExecutionCount: 0 },
-    margin: {
-      available: true,
-      status: 'live',
-      source: 'ibkr_live_session',
-      health: 'healthy',
-      availableFunds: 110000,
-      excessLiquidity: 115000,
-      buyingPower: 380000,
-      initialDeficit: 0,
-      maintenanceDeficit: 0,
-    },
-    settlement: { state: 'settled', pending: false },
-    cash: { securitiesCashFloor: 50000, shortCollateral: 40000 },
-    buffer: { totalReserve: 5000 },
-    interestExposure: {
-      available: true,
-      status: 'live',
-      source: 'ibkr_live_session',
-      actionable: false,
-      current: { estimatedDebitPrincipal: 0 },
-      projected: { effectiveDate: '2026-08-31', securitiesCash: 50000, shortCollateral: 40000, estimatedDebitPrincipal: 0 },
-      policy: { totalReserve: 5000, estimatedDebitPrincipalAfterReserve: 0 },
-    },
-    capacity: { available: true, status: 'live' },
   };
 }
 
@@ -457,26 +350,6 @@ function seedDashboardApis() {
   ));
 }
 
-function openPredictionMarketsMenu(navigation = screen.getByTestId('dashboard-top-navigation')) {
-  const trigger = within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true });
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger);
-  return screen.getByRole('menu', { name: 'Prediction Markets' });
-}
-
-function getPredictionMarketItem(navigation, label) {
-  return within(openPredictionMarketsMenu(navigation)).getByRole('menuitemcheckbox', { name: label });
-}
-
-function openPerpetualFuturesMenu(navigation = screen.getByTestId('dashboard-top-navigation')) {
-  const trigger = within(navigation).getByRole('button', { name: 'Perpetual Futures', exact: true });
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger);
-  return screen.getByRole('menu', { name: 'Perpetual Futures' });
-}
-
-function getPerpetualFuturesItem(navigation, label) {
-  return within(openPerpetualFuturesMenu(navigation)).getByRole('menuitemcheckbox', { name: label });
-}
-
 function getDockItem(navigation = screen.getByTestId('dashboard-top-navigation'), label) {
   const research = ['X.com', 'Process', 'Dashboard Guide', 'PCA Guide', 'Bitcoin Research'];
   const portfolio = ['Portfolio', 'PCA', 'Balance', 'Contract P&L'];
@@ -537,122 +410,9 @@ describe('PortfolioDashboard workspace navigation', () => {
     }
   });
 
-  test('opens GDP and CPI from the prediction menu as separate persistent monitors', async () => {
-    render(<PortfolioDashboard />);
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const menu = openPredictionMarketsMenu(navigation);
-    expect(within(menu).getAllByRole('menuitemcheckbox').map((item) => item.getAttribute('aria-label')))
-      .toEqual(['WTI', 'Brent', 'SP500', 'CPI', 'GDP']);
-    fireEvent.click(getPredictionMarketItem(navigation, 'GDP'));
-    expect(await screen.findByText('Active monitor: gdp')).toBeVisible();
-    expect(within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true }))
-      .toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(getPredictionMarketItem(navigation, 'CPI'));
-    expect(await screen.findByText('Active monitor: cpi')).toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-gdp')).not.toBeVisible();
-  });
 
-  test('opens the existing Gold and Silver monitors from Perpetual Futures and retains each page state', async () => {
-    render(<PortfolioDashboard />);
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const perpetualToggle = within(navigation).getByRole('button', { name: 'Perpetual Futures', exact: true });
-    const predictionToggle = within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true });
 
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'Gold'));
-    expect(await screen.findByText('Active monitor: gold')).toBeVisible();
-    expect(mockPredictionMonitor).toHaveBeenCalledWith(expect.objectContaining({
-      marketId: 'gold', selectedAccount: 'U25779973',
-    }));
-    expect(screen.getByTestId('prediction-market-surface-gold')).toBeVisible();
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(predictionToggle).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.change(screen.getByLabelText('gold monitor draft'), { target: { value: 'retain Gold page state' } });
 
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'Silver'));
-    expect(await screen.findByText('Active monitor: silver')).toBeVisible();
-    expect(mockPredictionMonitor).toHaveBeenCalledWith(expect.objectContaining({
-      marketId: 'silver', selectedAccount: 'U25779973',
-    }));
-    expect(screen.getByTestId('prediction-market-surface-gold')).not.toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-silver')).toBeVisible();
-    expect(getPerpetualFuturesItem(navigation, 'Silver')).toHaveAttribute('aria-checked', 'true');
-    expect(getPerpetualFuturesItem(navigation, 'Gold')).toHaveAttribute('aria-checked', 'false');
-    fireEvent.change(screen.getByLabelText('silver monitor draft'), { target: { value: 'retain Silver page state' } });
-
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'Gold'));
-    expect(screen.getByDisplayValue('retain Gold page state')).toBeVisible();
-    expect(screen.getByDisplayValue('retain Silver page state')).not.toBeVisible();
-    expect(screen.getAllByText('Prediction Monitor')).toHaveLength(2);
-    expect(perpetualToggle).toHaveTextContent(/^Perpetual Futures$/);
-    expect(predictionToggle).toHaveTextContent(/^Prediction Markets$/);
-  });
-
-  test('opens BTC and ETH from Perpetual Futures and retains their separate card state', async () => {
-    render(<PortfolioDashboard />);
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const perpetualToggle = within(navigation).getByRole('button', { name: 'Perpetual Futures', exact: true });
-    const predictionToggle = within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true });
-
-    for (const [label, marketId] of [['BTC', 'bitcoin'], ['ETH', 'ethereum']]) {
-      fireEvent.click(getPerpetualFuturesItem(navigation, label));
-      expect(await screen.findByText(`Active monitor: ${marketId}`)).toBeVisible();
-      expect(mockPredictionMonitor).toHaveBeenCalledWith(expect.objectContaining({
-        marketId, selectedAccount: 'U25779973',
-      }));
-      expect(perpetualToggle).toHaveAttribute('aria-pressed', 'true');
-      expect(predictionToggle).toHaveAttribute('aria-pressed', 'false');
-      fireEvent.change(screen.getByLabelText(`${marketId} monitor draft`), {
-        target: { value: `${label} saved card state` },
-      });
-    }
-
-    expect(getPerpetualFuturesItem(navigation, 'ETH')).toHaveAttribute('aria-checked', 'true');
-    expect(getPerpetualFuturesItem(navigation, 'BTC')).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByTestId('prediction-market-surface-bitcoin')).not.toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-ethereum')).toBeVisible();
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'BTC'));
-    expect(screen.getByDisplayValue('BTC saved card state')).toBeVisible();
-    expect(screen.getByDisplayValue('ETH saved card state')).not.toBeVisible();
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'ETH'));
-    expect(screen.getByDisplayValue('ETH saved card state')).toBeVisible();
-    expect(perpetualToggle).toHaveTextContent(/^Perpetual Futures$/);
-
-    fireEvent.click(perpetualToggle);
-    expect(screen.getByRole('menu', { name: 'Perpetual Futures' })).toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-ethereum')).toBeVisible();
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'ETH'));
-    expect(screen.getByTestId('prediction-market-surface-ethereum')).not.toBeVisible();
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  test.each([
-    ['BTC', 'ETH', 'bitcoin', 'ethereum', 'Bitcoin', 'Ethereum'],
-    ['Gold', 'Silver', 'gold', 'silver', 'Gold', 'Silver'],
-  ])('switches between %s and %s from their cards while preserving each page', async (
-    firstLabel, secondLabel, firstMarketId, secondMarketId, firstButtonLabel, secondButtonLabel,
-  ) => {
-    render(<PortfolioDashboard />);
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    fireEvent.click(getPerpetualFuturesItem(navigation, firstLabel));
-    expect(await screen.findByText(`Active monitor: ${firstMarketId}`)).toBeVisible();
-    fireEvent.change(screen.getByLabelText(`${firstMarketId} monitor draft`), {
-      target: { value: `${firstLabel} chart selection` },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: `Switch to ${secondButtonLabel}` }));
-    expect(await screen.findByText(`Active monitor: ${secondMarketId}`)).toBeVisible();
-    expect(screen.getByDisplayValue(`${firstLabel} chart selection`)).not.toBeVisible();
-    fireEvent.change(screen.getByLabelText(`${secondMarketId} monitor draft`), {
-      target: { value: `${secondLabel} chart selection` },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: `Switch to ${firstButtonLabel}` }));
-    expect(screen.getByDisplayValue(`${firstLabel} chart selection`)).toBeVisible();
-    expect(screen.getByDisplayValue(`${secondLabel} chart selection`)).not.toBeVisible();
-    expect(within(navigation).getByRole('button', { name: 'Perpetual Futures', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).toBeVisible();
-  });
 
   test('pauses provider, account, and reference polls while hidden and refreshes once when visible', async () => {
     jest.useFakeTimers();
@@ -723,36 +483,6 @@ describe('PortfolioDashboard workspace navigation', () => {
     expect(MarketDataService.getHedgeyeChangelog).toHaveBeenCalledTimes(2);
   });
 
-  test('warms only the intended monitor after startup, including keyboard intent', async () => {
-    jest.useFakeTimers();
-    render(<PortfolioDashboard />);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      jest.advanceTimersByTime(20_000);
-      await Promise.resolve();
-    });
-    expect(warmDashboardResource).not.toHaveBeenCalled();
-
-    fireEvent.focus(getPerpetualFuturesItem(screen.getByTestId('dashboard-top-navigation'), 'Gold'));
-    await act(async () => {
-      jest.advanceTimersByTime(2000);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(warmDashboardResource).toHaveBeenCalledTimes(1);
-    expect(warmDashboardResource).toHaveBeenCalledWith(
-      'prediction-monitor',
-      expect.objectContaining({ marketId: 'gold', venue: 'kalshi' }),
-      expect.objectContaining({ fetcher: expect.any(Function) }),
-    );
-    fireEvent.pointerEnter(getPerpetualFuturesItem(screen.getByTestId('dashboard-top-navigation'), 'Gold'));
-    await act(async () => {
-      jest.advanceTimersByTime(2000);
-      await Promise.resolve();
-    });
-    expect(warmDashboardResource).toHaveBeenCalledTimes(1);
-  });
 
   test('passes the complete provider snapshot to the macro dashboard', async () => {
     const status = {
@@ -1283,104 +1013,9 @@ describe('PortfolioDashboard workspace navigation', () => {
     );
   });
 
-  test('replaces the retired Prediction Markets hub with five prediction monitors and a separate perpetual menu', async () => {
-    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
-      showPredictionMarketsHub: true,
-      activePredictionMarket: 'spx',
-      activeWtiCadence: 'weekly',
-      sidebarPanelStack: ['predictionMarkets'],
-    }));
 
-    render(<PortfolioDashboard />);
 
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    expect(within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true }))
-      .toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('menu', { name: 'Prediction Markets' })).not.toBeInTheDocument();
-    const menu = openPredictionMarketsMenu(navigation);
-    expect(within(menu).getAllByRole('menuitemcheckbox').map((item) => item.getAttribute('aria-label')))
-      .toEqual(['WTI', 'Brent', 'SP500', 'CPI', 'GDP']);
-    expect(within(menu).queryByRole('menuitemcheckbox', { name: 'Nasdaq' })).not.toBeInTheDocument();
-    expect(within(openPerpetualFuturesMenu(navigation)).getAllByRole('menuitemcheckbox')
-      .map((item) => item.getAttribute('aria-label'))).toEqual(['Silver', 'Gold', 'BTC', 'ETH']);
-    expect(screen.queryByTestId('prediction-markets-panel')).not.toBeInTheDocument();
 
-    await waitFor(() => expect(JSON.parse(
-      window.localStorage.getItem('marketDashboard.panelState.v1'),
-    ).showPredictionMarketsHub).toBeUndefined());
-    const stored = JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1'));
-    expect(stored.activePredictionMarket).toBeUndefined();
-    expect(stored.activeWtiCadence).toBeUndefined();
-    expect(stored.sidebarPanelStack).not.toContain('predictionMarkets');
-  });
-
-  test('opens CPI as its own persistent T2 monitor surface', async () => {
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const cpi = getPredictionMarketItem(navigation, 'CPI');
-    fireEvent.click(cpi);
-
-    expect(await screen.findByText('Active monitor: cpi')).toBeInTheDocument();
-    expect(screen.getByTestId('prediction-market-surface-cpi')).toBeVisible();
-    expect(getPredictionMarketItem(navigation, 'CPI')).toHaveAttribute('aria-checked', 'true');
-    expect(getPredictionMarketItem(navigation, 'SP500')).toHaveAttribute('aria-checked', 'false');
-    expect(mockPredictionMonitor).toHaveBeenCalledWith(expect.objectContaining({ marketId: 'cpi' }));
-  });
-
-  test('decorates only research-aligned RR monitor buttons and keeps the active state', async () => {
-    predictionMarketTestService.getMorningReport.mockResolvedValueOnce(alignedMorningReport());
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const sp500 = getPredictionMarketItem(navigation, 'SP500');
-    const wti = getPredictionMarketItem(navigation, 'WTI');
-    const brent = getPredictionMarketItem(navigation, 'Brent');
-
-    await waitFor(() => expect(sp500).toHaveAttribute('data-indicator-tone', 'bullish'));
-    expect(sp500).toHaveAccessibleDescription(
-      'Aligned bullish Trade and Trend in the lower Risk Range third.',
-    );
-    expect(wti).toHaveAttribute('data-indicator-tone', 'bearish');
-    expect(wti).toHaveAccessibleDescription(
-      'Aligned bearish Trade and Trend in the upper Risk Range third.',
-    );
-    expect(brent).not.toHaveAttribute('data-indicator-tone');
-
-    fireEvent.click(wti);
-    expect(getPredictionMarketItem(navigation, 'WTI')).toHaveAttribute('aria-checked', 'true');
-    expect(getPredictionMarketItem(navigation, 'WTI')).toHaveAttribute('data-indicator-tone', 'bearish');
-    expect(getPerpetualFuturesItem(navigation, 'Silver')).not.toHaveAttribute('data-indicator-tone');
-    expect(getPerpetualFuturesItem(navigation, 'Gold')).not.toHaveAttribute('data-indicator-tone');
-    expect(getPerpetualFuturesItem(navigation, 'BTC')).not.toHaveAttribute('data-indicator-tone');
-    expect(getPerpetualFuturesItem(navigation, 'ETH')).not.toHaveAttribute('data-indicator-tone');
-  });
-
-  test('removes a prior border immediately when the 30-second report refresh fails', async () => {
-    jest.useFakeTimers();
-    predictionMarketTestService.getMorningReport
-      .mockReset()
-      .mockResolvedValueOnce(alignedMorningReport())
-      .mockRejectedValue(new Error('morning report transport failed'));
-
-    render(<PortfolioDashboard />);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    const navigation = screen.getByTestId('dashboard-top-navigation');
-    const sp500 = getPredictionMarketItem(navigation, 'SP500');
-    expect(sp500).toHaveAttribute('data-indicator-tone', 'bullish');
-
-    await act(async () => {
-      jest.advanceTimersByTime(30_000);
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(sp500).not.toHaveAttribute('data-indicator-tone');
-  });
 
   test('opens Balance alone as a centered window with the shared blurred backdrop', async () => {
     render(<PortfolioDashboard />);
@@ -1399,7 +1034,6 @@ describe('PortfolioDashboard workspace navigation', () => {
     ['Portfolio', 'portfolio-breakdown-panel'],
     ['PCA', 'exposure-lab-panel'],
     ['Balance', 'portfolio-balance-planner-slot'],
-    ['Contract P&L', 'contract-pnl-panel-slot'],
     ['The Analyst', 'analyst-panel-surface'],
     ['Systems', 'system-readiness-sheet'],
   ])('dismisses %s on an outside click while keeping inside clicks open', async (label, testId) => {
@@ -1428,83 +1062,10 @@ describe('PortfolioDashboard workspace navigation', () => {
     expect(panel).toBeVisible();
   });
 
-  test('dismisses every perpetual and prediction monitor on an outside click and retains each draft', async () => {
-    render(<PortfolioDashboard />);
-    await act(async () => { await Promise.resolve(); });
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const backdrop = screen.getByTestId('dashboard-panel-backdrop');
-    const markets = [
-      [getPerpetualFuturesItem, 'BTC', 'bitcoin'],
-      [getPerpetualFuturesItem, 'ETH', 'ethereum'],
-      [getPerpetualFuturesItem, 'Gold', 'gold'],
-      [getPerpetualFuturesItem, 'Silver', 'silver'],
-      [getPredictionMarketItem, 'WTI', 'wti'],
-      [getPredictionMarketItem, 'Brent', 'brent'],
-      [getPredictionMarketItem, 'SP500', 'sp500'],
-      [getPredictionMarketItem, 'CPI', 'cpi'],
-      [getPredictionMarketItem, 'GDP', 'gdp'],
-    ];
 
-    for (const [getMenuItem, label, marketId] of markets) {
-      fireEvent.click(getMenuItem(navigation, label));
-      const draft = await screen.findByLabelText(`${marketId} monitor draft`);
-      const panel = screen.getByTestId('prediction-market-resolver-test-panel');
-      fireEvent.change(draft, { target: { value: `${label} retained draft` } });
-      fireEvent.click(draft);
-      expect(panel).toBeVisible();
-
-      fireEvent.click(backdrop);
-      expect(panel).not.toBeVisible();
-      expect(backdrop).not.toBeVisible();
-      expect(getMenuItem(navigation, label)).toHaveAttribute('aria-checked', 'false');
-
-      fireEvent.click(getMenuItem(navigation, label));
-      expect(screen.getByLabelText(`${marketId} monitor draft`)).toBe(draft);
-      expect(draft).toBeVisible();
-      expect(draft).toHaveValue(`${label} retained draft`);
-      fireEvent.click(backdrop);
-    }
-    expect(screen.getAllByText('Prediction Monitor')).toHaveLength(markets.length);
-  });
-
-  test('outside clicks close only the frontmost stacked workspace and reveal retained windows in order', async () => {
-    render(<PortfolioDashboard />);
-    await act(async () => { await Promise.resolve(); });
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const backdrop = screen.getByTestId('dashboard-panel-backdrop');
-    fireEvent.click(getPredictionMarketItem(navigation, 'CPI'));
-    const draft = await screen.findByLabelText('cpi monitor draft');
-    fireEvent.change(draft, { target: { value: 'underlying CPI draft' } });
-    const monitor = screen.getByTestId('prediction-market-resolver-test-panel');
-    monitor.scrollTop = 120;
-    fireEvent.click(getDockItem(navigation, 'Portfolio'));
-    const portfolio = await screen.findByTestId('portfolio-breakdown-panel');
-    fireEvent.click(getDockItem(navigation, 'Systems'));
-    const systems = await screen.findByTestId('system-readiness-sheet');
-
-    fireEvent.click(await within(systems).findByRole('button', { name: 'Report peripheral issue' }));
-    expect(systems).toBeVisible();
-    fireEvent.click(backdrop);
-    expect(systems).not.toBeVisible();
-    expect(portfolio).toBeVisible();
-    expect(monitor).toBeVisible();
-    expect(backdrop).toBeVisible();
-
-    fireEvent.click(backdrop);
-    expect(portfolio).not.toBeVisible();
-    expect(monitor).toBeVisible();
-    expect(draft).toHaveValue('underlying CPI draft');
-    expect(monitor.scrollTop).toBe(120);
-    expect(backdrop).toBeVisible();
-
-    fireEvent.click(backdrop);
-    expect(monitor).not.toBeVisible();
-    expect(backdrop).not.toBeVisible();
-  });
 
   test.each([
     ['Balance', 'portfolio-balance-planner-slot'],
-    ['Contract P&L', 'contract-pnl-panel-slot'],
   ])('outside clicks dismiss %s before the retained workspaces below its layer', async (label, testId) => {
     render(<PortfolioDashboard />);
     await act(async () => { await Promise.resolve(); });
@@ -1534,28 +1095,6 @@ describe('PortfolioDashboard workspace navigation', () => {
     expect(portfolio).toBeVisible();
   });
 
-  test('centers Balance above an open market monitor without repositioning either window', async () => {
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    fireEvent.click(getPredictionMarketItem(navigation, 'SP500'));
-    expect(await screen.findByText('Active monitor: sp500')).toBeInTheDocument();
-
-    fireEvent.click(getDockItem(navigation, 'Balance'));
-
-    const balancePanel = await screen.findByTestId('portfolio-balance-planner-slot');
-    expect(balancePanel).toBeVisible();
-    expectCenteredWorkspaceWindow(balancePanel);
-    const predictionMonitorPanel = screen.getByTestId('prediction-market-resolver-test-panel');
-    expect(predictionMonitorPanel).toBeVisible();
-    expect(Number(balancePanel.style.zIndex))
-      .toBeGreaterThan(Number(predictionMonitorPanel.style.zIndex));
-    expect(screen.getByTestId('dashboard-panel-backdrop')).toBeVisible();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close Balance' }));
-    await waitFor(() => expect(balancePanel).not.toBeVisible());
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).toBeVisible();
-  });
 
   test('opens The Analyst in the centered shared frame with a blurred dashboard backdrop', async () => {
     render(<PortfolioDashboard />);
@@ -1731,22 +1270,6 @@ test.each(['left', 'center', 'right'])('restores a saved Analyst %s position as 
   expect(within(navigation).queryByRole('group', { name: 'Position The Analyst' })).not.toBeInTheDocument();
 });
 
-test('centers The Analyst while an individual market monitor stays open', async () => {
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    fireEvent.click(getPredictionMarketItem(navigation, 'SP500'));
-    expect(await screen.findByText('Active monitor: sp500')).toBeInTheDocument();
-    fireEvent.click(within(navigation).getByRole('button', { name: 'The Analyst' }));
-
-    const analystPanel = await screen.findByTestId('analyst-panel-surface');
-    expect(analystPanel).toBeVisible();
-    expectCenteredWorkspaceWindow(analystPanel);
-    const predictionMonitorPanel = screen.getByTestId('prediction-market-resolver-test-panel');
-    expect(predictionMonitorPanel).toBeVisible();
-    expect(predictionMonitorPanel)
-      .toHaveAttribute('data-surface-active', 'true');
-  });
 
   test('centers The Analyst while Portfolio stays open', async () => {
     render(<PortfolioDashboard />);
@@ -1793,84 +1316,7 @@ test('centers The Analyst while an individual market monitor stays open', async 
     });
   });
 
-  test('puts every existing workspace destination in the bottom dock and groups prediction markets', async () => {
-    render(<PortfolioDashboard />);
 
-    const shell = screen.getByTestId('dashboard-shell');
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const processButton = () => getDockItem(navigation, 'Process');
-
-    expect(shell).toHaveStyle({
-      '--dashboard-rail-collapsed-width': '0px',
-      '--dashboard-rail-visible-width': '0px',
-    });
-    expect(navigation).toHaveClass('dashboard-top-navigation');
-    expect(screen.queryByRole('textbox', { name: 'Search navigation' })).not.toBeInTheDocument();
-    expect(screen.queryByText('⌘ K')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument();
-    expect(processButton()).toHaveClass('dashboard-top-navigation__item');
-    expect(within(navigation).queryByText('PRIMARY')).not.toBeInTheDocument();
-    expect(within(navigation).queryByText('UTILITY')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('dashboard-rail-navigation')).not.toBeInTheDocument();
-    ['X.com', 'Process', 'Dashboard Guide', 'PCA Guide', 'Portfolio', 'PCA',
-      'Balance', 'Contract P&L', 'Prediction Markets', 'Perpetual Futures', 'Systems', 'The Analyst']
-      .forEach((label) => expect(getDockItem(navigation, label))
-        .toBeInTheDocument());
-    ['Silver', 'Gold', 'BTC', 'ETH', 'WTI', 'Brent', 'SP500', 'CPI', 'GDP']
-      .forEach((label) => expect(within(navigation).queryByRole('button', { name: label }))
-        .not.toBeInTheDocument());
-    expect(within(openPredictionMarketsMenu(navigation)).getAllByRole('menuitemcheckbox')).toHaveLength(5);
-    expect(within(openPerpetualFuturesMenu(navigation)).getAllByRole('menuitemcheckbox')).toHaveLength(4);
-    expect(navigation.querySelector('.dashboard-top-navigation__chevron')).toBeNull();
-    expect(navigation.querySelector('.dashboard-navigation-rail__card-status')).toBeNull();
-    expect(screen.queryByTitle('Switch to Dark Mode')).not.toBeInTheDocument();
-  });
-
-  test('omits retired EV Data, Pods, and Securities Universe destinations', async () => {
-    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
-      showPeaPodWindow: true,
-      showEVWindow: true,
-      showSecuritiesUniverse: true,
-      sidebarPanelStack: ['pods', 'ev', 'securities'],
-    }));
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    expect(within(navigation).getByRole('button', { name: /^Systems/ })).toBeInTheDocument();
-    ['The Analyst', 'Process', 'Dashboard Guide', 'PCA Guide', 'Portfolio', 'Balance', 'Prediction Markets', 'Perpetual Futures']
-      .forEach((label) => expect(getDockItem(navigation, label)).toBeInTheDocument());
-    expect(within(navigation).queryByRole('button', { name: 'Market Structure' }))
-      .not.toBeInTheDocument();
-    expect(within(navigation).queryByRole('button', { name: 'PODS' })).not.toBeInTheDocument();
-    expect(within(navigation).queryByRole('button', { name: 'EV Data' })).not.toBeInTheDocument();
-    expect(within(navigation).queryByRole('button', { name: 'Securities Universe' }))
-      .not.toBeInTheDocument();
-    expect(screen.queryByText('POD Calculations')).not.toBeInTheDocument();
-    expect(screen.queryByText('Expected Values')).not.toBeInTheDocument();
-    const processButton = () => getDockItem(navigation, 'Process');
-    expect(within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true }))
-      .toHaveAttribute('aria-haspopup', 'menu');
-    expect(within(navigation).queryByRole('button', { name: 'SPX Close' })).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Performance Tracking')).not.toBeInTheDocument();
-    expect(within(navigation).queryByRole('button', { name: 'Analytics' })).not.toBeInTheDocument();
-    expect(within(navigation).getByTitle('Systems')).toBeInTheDocument();
-    expect(getDockItem(undefined, 'X.com')).toBeInTheDocument();
-    expect(processButton()).toHaveAttribute('data-process-toggle', 'true');
-    await waitFor(() => {
-      const stored = JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1'));
-      expect({
-        showPeaPodWindow: stored.showPeaPodWindow,
-        showEVWindow: stored.showEVWindow,
-        showSecuritiesUniverse: stored.showSecuritiesUniverse,
-        sidebarPanelStack: stored.sidebarPanelStack,
-      }).toEqual({
-        showPeaPodWindow: undefined,
-        showEVWindow: undefined,
-        showSecuritiesUniverse: undefined,
-        sidebarPanelStack: expect.not.arrayContaining(['pods', 'ev', 'securities']),
-      });
-    });
-  });
 
   test('discards the retired Market Structure workspace state and destination', async () => {
     window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
@@ -1895,260 +1341,10 @@ test('centers The Analyst while an individual market monitor stays open', async 
     });
   });
 
-  test('keeps every workspace destination in the bottom navigation and opens Balance separately', async () => {
-    MarketDataService.getPortfolioBalance.mockResolvedValue(livePortfolioBalance());
-    render(<PortfolioDashboard />);
 
-    const shell = screen.getByTestId('dashboard-shell');
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    expect(shell).toHaveStyle({
-      '--dashboard-rail-visible-width': '0px',
-    });
-    expect(navigation).toHaveClass('dashboard-top-navigation');
-    expect(screen.queryByRole('heading', { name: 'Workspace' })).not.toBeInTheDocument();
-    expect(within(navigation).queryByText('SYSTEMS')).not.toBeInTheDocument();
-    expect(within(navigation).queryByText('MARKET INTELLIGENCE')).not.toBeInTheDocument();
-    ['Signal Strength', 'ETF Pro', 'Macro Show', 'Call']
-      .forEach((label) => expect(within(navigation).queryByTitle(label)).not.toBeInTheDocument());
-    expect(within(navigation).getByTitle('Systems')).toBeInTheDocument();
-    expect(getDockItem(navigation, 'Balance')).toHaveClass('dashboard-top-navigation__item');
-    expect(getDockItem(navigation, 'Contract P&L')).toHaveClass('dashboard-top-navigation__item');
-    expect(screen.queryByTitle('Expand')).not.toBeInTheDocument();
-    expect(within(navigation).queryByRole('button', { name: 'Analytics' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Portfolio Sidebar Snapshot')).not.toBeInTheDocument();
 
-    fireEvent.click(getDockItem(navigation, 'Portfolio'));
-    expect(await screen.findByText('Portfolio Breakdown')).toBeInTheDocument();
-    expect(screen.getByTestId('portfolio-breakdown-panel')).toBeVisible();
-    expect(screen.getByTestId('portfolio-breakdown-panel'))
-      .toHaveClass('dashboard-side-panel--portfolio-card');
-    expect(screen.getByTestId('dashboard-panel-backdrop')).toBeVisible();
 
-    fireEvent.click(getDockItem(navigation, 'Balance'));
-    expect(await screen.findByRole('dialog', { name: 'Balance' })).toBeInTheDocument();
-    expect(screen.queryByRole('tablist', { name: 'Balance panel view' })).not.toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Portfolio balance scenario planner' }))
-      .toBeInTheDocument();
-    expectCenteredWorkspaceWindow(screen.getByTestId('portfolio-balance-planner-slot'));
-    expect(screen.getByText('Portfolio Breakdown')).toBeInTheDocument();
-    expect(shell).toHaveStyle({
-      '--dashboard-rail-visible-width': '0px',
-    });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close Balance' }));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Balance' }))
-      .not.toBeInTheDocument());
-
-    const balanceReadsAfterFirstOpen = MarketDataService.getPortfolioBalance.mock.calls.length;
-    fireEvent.click(getDockItem(navigation, 'Balance'));
-    expect(await screen.findByRole('dialog', { name: 'Balance' })).toBeInTheDocument();
-    expect(MarketDataService.getPortfolioBalance.mock.calls.length)
-      .toBe(balanceReadsAfterFirstOpen);
-  });
-
-  test('opens the single-account Contract P&L ledger from its own navigation destination', async () => {
-    MarketDataService.getPredictionMarketPerformance.mockResolvedValue({
-      rows: [{
-        id: 'ledger-1',
-        resolvedDate: '2026-08-13',
-        market: 'wti',
-        contractLabel: 'WTI $81.49 YES',
-        risked: 4,
-        paid: 10,
-        currentValue: 10,
-        pnl: 6,
-        roi: 1.5,
-        status: 'verified',
-      }],
-      review: [],
-      summary: { count: 1, openCount: 0, openPnl: 0, realizedCount: 1, realizedPnl: 6, risked: 4, paid: 10, pnl: 6, roi: 1.5 },
-      tracker: { status: 'ready', health: 'capturing' },
-    });
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const balanceButton = () => getDockItem(navigation, 'Balance');
-    const contractPnlButton = () => getDockItem(navigation, 'Contract P&L');
-    expect(balanceButton()).not.toBe(contractPnlButton());
-    await waitFor(() => expect(MarketDataService.getPredictionMarketPerformanceHistory).toHaveBeenCalledWith({ account: 'U25779973' }));
-    expect(MarketDataService.getPredictionMarketPerformanceCurrent).not.toHaveBeenCalled();
-    fireEvent.click(contractPnlButton());
-    expect(await screen.findByRole('dialog', { name: 'Contract P&L' })).toBeVisible();
-    expect(screen.queryByRole('dialog', { name: 'Balance' })).not.toBeInTheDocument();
-    expect(contractPnlButton()).toHaveClass('is-active');
-    expect(balanceButton()).not.toHaveClass('is-active');
-    expect(screen.queryByRole('tablist', { name: 'Balance panel view' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tablist', { name: 'Contract P&L account' })).not.toBeInTheDocument();
-    await waitFor(() => expect(MarketDataService.getPredictionMarketPerformance).toHaveBeenCalled());
-    expect(await screen.findByText('81.49')).toBeInTheDocument();
-    expect(screen.getByTestId('contract-pnl-surface'))
-      .toHaveClass('dashboard-navigation-rail__balance-surface');
-    expect(screen.queryByText('Prediction performance')).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
-    expect(MarketDataService.getPredictionMarketPerformance).toHaveBeenCalledWith(expect.objectContaining({
-      account: 'U25779973',
-      scope: 'account',
-    }));
-    expect(MarketDataService.getPredictionMarketPerformanceHistory).toHaveBeenCalledTimes(1);
-  });
-
-  test('centers Contract P&L independently of the covered Portfolio and restores its retained state', async () => {
-    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
-      showPortfolioBreakdown: true, sidebarPanelStack: ['portfolio'], contractPnlPanelWidth: 295,
-    }));
-    MarketDataService.getPredictionMarketPerformance.mockResolvedValue({ rows: [], tracker: { status: 'ready' } });
-    render(<PortfolioDashboard />);
-    const covered = await screen.findByTestId('portfolio-breakdown-panel');
-    covered.scrollTop = 150;
-    jest.spyOn(covered, 'getBoundingClientRect').mockReturnValue({
-      left: 100, right: 960, top: 8, bottom: 712, width: 860, height: 704,
-    });
-    const navigation = screen.getByTestId('dashboard-top-navigation');
-    fireEvent.click(getDockItem(navigation, 'Contract P&L'));
-    const panel = await screen.findByTestId('contract-pnl-panel-slot');
-    expectCenteredWorkspaceWindow(panel);
-    expect(panel.style.getPropertyValue('--dashboard-balance-panel-width')).toBe('720px');
-    expect(panel.style.getPropertyValue('--dashboard-balance-panel-base-right')).toBe('');
-    expect(screen.getByTestId('dashboard-panel-backdrop')).toBeVisible();
-    expect(covered).not.toBeVisible();
-    expect(covered).toHaveAttribute('data-surface-occluded', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Close Contract P&L' }));
-    expect(covered).toBeVisible();
-    expect(covered.scrollTop).toBe(150);
-    expect(screen.getByTestId('portfolio-breakdown-panel')).toBe(covered);
-  });
-
-  test('resizes Contract P&L symmetrically from either edge and persists its complete width', async () => {
-    MarketDataService.getPredictionMarketPerformance.mockResolvedValue({
-      rows: [],
-      review: [],
-      summary: { count: 0, openCount: 0, openPnl: 0, realizedCount: 0, realizedPnl: 0 },
-      tracker: { status: 'ready', health: 'capturing' },
-    });
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    fireEvent.click(getDockItem(navigation, 'Contract P&L'));
-
-    const panel = screen.getByTestId('contract-pnl-panel-slot');
-    const resizeHandle = screen.getByRole('separator', {
-      name: 'Resize Contract P&L from the left edge',
-    });
-    const rightResizeHandle = screen.getByRole('separator', {
-      name: 'Resize Contract P&L from the right edge',
-    });
-    expect(panel).toHaveClass('dashboard-navigation-rail__balance-panel--contract-pnl');
-    expect(screen.getByTestId('dashboard-panel-backdrop')).toBeVisible();
-    expect(screen.getByTestId('dashboard-panel-backdrop')).toHaveAttribute('aria-hidden', 'false');
-    expect(resizeHandle).toHaveAttribute(
-      'title',
-      'Drag the left edge to resize · double-click to reset',
-    );
-    expect(rightResizeHandle).toHaveAttribute(
-      'title',
-      'Drag the right edge to resize · double-click to reset',
-    );
-    jest.spyOn(panel, 'getBoundingClientRect').mockImplementation(() => {
-      const width = Number.parseFloat(
-        panel.style.getPropertyValue('--dashboard-balance-panel-width'),
-      ) || 720;
-      const left = (window.innerWidth - width) / 2;
-      const right = left + width;
-      return {
-        bottom: 712,
-        height: 704,
-        left,
-        right,
-        top: 8,
-        width,
-        x: left,
-        y: 8,
-        toJSON: () => ({}),
-      };
-    });
-
-    fireEvent(resizeHandle, new MouseEvent('pointerdown', {
-      bubbles: true,
-      button: 0,
-      clientX: 605,
-    }));
-    expect(document.body).toHaveClass('dashboard-is-resizing-contract-pnl');
-    fireEvent(window, new MouseEvent('pointermove', { clientX: 505 }));
-    expect(panel.style.getPropertyValue('--dashboard-balance-panel-width')).toBe('920px');
-    fireEvent(window, new MouseEvent('pointerup', { clientX: 505 }));
-    expect(document.body).not.toHaveClass('dashboard-is-resizing-contract-pnl');
-
-    await waitFor(() => expect(
-      JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1')).contractPnlPanelWidth,
-    ).toBe(920));
-
-    fireEvent.keyDown(resizeHandle, { key: 'ArrowRight' });
-    expect(panel.style.getPropertyValue('--dashboard-balance-panel-width')).toBe('896px');
-
-    fireEvent(rightResizeHandle, new MouseEvent('pointerdown', {
-      bubbles: true,
-      button: 0,
-      clientX: 900,
-    }));
-    fireEvent(window, new MouseEvent('pointermove', { clientX: 940 }));
-    expect(panel.style.getPropertyValue('--dashboard-balance-panel-width')).toBe('976px');
-    expect(panel.style.getPropertyValue('--dashboard-contract-pnl-right-extension')).toBe('');
-    fireEvent(window, new MouseEvent('pointerup', { clientX: 940 }));
-
-    expectCenteredWorkspaceWindow(panel);
-    await waitFor(() => expect(
-      JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1')),
-    ).toMatchObject({
-      contractPnlPanelWidth: 976,
-      contractPnlPanelRightExtension: 0,
-      contractPnlGeometryVersion: 3,
-    }));
-
-    fireEvent.click(getDockItem(navigation, 'Balance'));
-    expect(panel).not.toBeVisible();
-    expect(screen.queryByRole('separator', {
-      name: 'Resize Contract P&L from the left edge',
-    })).not.toBeInTheDocument();
-    expect(screen.getByTestId('portfolio-balance-planner-slot').style
-      .getPropertyValue('--dashboard-balance-panel-width')).toBe('295px');
-
-    fireEvent.click(getDockItem(navigation, 'Contract P&L'));
-    expect(panel).toBeVisible();
-    expect(panel.style.getPropertyValue('--dashboard-balance-panel-width')).toBe('976px');
-    fireEvent.doubleClick(screen.getByRole('separator', {
-      name: 'Resize Contract P&L from the right edge',
-    }));
-    expect(panel.style.getPropertyValue('--dashboard-balance-panel-width')).toBe('720px');
-    expect(panel.style.getPropertyValue('--dashboard-contract-pnl-right-extension')).toBe('');
-  });
-
-  test('switches the Contract P&L surface to Overview market sections', async () => {
-    MarketDataService.getPredictionMarketPerformance.mockResolvedValue({
-      rows: [{
-        id: 'ledger-1',
-        resolvedDate: '2026-08-13',
-        market: 'wti',
-        contractLabel: 'WTI $81.49 YES',
-        risked: 4,
-        paid: 10,
-        currentValue: 10,
-        pnl: 6,
-        roi: 1.5,
-        status: 'verified',
-      }],
-      review: [],
-      summary: { count: 1, openCount: 0, openPnl: 0, realizedCount: 1, realizedPnl: 6, risked: 4, paid: 10, pnl: 6, roi: 1.5 },
-      tracker: { status: 'ready', health: 'capturing' },
-    });
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    fireEvent.click(getDockItem(navigation, 'Contract P&L'));
-    fireEvent.click(await screen.findByRole('tab', { name: 'Overview' }));
-    expect(await screen.findByRole('article', { name: 'WTI overview' })).toBeInTheDocument();
-    expect(within(screen.getByRole('article', { name: 'WTI overview' })).getAllByText('+$6.00').length).toBeGreaterThan(0);
-    expect(screen.getByRole('article', { name: 'Gold overview' })).toBeInTheDocument();
-  });
 
   test('raises the blurred backdrop over retained windows below Systems and restores it on close', async () => {
     render(<PortfolioDashboard />);
@@ -2409,47 +1605,6 @@ test('centers The Analyst while an individual market monitor stays open', async 
     expect(systemControl).toHaveFocus();
   });
 
-  test.each([
-    { input: 'pointer', selectionKey: null },
-    { input: 'Enter', selectionKey: 'Enter' },
-    { input: 'Space', selectionKey: ' ' },
-  ])('opens GDP using $input while dismissing the Process reader', async ({ selectionKey }) => {
-    const onCloseProcess = jest.fn();
-    const onNavigateProcess = jest.fn();
-    const view = render(
-      <PortfolioDashboard
-        processDocumentId="the-process"
-        onCloseProcess={onCloseProcess}
-        onNavigateProcess={onNavigateProcess}
-      />,
-    );
-    expect(await screen.findByTestId('process-overlay')).toBeVisible();
-    const navigation = screen.getByTestId('dashboard-top-navigation');
-    const trigger = within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true });
-    if (selectionKey) {
-      fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-      const menu = screen.getByRole('menu', { name: 'Prediction Markets' });
-      fireEvent.keyDown(menu, { key: 'End' });
-      const gdp = within(menu).getByRole('menuitemcheckbox', { name: 'GDP' });
-      fireEvent.keyDown(gdp, { key: selectionKey });
-    } else {
-      fireEvent.click(getPredictionMarketItem(navigation, 'GDP'));
-    }
-    expect(onCloseProcess).toHaveBeenCalledTimes(1);
-    expect(onCloseProcess).toHaveBeenCalledWith({ replace: true });
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    view.rerender(
-      <PortfolioDashboard
-        processDocumentId={null}
-        onCloseProcess={onCloseProcess}
-        onNavigateProcess={onNavigateProcess}
-      />,
-    );
-    expect(await screen.findByText('Active monitor: gdp')).toBeVisible();
-    expect(screen.getByTestId('process-overlay').closest('[data-surface-active]'))
-      .toHaveAttribute('data-surface-active', 'false');
-    expect(screen.getByTestId('dashboard-main-canvas')).not.toHaveAttribute('aria-hidden');
-  });
 
   test('opens the Process explainer and The Analyst that replaced the TL;DR reader', async () => {
     const onOpenWhitePaper = jest.fn();
@@ -2499,120 +1654,8 @@ test('centers The Analyst while an individual market monitor stays open', async 
     expect(bitcoinResearchButton()).toHaveClass('is-active');
   });
 
-  test('keeps Portfolio and Prediction Markets open through Process visits until their menu selections close them', async () => {
-    const onCloseProcess = jest.fn();
-    const view = render(<PortfolioDashboard onCloseProcess={onCloseProcess} />);
-    const navigation = screen.getByTestId('dashboard-top-navigation');
-    const portfolioToggle = () => within(navigation).getByRole('button', { name: 'Portfolio', exact: true });
-    const predictionToggle = () => within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true });
 
-    fireEvent.click(getDockItem(navigation, 'Portfolio'));
-    expect(await screen.findByText('Portfolio Breakdown')).toBeVisible();
-    fireEvent.click(getPredictionMarketItem(navigation, 'CPI'));
-    expect(await screen.findByText('Active monitor: cpi')).toBeVisible();
-    fireEvent.change(screen.getByLabelText('cpi monitor draft'), { target: { value: 'CPI working draft' } });
 
-    view.rerender(<PortfolioDashboard processDocumentId="the-process" onCloseProcess={onCloseProcess} />);
-    expect(await screen.findByTestId('process-overlay')).toBeVisible();
-    expect(screen.getByTestId('dashboard-workspace-windows')).toHaveAttribute('aria-hidden', 'true');
-    expect(screen.getByTestId('dashboard-workspace-windows').inert).toBe(true);
-    expect(screen.getByTestId('portfolio-breakdown-panel')).not.toBeVisible();
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).not.toBeVisible();
-    expect(portfolioToggle()).toHaveAttribute('aria-pressed', 'true');
-    expect(predictionToggle()).toHaveAttribute('aria-pressed', 'true');
-    expect(JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1'))).toMatchObject({
-      showPortfolioBreakdown: true,
-      showPredictionMonitor: true,
-      sidebarPanelStack: ['portfolio', 'predictionMonitor'],
-    });
-
-    fireEvent.click(getDockItem(navigation, 'Process'));
-    expect(onCloseProcess).toHaveBeenCalledTimes(1);
-    view.rerender(<PortfolioDashboard onCloseProcess={onCloseProcess} />);
-    expect(screen.getByTestId('portfolio-breakdown-panel')).toBeVisible();
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).toBeVisible();
-    expect(screen.getByDisplayValue('CPI working draft')).toBeVisible();
-
-    fireEvent.click(portfolioToggle());
-    expect(screen.getByRole('menu', { name: 'Portfolio' })).toBeVisible();
-    expect(screen.getByTestId('portfolio-breakdown-panel')).toBeVisible();
-    expect(portfolioToggle()).toHaveAttribute('aria-pressed', 'true');
-    expect(portfolioToggle()).not.toHaveAttribute('data-navigation-item-id');
-    fireEvent.click(getDockItem(navigation, 'Portfolio'));
-    expect(screen.getByTestId('portfolio-breakdown-panel')).not.toBeVisible();
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).toBeVisible();
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'Gold'));
-    expect(await screen.findByText('Active monitor: gold')).toBeVisible();
-    expect(predictionToggle()).toHaveTextContent(/^Prediction Markets$/);
-    expect(predictionToggle()).toHaveAttribute('aria-pressed', 'false');
-    const perpetualToggle = within(navigation).getByRole('button', { name: 'Perpetual Futures', exact: true });
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'Gold'));
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).not.toBeVisible();
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'false');
-    expect(predictionToggle()).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(getPredictionMarketItem(navigation, 'CPI'));
-    expect(screen.getByDisplayValue('CPI working draft')).toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-gold')).not.toBeVisible();
-    expect(predictionToggle()).toHaveTextContent(/^Prediction Markets$/);
-  });
-
-  test('opens the Prediction Markets menu without reopening the saved market or choosing CPI', async () => {
-    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
-      showPredictionMonitor: false,
-      activePredictionMonitorMarket: 'gold',
-    }));
-    render(<PortfolioDashboard />);
-    const toggle = within(screen.getByTestId('dashboard-top-navigation'))
-      .getByRole('button', { name: 'Prediction Markets', exact: true });
-
-    fireEvent.click(toggle);
-    expect(screen.getByRole('menu', { name: 'Prediction Markets' })).toBeVisible();
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    expect(toggle).not.toHaveAttribute('data-navigation-item-id');
-    expect(toggle).toHaveTextContent(/^Prediction Markets$/);
-    expect(screen.queryByText('Active monitor: cpi')).not.toBeInTheDocument();
-    expect(screen.queryByText('Active monitor: gold')).not.toBeInTheDocument();
-    fireEvent.click(getPredictionMarketItem(undefined, 'CPI'));
-    expect(await screen.findByText('Active monitor: cpi')).toBeVisible();
-  });
-
-  test('opens grouped market menus without changing the active metal until a market is selected', async () => {
-    render(<PortfolioDashboard />);
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const perpetualToggle = within(navigation).getByRole('button', { name: 'Perpetual Futures', exact: true });
-    const predictionToggle = within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true });
-
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'Silver'));
-    expect(await screen.findByText('Active monitor: silver')).toBeVisible();
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(perpetualToggle).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(perpetualToggle);
-    expect(screen.getByRole('menu', { name: 'Perpetual Futures' })).toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-silver')).toBeVisible();
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'true');
-
-    fireEvent.click(perpetualToggle);
-    expect(screen.queryByRole('menu', { name: 'Perpetual Futures' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('prediction-market-surface-silver')).toBeVisible();
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(predictionToggle).toHaveAttribute('aria-pressed', 'false');
-    expect(perpetualToggle).toHaveAttribute('aria-expanded', 'false');
-    expect(perpetualToggle).toHaveTextContent(/^Perpetual Futures$/);
-    expect(perpetualToggle).not.toHaveAttribute('data-navigation-item-id');
-
-    fireEvent.click(predictionToggle);
-    expect(screen.getByRole('menu', { name: 'Prediction Markets' })).toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-silver')).toBeVisible();
-    expect(predictionToggle).toHaveAttribute('aria-pressed', 'false');
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(getPredictionMarketItem(navigation, 'CPI'));
-    expect(await screen.findByText('Active monitor: cpi')).toBeVisible();
-    expect(predictionToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(perpetualToggle).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByTestId('prediction-market-surface-silver')).not.toBeVisible();
-  });
 
   test('uses the Research label for its menu and preserves the reader until Bitcoin Research is selected', async () => {
     render(<PortfolioDashboard />);
@@ -2644,25 +1687,6 @@ test('centers The Analyst while an individual market monitor stays open', async 
     expect(screen.getByText('Bitcoin historical entry study')).toBeVisible();
   });
 
-  test('keeps Process open when grouped dock labels only open their menus', async () => {
-    const onCloseProcess = jest.fn();
-    render(<PortfolioDashboard processDocumentId="the-process" onCloseProcess={onCloseProcess} />);
-    const process = await screen.findByTestId('process-overlay');
-    const navigation = screen.getByTestId('dashboard-top-navigation');
-
-    for (const label of ['Research', 'Portfolio', 'Prediction Markets', 'Perpetual Futures']) {
-      const trigger = within(navigation).getByRole('button', { name: label, exact: true });
-      fireEvent.click(trigger);
-      expect(screen.getByRole('menu', { name: label })).toBeVisible();
-      expect(trigger).toHaveAttribute('aria-expanded', 'true');
-      expect(trigger).not.toHaveAttribute('data-navigation-item-id');
-      expect(process).toBeVisible();
-      expect(onCloseProcess).not.toHaveBeenCalled();
-    }
-    expect(screen.queryByText('Portfolio Breakdown')).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Active monitor:/)).not.toBeInTheDocument();
-    expect(screen.queryByTestId('mock-morning-tldr')).not.toBeInTheDocument();
-  });
 
   test.each(['dashboard-guide', 'exposure-lab-guide'])('preserves open windows while reading %s', async (processDocumentId) => {
     window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
@@ -2684,7 +1708,7 @@ test('centers The Analyst while an individual market monitor stays open', async 
     expect(screen.getByText('Active monitor: gold')).toBeVisible();
   });
 
-  test.each(['Balance', 'Contract P&L'])('opens %s from its menu while leaving Process', async (label) => {
+  test.each(['Balance', ])('opens %s from its menu while leaving Process', async (label) => {
     const onCloseProcess = jest.fn();
     const view = render(<PortfolioDashboard processDocumentId="the-process" onCloseProcess={onCloseProcess} />);
     expect(await screen.findByTestId('process-overlay')).toBeVisible();
@@ -2694,79 +1718,7 @@ test('centers The Analyst while an individual market monitor stays open', async 
     expect(await screen.findByRole('dialog', { name: label, exact: true })).toBeVisible();
   });
 
-  test('keeps the dashboard as the default background while closing windows individually and retaining monitor state', async () => {
-    render(<PortfolioDashboard />);
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    const dashboardCanvas = screen.getByTestId('dashboard-main-canvas');
-    expect(within(navigation).queryByRole('button', { name: 'Dashboard', exact: true })).not.toBeInTheDocument();
-    expect(within(dashboardCanvas).getByText('USD Macro Dashboard')).toBeVisible();
-    fireEvent.click(getPredictionMarketItem(navigation, 'CPI'));
-    expect(await screen.findByText('Active monitor: cpi')).toBeVisible();
-    const monitorPanel = screen.getByTestId('prediction-market-resolver-test-panel');
-    const monitorDraft = screen.getByLabelText('cpi monitor draft');
-    monitorPanel.scrollTop = 120;
-    expectCenteredWorkspaceWindow(monitorPanel);
-    fireEvent.change(monitorDraft, {
-      target: { value: 'retain CPI state' },
-    });
-    fireEvent.click(getDockItem(navigation, 'Portfolio'));
-    expect(await screen.findByText('Portfolio Breakdown')).toBeVisible();
-    fireEvent.click(getDockItem(navigation, 'Balance'));
-    expect(await screen.findByRole('dialog', { name: 'Balance' })).toBeVisible();
 
-    expect(dashboardCanvas).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Close Balance' }));
-    expect(screen.getByTestId('portfolio-balance-planner-slot')).not.toBeVisible();
-    expect(screen.getByTestId('portfolio-breakdown-panel')).toBeVisible();
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).toBeVisible();
-    fireEvent.click(getDockItem(navigation, 'Portfolio'));
-    expect(screen.getByTestId('portfolio-breakdown-panel')).not.toBeVisible();
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Close Prediction Monitor' }));
-    await waitFor(() => {
-      expect(screen.getByTestId('prediction-market-resolver-test-panel')).not.toBeVisible();
-      expect(screen.getByTestId('portfolio-breakdown-panel')).not.toBeVisible();
-      expect(screen.getByTestId('portfolio-balance-planner-slot')).not.toBeVisible();
-    });
-    expect(screen.getByTestId('dashboard-main-canvas')).toBe(dashboardCanvas);
-    expect(dashboardCanvas).toBeVisible();
-    fireEvent.click(getPredictionMarketItem(navigation, 'CPI'));
-    expect(await screen.findByDisplayValue('retain CPI state')).toBeVisible();
-    expect(screen.getByLabelText('cpi monitor draft')).toBe(monitorDraft);
-    expect(screen.getByTestId('prediction-market-resolver-test-panel')).toBe(monitorPanel);
-    expect(monitorPanel.scrollTop).toBe(120);
-  });
-
-  test('discards persisted state for every retired Prediction Markets hub alias', async () => {
-    window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({
-      showPredictionMarkets: true,
-      showPredictionMarketsHub: true,
-      showCpiModel: true,
-      showPredictionMarketsSandbox: true,
-      activePredictionMarket: 'spx',
-      activeWtiCadence: 'weekly',
-      showSystemReadiness: true,
-      showEtfPro: true,
-      sidebarPanelStack: ['system', 'predMkts', 'cpi', 'predictionMarkets', 'etfPro'],
-    }));
-
-    render(<PortfolioDashboard />);
-
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    expect(within(navigation).getByRole('button', { name: 'Prediction Markets', exact: true }))
-      .toHaveAttribute('aria-haspopup', 'menu');
-    expect(screen.queryByTestId('prediction-markets-panel')).not.toBeInTheDocument();
-    await waitFor(() => expect(JSON.parse(
-      window.localStorage.getItem('marketDashboard.panelState.v1'),
-    ).sidebarPanelStack).toEqual(['system', 'etfPro']));
-    const stored = JSON.parse(window.localStorage.getItem('marketDashboard.panelState.v1'));
-    expect(stored.showPredictionMarkets).toBeUndefined();
-    expect(stored.showPredictionMarketsHub).toBeUndefined();
-    expect(stored.showCpiModel).toBeUndefined();
-    expect(stored.showPredictionMarketsSandbox).toBeUndefined();
-    expect(stored.activePredictionMarket).toBeUndefined();
-    expect(stored.activeWtiCadence).toBeUndefined();
-  });
 
   test('removes the left product rail and hides the legacy reference buttons', async () => {
     render(<PortfolioDashboard />);
@@ -2779,71 +1731,7 @@ test('centers The Analyst while an individual market monitor stays open', async 
       .forEach((label) => expect(within(navigation).queryByRole('button', { name: label })).not.toBeInTheDocument());
   });
 
-  test('keeps one persistent monitor instance per visited market', async () => {
-    render(<PortfolioDashboard />);
 
-    const navigation = await screen.findByTestId('dashboard-top-navigation');
-    fireEvent.click(getPredictionMarketItem(navigation, 'SP500'));
-
-    expect(await screen.findByText('Active monitor: sp500')).toBeInTheDocument();
-    const resolverTestPanel = screen.getByTestId('prediction-market-resolver-test-panel');
-    expect(resolverTestPanel).toBeVisible();
-    expect(resolverTestPanel).toHaveClass('dashboard-side-panel--resolver-test');
-    expect(resolverTestPanel.style.width).toBe('');
-    expect(screen.queryByText('Prediction Markets Hub')).not.toBeInTheDocument();
-    expect(getPredictionMarketItem(navigation, 'SP500')).toHaveClass('is-active');
-    expect(getPredictionMarketItem(navigation, 'WTI')).not.toHaveClass('is-active');
-    fireEvent.change(screen.getByLabelText('sp500 monitor draft'), {
-      target: { value: 'retain SP500 state' },
-    });
-
-    fireEvent.click(getPredictionMarketItem(navigation, 'WTI'));
-    expect(await screen.findByText('Active monitor: wti')).toBeInTheDocument();
-    expect(screen.getAllByText('Prediction Monitor')).toHaveLength(2);
-    expect(screen.getByTestId('prediction-market-surface-sp500')).not.toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-wti')).toBeVisible();
-    expect(resolverTestPanel).toBeVisible();
-    expect(getPredictionMarketItem(navigation, 'WTI')).toHaveClass('is-active');
-    expect(getPredictionMarketItem(navigation, 'SP500')).not.toHaveClass('is-active');
-
-    fireEvent.click(getPredictionMarketItem(navigation, 'Brent'));
-    expect(await screen.findByText('Active monitor: brent')).toBeInTheDocument();
-    expect(screen.getAllByText('Prediction Monitor')).toHaveLength(3);
-    expect(getPredictionMarketItem(navigation, 'Brent')).toHaveClass('is-active');
-    expect(getPredictionMarketItem(navigation, 'WTI')).not.toHaveClass('is-active');
-
-    fireEvent.click(getPredictionMarketItem(navigation, 'SP500'));
-    expect(await screen.findByDisplayValue('retain SP500 state')).toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-sp500')).toBeVisible();
-    expect(screen.getByTestId('prediction-market-surface-wti')).not.toBeVisible();
-
-    fireEvent.click(getPredictionMarketItem(navigation, 'SP500'));
-    await waitFor(() => expect(resolverTestPanel).not.toBeVisible());
-  });
-
-  test('closes from the shared monitor control and persists the selected market across reloads', async () => {
-    const view = render(<PortfolioDashboard />);
-    let navigation = await screen.findByTestId('dashboard-top-navigation');
-    fireEvent.click(getPerpetualFuturesItem(navigation, 'Gold'));
-
-    expect(await screen.findByText('Active monitor: gold')).toBeInTheDocument();
-    await waitFor(() => expect(JSON.parse(
-      window.localStorage.getItem('marketDashboard.panelState.v1'),
-    )).toMatchObject({
-      showPredictionMonitor: true,
-      activePredictionMonitorMarket: 'gold',
-      sidebarPanelStack: expect.arrayContaining(['predictionMonitor']),
-    }));
-
-    view.unmount();
-    render(<PortfolioDashboard />);
-    navigation = await screen.findByTestId('dashboard-top-navigation');
-    expect(await screen.findByText('Active monitor: gold')).toBeInTheDocument();
-    expect(getPerpetualFuturesItem(navigation, 'Gold')).toHaveClass('is-active');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close Prediction Monitor' }));
-    await waitFor(() => expect(screen.getByTestId('prediction-market-resolver-test-panel')).not.toBeVisible());
-  });
 
   test('migrates the legacy Test monitor to an open SP500 monitor', async () => {
     window.localStorage.setItem('marketDashboard.panelState.v1', JSON.stringify({

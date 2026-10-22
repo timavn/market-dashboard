@@ -305,7 +305,7 @@ test.each(['detail hydration', 'event recovery'])('%s restores cached manual Sou
     // AGENTS.md: transient metadata-read failures keep unfinished rows Checking
     // and keep reading; they never settle the capture as Unavailable.
     const retrying = screen.getByRole('region', { name: 'Review sources' });
-    expect(retrying).toHaveTextContent('0/20 ready');
+    expect(retrying).toHaveTextContent('0/21 ready');
     expect(retrying).toHaveAttribute('aria-busy', 'true');
     expect(retrying.querySelector('header')).toHaveTextContent('Reconnecting…');
     expect(retrying).not.toHaveTextContent('Unavailable');
@@ -2566,7 +2566,7 @@ test('portfolio refresh progress and failure preserve the saved report and Sourc
   const header = sources.querySelector('header');
   const list = sources.querySelector('ul');
   const sourceRow = within(sources).getByText('IB Gateway').closest('li');
-  expect(within(sources).getAllByRole('listitem')).toHaveLength(22);
+  expect(within(sources).getAllByRole('listitem')).toHaveLength(23);
   expect(within(header).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
   expect(within(sourceRow).getByText('Checking')).toBeVisible();
   expect(within(sourceRow).queryByText('Sep 4 08:00 PDT')).not.toBeInTheDocument();
