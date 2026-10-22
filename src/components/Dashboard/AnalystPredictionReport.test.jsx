@@ -308,5 +308,6 @@ test('reported data lists one fact per line, including saved reports that joined
   expect(within(lists[0]).getByText('Risk On')).toHaveClass('analyst-process--positive');
   expect(within(lists[0]).getByText('SPX')).toHaveClass('analyst-process--ticker');
   // A sentence with a colon stays a sentence.
-  expect(screen.getByText(/Immediate-term @Hedgeye Risk Ranges:/).closest('ul')).toBeNull();
+  const sentence = screen.getByText(/Immediate-term @Hedgeye Risk Ranges:/);
+  expect(sentence.closest('ul')).toBeNull();
 });
