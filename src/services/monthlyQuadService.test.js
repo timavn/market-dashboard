@@ -46,8 +46,12 @@ test('the newest ETF Pro book naming a month supplies its reading', async () => 
   expect(readArtifact).toHaveBeenCalledTimes(3);
   expect(result.readings['2026-08']).toMatchObject({ quad: 2, asOf: '2026-10-13' });
   expect(result.readings['2026-10']).toEqual({
-    quad: 2, asOf: '2026-10-13', source: 'hedgeye-published', sourceUrl: 'https://mail.google.com/mail/#all/oct',
+    quad: 2, asOf: '2026-10-13', period: '2026-10', source: 'hedgeye-published', sourceUrl: 'https://mail.google.com/mail/#all/oct',
     sourceLabel: 'ETF Pro · October 13, 2026 · Quad Path: October #Quad2',
+  });
+  expect(result.readings['2026-11']).toMatchObject({
+    quad: 1, asOf: '2026-10-13', period: '2026-11',
+    sourceLabel: 'ETF Pro · October 13, 2026 · Quad Path forecast: November #Quad1 · until the November update',
   });
   expect(result.sources.map(source => source.gmailMessageId)).toEqual(['oct', 'sep']);
 });

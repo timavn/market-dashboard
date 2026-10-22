@@ -14,8 +14,15 @@ const periodFor = (date, scope) => scope === 'usMonthly'
   ? date.slice(0, 7)
   : `${date.slice(0, 4)}-Q${Math.ceil(Number(date.slice(5, 7)) / 3)}`;
 
+const previousMonth = date => {
+  const [year, month] = date.split('-').map(Number);
+  return month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, '0')}`;
+};
+
 // These are dated published or operator-entered research readings. Never substitute a
 // sample chart, country-mode calculation, or prior-period reading for a current quad.
+// The one exception is last month's published monthly call for this month, which stands
+// until this month's update replaces it.
 export function currentPortfolioQuadReadings(readings, today = quadReadingDate()) {
   return Object.fromEntries(QUAD_READING_SCOPES.map(({ id }) => {
     const reading = readings?.[id];
@@ -26,9 +33,13 @@ export function currentPortfolioQuadReadings(readings, today = quadReadingDate()
     const sourced = reading?.source === 'manual-hedgeye'
       || (reading?.source === 'hedgeye-published' && Boolean(reading.sourceLabel)
         && /^https:\/\/mail\.google\.com\/mail\/#all\/[a-z0-9]+$/.test(reading.sourceUrl || ''));
+    const current = periodFor(today, id);
+    const forecast = validDate && id === 'usMonthly' && reading.source === 'hedgeye-published'
+      && reading.period === current && date.slice(0, 7) === previousMonth(today);
     const valid = sourced
       && [1, 2, 3, 4].includes(reading.quad)
-      && validDate && date <= today && periodFor(date, id) === periodFor(today, id);
+      && validDate && date <= today && (reading.period ?? current) === current
+      && (periodFor(date, id) === current || forecast);
     return [id, valid ? reading : null];
   }));
 }
@@ -53,9 +64,10 @@ export function loadPortfolioQuadReadings(fetched = {}) {
     const bundled = HEDGEYE_QUAD_READINGS[id];
     const published = (fetched?.[id]?.asOf || '') > (bundled?.asOf || '') ? fetched[id] : bundled;
     const override = saved[id];
-    // A newer published update supersedes an older manually entered reading.
+    // A newer published update supersedes an older manually entered reading. A saved
+    // copy of a published reading never overrides the current published one.
     const useOverride = Object.prototype.hasOwnProperty.call(saved, id)
-      && (override === null || (override?.asOf || '') >= (published?.asOf || ''));
+      && (override === null || (override?.source === 'manual-hedgeye' && (override.asOf || '') >= (published?.asOf || '')));
     return [id, useOverride ? override : published];
   }));
 }

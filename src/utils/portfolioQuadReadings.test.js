@@ -59,6 +59,31 @@ test('a reading parsed from the emails for this month supersedes an older bundle
   const loaded = loadPortfolioQuadReadings(publishedQuadReadings(payload, '2026-10-21'));
   expect(loaded.usMonthly).toBe(october);
   expect(currentPortfolioQuadReadings(loaded, '2026-10-21').usMonthly).toBe(october);
-  // A forecast for next month published this month is not yet that month's reading.
-  expect(currentPortfolioQuadReadings(loadPortfolioQuadReadings(publishedQuadReadings(payload, '2026-11-02')), '2026-11-02').usMonthly).toBeNull();
+});
+
+test("last month's published call for this month stands until this month's update", () => {
+  const forecast = { quad: 1, asOf: '2026-10-13', period: '2026-11', source: 'hedgeye-published',
+    sourceLabel: 'ETF Pro · October 13, 2026 · Quad Path forecast: November #Quad1 · until the November update',
+    sourceUrl: 'https://mail.google.com/mail/#all/1a1363b72b765da0' };
+  const monthly = (reading, today) => currentPortfolioQuadReadings({ usMonthly: reading }, today).usMonthly;
+  expect(monthly(forecast, '2026-11-02')).toBe(forecast);
+  // Not before its month, not two months on, not for another month, and never for a manual entry.
+  expect(monthly(forecast, '2026-10-21')).toBeNull();
+  expect(monthly({ ...forecast, period: '2026-12' }, '2026-12-02')).toBeNull();
+  expect(monthly({ ...forecast, period: '2026-12' }, '2026-11-02')).toBeNull();
+  expect(monthly({ ...forecast, source: 'manual-hedgeye' }, '2026-11-02')).toBeNull();
+  expect(monthly({ ...forecast, period: undefined }, '2026-11-02')).toBeNull();
+  // Quarterly and global readings have no forecast carry-over.
+  expect(currentPortfolioQuadReadings({ usQuarterly: { ...forecast, period: '2026-Q4', asOf: '2026-09-22' } }, '2026-10-02').usQuarterly).toBeNull();
+});
+
+test('a saved copy of a published reading does not hide a newer published one', () => {
+  const october = { quad: 2, asOf: '2026-10-13', period: '2026-10', source: 'hedgeye-published', sourceLabel: 'ETF Pro', sourceUrl: 'https://mail.google.com/mail/#all/a' };
+  const november = { ...october, quad: 1, period: '2026-11' };
+  localStorage.setItem(PORTFOLIO_QUAD_READINGS_KEY, JSON.stringify({ usMonthly: october }));
+  try {
+    expect(loadPortfolioQuadReadings({ usMonthly: november }).usMonthly).toBe(november);
+  } finally {
+    localStorage.removeItem(PORTFOLIO_QUAD_READINGS_KEY);
+  }
 });

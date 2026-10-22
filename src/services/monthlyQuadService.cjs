@@ -81,9 +81,13 @@ async function loadMonthlyQuads({ listEvents, readArtifact, now = new Date() }) 
     sources.push({ gmailMessageId: item.sourceMessageId, asOf, quadPath: text, months });
     // Books are newest first, so the latest publication naming a month wins.
     for (const [period, quad] of Object.entries(months)) {
+      const month = MONTH_NAMES[Number(period.slice(5)) - 1];
+      // A call made before its month is that update's forecast until the month's own update.
       readings[period] ??= {
-        quad, asOf, source: 'hedgeye-published', sourceUrl,
-        sourceLabel: `ETF Pro · ${longDate(asOf)} · Quad Path: ${MONTH_NAMES[Number(period.slice(5)) - 1]} #Quad${quad}`,
+        quad, asOf, period, source: 'hedgeye-published', sourceUrl,
+        sourceLabel: asOf.slice(0, 7) < period
+          ? `ETF Pro · ${longDate(asOf)} · Quad Path forecast: ${month} #Quad${quad} · until the ${month} update`
+          : `ETF Pro · ${longDate(asOf)} · Quad Path: ${month} #Quad${quad}`,
       };
     }
   });

@@ -27,6 +27,15 @@ test('a current dated reading wins over the Global Quads table; monthly has no t
   expect(landingQuads(quads(2).data, current, now)).toMatchObject({ global: { quad: 4 }, quarterly: { quad: 1 }, monthly: { quad: 2 } });
 });
 
+test("in November, before the November update, monthly shows October's published forecast and says so", () => {
+  const forecast = { quad: 1, asOf: '2026-10-13', period: '2026-11', source: 'hedgeye-published',
+    sourceLabel: 'ETF Pro · October 13, 2026 · Quad Path forecast: November #Quad1 · until the November update',
+    sourceUrl: 'https://mail.google.com/mail/#all/1a1363b72b765da0' };
+  expect(landingQuads(undefined, { usMonthly: forecast }, new Date('2026-11-02T16:00:00Z')).monthly).toEqual({
+    quad: 1, title: 'ETF Pro · October 13, 2026 · Quad Path forecast: November #Quad1 · until the November update · as of 2026-10-13',
+  });
+});
+
 test('the status line shows the game, holdings, the verified close, and the three quads', async () => {
   jest.useFakeTimers({ now: new Date('2026-10-16T20:30:00Z'), doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
   useGlobalQuads.mockReturnValue(quads(2));
