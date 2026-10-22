@@ -29,7 +29,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from workspace import WorkspaceStore
-from manual_portfolio_verification import ManualPortfolioVerification
 from acquisition_tasks import AcquisitionTasks
 from loop_lag import monitor as loop_lag_monitor
 from research_cadence import publication_matches_expected
@@ -219,7 +218,7 @@ SYNC_MAX_PAGES_PER_CYCLE = min(
     100,
     max(1, int(os.environ.get("ANALYST_SYNC_MAX_PAGES_PER_CYCLE", "4"))),
 )
-MAX_BRIEFING_EXCERPT_CHARS = 18_000
+MAX_BRIEFING_EXCERPT_CHARS = 16_000
 MAX_BRIEFING_CITATION_PREVIEW_CHARS = 256
 MARKET_SITUATION_PRODUCT_ID = "market-structure"
 
@@ -245,15 +244,6 @@ openbb = OpenBBReader()
 portfolio_sizing_reader = PortfolioSizingReader(API_BASE_URL)
 momo_roster_context = MomoRosterContextReader(API_BASE_URL)
 daily_market_context = DailyMarketContextReader(API_BASE_URL)
-manual_portfolio_verification = ManualPortfolioVerification(
-    workspace_store, readiness_reader=ibkr.readiness,
-    capture_readers=lambda: {
-        "portfolio_reader": ibkr.portfolio_context, "holdings_reader": ibkr.holdings_context,
-        "market_date_reader": _review_market_date, "symbols_reader": _security_intelligence_symbols,
-        "archive_reader": _portfolio_refresh_research, "coverage_reader": research_coverage,
-        "identity_reader": _portfolio_security_identities,
-    },
-)
 market_situation_context = MarketSituationContextReader()
 sync_lock = asyncio.Lock()
 # Keep queued MCP searches as coroutines so a large parallel batch does not
@@ -1017,15 +1007,6 @@ async def _portfolio_refresh_research(symbols: list[str], market_date: str, as_o
     if payload.get("schemaVersion") != 1 or not isinstance(payload.get("bySymbol"), dict):
         raise ValueError("Portfolio Refresh returned an invalid research capture.")
     return payload
-
-
-async def _portfolio_security_identities(symbols: list[str]) -> dict[str, Any]:
-    """Exact descriptive names from the Portfolio identity service, never quotes."""
-    async with httpx.AsyncClient(timeout=25) as client:
-        response = await client.get(f"{API_BASE_URL}/api/security-identities",
-                                    params={"symbols": ",".join(symbols)})
-        response.raise_for_status()
-        return response.json()
 
 
 async def _security_intelligence_universe(market_date: str) -> dict[str, Any]:
@@ -3742,45 +3723,10 @@ async def get_dashboard_context(include_live_channels: bool = True) -> dict[str,
 
 
 @mcp.tool(annotations=NETWORK_READ_ONLY)
-async def get_portfolio_context(include_research_verification: bool = False,
-                                compact_research_verification: bool = False,
-                                verification_symbols: Optional[list[str]] = None) -> dict[str, Any]:
-    """Refresh IBKR book/quote coverage. Optional research verification checks every holding against the available archive without creating a review/chat. Set compact_research_verification=true with include_research_verification=true for the complete columnar finding roster and selected support. verification_symbols expands secondary dated evidence only for those tickers; the full scan and complete holding roster are preserved."""
-    if include_research_verification:
-        from portfolio_verification_context import capture_portfolio_verification
-        captured_valuation = []
-        verification = await capture_portfolio_verification(
-            portfolio_source={}, portfolio_reader=ibkr.portfolio_context, source_sink=captured_valuation.append,
-            holdings_reader=ibkr.holdings_context,
-            market_date_reader=_review_market_date, symbols_reader=_security_intelligence_symbols,
-            archive_reader=_portfolio_refresh_research, coverage_reader=research_coverage,
-            identity_reader=_portfolio_security_identities)
-        source = captured_valuation[0] if captured_valuation and verification["diagnostics"]["portfolioCaptureVerified"] else envelope(
-            status="unavailable", source_system="ibkr", provider="ibkr", freshness="unavailable",
-            data=None, warnings=["Fresh portfolio valuation is unavailable."])
-        projected = checked(project_portfolio_context(source))
-        projected["researchVerification"] = verification
-        research_source_resolver.remember(verification.get("citations"))
-        if compact_research_verification:
-            from portfolio_verification_context import compact_manual_portfolio_context
-            projected = compact_manual_portfolio_context(projected, verification_symbols)
-    else:
-        projected = checked(project_portfolio_context(checked(await ibkr.portfolio_context())))
+async def get_portfolio_context() -> dict[str, Any]:
+    """Refresh IBKR book/quote coverage."""
+    projected = checked(project_portfolio_context(checked(await ibkr.portfolio_context())))
     return compact_json_tool_result(checked(projected))
-
-
-@mcp.tool(annotations=NETWORK_READ_ONLY)
-async def get_portfolio_verification_page(capture_id: str, cursor: Optional[str] = None,
-                                          symbols: Optional[list[str]] = None) -> dict[str, Any]:
-    """Read one bounded page from an issued immutable manual portfolio capture. Omit symbols for the complete summary/holdings roster and follow nextCursor until null. Select captured holding symbols for detail-only evidence pages. This tool never refreshes account or research data."""
-    try:
-        page = await asyncio.to_thread(workspace_store.manual_page, capture_id, cursor, symbols)
-    except (KeyError, ValueError):
-        page = {**envelope(status="unavailable", source_system="dashboard", provider="portfolio_verification_capture",
-                          data=None, freshness="unavailable", warnings=["Captured evidence reference is unavailable."]),
-                "captureId": capture_id if isinstance(capture_id, str) and len(capture_id) <= 200 else None,
-                "complete": False, "errorCode": "MANUAL_CAPTURE_REFERENCE_UNAVAILABLE"}
-    return compact_json_tool_result(page)
 
 
 @mcp.tool(annotations=NETWORK_READ_ONLY)
@@ -4118,13 +4064,6 @@ async def workspace_route(request: Request) -> JSONResponse:
     try:
         operation = request.path_params["operation"]
         payload = await _json_body(request)
-        if operation == "manual-start":
-            result = await manual_portfolio_verification.start(payload)
-            return JSONResponse(result, headers={"Cache-Control": "no-store"})
-        if operation == "manual-cancel":
-            result = await asyncio.to_thread(workspace_store.dispatch, operation, payload)
-            await manual_portfolio_verification.cancel(result["captureId"])
-            return JSONResponse(result, headers={"Cache-Control": "no-store"})
         if operation == "captured-citation":
             for field in ("conversationId", "messageId", "citationId"):
                 if not isinstance(payload.get(field), str) or not payload[field].strip() or len(payload[field]) > 512:
@@ -4240,10 +4179,6 @@ async def workspace_route(request: Request) -> JSONResponse:
             return JSONResponse({"hermes": hermes_count, "reviews": review_count})
         workspace_started = time.perf_counter()
         result = await asyncio.to_thread(workspace_store.dispatch, operation, payload)
-        if operation == "delete" and result.get("cancelManualCaptureId"):
-            await manual_portfolio_verification.cancel(result["cancelManualCaptureId"])
-        elif (operation == "frame" and payload.get("type") in {"failed", "interrupted"}) or operation == "recover":
-            await manual_portfolio_verification.cancel_inactive()
         workspace_finished = time.perf_counter()
         if operation == "source-binding":
             # Paused sources keep their place as Pending even in a review that
@@ -4890,20 +4825,8 @@ async def application_lifespan(starlette_app):
     # Lag is measured from a separate thread, so a stalled loop is still timed.
     loop_lag_monitor.start(asyncio.get_running_loop())
     try:
-        # Before serving: a previous process's queued or acquiring manual
-        # captures have no owner now. A failed cleanup must not stop serving.
-        try:
-            settled = await asyncio.to_thread(workspace_store.settle_orphaned_manual_verifications)
-        except Exception:
-            LOGGER.exception("Orphaned manual verification settlement failed")
-        else:
-            if settled > 0:
-                LOGGER.info("Settled %s orphaned manual verification(s) as restarted", settled)
         async with managed_indexing_lifespan(starlette_app, mcp_transport_lifespan):
-            try:
-                yield
-            finally:
-                await manual_portfolio_verification.close()
+            yield
     finally:
         # Pooled reader clients close only after indexing and MCP sessions end.
         try:

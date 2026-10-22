@@ -46,7 +46,6 @@ from market import (
     IbkrReader,
     MarketSituationContextReader,
     OpenBBReader,
-    PredictionMarketReader,
     current_price,
     verified_live_quote,
 )
@@ -1164,7 +1163,6 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(analyst_app.ibkr, "portfolio_context", AsyncMock(side_effect=AssertionError("No repeated valuation"))) as portfolio,
             patch.object(analyst_app.balance_context, "context", AsyncMock(side_effect=AssertionError("No repeated balance"))) as balance,
-            patch.object(analyst_app.prediction_markets, "fixed_review_universe", AsyncMock(side_effect=AssertionError("No repeated native monitor"))) as prediction,
             patch.object(analyst_app.market_situation_context, "spx_realized_volatility", AsyncMock(return_value=supporting)),
             patch.object(analyst_app.momo_roster_context, "context", AsyncMock(return_value=supporting)),
             patch.object(analyst_app.daily_market_context, "context", AsyncMock(return_value=supporting)),
@@ -1174,11 +1172,12 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
             patch.object(analyst_app.workspace_store, "dispatch", return_value={"conversations": []}),
         ):
             dashboard = await analyst_app.mcp.call_tool("get_dashboard_context", {"include_live_channels": False})
-        for reader in (portfolio, balance, prediction, post):
+        for reader in (portfolio, balance, post):
             reader.assert_not_awaited()
         self.assertEqual(get.await_count, 5)
         data = dashboard.structuredContent["data"]
-        for name in ("portfolio", "balances", "predictionMonitors"):
+        self.assertNotIn("predictionMonitors", data)
+        for name in ("portfolio", "balances"):
             self.assertEqual(data[name], {"status": "unavailable", "classification": "not_requested",
                                           "liveVerified": False, "freshness": "unavailable", "data": None})
         self.assertNotIn("exposure", data)
@@ -1190,30 +1189,25 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(data[name], supporting)
         self.assertFalse(dashboard.structuredContent["liveVerified"])
 
-    async def test_dashboard_default_preserves_live_readers_and_setup_analysis(self):
+    async def test_dashboard_default_preserves_live_readers(self):
         unavailable = envelope(status="unavailable", source_system="ibkr", provider="ibkr", data=None)
-        analysis = {"status": "unavailable", "reason": "No verified native quote"}
-        response = analyst_app.httpx.Response(200, json=analysis,
-                                             request=analyst_app.httpx.Request("POST", "http://localhost/analysis"))
         with (
             patch.object(analyst_app.ibkr, "portfolio_context", AsyncMock(return_value=unavailable)) as portfolio,
             patch.object(analyst_app.balance_context, "context", AsyncMock(return_value=unavailable)) as balance,
-            patch.object(analyst_app.prediction_markets, "fixed_review_universe", AsyncMock(return_value=unavailable)) as prediction,
             patch.object(analyst_app.market_situation_context, "spx_realized_volatility", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.momo_roster_context, "context", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.daily_market_context, "context", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.httpx.AsyncClient, "get", AsyncMock(side_effect=RuntimeError("Provider unavailable"))),
-            patch.object(analyst_app.httpx.AsyncClient, "post", AsyncMock(return_value=response)) as post,
+            patch.object(analyst_app.httpx.AsyncClient, "post", AsyncMock(side_effect=AssertionError("No setup analysis post"))) as post,
             patch.object(analyst_app, "research_coverage", return_value={"products": []}),
             patch.object(analyst_app.workspace_store, "dispatch", return_value={"conversations": []}),
         ):
             dashboard = await analyst_app.mcp.call_tool("get_dashboard_context", {})
-        for reader in (portfolio, balance, prediction, post):
+        for reader in (portfolio, balance):
             reader.assert_awaited_once()
-        self.assertEqual(dashboard.structuredContent["data"]["predictionMonitors"], analysis)
+        post.assert_not_awaited()
+        self.assertNotIn("predictionMonitors", dashboard.structuredContent["data"])
         self.assertEqual(dashboard.structuredContent["data"]["balances"], unavailable)
-        self.assertEqual(post.call_args.kwargs["json"]["portfolio"], unavailable)
-        self.assertEqual(post.call_args.kwargs["json"]["metrics"], {})
         tools = await analyst_app.mcp.list_tools()
         tool = next(tool for tool in tools if tool.name == "get_dashboard_context")
         self.assertTrue(tool.inputSchema["properties"]["include_live_channels"]["default"])
@@ -1233,7 +1227,6 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(analyst_app.ibkr, "portfolio_context", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.balance_context, "context", AsyncMock(return_value=unavailable)),
-            patch.object(analyst_app.prediction_markets, "fixed_review_universe", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.market_situation_context, "spx_realized_volatility", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.httpx.AsyncClient, "get", AsyncMock(side_effect=RuntimeError("Provider unavailable"))),
             patch.object(analyst_app.httpx.AsyncClient, "post", AsyncMock(side_effect=RuntimeError("Provider unavailable"))),
@@ -1241,7 +1234,7 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
             dashboard = await analyst_app.mcp.call_tool("get_dashboard_context", {})
         data = dashboard.structuredContent["data"]
         self.assertFalse(data["portfolio"]["liveVerified"])
-        self.assertEqual(set(["balances", "predictionMonitors", "marketBackdrop", "volatility", "currencies", "correlations", "liquidity", "calendarEvents", "momoRoster"]) - set(data), set())
+        self.assertEqual(set(["balances", "marketBackdrop", "volatility", "currencies", "correlations", "liquidity", "calendarEvents", "momoRoster"]) - set(data), set())
         self.assertEqual(data["momoRoster"]["status"], "unavailable")
         self.assertFalse(data["momoRoster"]["liveVerified"])
 
@@ -1253,7 +1246,6 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(analyst_app.ibkr, "portfolio_context", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.balance_context, "context", AsyncMock(return_value=unavailable)),
-            patch.object(analyst_app.prediction_markets, "fixed_review_universe", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.market_situation_context, "spx_realized_volatility", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.momo_roster_context, "context", AsyncMock(return_value=projected)) as context,
             patch.object(analyst_app.httpx.AsyncClient, "get", AsyncMock(side_effect=RuntimeError("Provider unavailable"))),
@@ -1274,7 +1266,6 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(analyst_app.ibkr, "portfolio_context", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.balance_context, "context", AsyncMock(return_value=unavailable)),
-            patch.object(analyst_app.prediction_markets, "fixed_review_universe", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.market_situation_context, "spx_realized_volatility", AsyncMock(return_value=unavailable)),
             patch.object(analyst_app.daily_market_context, "context", AsyncMock(return_value=projected)) as context,
             patch.object(analyst_app.httpx.AsyncClient, "get", AsyncMock(side_effect=RuntimeError("Provider unavailable"))),
@@ -1290,7 +1281,7 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value["data"]["coverage"], {"quotes": 503, "total": 503})
         self.assertEqual([row["ticker"] for row in value["data"]["winners"]], ["AAA", "BBB"])
 
-    async def test_exact_sixteen_tool_boundary_is_explicitly_read_only(self):
+    async def test_exact_fifteen_tool_boundary_is_explicitly_read_only(self):
         tools = await analyst_app.mcp.list_tools()
         self.assertEqual(
             {tool.name for tool in tools},
@@ -1304,10 +1295,8 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 "get_dashboard_context",
                 "get_process_context",
                 "get_portfolio_context",
-                "get_portfolio_verification_page",
                 "get_balance_context",
                 "get_live_market_snapshot",
-                "get_prediction_market_snapshot",
                 "get_market_history",
                 "get_company_fundamentals",
                 "get_macro_series",
@@ -1316,63 +1305,10 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         for tool in tools:
             self.assertTrue(tool.annotations.readOnlyHint, tool.name)
             self.assertFalse(tool.annotations.destructiveHint, tool.name)
-        prediction_tool = next(tool for tool in tools if tool.name == "get_prediction_market_snapshot")
-        market_areas = prediction_tool.inputSchema["properties"]["market_areas"]["anyOf"][0]
-        self.assertEqual(
-            market_areas["items"]["enum"],
-            ["sp500", "wti", "nasdaq100", "gold"],
-        )
-        properties = prediction_tool.inputSchema["properties"]
-        self.assertIn("An empty array is treated as omitted", properties["series_tickers"]["description"])
-        self.assertIn("include_market_setups", properties)
-        self.assertIn("review_universe", properties)
 
-    async def test_review_tool_uses_same_pinned_monitors_and_compact_evidence_as_report(self):
-        from test_prediction_review import monitor
-        from datetime import datetime, timezone
-        rows = [monitor(market_id, venue, datetime.now(timezone.utc))
-                for market_id, _asset, venue in analyst_app.PREDICTIVE_REVIEW_UNIVERSE]
-        source = envelope(status="partial", source_system="dashboard", provider="fixed_prediction_monitor_universe",
-                          freshness="current_monitor", data={"markets": rows})
-        with (
-            patch.object(analyst_app.prediction_markets, "fixed_review_universe", AsyncMock(return_value=source)) as pinned,
-            patch.object(analyst_app.prediction_markets, "snapshot", AsyncMock()) as legacy,
-        ):
-            result = await analyst_app.mcp.call_tool("get_prediction_market_snapshot", {"review_universe": True})
-        pinned.assert_awaited_once()
-        legacy.assert_not_awaited()
-        markets = result.structuredContent["data"]["markets"]
-        self.assertEqual([(row["marketId"], row["venue"]) for row in markets], [
-            ("cpi", "ForecastEx"),
-            ("sp500", "ForecastEx"),
-            ("nasdaq100", "Kalshi"),
-            ("gold", "Kalshi"),
-            ("silver", "Kalshi"),
-            ("bitcoin", "Kalshi"),
-            ("ethereum", "Kalshi"),
-        ])
-        self.assertTrue(all("fields" in row and "snapshot" not in row for row in markets))
-        self.assertEqual(markets[0]["quotedLineCount"], 1)
-        self.assertTrue(result.structuredContent["liveVerified"])
-        self.assertEqual(result.structuredContent["data"]["verificationScope"], "native_quotes_only")
-        self.assertFalse(result.structuredContent["data"]["executionVerified"])
-        text_envelope = json.loads(result.content[0].text)
-        self.assertEqual(text_envelope, result.model_dump(mode="json")["structuredContent"])
-        self.assertEqual(text_envelope["data"]["markets"], json.loads(json.dumps(markets)))
-        self.assertNotIn("See structuredContent", result.content[0].text)
-
-    async def test_review_universe_rejects_mixed_venue_selectors(self):
-        with patch.object(analyst_app.prediction_markets, "fixed_review_universe", AsyncMock()) as pinned:
-            result = await analyst_app.mcp.call_tool("get_prediction_market_snapshot", {"review_universe": True, "market_areas": ["sp500"]})
-        self.assertEqual(result.structuredContent["status"], "invalid_request")
-        pinned.assert_not_awaited()
-
-    async def test_review_catalog_alone_never_verifies_live_quotes(self):
+    def test_review_catalog_alone_never_verifies_live_quotes(self):
         source = envelope(status="partial", source_system="dashboard", provider="fixed_prediction_monitor_universe",
                           freshness="current_monitor", data={"markets": []})
-        with patch.object(analyst_app.prediction_markets, "fixed_review_universe", AsyncMock(return_value=source)):
-            result = await analyst_app.mcp.call_tool("get_prediction_market_snapshot", {"review_universe": True})
-        self.assertFalse(result.structuredContent["liveVerified"])
         source["liveVerified"] = True
         with self.assertRaisesRegex(ValueError, "quote-only scope"):
             validate_envelope(source)
@@ -1703,45 +1639,6 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
             100_000,
         )
 
-        prediction_payload = envelope(
-            status="available",
-            source_system="market_dashboard",
-            provider="kalshi",
-            data={"markets": [], "refreshEvidence": {"requestedAt": "2026-08-25T03:00:00Z"}},
-            as_of="2026-08-25T03:00:00Z",
-            freshness="direct_venue_snapshot",
-            live_verified=True,
-        )
-        prediction_snapshot = AsyncMock(return_value=prediction_payload)
-        with patch.object(analyst_app.prediction_markets, "snapshot", new=prediction_snapshot):
-            prediction_result = await analyst_app.mcp.call_tool(
-                "get_prediction_market_snapshot",
-                {
-                    "series_tickers": [],
-                    "market_areas": [],
-                    "include_ladders": True,
-                    "include_market_setups": True,
-                },
-            )
-
-        prediction_snapshot.assert_awaited_once_with(
-            series_tickers=None,
-            include_ladders=True,
-            market_areas=None,
-            include_market_setups=True,
-        )
-        prediction_text = prediction_result.content[0].text
-        self.assertNotIn("\n", prediction_text)
-        prediction_envelope = json.loads(prediction_text)
-        self.assertEqual(prediction_envelope["status"], "available")
-        self.assertEqual(prediction_envelope["provider"], "kalshi")
-        self.assertTrue(prediction_envelope["liveVerified"])
-        self.assertEqual(prediction_envelope, prediction_payload)
-        self.assertEqual(prediction_result.structuredContent, prediction_payload)
-        serialized = prediction_result.model_dump_json(exclude_none=True)
-        self.assertEqual(serialized.count("2026-08-25T03:00:00Z"), 4)
-        self.assertLess(len(serialized), 2 * len(json.dumps(prediction_payload)) + 1_000)
-
     async def test_indexing_loop_lives_for_the_whole_application_lifespan(self):
         entered = asyncio.Event()
         started = asyncio.Event()
@@ -1786,22 +1683,14 @@ class SidecarRuntimeTests(unittest.IsolatedAsyncioTestCase):
         monitor = Mock()
         monitor.start.side_effect = lambda loop: events.append(("start", loop))
         monitor.stop.side_effect = lambda: events.append("stop")
-        close = AsyncMock(side_effect=lambda: events.append("close"))
-        # Orphaned manual captures settle before serving; pooled clients close
-        # only after indexing and the MCP transport have exited.
-        settle = Mock(side_effect=lambda: events.append("settle") or 2)
+        # Pooled clients close only after indexing and the MCP transport have exited.
         aclose = AsyncMock(side_effect=lambda: events.append("aclose"))
         with patch.object(analyst_app, "managed_indexing_lifespan", indexing), \
                 patch.object(analyst_app, "loop_lag_monitor", monitor), \
-                patch.object(analyst_app.manual_portfolio_verification, "close", close), \
-                patch.object(analyst_app.workspace_store, "settle_orphaned_manual_verifications", settle), \
-                patch.object(analyst_app, "aclose_shared_clients", aclose), \
-                self.assertLogs(analyst_app.LOGGER, level="INFO") as logs:
+                patch.object(analyst_app, "aclose_shared_clients", aclose):
             async with analyst_app.application_lifespan(None):
-                self.assertEqual(events, [("start", asyncio.get_running_loop()), "settle", "enter"])
-        self.assertEqual(events[3:], ["close", "exit", "aclose", "stop"])
-        settle.assert_called_once_with()
-        self.assertIn("Settled 2 orphaned manual verification(s) as restarted", "\n".join(logs.output))
+                self.assertEqual(events, [("start", asyncio.get_running_loop()), "enter"])
+        self.assertEqual(events[2:], ["exit", "aclose", "stop"])
 
         @asynccontextmanager
         async def failed_startup(_application, _transport):
@@ -1812,7 +1701,6 @@ class SidecarRuntimeTests(unittest.IsolatedAsyncioTestCase):
         aclose = AsyncMock()
         with patch.object(analyst_app, "managed_indexing_lifespan", failed_startup), \
                 patch.object(analyst_app, "loop_lag_monitor", monitor), \
-                patch.object(analyst_app.workspace_store, "settle_orphaned_manual_verifications", Mock(return_value=0)), \
                 patch.object(analyst_app, "aclose_shared_clients", aclose):
             with self.assertRaisesRegex(RuntimeError, "transport startup failed"):
                 async with analyst_app.application_lifespan(None):
@@ -1825,26 +1713,11 @@ class SidecarRuntimeTests(unittest.IsolatedAsyncioTestCase):
         monitor.reset_mock()
         with patch.object(analyst_app, "managed_indexing_lifespan", indexing), \
                 patch.object(analyst_app, "loop_lag_monitor", monitor), \
-                patch.object(analyst_app.manual_portfolio_verification, "close", AsyncMock()), \
-                patch.object(analyst_app.workspace_store, "settle_orphaned_manual_verifications", Mock(return_value=0)), \
                 patch.object(analyst_app, "aclose_shared_clients", AsyncMock(side_effect=RuntimeError("client close failed"))):
             with self.assertRaisesRegex(RuntimeError, "client close failed"):
                 async with analyst_app.application_lifespan(None):
                     pass
         monitor.stop.assert_called_once_with()
-
-        # A failed orphan cleanup is logged; the sidecar still serves.
-        events.clear()
-        broken = Mock(side_effect=RuntimeError("database is locked"))
-        with patch.object(analyst_app, "managed_indexing_lifespan", indexing), \
-                patch.object(analyst_app, "loop_lag_monitor", Mock()), \
-                patch.object(analyst_app.manual_portfolio_verification, "close", AsyncMock()), \
-                patch.object(analyst_app.workspace_store, "settle_orphaned_manual_verifications", broken), \
-                patch.object(analyst_app, "aclose_shared_clients", AsyncMock()), \
-                self.assertLogs(analyst_app.LOGGER, level="ERROR") as logs:
-            async with analyst_app.application_lifespan(None):
-                self.assertEqual(events, ["enter"])
-        self.assertIn("Orphaned manual verification settlement failed", "\n".join(logs.output))
 
     async def test_production_review_checkpoints_become_workspace_source_progress(self):
         import review_runs_v2
@@ -2025,7 +1898,7 @@ class SidecarRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 request.json.return_value = {"windowSeconds": 1800}
                 response = await analyst_app.workspace_route(request)
                 self.assertEqual(json.loads(response.body),
-                                 {"reviews": 1, "turns": 1, "manualCaptures": 0, "windowSeconds": 1800})
+                                 {"reviews": 1, "turns": 1, "windowSeconds": 1800})
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
                 self.assertEqual(len(threads), 1)
                 self.assertNotEqual(threads[0], loop_thread)
@@ -2585,10 +2458,9 @@ class LiveDataGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["data"]["positions"][0]["marketValue"], 400)
         self.assertNotIn("quote_timeout", " ".join(result["warnings"]))
 
-    async def test_portfolio_skips_expired_forecastex_quotes_and_applies_verified_settlement(self):
+    async def test_portfolio_skips_expired_forecastex_quotes_and_awaits_settlement(self):
         observed = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         quote_con_ids = []
-        settlement_requests = []
 
         async def request(path, **kwargs):
             if path == "/status":
@@ -2647,146 +2519,33 @@ class LiveDataGuardTests(unittest.IsolatedAsyncioTestCase):
                 }
             raise AssertionError(path)
 
-        async def settlement_request(path, **kwargs):
-            settlement_requests.append((path, kwargs["json_body"]))
-            return {
-                "status": "available",
-                "rows": [{
-                    "conId": 101,
-                    "localSymbol": "FES_082426_7675_YES",
-                    "status": "verified_settlement",
-                    "settlementPrice": 0,
-                    "settlementSource": "forecastex_verified_settlement",
-                    "settlementObservedAt": observed,
-                    "settlementDataDate": "2026-08-25",
-                    "settlementDate": "2026-08-24",
-                }],
-            }
-
         result = await IbkrReader(
             request=request,
-            settlement_request=settlement_request,
             now=lambda: datetime(2026, 8, 25, 18, 0, tzinfo=timezone.utc),
         ).portfolio_context()
         positions = {row["conId"]: row for row in result["data"]["positions"]}
-        settled = positions[101]
+        expired = positions[101]
 
         self.assertEqual(quote_con_ids, [102])
-        self.assertEqual(len(settlement_requests), 1)
-        self.assertEqual(settled["currentPrice"], None)
-        self.assertEqual(settled["valuationPrice"], 0)
-        self.assertEqual(settled["marketValue"], 0)
-        self.assertEqual(settled["valuationPnl"], -510)
-        self.assertEqual(settled["instrumentCategory"], "event_contract")
-        self.assertEqual(settled["valuationBasis"], "official_settlement")
-        self.assertFalse(settled["currentValuesLiveVerified"])
-        self.assertTrue(settled["currentValuesOfficialSettlementVerified"])
-        self.assertEqual(settled["markStatus"], "verified_official_settlement")
+        self.assertIsNone(expired["currentPrice"])
+        self.assertIsNone(expired["valuationPrice"])
+        self.assertIsNone(expired["marketValue"])
+        self.assertEqual(expired["instrumentCategory"], "event_contract")
+        self.assertEqual(expired["valuationStatus"], "awaiting_official_settlement")
+        self.assertEqual(expired["markStatus"], "awaiting_official_settlement")
+        self.assertEqual(expired["markUnavailableReason"], "awaiting_official_settlement")
+        self.assertFalse(expired["currentValuesLiveVerified"])
         self.assertEqual(result["data"]["quoteCoverage"]["skippedForSettlementCount"], 1)
         self.assertEqual(result["data"]["quoteCoverage"]["missingMarkCount"], 0)
         self.assertEqual(result["data"]["valuationCoverage"], {
             "positionCount": 2,
-            "valuedCount": 2,
-            "liveMarkCount": 1,
-            "verifiedSettlementCount": 1,
-            "resolverDeterminedCount": 0,
-            "awaitingSettlementCount": 0,
-            "missingCount": 0,
-            "missingContracts": [],
-            "awaitingSettlementContracts": [],
-            "settledContracts": ["FES_082426_7675_YES"],
-            "resolverDeterminedContracts": [],
-            "coverageComplete": True,
-        })
-
-    async def test_portfolio_values_same_day_fes_from_verified_exact_cutoff_outcome(self):
-        observed = "2026-08-25T22:45:00Z"
-        quote_con_ids = []
-
-        async def request(path, **kwargs):
-            if path == "/status":
-                return {"connected": True, "status": "connected", "accounts": []}
-            if path == "/portfolio/live-positions":
-                return {
-                    "ok": True,
-                    "source": "ibkr_live_session",
-                    "from_cache": False,
-                    "accounts": [],
-                    "positions_observed_at": observed,
-                    "positions": [{
-                        "symbol": "ES",
-                        "localSymbol": "FES_082526_7700_YES",
-                        "conId": 201,
-                        "secType": "FOP",
-                        "exchange": None,
-                        "currency": "USD",
-                        "lastTradeDateOrContractMonth": "20260825",
-                        "strike": 7700,
-                        "right": "C",
-                        "multiplier": "1",
-                        "tradingClass": "FES",
-                        "position": 2000,
-                        "avgCost": 0.575,
-                    }],
-                }
-            if path == "/quotes":
-                quote_con_ids.extend(
-                    row["conId"] for row in kwargs["json_body"]["instruments"]
-                )
-                return {"quotes": [], "errors": ["ES: quote_timeout"]}
-            raise AssertionError(path)
-
-        async def settlement_request(_path, **_kwargs):
-            return {
-                "status": "available",
-                "rows": [{
-                    "conId": 201,
-                    "localSymbol": "FES_082526_7700_YES",
-                    "status": "resolver_determined",
-                    "valuationPrice": 0,
-                    "valuationSource": "ibkr_exact_cutoff_bar",
-                    "valuationObservedAt": observed,
-                    "resolverValue": 7691,
-                    "resolverSymbol": "ESU26",
-                    "resolverWindowHigh": 7694.75,
-                    "resolverWindowLow": 7689.5,
-                    "resolverCutoffAt": "2026-08-25T20:00:00Z",
-                    "resolverProvenance": "verified_ibkr_historical_trade_bar",
-                    "finalSettlementPending": True,
-                }],
-            }
-
-        result = await IbkrReader(
-            request=request,
-            settlement_request=settlement_request,
-            now=lambda: datetime(2026, 8, 25, 22, 45, tzinfo=timezone.utc),
-        ).portfolio_context()
-        position = result["data"]["positions"][0]
-
-        self.assertEqual(quote_con_ids, [201, 201])
-        self.assertEqual(position["valuationBasis"], "resolver_determined")
-        self.assertEqual(position["valuationPrice"], 0)
-        self.assertEqual(position["marketValue"], 0)
-        self.assertEqual(position["valuationPnl"], -1150)
-        self.assertFalse(position["currentValuesLiveVerified"])
-        self.assertFalse(position["currentValuesOfficialSettlementVerified"])
-        self.assertTrue(position["currentValuesResolverVerified"])
-        self.assertEqual(position["markStatus"], "verified_resolver_outcome")
-        self.assertEqual(result["data"]["quoteCoverage"]["missingMarkCount"], 1)
-        self.assertEqual(result["data"]["quoteCoverage"]["skippedForSettlementCount"], 0)
-        self.assertEqual(result["data"]["valuationCoverage"], {
-            "positionCount": 1,
             "valuedCount": 1,
-            "liveMarkCount": 0,
-            "verifiedSettlementCount": 0,
-            "resolverDeterminedCount": 1,
-            "awaitingSettlementCount": 0,
+            "liveMarkCount": 1,
+            "awaitingSettlementCount": 1,
             "missingCount": 0,
             "missingContracts": [],
-            "awaitingSettlementContracts": [],
-            "settledContracts": [],
-            "resolverDeterminedContracts": ["FES_082526_7700_YES"],
-            "coverageComplete": True,
+            "awaitingSettlementContracts": ["FES_082426_7675_YES"],
+            "coverageComplete": False,
         })
 
     async def test_portfolio_does_not_fabricate_missing_average_cost_or_cost_basis(self):
@@ -2893,7 +2652,7 @@ class LiveDataGuardTests(unittest.IsolatedAsyncioTestCase):
             for warning in result["warnings"]
         ))
 
-    async def test_verified_ibkr_event_marks_survive_prediction_failure_with_exact_metadata(self):
+    async def test_verified_ibkr_event_marks_keep_exact_metadata(self):
         observed = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         quote_request_counts = []
         live_positions = [
@@ -3001,17 +2760,8 @@ class LiveDataGuardTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(path)
 
         result = await IbkrReader(request=request).portfolio_context()
-
-        async def failed_prediction_request(_path):
-            raise RuntimeError("venue offline")
-
-        prediction = await PredictionMarketReader(
-            request=failed_prediction_request,
-        ).snapshot(include_ladders=False)
         rows = {row["conId"]: row for row in result["data"]["positions"]}
 
-        self.assertEqual(prediction["status"], "unavailable")
-        self.assertFalse(prediction["liveVerified"])
         self.assertEqual(quote_request_counts, [3])
         self.assertEqual(result["data"]["quoteCoverage"]["positionCount"], 3)
         self.assertEqual(result["data"]["quoteCoverage"]["freshMarkCount"], 3)
@@ -3053,503 +2803,6 @@ class LiveDataGuardTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertTrue(verified_live_quote(quote))
         self.assertEqual(current_price(quote), 123.45)
-
-
-class PredictionMarketLiveDataGuardTests(unittest.IsolatedAsyncioTestCase):
-    NOW = datetime(2026, 8, 18, 18, 0, tzinfo=timezone.utc)
-
-    def row(self, **updates):
-        row = {
-            "id": "KXCPIYOY-26AUG",
-            "seriesTicker": "KXCPIYOY",
-            "eventTicker": "KXCPIYOY-26AUG",
-            "marketTicker": "KXCPIYOY-26AUG-T2.9",
-            "label": "Headline CPI YoY",
-            "eventTitle": "CPI in August",
-            "marketTitle": "Above 2.9%",
-            "closeTime": "2026-08-20T12:30:00Z",
-            "venue": {
-                "name": "Kalshi",
-                "source": "kalshi_trade_api_v2",
-                "snapshotType": "direct_venue",
-                "yesBid": 0.41,
-                "yesAsk": 0.43,
-                "yesBidSize": 120,
-                "yesAskSize": 90,
-                "noBid": 0.56,
-                "noAsk": 0.58,
-                "noBidSize": 80,
-                "noAskSize": 70,
-                "volume24h": 1000,
-                "volumeTotal": 5000,
-                "openInterest": 2200,
-                "fetchedAt": "2026-08-18T17:59:40Z",
-                "updatedAt": "2026-08-18T17:59:35Z",
-            },
-            "ibkr": {"verified": False},
-            "executable": False,
-        }
-        for key, value in updates.items():
-            if key == "venue":
-                row["venue"] = {**row["venue"], **value}
-            elif key == "ibkr":
-                row["ibkr"] = {**row["ibkr"], **value}
-            else:
-                row[key] = value
-        return row
-
-    @staticmethod
-    def watchlist(rows, *, ibkr=None, warnings=None):
-        ibkr_provider = ibkr or {
-            "status": "catalog_unavailable",
-            "connected": True,
-            "authenticated": True,
-            "errorCode": "CATALOG_NOT_PROMOTED",
-            "message": "Catalog is not promoted",
-        }
-        ibkr_evidence = ibkr_provider.get("refreshEvidence") or {
-            "requestedContractCount": 0,
-            "brokerSnapshotRequestedCount": 0,
-            "brokerSnapshotRetryCount": 0,
-            "verifiedContractCount": 0,
-            "missingContractCount": 0,
-            "coverageComplete": False,
-            "blockedBy": ibkr_provider.get("errorCode") or ibkr_provider.get("status"),
-            "fromCache": False,
-        }
-        return {
-            "ok": True,
-            "rows": rows,
-            "warnings": warnings or [],
-            "refreshEvidence": {
-                "mode": "on_demand_prediction_fanout",
-                "requestedAt": "2026-08-18T17:59:30Z",
-                "completedAt": "2026-08-18T17:59:45Z",
-                "fromCache": False,
-                "kalshi": {
-                    "requestedSeriesCount": 11,
-                    "venueRequestCount": 11,
-                    "retryCount": 0,
-                    "verifiedSeriesCount": len(rows),
-                    "missingSeriesCount": 11 - len(rows),
-                    "coverageComplete": len(rows) == 11,
-                    "fromCache": False,
-                },
-                "ibkr": ibkr_evidence,
-            },
-            "providers": {
-                "kalshi": {"status": "direct_venue_snapshot"},
-                "ibkr": ibkr_provider,
-            },
-        }
-
-    def reader(self, payload):
-        async def request(path):
-            self.assertEqual(path, "/api/prediction-markets/watchlist?forceRefresh=true")
-            return payload
-
-        return PredictionMarketReader(request=request, now=lambda: self.NOW)
-
-    async def test_fresh_direct_kalshi_snapshot_preserves_native_yes_and_no_books(self):
-        result = await self.reader(self.watchlist([self.row()])).snapshot(
-            ["KXCPIYOY"], include_ladders=False
-        )
-        self.assertTrue(result["liveVerified"])
-        self.assertEqual(result["freshness"], "direct_venue_snapshot")
-        self.assertEqual(len(result["data"]["markets"]), 1)
-        market_row = result["data"]["markets"][0]
-        self.assertEqual(
-            {key: market_row[key] for key in ("yesBid", "yesAsk", "noBid", "noAsk")},
-            {"yesBid": 0.41, "yesAsk": 0.43, "noBid": 0.56, "noAsk": 0.58},
-        )
-        self.assertFalse(market_row["executable"])
-        self.assertTrue(market_row["liveVerified"])
-        self.assertEqual(market_row["usage"], "research_only")
-        self.assertEqual(result["data"]["providers"]["ibkr"]["errorCode"], "CATALOG_NOT_PROMOTED")
-        evidence = result["data"]["refreshEvidence"]
-        self.assertEqual(evidence["mode"], "on_demand_prediction_fanout")
-        self.assertEqual(evidence["kalshi"]["requestedOutputSeriesCount"], 1)
-        self.assertEqual(evidence["kalshi"]["verifiedOutputSeriesCount"], 1)
-        self.assertEqual(evidence["ibkr"]["brokerSnapshotRequestedCount"], 0)
-        self.assertEqual(evidence["ibkr"]["blockedBy"], "CATALOG_NOT_PROMOTED")
-
-        native_no_depth_absent = self.row(venue={"noBidSize": None, "noAskSize": None})
-        absent = await self.reader(self.watchlist([native_no_depth_absent])).snapshot(
-            ["KXCPIYOY"], include_ladders=False
-        )
-        self.assertTrue(absent["liveVerified"])
-        self.assertIsNone(absent["data"]["markets"][0]["noBidSize"])
-        self.assertIsNone(absent["data"]["markets"][0]["noAskSize"])
-
-    async def test_stale_incomplete_cached_mock_fallback_closed_and_failed_rows_are_omitted(self):
-        variants = {
-            "stale": self.row(venue={"fetchedAt": "2026-08-18T17:58:00Z"}),
-            "incomplete": self.row(venue={"noAsk": None}),
-            "cached": self.row(venue={"fromCache": True}),
-            "mock": self.row(venue={"flags": ["mock"]}),
-            "fallback": self.row(venue={"flags": ["fallback"]}),
-            "closed": self.row(closeTime="2026-08-18T17:00:00Z"),
-            "failed": self.row(venue={"dataQualityFlags": ["failed"]}),
-        }
-        for label, row in variants.items():
-            with self.subTest(label=label):
-                result = await self.reader(self.watchlist([row])).snapshot(
-                    ["KXCPIYOY"], include_ladders=False
-                )
-                self.assertEqual(result["status"], "unavailable")
-                self.assertFalse(result["liveVerified"])
-                self.assertEqual(result["data"]["markets"], [])
-
-    async def test_partial_coverage_warns_and_never_retains_rejected_rows(self):
-        incomplete = self.row(
-            seriesTicker="KXGDP",
-            eventTicker="KXGDP-26Q3",
-            marketTicker="KXGDP-26Q3-T2",
-            venue={"noBidSize": None},
-        )
-        result = await self.reader(self.watchlist([self.row(), incomplete])).snapshot(
-            ["KXCPIYOY", "KXGDP"], include_ladders=False
-        )
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual([row["seriesTicker"] for row in result["data"]["markets"]], ["KXCPIYOY"])
-        self.assertTrue(any("KXGDP" in warning for warning in result["warnings"]))
-
-    async def test_only_strict_ibkr_quote_can_make_a_kalshi_row_executable(self):
-        strict = self.row(
-            ibkr={
-                "verified": True,
-                "conId": 123456,
-                "quoteTimestamp": "2026-08-18T17:59:45Z",
-                "sourceApi": "IBKR_TWS_API",
-                "marketDataType": "live",
-                "nativeQuoteSide": "YES",
-                "nativeBid": 0.40,
-                "nativeAsk": 0.44,
-                "nativeBidSize": 10,
-                "nativeAskSize": 12,
-                "dataQualityFlags": [],
-            },
-            executable=True,
-        )
-        accepted = await self.reader(self.watchlist([strict], ibkr={"status": "connected"})).snapshot(
-            ["KXCPIYOY"], include_ladders=False
-        )
-        self.assertTrue(accepted["data"]["markets"][0]["executable"])
-        self.assertEqual(accepted["data"]["providers"]["ibkr"]["verifiedContractCount"], 1)
-
-        rejected = self.row(
-            ibkr={**strict["ibkr"], "dataQualityFlags": ["portfolio_seed"]},
-            executable=True,
-        )
-        failed = await self.reader(self.watchlist([rejected], ibkr={"status": "connected"})).snapshot(
-            ["KXCPIYOY"], include_ladders=False
-        )
-        self.assertFalse(failed["data"]["markets"][0]["executable"])
-        self.assertIsNone(failed["data"]["markets"][0]["ibkr"]["conId"])
-
-    async def test_unknown_and_excessive_series_are_rejected_without_network_access(self):
-        request = AsyncMock()
-        reader = PredictionMarketReader(request=request, now=lambda: self.NOW)
-        unknown = await reader.snapshot(["NOT_ALLOWED"], include_ladders=False)
-        excessive = await reader.snapshot(["KXCPIYOY"] * 12, include_ladders=False)
-        self.assertEqual(unknown["status"], "invalid_request")
-        self.assertEqual(excessive["status"], "invalid_request")
-        request.assert_not_awaited()
-
-    async def test_empty_selectors_are_omitted_and_argument_free_defaults_scan_allowlist(self):
-        calls = []
-        watchlist = self.watchlist([self.row()])
-
-        async def request(path):
-            calls.append(path)
-            if path == "/api/prediction-markets/watchlist?forceRefresh=true":
-                return watchlist
-            if path == "/api/prediction-markets/overview?forceRefresh=true":
-                return {"ok": True, "markets": {}}
-            raise AssertionError(path)
-
-        reader = PredictionMarketReader(request=request, now=lambda: self.NOW)
-        empty = await reader.snapshot(
-            series_tickers=[],
-            market_areas=[],
-            include_ladders=False,
-        )
-        self.assertNotEqual(empty["status"], "invalid_request")
-        self.assertEqual(empty["data"]["requestedSeriesTickers"], list(market.PREDICTION_SERIES_TICKERS))
-        self.assertEqual(calls, ["/api/prediction-markets/watchlist?forceRefresh=true"])
-
-        calls.clear()
-        default = await reader.snapshot()
-        self.assertNotEqual(default["status"], "invalid_request")
-        self.assertEqual(default["data"]["requestedSeriesTickers"], list(market.PREDICTION_SERIES_TICKERS))
-        self.assertCountEqual(calls, [
-            "/api/prediction-markets/watchlist?forceRefresh=true",
-            "/api/prediction-markets/overview?forceRefresh=true",
-        ])
-
-    async def test_options_bundle_keeps_held_contract_snapshot_and_setup_screen_independent(self):
-        calls = []
-        monitor_payload = {
-            "schemaVersion": 1,
-            "reportType": "four_market_morning",
-            "generatedAt": "2026-08-18T17:59:45Z",
-            "asOf": "2026-08-18T17:59:40Z",
-            "status": "available",
-            "marketOrder": ["sp500", "wti", "nasdaq100", "gold"],
-            "summary": {
-                "requestedMarketCount": 4,
-                "verifiedDirectBookCount": 1,
-                "matchedSetupCount": 1,
-                "rankEligibleCount": 1,
-            },
-            "markets": [
-                {
-                    "marketId": market_id,
-                    "setup": {
-                        "researchQualified": market_id == "wti",
-                        "rankEligible": market_id == "wti",
-                    },
-                }
-                for market_id in ("sp500", "wti", "nasdaq100", "gold")
-            ],
-            "warnings": [],
-            "policy": {
-                "currentFieldsMayUseArchiveFallback": False,
-                "recommendationAllowed": False,
-            },
-        }
-
-        async def request(path):
-            calls.append(path)
-            if path == "/api/prediction-markets/watchlist?forceRefresh=true":
-                return self.watchlist([self.row()])
-            if path == "/api/prediction-market-test/morning-report":
-                return monitor_payload
-            raise AssertionError(path)
-
-        result = await PredictionMarketReader(request=request, now=lambda: self.NOW).snapshot(
-            include_ladders=False,
-            include_market_setups=True,
-        )
-
-        self.assertTrue(result["liveVerified"])
-        self.assertEqual(len(result["data"]["markets"]), 1)
-        screen = result["data"]["marketSetupScreen"]
-        self.assertEqual(screen["status"], "available")
-        self.assertEqual(screen["freshness"], "current_monitor")
-        self.assertFalse(screen["liveVerified"])
-        self.assertEqual(screen["summary"]["rankEligibleCount"], 1)
-        self.assertEqual(
-            [row["marketId"] for row in screen["markets"]],
-            ["sp500", "wti", "nasdaq100", "gold"],
-        )
-        self.assertCountEqual(calls, [
-            "/api/prediction-markets/watchlist?forceRefresh=true",
-            "/api/prediction-market-test/morning-report",
-        ])
-
-    async def test_offline_setup_screen_never_erases_live_held_rows_or_retains_setup_rows(self):
-        async def request(path):
-            if path == "/api/prediction-markets/watchlist?forceRefresh=true":
-                return self.watchlist([self.row()])
-            if path == "/api/prediction-market-test/morning-report":
-                raise RuntimeError("monitor offline")
-            raise AssertionError(path)
-
-        result = await PredictionMarketReader(request=request, now=lambda: self.NOW).snapshot(
-            include_ladders=False,
-            include_market_setups=True,
-        )
-
-        self.assertTrue(result["liveVerified"])
-        self.assertEqual(len(result["data"]["markets"]), 1)
-        screen = result["data"]["marketSetupScreen"]
-        self.assertEqual(screen["status"], "unavailable")
-        self.assertEqual(screen["freshness"], "unavailable")
-        self.assertEqual(screen["markets"], [])
-        self.assertIn("monitor offline", " ".join(screen["warnings"]))
-
-    async def test_one_nonempty_selector_and_one_empty_selector_are_accepted(self):
-        watchlist_calls = []
-
-        async def watchlist_request(path):
-            watchlist_calls.append(path)
-            return self.watchlist([self.row()])
-
-        series_result = await PredictionMarketReader(
-            request=watchlist_request,
-            now=lambda: self.NOW,
-        ).snapshot(
-            series_tickers=["KXCPIYOY"],
-            market_areas=[],
-            include_ladders=False,
-        )
-        self.assertNotEqual(series_result["status"], "invalid_request")
-        self.assertEqual(series_result["data"]["requestedSeriesTickers"], ["KXCPIYOY"])
-        self.assertEqual(watchlist_calls, ["/api/prediction-markets/watchlist?forceRefresh=true"])
-
-        monitor_payload = {
-            "schemaVersion": 1,
-            "reportType": "four_market_morning",
-            "generatedAt": "2026-08-18T17:59:45Z",
-            "asOf": "2026-08-18T17:59:40Z",
-            "status": "partial",
-            "marketOrder": ["sp500"],
-            "summary": {},
-            "markets": [{"marketId": "sp500"}],
-            "warnings": [],
-            "policy": {"currentFieldsMayUseArchiveFallback": False},
-        }
-
-        async def monitor_request(path):
-            self.assertEqual(path, "/api/prediction-market-test/morning-report")
-            return monitor_payload
-
-        market_result = await PredictionMarketReader(
-            request=monitor_request,
-            now=lambda: self.NOW,
-        ).snapshot(
-            series_tickers=[],
-            market_areas=["sp500"],
-            include_ladders=False,
-        )
-        self.assertNotEqual(market_result["status"], "invalid_request")
-
-    async def test_four_market_monitor_uses_one_guarded_endpoint_and_preserves_exact_order(self):
-        payload = {
-            "schemaVersion": 1,
-            "reportType": "four_market_morning",
-            "generatedAt": "2026-08-18T17:59:45Z",
-            "asOf": "2026-08-18T17:59:40Z",
-            "status": "partial",
-            "marketOrder": ["sp500", "wti", "nasdaq100", "gold"],
-            "summary": {"requestedMarketCount": 4, "verifiedDirectBookCount": 1},
-            "markets": [
-                {"marketId": market_id, "label": market_id, "setup": {"rankEligible": False}}
-                for market_id in ("sp500", "wti", "nasdaq100", "gold")
-            ],
-            "warnings": ["Gold direct book unavailable."],
-            "policy": {
-                "currentFieldsMayUseArchiveFallback": False,
-                "recommendationAllowed": False,
-            },
-        }
-
-        async def request(path):
-            self.assertEqual(path, "/api/prediction-market-test/morning-report")
-            return payload
-
-        result = await PredictionMarketReader(request=request, now=lambda: self.NOW).snapshot(
-            market_areas=["sp500", "wti", "nasdaq100", "gold"],
-            include_ladders=False,
-        )
-
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["provider"], "market_dashboard")
-        self.assertEqual(result["freshness"], "current_monitor")
-        self.assertFalse(result["liveVerified"])
-        self.assertEqual(
-            [row["marketId"] for row in result["data"]["markets"]],
-            ["sp500", "wti", "nasdaq100", "gold"],
-        )
-        self.assertFalse(result["data"]["policy"]["currentFieldsMayUseArchiveFallback"])
-
-    async def test_monitor_area_validation_rejects_guesses_conflicts_and_duplicates_without_network(self):
-        request = AsyncMock()
-        reader = PredictionMarketReader(request=request, now=lambda: self.NOW)
-
-        unknown = await reader.snapshot(market_areas=["spx"])
-        conflict = await reader.snapshot(series_tickers=["KXINXU"], market_areas=["sp500"])
-        duplicate = await reader.snapshot(market_areas=["wti", "wti"])
-        bundled_conflict = await reader.snapshot(
-            market_areas=["sp500"],
-            include_market_setups=True,
-        )
-
-        self.assertEqual(unknown["status"], "invalid_request")
-        self.assertEqual(conflict["status"], "invalid_request")
-        self.assertEqual(duplicate["status"], "invalid_request")
-        self.assertEqual(bundled_conflict["status"], "invalid_request")
-        request.assert_not_awaited()
-
-    async def test_invalid_monitor_contract_is_failed_closed(self):
-        async def request(_path):
-            return {
-                "reportType": "four_market_morning",
-                "marketOrder": ["sp500", "wti"],
-                "markets": [],
-                "status": "available",
-            }
-
-        result = await PredictionMarketReader(request=request, now=lambda: self.NOW).snapshot(
-            market_areas=["sp500", "wti", "nasdaq100", "gold"]
-        )
-
-        self.assertEqual(result["status"], "unavailable")
-        self.assertFalse(result["liveVerified"])
-        self.assertEqual(result["data"]["markets"], [])
-
-    async def test_supported_ladder_keeps_native_contract_lines_and_strips_chart_history(self):
-        watchlist = self.watchlist([self.row()])
-        overview = {
-            "ok": True,
-            "markets": {
-                "cpi": {
-                    "status": "available",
-                    "summary": {
-                        "seriesTicker": "KXCPIYOY",
-                        "eventTicker": "KXCPIYOY-26AUG",
-                        "eventTitle": "CPI in August",
-                        "closeTime": "2026-08-20T12:30:00Z",
-                        "freshness": {
-                            "status": "direct_snapshot",
-                            "snapshotType": "direct_venue",
-                            "fetchedAt": "2026-08-18T17:59:40Z",
-                            "updatedAt": "2026-08-18T17:59:35Z",
-                        },
-                        "lines": [
-                            {
-                                "ticker": "KXCPIYOY-26AUG-T2.9",
-                                "label": "Above 2.9%",
-                                "sortValue": 2.9,
-                                "yesBid": 0.41,
-                                "yesAsk": 0.43,
-                                "yesBidSize": 120,
-                                "yesAskSize": 90,
-                                "noBid": 0.56,
-                                "noAsk": 0.58,
-                                "noBidSize": 80,
-                                "noAskSize": 70,
-                                "volume24h": 1000,
-                                "openInterest": 2200,
-                            }
-                        ],
-                        "chart": {"points": [{"timestamp": 1, "value": 0.42}]},
-                        "history": [{"price": 0.4}],
-                    },
-                },
-                "spx": {"status": "unavailable", "summary": None},
-                "wti": {},
-            },
-        }
-
-        async def request(path):
-            if path == "/api/prediction-markets/watchlist?forceRefresh=true":
-                return watchlist
-            if path == "/api/prediction-markets/overview?forceRefresh=true":
-                return overview
-            raise AssertionError(path)
-
-        result = await PredictionMarketReader(request=request, now=lambda: self.NOW).snapshot(
-            ["KXCPIYOY"], include_ladders=True
-        )
-        ladder = result["data"]["ladders"]["KXCPIYOY"]
-        self.assertEqual(ladder["contracts"][0]["noBidSize"], 80)
-        self.assertTrue(ladder["contracts"][0]["liveVerified"])
-        self.assertEqual(ladder["contracts"][0]["usage"], "research_only")
-        self.assertFalse(ladder["contracts"][0]["executable"])
-        self.assertNotIn("chart", ladder)
-        self.assertNotIn("history", ladder)
 
 
 class OpenBBTests(unittest.IsolatedAsyncioTestCase):

@@ -819,15 +819,15 @@ class SourceReasonTests(unittest.TestCase):
         result = review_sources(record, Store(evidence or {}), research_products=products, prediction_universe=UNIVERSE)
         return result, {item["id"]: item for item in result["items"]}
 
-    def test_paused_source_is_pending_while_running_and_after_settling(self):
+    def test_paused_pca_model_is_left_out_while_running_and_after_settling(self):
         paused = {"status": "pending", "asOf": AT, "updatedAt": AT, "fingerprint": None, "errorCode": "SOURCE_PAUSED",
                   "detail": {"elapsedMs": 5}}
         for state in ("running", "succeeded", "failed"):
             with self.subTest(state=state):
                 _, items = self.project(run("portfolio-review", {"portfolioPca": paused}, state=state))
-                self.assertEqual(items["portfolioPca"], {
-                    "id": "portfolioPca", "label": "PCA model", "status": "pending", "observedAt": None,
-                    "diagnostic": {"code": "SOURCE_PAUSED", "reason": "Paused for now. This source returns when it is re-enabled."}})
+                self.assertNotIn("portfolioPca", items)
+        _, running = self.project(run("portfolio-review", state="running"))
+        self.assertNotIn("portfolioPca", running)
 
     def test_settled_rows_without_a_check_are_not_checked_and_running_rows_stay_checking(self):
         _, running = self.project(run("portfolio-review", state="running"))

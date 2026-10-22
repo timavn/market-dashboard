@@ -1007,7 +1007,7 @@ class ConversationLifecycleTests(unittest.TestCase):
         cid = accepted['conversation']['id']
         self.store.dispatch('delete', {'conversationId': cid})
         lookups = [('get', {'conversationId': cid}), ('source-binding', {'conversationId': cid}),
-                   ('manual-sources', {'conversationId': cid}), ('archive', {'conversationId': cid}),
+                   ('archive', {'conversationId': cid}),
                    ('append', {'conversationId': cid, 'sourceId': 'late', 'text': 'Late'})]
         for operation, payload in lookups:
             with self.subTest(operation=operation, kind='deleted'):
@@ -1024,11 +1024,6 @@ class ConversationLifecycleTests(unittest.TestCase):
         with self.assertRaises(ConversationNotFound):
             self.store.dispatch('delete', {'conversationId': 'never-saved'})
         self.assertEqual(self.store.dispatch('delete', {'conversationId': cid}), {'ok': True})
-        # Other missing records keep a plain, code-less KeyError.
-        accepted = self.accept('r2')
-        with self.assertRaises(KeyError) as raised:
-            self.store.dispatch('manual-sources', {'conversationId': accepted['conversation']['id']})
-        self.assertFalse(hasattr(raised.exception, 'code'))
         self.assertEqual(self.store.deleted_conversation_ids(), {cid})
 
     def test_source_progress_is_a_compact_event_for_live_conversations_only(self):
@@ -1050,95 +1045,49 @@ class ConversationLifecycleTests(unittest.TestCase):
         self.assertEqual(self.events(cursor), [])
         self.assertEqual(self.store.dispatch('list', {})['conversations'], [])
 
-    def test_restart_settles_orphaned_manual_captures_once_without_touching_ready_ones(self):
-        from manual_portfolio_verification import captured_manual_sources, gateway_source, summary_pages
-        from test_manual_portfolio_verification import readiness, synthetic_capture
-        owners = []
-        for request in ('queued', 'acquiring', 'ready'):
-            accepted = self.accept(request, 'Verify my complete portfolio', operation='portfolio-cross-verification')
-            owner = accepted['conversation']['manualVerification']
-            owners.append({key: owner[key] for key in ('conversationId', 'turnId', 'captureId')})
-        self.store.dispatch('manual-mark-start', owners[1])
-        self.store.dispatch('manual-mark-start', owners[2])
-        captured = synthetic_capture()
-        self.store.dispatch('manual-complete', {**owners[2], 'result': captured, 'pages': summary_pages(owners[2]['captureId'], captured),
-                                                'items': captured_manual_sources(captured, gateway_source(readiness()))})
-        cursor = self.store.dispatch('event-cursor', {})['cursor']
-        restarted = WorkspaceStore(self.store.path)
-        self.assertEqual(restarted.settle_orphaned_manual_verifications(), 2)
-        self.assertEqual(restarted.settle_orphaned_manual_verifications(), 0)
-        for owner in owners[:2]:
-            status = restarted.dispatch('manual-status', owner)
-            self.assertEqual((status['state'], status['errorCode']), ('interrupted', 'MANUAL_VERIFICATION_RESTARTED'))
-            self.assertTrue(all(item['status'] == 'missing' and item['diagnostic'] == {'code': 'SOURCE_NOT_ATTEMPTED'}
-                                for item in status['items']))
-        self.assertEqual(restarted.dispatch('manual-status', owners[2])['state'], 'ready')
-        self.assertEqual(sorted((event['type'], event['conversation_id']) for event in self.events(cursor)),
-                         sorted(('revision', owner['conversationId']) for owner in owners[:2]))
-        self.assertEqual(len(restarted.dispatch('list', {})['conversations']), 3)
-
     def test_activity_counts_only_in_progress_work_updated_within_the_window(self):
-        self.assertEqual(self.store.activity(1800), {'turns': 0, 'manualCaptures': 0})
+        self.assertEqual(self.store.activity(1800), {'turns': 0})
         chat = self.accept('chat', 'Hello')
-        self.accept('manual', 'Verify my complete portfolio', operation='portfolio-cross-verification')
+        self.accept('other', 'Another question')
         finished = self.accept('finished', 'Done soon')
         cursor = self.store.dispatch('event-cursor', {})['cursor']
-        self.assertEqual(self.store.activity(1800), {'turns': 3, 'manualCaptures': 1})
+        self.assertEqual(self.store.activity(1800), {'turns': 3})
         # Reading activity writes nothing.
         self.assertEqual(self.events(cursor), [])
         self.store.dispatch('frame', {'turnId': finished['turn']['id'], 'type': 'complete', 'text': 'Saved final'})
-        self.assertEqual(self.store.activity(1800), {'turns': 2, 'manualCaptures': 1})
+        self.assertEqual(self.store.activity(1800), {'turns': 2})
         # A row left in progress but not updated within the window stops counting.
         with sqlite3.connect(self.store.path) as db:
             db.execute("UPDATE turns SET updated_at='2026-01-01T00:00:00Z' WHERE id=?", (chat['turn']['id'],))
-            db.execute("UPDATE manual_verifications SET updated_at='2026-01-01T00:00:00.000000Z'")
-        self.assertEqual(self.store.activity(1800), {'turns': 1, 'manualCaptures': 0})
+        self.assertEqual(self.store.activity(1800), {'turns': 1})
 
-    def test_manual_failure_after_verified_disconnect_keeps_broker_checks_unavailable(self):
-        accepted = self.accept('manual', 'Verify my complete portfolio', operation='portfolio-cross-verification')
-        manual = accepted['conversation']['manualVerification']
-        owner = {key: manual[key] for key in ('conversationId', 'turnId', 'captureId')}
-        sources = self.store.dispatch('manual-sources', owner)
+    def test_retired_manual_updates_are_rejected_and_their_saved_chats_load_as_ordinary_chats(self):
+        accepted = self.accept('manual', 'Verify my complete portfolio')
+        cid = accepted['conversation']['id']
+        self.store.dispatch('frame', {'turnId': accepted['turn']['id'], 'type': 'complete', 'text': 'Verified'})
+        # A database saved before the retirement still holds the capture table.
         with sqlite3.connect(self.store.path) as db:
-            created = db.execute('SELECT created_at FROM manual_verifications WHERE capture_id=?', (owner['captureId'],)).fetchone()[0]
-        self.assertEqual(sources['startedAt'], created)
-        self.assertNotIn('startedAt', self.store.dispatch('manual-status', owner))
-        self.store.dispatch('manual-mark-start', owner)
-        items = [{'id': 'ibGateway', 'label': 'IB Gateway', 'status': 'checking', 'observedAt': None, 'requiresIbGateway': True},
-                 {'id': 'brokerRow', 'label': 'Broker row', 'status': 'checking', 'observedAt': None, 'requiresIbGateway': True},
-                 {'id': 'research', 'label': 'Research', 'status': 'checking', 'observedAt': None}]
-        for verdict, broker in (('disconnected', ('unavailable', {'code': 'IBKR_GATEWAY_NOT_CONNECTED'})),
-                                ('unverified', ('missing', {'code': 'SOURCE_NOT_ATTEMPTED'}))):
-            with self.subTest(verdict=verdict):
-                if verdict == 'unverified':
-                    accepted = self.accept('manual-2', 'Verify my complete portfolio', operation='portfolio-cross-verification')
-                    manual = accepted['conversation']['manualVerification']
-                    owner = {key: manual[key] for key in ('conversationId', 'turnId', 'captureId')}
-                    self.store.dispatch('manual-mark-start', owner)
-                status = self.store.dispatch('manual-fail', {**owner, 'items': items, 'gatewayVerdict': verdict,
-                                                             'errorCode': 'IBKR_GATEWAY_NOT_CONNECTED'})
-                rows = {row['id']: row for row in status['items']}
-                self.assertEqual((rows['ibGateway']['status'], rows['ibGateway']['diagnostic']), broker)
-                self.assertEqual((rows['brokerRow']['status'], rows['brokerRow']['diagnostic']), broker)
-                self.assertEqual((rows['research']['status'], rows['research']['diagnostic']),
-                                 ('missing', {'code': 'SOURCE_NOT_ATTEMPTED'}))
-                self.assertEqual(status['errorCode'], 'IBKR_GATEWAY_NOT_CONNECTED')
-
-    def test_manual_failure_infers_a_verified_disconnect_only_from_the_captured_gateway_row(self):
-        for gateway, expected in (({'status': 'unavailable', 'connectionState': 'disconnected',
-                                    'diagnostic': {'code': 'GATEWAY_UNAVAILABLE'}}, ('unavailable', 'GATEWAY_UNAVAILABLE')),
-                                  ({'status': 'unavailable', 'diagnostic': {'code': 'IBKR_GATEWAY_READINESS_TIMEOUT'}},
-                                   ('missing', 'SOURCE_NOT_ATTEMPTED'))):
-            with self.subTest(gateway=gateway):
-                accepted = self.accept(str(gateway), 'Verify my complete portfolio', operation='portfolio-cross-verification')
-                manual = accepted['conversation']['manualVerification']
-                owner = {key: manual[key] for key in ('conversationId', 'turnId', 'captureId')}
-                self.store.dispatch('manual-mark-start', owner)
-                items = [{'id': 'ibGateway', 'label': 'IB Gateway', 'observedAt': None, 'requiresIbGateway': True, **gateway},
-                         {'id': 'brokerRow', 'label': 'Broker row', 'status': 'checking', 'observedAt': None, 'requiresIbGateway': True}]
-                status = self.store.dispatch('manual-fail', {**owner, 'items': items, 'errorCode': 'MANUAL_VERIFICATION_FAILED'})
-                row = next(row for row in status['items'] if row['id'] == 'brokerRow')
-                self.assertEqual((row['status'], row['diagnostic']['code']), expected)
+            db.executescript('''
+              CREATE TABLE manual_verifications (capture_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, sources TEXT NOT NULL, result TEXT, pages TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT, error_code TEXT);
+              CREATE INDEX manual_verification_history ON manual_verifications(conversation_id,created_at);
+              INSERT INTO settings VALUES('manual-verification-cursor-key','"secret"');''')
+            db.execute("INSERT INTO manual_verifications VALUES('capture',?,?,'ready','[]',NULL,NULL,'t','t','t',NULL)",
+                       (cid, accepted['turn']['id']))
+        restarted = WorkspaceStore(self.store.path)
+        with sqlite3.connect(self.store.path) as db:
+            self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name LIKE 'manual_verification%'").fetchone())
+            self.assertIsNone(db.execute("SELECT 1 FROM settings WHERE key='manual-verification-cursor-key'").fetchone())
+        conversation = restarted.dispatch('get', {'conversationId': cid})['conversation']
+        self.assertEqual((conversation['kind'], conversation['messages'][-1]['text']), ('chat', 'Verified'))
+        self.assertNotIn('manualVerification', conversation)
+        self.assertNotIn('manualVerification', restarted.dispatch('list', {})['conversations'][0])
+        with self.assertRaisesRegex(ValueError, 'Unknown chat operation'):
+            restarted.dispatch('accept', {'requestId': 'again', 'text': 'Verify my complete portfolio',
+                                          'conversationId': cid, 'operation': 'portfolio-cross-verification'})
+        self.assertEqual(restarted.activity(1800), {'turns': 0})
+        self.assertEqual(restarted.dispatch('delete', {'conversationId': cid}), {'ok': True, 'turnId': None, 'cancelRunId': None})
 
     def test_delete_audit_event_names_the_removed_chat_and_requesting_client(self):
         accepted = self.accept('first', 'Question about IGV')

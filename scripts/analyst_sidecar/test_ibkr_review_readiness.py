@@ -22,7 +22,7 @@ from analyst_review_sources import review_sources
 from market import IbkrReader, aclose_shared_clients
 from review_runs_v2 import ReviewCoordinatorV2, ReviewExecutionContext, ReviewRunV2Store
 from test_gateway_probe_stall import ReadinessServer, stall_loop
-from test_portfolio_review_coordinator import coordinator_sources, verified_balance_context, verified_prediction_universe
+from test_portfolio_review_coordinator import coordinator_sources, verified_balance_context
 
 
 class IbkrReadinessTests(unittest.IsolatedAsyncioTestCase):
@@ -163,9 +163,7 @@ class PortfolioPreflightTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(analyst_app.ibkr, "readiness", new=AsyncMock(return_value=unavailable)) as readiness,
                 patch.object(analyst_app.ibkr, "holdings_context", new=AsyncMock(return_value=unavailable)) as holdings,
                 patch.object(analyst_app.balance_context, "context", new=AsyncMock(return_value=verified_balance_context())) as balance,
-                patch.object(analyst_app.prediction_markets, "fixed_review_universe", new=AsyncMock(return_value=verified_prediction_universe())) as prediction,
                 patch.object(analyst_app, "_review_market_date", new=AsyncMock(return_value="2026-10-08")),
-                patch.object(analyst_app, "capture_prediction_research", new=AsyncMock(return_value={})),
             ):
                 coordinator = ReviewCoordinatorV2(self.store, {kind: handler})
                 run = await coordinator.start(review_kind=kind, request_id=f"independent-{kind}")
@@ -178,7 +176,6 @@ class PortfolioPreflightTests(unittest.IsolatedAsyncioTestCase):
                 readiness.assert_awaited_once()
                 holdings.assert_awaited_once()
                 balance.assert_awaited_once()
-                prediction.assert_not_awaited()
 
     async def test_disconnected_review_terminates_before_optional_or_account_requests(self):
         for pca_enabled in ("false", "true"):

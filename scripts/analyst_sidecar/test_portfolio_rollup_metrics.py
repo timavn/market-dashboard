@@ -160,6 +160,16 @@ class ReviewComparisonTests(unittest.TestCase):
                 self.assertEqual(result["baselineSessionDate"], "2026-09-17")
                 self.assertIsNone(result["baselineAsOf"])
 
+    def test_holdings_read_before_the_next_pre_market_open_is_the_previous_close(self):
+        current = {**self.current, "observedAt": "2026-10-19T14:30:00Z"}
+        session = previous_session_baseline(current["observedAt"])
+        for observed, status in (("2026-10-17T13:30:00Z", "available"), ("2026-10-19T07:59:00Z", "available"),
+                                 ("2026-10-19T08:00:00Z", "unavailable"), ("2026-10-16T19:59:59Z", "unavailable")):
+            with self.subTest(observed=observed):
+                result = build_review_comparison(current, {**self.previous, "observedAt": observed}, session_baseline=session)
+                self.assertEqual(result["baselineSessionDate"], "2026-10-16")
+                self.assertEqual(result["status"], status)
+
 
 class ExposureTests(unittest.TestCase):
     def test_nlv_denominator_signed_shorts_and_netting(self):

@@ -198,10 +198,31 @@ def previous_session_baseline(review_as_of: Any) -> dict[str, Any]:
     return dict(_previous_session(observed.astimezone(EASTERN).date().isoformat()) or {}) if observed else {}
 
 
+@lru_cache(maxsize=128)
+def _holdings_frozen_until(session_day: str) -> datetime | None:
+    """Holdings cannot change until the next session's 4:00am ET pre-market open."""
+    script = (
+        "const c=require('./src/utils/usEquityMarketCalendar.cjs');"
+        "process.stdout.write(c.nextTradingDateKey(process.argv[1]));"
+    )
+    try:
+        result = subprocess.run(["node", "-e", script, session_day], cwd=ROOT, text=True,
+                                capture_output=True, timeout=1, check=True)
+        next_day = datetime.strptime(result.stdout.strip(), "%Y-%m-%d").date()
+        return datetime.combine(next_day, time(4, 0), EASTERN)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def is_previous_session_close(metrics: Any, baseline: dict[str, Any]) -> bool:
+    """A verified read after the close and before the next pre-market open."""
     observed, close = _time(comparison_observed_at(metrics)), _time(baseline.get("baselineSessionCloseAt"))
-    return bool(observed and close and observed >= close
-                and observed.astimezone(EASTERN).date().isoformat() == baseline.get("baselineSessionDate"))
+    if not observed or not close or observed < close:
+        return False
+    if observed.astimezone(EASTERN).date().isoformat() == baseline.get("baselineSessionDate"):
+        return True
+    frozen_until = _holdings_frozen_until(baseline.get("baselineSessionDate") or "")
+    return bool(frozen_until and observed < frozen_until)
 
 
 def build_review_comparison(current_metrics, previous_metrics, baseline_as_of=None, *, session_baseline=None, baseline_source=None):

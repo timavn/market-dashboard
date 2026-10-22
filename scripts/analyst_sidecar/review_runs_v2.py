@@ -563,9 +563,10 @@ class ReviewRunV2Store:
             query += " AND run_id=?"
             params.append(bound_source.get("runId"))
         else:
-            from portfolio_rollup_metrics import EASTERN
+            from portfolio_rollup_metrics import EASTERN, _holdings_frozen_until
             close = _time(session["baselineSessionCloseAt"])
-            end = close.astimezone(EASTERN).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            end = (_holdings_frozen_until(session["baselineSessionDate"])
+                   or close.astimezone(EASTERN).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
             query += " AND julianday(json_extract(dependencies_json, '$.portfolio.asOf'))>=julianday(?) AND julianday(json_extract(dependencies_json, '$.portfolio.asOf'))<julianday(?)"
             params += [session["baselineSessionCloseAt"], end.isoformat()]
         with self.connect() as connection:

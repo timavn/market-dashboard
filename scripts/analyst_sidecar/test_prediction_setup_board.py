@@ -70,10 +70,10 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertEqual(indices["volatility"][0]["signal"], "Bearish")
         self.assertEqual(indices["volatility"][0]["range"], "14.58–16.71")
         self.assertNotIn('"Kalshi"', report)
-        self.assertIn("| Market | Tick | Trade | Trend | Price and Risk Range | As of (PT) |", report)
+        self.assertIn("| Market | Tick | Trade | Trend | Price and Risk Range | Status |", report)
         self.assertNotIn("Setup", report)
         # The US Dollar is the first row of every section, laid out like a market.
-        self.assertIn("| Market | Tick | Trade | Trend | Price and Risk Range | As of (PT) |\n| --- | --- | --- | --- | --- | --- |\n"
+        self.assertIn("| Market | Tick | Trade | Trend | Price and Risk Range | Status |\n| --- | --- | --- | --- | --- | --- |\n"
                       "| REF(US Dollar;DXY) | BIAS(Bullish;;) | BIAS(Bullish;;) | BIAS(Bullish;;) | RR(101.40;102.58;102.47;2;) | "
                       "ASOF(Oct 10 10:00;Oct 6,HedgAI UUP;Oct 6,Macro Show;Oct 9,Risk Ranges) |", report)
         self.assertEqual(report.count("REF(US Dollar;DXY)"), 5)
@@ -144,11 +144,12 @@ class SetupBoardRenderTests(unittest.TestCase):
             {"product": "the-macro-show", "productLabel": "The Macro Show", "kind": "position", "side": "Long", "name": "U.S. Dollar (USD)",
              "fit": "exact", "sourceText": "Longs: U.S. Dollar (USD), Software (IGV)"}]}
         report = render_setup_board(data)
-        self.assertIn("| Market | Tick | Trade | Trend | Alpha Code | Price and Risk Range | As of (PT) |", report)
-        # Gold 4216.3 sits above both levels; UST 2Y has only a Trend level.
-        self.assertIn("| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | ALPHA(4,180;4,120;above;above;;1;The Macro Show) |", report)
-        self.assertIn("| BIAS(Bullish;;) | ALPHA(;4.40;;above;%;0;Top 3 Things) |", report)
-        self.assertIn("| WTI | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | N/A |", report)
+        # The Alpha Code rides in the range cell as Trade;Trend;approximate;dots;product, not a column of its own.
+        self.assertIn("| Market | Tick | Trade | Trend | Price and Risk Range | Status |", report)
+        self.assertIn("| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | RR(4100;4224;4216;0;;4180;4120;1;1;The Macro Show) |", report)
+        # UST 2Y has only a Trend level.
+        self.assertIn("| BIAS(Bullish;;) | RR(4.73;4.96;4.75;2;%;;4.4;0;1;Top 3 Things) |", report)
+        self.assertIn("| WTI | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(87.14;93.03;91.85;2;) |", report)
         metals = json.loads(report.split("## Metals", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
         # One entry per mention in time order: the part of the sentence about the market, with the sentence as its source;
         # published data carries the line or list it was printed in.
@@ -185,6 +186,42 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertNotIn("analyst-research", report)
         self.assertNotIn("Research read", report)
 
+    def test_structure_column_carries_runs_and_the_all_time_high_before_as_of(self):
+        data = board()
+        data["structureSessions"] = 10
+        data["usd"]["structure"] = {"sessions": 2, "low": {"steps": "+-", "direction": -1, "run": 1},
+                                    "high": {"steps": "==", "direction": 0, "run": 0},
+                                    "allTimeHigh": {"value": 164.72, "date": "1985-02-25", "rangeTopAbove": False}}
+        gold = next(row for row in data["rows"] if row["id"] == "gold")
+        gold["structure"] = {"sessions": 3, "low": {"steps": "+=+", "direction": 1, "run": 2},
+                             "high": {"steps": "-++", "direction": 1, "run": 2},
+                             "allTimeHigh": {"value": 4200, "date": "2026-10-06", "rangeTopAbove": True}}
+        report = render_setup_board(data)
+        self.assertIn("| Price and Risk Range | Structure | Status |", report)
+        # The record's full date rides along for the ATH pop-up. Price sits 0% from the ATH.
+        self.assertIn("| STRUCT(+=+;+2;-++;+2;4,200;Oct 6, 2026;+0;1;) | ASOF(", report)
+        self.assertIn("| STRUCT(+-;-1;==;0;164.72;Feb 25, 1985;-38;0;) |", report)
+        # A market whose structure could not be read shows N/A; boards without history keep six columns.
+        self.assertIn("| N/A | ASOF(", report)
+        self.assertNotIn("Structure", render_setup_board(board()))
+
+    def test_volume_column_follows_trend_and_structure_carries_dv_or_av(self):
+        data = board()
+        data["volumeWindows"] = {"d15": 15, "d30": 30, "d90": 90}
+        data["structureSessions"] = 10
+        gold = next(row for row in data["rows"] if row["id"] == "gold")
+        gold["volume"] = {"symbol": "GLD", "date": "2026-10-09", "d1": 13.6, "d15": -4.6, "d30": -15.2, "d90": -21.4,
+                          "changePct": 0.3, "signal": {"move": "DV", "tone": None}}
+        gold["structure"] = {"sessions": 1, "low": {"steps": "+", "direction": 1, "run": 1},
+                             "high": {"steps": "-", "direction": -1, "run": 1}, "allTimeHigh": None}
+        report = render_setup_board(data)
+        self.assertIn("| Market | Tick | Trade | Trend | Volume | Price and Risk Range | Structure | Status |", report)
+        self.assertIn("| BIAS(Bearish;;) | VOL(+14;-5;-15;-21;2026-10-09;GLD) | RR(", report)
+        self.assertIn("STRUCT(+;+1;-;-1;;;;0;;DV;) |", report)
+        # A market whose volume could not be read keeps an empty token, so its row still splits.
+        self.assertIn("| BIAS(Bullish;;) | VOL(;;;;;) | RR(", report)
+        self.assertNotIn("Volume", render_setup_board(board()))
+
     def test_cpi_lists_every_nowcast_month_with_its_kalshi_event_or_na(self):
         report = render_setup_board({"rows": [{"id": "cpi", "label": "CPI YoY", "group": "inflation",
             "events": [{"eventTicker": "KXCPIYOY-26SEP"}], "forecasts": [
@@ -192,6 +229,7 @@ class SetupBoardRenderTests(unittest.TestCase):
                  "publishedAt": "2026-10-06T11:48:50+00:00", "eventTicker": "KXCPIYOY-26SEP"},
                 {"reportMonth": "2026-10", "available": True, "lower": 3.69, "base": 3.8, "upper": 3.91,
                  "publishedAt": "2026-10-06T11:48:50+00:00", "eventTicker": None}]}]})
+        self.assertIn("| Market | Kalshi | Low | Base | High | Published |", report)
         self.assertIn("| CPI YoY · Sep 2026 | Sep | 3.63% | 3.74% | 3.85% | Oct 6 04:48 PDT |", report)
         self.assertIn("| CPI YoY · Oct 2026 | N/A | 3.69% | 3.80% | 3.91% | Oct 6 04:48 PDT |", report)
         self.assertIn("Sources: HedgAI Signals, Cboe volatility indices, Kalshi", report)

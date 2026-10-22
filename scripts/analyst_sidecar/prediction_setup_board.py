@@ -206,8 +206,29 @@ def _market_cell(row: dict[str, Any]) -> str:
     return row.get("label") or NA
 
 
+def _alpha_code(row: dict[str, Any]) -> dict[str, Any] | None:
+    """This morning's Alpha Code, or without one the highest-priority product's single Trade or Trend level."""
+    research = row.get("research") or {}
+    if research.get("alphaCode"):
+        return research["alphaCode"]
+    singles = [item for item in research.get("findings") or []
+               if item.get("kind") in ("tradeLevel", "trendLevel") and item.get("fit") == "exact"]
+    trade = next((item for item in singles if item["kind"] == "tradeLevel"), None)
+    trend = next((item for item in singles if item["kind"] == "trendLevel"), None)
+    if not (trade or trend):
+        return None
+    first = trade or trend
+    return {"trade": (trade or {}).get("level"), "trend": (trend or {}).get("level"), "unit": first.get("unit"),
+            "approximate": bool((trade or {}).get("approximate") or (trend or {}).get("approximate")),
+            "productLabel": first.get("productLabel")}
+
+
 def _range_cell(row: dict[str, Any]) -> str:
-    """Token the report UI draws as a one-line price-in-range bar: RR(low;high;price;decimals;unit)."""
+    """Token the report UI draws as a one-line price-in-range bar with this morning's Alpha Code under it.
+
+    RR(low;high;price;decimals;unit;acTrade;acTrend;approx;dots;product) — dots is 1 when the Alpha Code
+    is on the range's own instrument, so its levels can be marked on the bar.
+    """
     risk_range = row.get("range") or {}
     low, high = risk_range.get("low"), risk_range.get("high")
     if not all(isinstance(value, (int, float)) for value in (low, high)):
@@ -217,7 +238,15 @@ def _range_cell(row: dict[str, Any]) -> str:
     decimals = 0 if max(abs(low), abs(high)) >= 1000 else 2
     value = f"{price:.{decimals}f}" if isinstance(price, (int, float)) else ""
     unit = "%" if row.get("group") == "rates" else ""
-    return f"RR({low:.{decimals}f};{high:.{decimals}f};{value};{decimals};{unit})"
+    token = f"RR({low:.{decimals}f};{high:.{decimals}f};{value};{decimals};{unit}"
+    code = _alpha_code(row)
+    if not code:
+        return token + ")"
+    level = lambda key: f"{code[key]:g}" if isinstance(code.get(key), (int, float)) and not isinstance(code.get(key), bool) else ""
+    # The Alpha Code is printed for the market itself; a range drawn on another instrument (COMPQ) gets no dots.
+    dots = 0 if row.get("rangePrice") else 1
+    product = re.sub(r"[;()|]", " ", str(code.get("productLabel") or "")).strip()
+    return f"{token};{level('trade')};{level('trend')};{1 if code.get('approximate') else 0};{dots};{product})"
 
 
 def _level(value: Any, unit: str | None) -> str:
@@ -229,33 +258,49 @@ def _level(value: Any, unit: str | None) -> str:
     return f"{value:,.0f}" if abs(value) >= 1000 else f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
-def _alpha_cell(row: dict[str, Any]) -> str:
-    """Token the report UI stacks as Trade and Trend levels with the price above or below each.
+def _structure_cell(row: dict[str, Any]) -> str:
+    """Token the report UI stacks as today's range moves, the run counts and the all-time high check.
 
-    ALPHA(trade;trend;tradeRel;trendRel;unit;approx;product)
+    STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone]) — steps oldest first as
+    + (higher), - (lower) or = (unchanged); runs signed (+8 = eight higher in a row ending today). Boards with
+    volume add DV/AV and whether the move against the Trend is supported or warned by it.
     """
-    research = row.get("research") or {}
-    code = research.get("alphaCode")
-    price = (row.get("price") or {}).get("value")
-    relation = lambda level: ("above" if price > level else "below" if price < level else "at") \
-        if isinstance(price, (int, float)) and isinstance(level, (int, float)) else ""
-    if not code:
-        # Without a full code, the highest-priority product's single Trade or Trend level for the market itself.
-        singles = [item for item in research.get("findings") or []
-                   if item.get("kind") in ("tradeLevel", "trendLevel") and item.get("fit") == "exact"]
-        trade = next((item for item in singles if item["kind"] == "tradeLevel"), None)
-        trend = next((item for item in singles if item["kind"] == "trendLevel"), None)
-        if not (trade or trend):
-            return "N/A"
-        first = trade or trend
-        code = {"trade": (trade or {}).get("level"), "trend": (trend or {}).get("level"), "unit": first.get("unit"),
-                "approximate": bool((trade or {}).get("approximate") or (trend or {}).get("approximate")),
-                "productLabel": first.get("productLabel")}
-    clean = lambda value: re.sub(r"[;()|]", " ", str(value or "")).strip()
-    unit = code.get("unit") or ""
-    return (f"ALPHA({_level(code.get('trade'), unit)};{_level(code.get('trend'), unit)};"
-            f"{relation(code.get('trade'))};{relation(code.get('trend'))};{unit};{1 if code.get('approximate') else 0};"
-            f"{clean(code.get('productLabel'))})")
+    structure = row.get("structure")
+    if not isinstance(structure, dict):
+        return NA
+    run = lambda leg: f"{'+' if leg.get('direction', 0) > 0 else '-' if leg.get('direction', 0) < 0 else ''}{leg.get('run') or 0}"
+    low, high = structure.get("low") or {}, structure.get("high") or {}
+    unit = "%" if row.get("group") == "rates" else ""
+    ath, ath_date, ath_pct, top_above = "", "", "", "0"
+    record = structure.get("allTimeHigh") or {}
+    if isinstance(record.get("value"), (int, float)):
+        ath = _level(record["value"], unit)
+        match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", str(record.get("date") or ""))
+        if match:
+            month = MONTHS[int(match[2]) - 1]
+            # The full date, shown when the ATH line is opened.
+            ath_date = f"{month} {int(match[3])}, {match[1]}"
+        price = ((row.get("rangePrice") or row.get("price")) or {}).get("value")
+        if isinstance(price, (int, float)) and record["value"]:
+            ath_pct = f"{round((price / record['value'] - 1) * 100):+d}"
+        top_above = "1" if record.get("rangeTopAbove") else "0"
+    signal = ((row.get("volume") or {}).get("signal") or {}) if "volume" in row else None
+    volume = "" if signal is None else f";{signal.get('move') or ''};{signal.get('tone') or ''}"
+    return (f"STRUCT({low.get('steps', '')};{run(low)};{high.get('steps', '')};{run(high)};"
+            f"{ath};{ath_date};{ath_pct};{top_above};{unit}{volume})")
+
+
+def _volume_cell(row: dict[str, Any]) -> str:
+    """Token the report UI draws under Tick, Trade and Trend: the latest session's ETF volume against the prior
+    session and its 15-, 30- and 90-calendar-day averages, as signed whole percents.
+
+    VOL(d1;d15;d30;d90;date;symbol) — empty readings when the market's volume is unavailable, so the row keeps its shape.
+    """
+    volume = row.get("volume")
+    if not isinstance(volume, dict):
+        return "VOL(;;;;;)"
+    pct = lambda key: f"{round(volume[key]):+d}" if isinstance(volume.get(key), (int, float)) else ""
+    return f"VOL({pct('d1')};{pct('d15')};{pct('d30')};{pct('d90')};{volume.get('date') or ''};{volume.get('symbol') or ''})"
 
 
 TONE = {"Bullish": "positive", "Bearish": "negative", "Long": "positive", "Short": "negative",
@@ -371,7 +416,8 @@ def _dollar_row(usd: dict[str, Any] | None) -> dict[str, Any] | None:
     return {"id": "usd", "label": "US Dollar", "reference": "DXY",
             "price": {"value": usd.get("value"), "asOf": usd.get("asOf")},
             "range": {"low": usd.get("low"), "high": usd.get("high"), "date": usd.get("rangeDate")} if has_range else {},
-            "tick": usd.get("tick"), "trade": usd.get("trade"), "trend": usd.get("trend"), "research": usd.get("research")}
+            "tick": usd.get("tick"), "trade": usd.get("trade"), "trend": usd.get("trend"), "research": usd.get("research"),
+            "structure": usd.get("structure"), **({"volume": usd.get("volume")} if "volume" in usd else {})}
 
 
 def _section_rows(board: dict[str, Any], rows: list[dict[str, Any]]) -> list[tuple[str, str, list[dict[str, Any]]]]:
@@ -384,8 +430,12 @@ def render_setup_board(board: dict[str, Any]) -> str:
     rows = [row for row in board.get("rows") or [] if isinstance(row, dict)]
     priced = [row for row in rows if row.get("id") != "cpi"]
     sources = board.get("sources") or {}
-    # Boards captured with the morning's products carry an Alpha Code column and research block.
+    # Boards captured with the morning's products carry Alpha Codes in the range cell and a research block.
     with_research = isinstance(board.get("research"), dict)
+    # Boards captured with Risk Range history add higher highs and higher lows before As of.
+    sessions = board.get("structureSessions")
+    # Boards captured with ETF volume add it after Trend; the report draws it under Tick, Trade and Trend.
+    with_volume = isinstance(board.get("volumeWindows"), dict)
     dollar_research_shown = False
     lines = []
     for section_id, label, members in _section_rows(board, rows):
@@ -409,7 +459,7 @@ def render_setup_board(board: dict[str, Any]) -> str:
                                  *(_number(forecast.get(key), percent=True) if forecast.get("available") else NA
                                    for key in ("lower", "base", "upper")),
                                  published if published != DASH else NA])
-                lines += _table(["Market", "Kalshi", "Nowcast low", "Base", "High", "Published"], rows)
+                lines += _table(["Market", "Kalshi", "Low", "Base", "High", "Published"], rows)
             continue
         drivers = _driver_block(board, members, label)
         if drivers["volatility"] or drivers.get("correlations"):
@@ -420,13 +470,14 @@ def render_setup_board(board: dict[str, Any]) -> str:
             price, tick, trade, risk_range = (row.get(key) or {} for key in ("price", "tick", "trade", "range"))
             trend_product = "Crypto Quant" if risk_range.get("product") == "crypto-quant" else "Risk Ranges"
             table.append([_market_cell(row), _bias_cell(tick.get("direction")), _bias_cell(trade.get("direction")),
-                          _bias_cell(row.get("trend")), *([_alpha_cell(row)] if with_research else []), _range_cell(row),
+                          _bias_cell(row.get("trend")), *([_volume_cell(row)] if with_volume else []), _range_cell(row),
+                          *([_structure_cell(row)] if sessions else []),
                           _as_of_cell(price.get("asOf"), [
                               (tick.get("date"), f"HedgAI {tick.get('ticker') or ''}".strip() if tick else None),
                               (trade.get("date"), trade.get("source")),
                               (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)])])
-        lines += _table(["Market", "Tick", "Trade", "Trend", *(["Alpha Code"] if with_research else []),
-                         "Price and Risk Range", "As of (PT)"], table)
+        lines += _table(["Market", "Tick", "Trade", "Trend", *(["Volume"] if with_volume else []), "Price and Risk Range",
+                         *(["Structure"] if sessions else []), "Status"], table)
         notes = []
         for row in members:
             if row.get("rangePrice") and row.get("range"):

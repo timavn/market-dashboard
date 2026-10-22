@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -12,23 +12,18 @@ import unittest
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
-import httpx
-
 
 SIDECAR_DIR = Path(__file__).resolve().parent
 if str(SIDECAR_DIR) not in sys.path:
     sys.path.insert(0, str(SIDECAR_DIR))
 
-from market import PREDICTION_TIMEOUT_SECONDS, PREDICTIVE_REVIEW_UNIVERSE, PredictionMarketReader
 from review_runs_v2 import (
-    DEADLINE_SECONDS,
     MAX_SUMMARY_INPUT_BYTES,
     MAX_REVIEW_CONTEXT_BYTES,
     ReviewCoordinatorV2,
     ReviewExecutionContext,
     ReviewRunError,
     ReviewRunV2Store,
-    SUMMARY_TIMEOUT_SECONDS,
     bounded_summary_input,
     canonical_fingerprint,
     coordinator_canary,
@@ -174,12 +169,6 @@ class ReviewRunV2Tests(unittest.IsolatedAsyncioTestCase):
                 self.store.create(review_kind="balance-review", request_id="accepted", run_id=run_id)
             self.assertEqual(invalid.exception.code, "REVIEW_REQUEST_INVALID")
         self.assertEqual(self.store.list_recent(), [])
-
-    def test_prediction_deadline_covers_upstream_acquisition_summary_and_persistence(self):
-        self.assertGreaterEqual(
-            DEADLINE_SECONDS["prediction-markets-review"],
-            PREDICTION_TIMEOUT_SECONDS + SUMMARY_TIMEOUT_SECONDS + 1,
-        )
 
     def test_status_and_source_metadata_do_not_decode_reports_or_hydrate_archives(self):
         run, _ = self.store.create(review_kind="portfolio-review", conversation_id="bound", request_id="cheap-read")
@@ -1210,234 +1199,6 @@ class ReviewRunV2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(payload.encode("utf-8")), MAX_SUMMARY_INPUT_BYTES)
 
 
-class FixedPredictionUniverseTests(unittest.IsolatedAsyncioTestCase):
-    @staticmethod
-    def fresh(path, **changes):
-        stamp = datetime.now(timezone.utc).isoformat()
-        venue = path.split("venue=", 1)[1].split("&", 1)[0]
-        market_id = path.split("/monitor/", 1)[1].split("/", 1)[0]
-        return {
-            "status": "available", "marketId": market_id, "selectedVenueId": venue,
-            "revision": 2, "refresh": {"state": "idle"},
-            "acquisition": {"status": "complete", "requestedAt": stamp, "completedAt": stamp,
-                            "previousRevision": 1, "revision": 2},
-            "displaySelection": {"status": "available", "venueId": venue},
-            "displayContracts": {"status": "available", "event": {"ticker": f"{market_id}-event"},
-                                 "lines": [{"ticker": f"{market_id}-contract", "yesBid": 40, "yesAsk": 42}]},
-            **changes,
-        }
-
-    @classmethod
-    def native_fresh(cls, path):
-        payload = cls.fresh(path)
-        stamp = payload["acquisition"]["requestedAt"]
-        observed = datetime.fromisoformat(stamp)
-        venue = payload["selectedVenueId"]
-        source = "ibkr_tws_forecastex_live" if venue == "forecastex" else "kalshi_batch_orderbooks_v2"
-        payload["acquisition"]["scope"] = "pinned_native_book"
-        payload["refresh"].update(state="refreshing", startedAt=stamp, completedAt=stamp)
-        display = payload["displayContracts"]
-        display.update(bookExpiresAt=(observed + timedelta(seconds=60)).isoformat(), sourceRefreshPending=True)
-        display["event"].update(venueId=venue, status="open", closeTime=(observed + timedelta(days=1)).isoformat())
-        display["lines"][0].update(
-            yesBid=.40, yesAsk=.42, noBid=.58, noAsk=.60, directNative=True,
-            source=source, evidence={"quotes": {"source": source, "asOf": stamp, "fit": "exact"}},
-        )
-        return payload
-
-    async def test_scoped_native_acquisition_keeps_fresh_quotes_while_other_sources_refresh(self):
-        async def request(path, *, method):
-            return self.native_fresh(path)
-
-        result = await PredictionMarketReader(request=request).fixed_review_universe()
-        self.assertEqual(result["status"], "available")
-        self.assertEqual(result["data"]["availableCount"], 7)
-        self.assertTrue(all(row["snapshot"]["refresh"]["state"] == "refreshing"
-                            for row in result["data"]["markets"]))
-
-    async def test_scoped_acquisition_requires_independent_current_native_book_proof(self):
-        cases = (
-            ("acquisition", {"scope": "unverified"}),
-            ("selection", {"status": "unavailable"}),
-            ("selection", {"refreshPending": True}),
-            ("selection", {"refreshRetained": True}),
-            ("refresh", {"lastError": "Provider unavailable"}),
-            ("refresh", {"startedAt": "2020-01-01T00:00:00Z"}),
-            ("refresh", {"completedAt": "2020-01-01T00:00:00Z"}),
-            ("display", {"refreshPending": True}),
-            ("display", {"refreshRetained": True}),
-            ("display", {"cachedOnly": True}),
-            ("display", {"refreshFailed": True}),
-            ("display", {"bookExpiresAt": "2020-01-01T00:00:00Z"}),
-            ("event", {"status": "closed"}),
-            ("event", {"venueId": "forecastex"}),
-            ("line", {"stale": True}),
-            ("line", {"mock": True}),
-            ("line", {"seeded": True}),
-            ("line", {"connected": False}),
-            ("line", {"directNative": False}),
-            ("line", {"derivedFields": ["noAsk"]}),
-            ("line", {"yesBid": .80}),
-            ("line", {"noAsk": None}),
-            ("quote", {"source": "ibkr_tws_forecastex_live"}),
-            ("quote", {"fit": "proxy"}),
-            ("quote", {"asOf": "2020-01-01T00:00:00Z"}),
-            ("quote", {"asOf": "2099-01-01T00:00:00Z"}),
-        )
-        for target, mutation in cases:
-            with self.subTest(target=target, mutation=mutation):
-                async def request(path, *, method):
-                    payload = self.native_fresh(path)
-                    if payload["marketId"] == "silver":
-                        display = payload["displayContracts"]
-                        targets = {"acquisition": payload["acquisition"], "refresh": payload["refresh"],
-                                   "selection": payload["displaySelection"],
-                                   "display": display, "event": display["event"], "line": display["lines"][0],
-                                   "quote": display["lines"][0]["evidence"]["quotes"]}
-                        targets[target].update(mutation)
-                    return payload
-
-                result = await PredictionMarketReader(request=request).fixed_review_universe()
-                rows = {row["marketId"]: row for row in result["data"]["markets"]}
-                self.assertEqual(result["status"], "partial")
-                self.assertIsNone(rows["silver"]["snapshot"])
-                self.assertEqual(rows["gold"]["status"], "available")
-
-    async def test_scoped_acquisition_rejects_a_recent_book_from_before_this_request(self):
-        async def request(path, *, method):
-            payload = self.native_fresh(path)
-            requested = datetime.fromisoformat(payload["acquisition"]["requestedAt"])
-            payload["displayContracts"]["lines"][0]["evidence"]["quotes"]["asOf"] = (
-                requested - timedelta(seconds=1)
-            ).isoformat()
-            return payload
-
-        result = await PredictionMarketReader(request=request).fixed_review_universe()
-        self.assertEqual(result["status"], "unavailable")
-        self.assertTrue(all(row["snapshot"] is None for row in result["data"]["markets"]))
-
-    async def test_http_transport_posts_json_for_each_pinned_monitor_refresh(self):
-        requests = []
-
-        def respond(request):
-            requests.append(request)
-            if request.headers.get("Content-Type") != "application/json":
-                return httpx.Response(415, json={"error": "JSON request content type is required"})
-            self.assertEqual(request.method, "POST")
-            self.assertEqual(json.loads(request.content), {})
-            self.assertEqual(request.headers.get("Cache-Control"), "no-cache")
-            return httpx.Response(
-                200,
-                headers={"Cache-Control": "no-store, max-age=0"},
-                json=self.fresh(str(request.url)),
-            )
-
-        async_client = httpx.AsyncClient
-        with patch("market.httpx.AsyncClient", side_effect=lambda **kwargs: async_client(
-            transport=httpx.MockTransport(respond), **kwargs
-        )), patch("market.asyncio.wait_for", wraps=asyncio.wait_for) as wait_for:
-            result = await PredictionMarketReader().fixed_review_universe()
-
-        self.assertEqual(result["status"], "available")
-        self.assertEqual(result["data"]["availableCount"], 7)
-        for call in wait_for.call_args_list:
-            self.assertGreater(call.kwargs["timeout"], 35)
-            self.assertGreaterEqual(call.kwargs["timeout"], requests[0].extensions["timeout"]["read"])
-        self.assertEqual(
-            [(request.url.path.split("/monitor/")[1].split("/")[0], request.url.params["venue"])
-             for request in requests],
-            [(market_id, venue) for market_id, _, venue in PREDICTIVE_REVIEW_UNIVERSE],
-        )
-
-    async def test_http_transport_without_no_store_cannot_supply_review_snapshots(self):
-        async_client = httpx.AsyncClient
-        with patch("market.httpx.AsyncClient", side_effect=lambda **kwargs: async_client(
-            transport=httpx.MockTransport(lambda request: httpx.Response(
-                200, json=self.fresh(str(request.url))
-            )), **kwargs
-        )):
-            result = await PredictionMarketReader().fixed_review_universe()
-
-        self.assertEqual(result["status"], "unavailable")
-        self.assertTrue(all(row["snapshot"] is None for row in result["data"]["markets"]))
-        self.assertTrue(all("no-store" in row["error"] for row in result["data"]["markets"]))
-
-    async def test_exact_asset_venue_allowlist_posts_concurrent_fresh_acquisitions(self):
-        paths = []
-        all_started = asyncio.Event()
-
-        async def request(path, *, method):
-            self.assertEqual(method, "POST")
-            paths.append(path)
-            if len(paths) == len(PREDICTIVE_REVIEW_UNIVERSE):
-                all_started.set()
-            await asyncio.wait_for(all_started.wait(), .5)
-            return self.fresh(path)
-
-        result = await PredictionMarketReader(request=request).fixed_review_universe()
-        self.assertEqual(result["status"], "available")
-        self.assertEqual(len(paths), len(PREDICTIVE_REVIEW_UNIVERSE))
-        self.assertIn("/api/prediction-market-test/monitor/silver/refresh?venue=kalshi&view=review", paths)
-        self.assertNotIn("/api/prediction-market-test/monitor/silver/refresh?venue=forecastex&view=review", paths)
-        self.assertIn("/api/prediction-market-test/monitor/cpi/refresh?venue=forecastex&view=review", paths)
-        self.assertIn("/api/prediction-market-test/monitor/ethereum/refresh?venue=kalshi&view=review", paths)
-        self.assertEqual(list(PREDICTIVE_REVIEW_UNIVERSE), [
-            ("cpi", "CPI", "forecastex"), ("sp500", "S&P 500", "forecastex"),
-            ("nasdaq100", "Nasdaq-100", "kalshi"),
-            ("gold", "Gold", "kalshi"), ("silver", "Silver", "kalshi"),
-            ("bitcoin", "Bitcoin", "kalshi"), ("ethereum", "Ethereum", "kalshi"),
-        ])
-        self.assertEqual([(row["marketId"], row["asset"], row["venue"]) for row in result["data"]["universe"]],
-                         list(PREDICTIVE_REVIEW_UNIVERSE))
-        self.assertFalse(any("venue=auto" in path for path in paths))
-
-    async def test_cached_or_wrong_venue_asset_fails_only_that_row(self):
-        async def request(path, *, method):
-            payload = self.fresh(path)
-            if payload["marketId"] == "silver":
-                payload["selectedVenueId"] = "forecastex"
-                payload["displaySelection"]["venueId"] = "forecastex"
-            if payload["marketId"] == "ethereum":
-                payload["displayContracts"]["cachedOnly"] = True
-            return payload
-
-        result = await PredictionMarketReader(request=request).fixed_review_universe()
-        by_market = {row["marketId"]: row for row in result["data"]["markets"]}
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(by_market["silver"]["errorCode"], "PINNED_VENUE_MISMATCH")
-        self.assertEqual(by_market["ethereum"]["errorCode"], "PINNED_VENUE_DATA_INCOMPLETE")
-        self.assertEqual(by_market["gold"]["status"], "available")
-        self.assertIsNone(by_market["silver"]["snapshot"])
-        self.assertFalse(result["liveVerified"])
-
-    async def test_failed_or_unverified_refresh_never_returns_an_old_snapshot(self):
-        for failure in ("missing", "unchanged", "failed", "old", "offline"):
-            with self.subTest(failure=failure):
-                async def request(path, *, method):
-                    payload = self.fresh(path)
-                    if failure == "missing": payload.pop("acquisition")
-                    elif failure == "unchanged": payload["acquisition"]["previousRevision"] = 2
-                    elif failure == "failed": payload["refresh"]["state"] = "error"
-                    elif failure == "old": payload["acquisition"]["requestedAt"] = "2020-01-01T00:00:00Z"
-                    else: raise RuntimeError("Provider unavailable")
-                    return payload
-                result = await PredictionMarketReader(request=request).fixed_review_universe()
-                self.assertEqual(result["status"], "unavailable")
-                self.assertTrue(all(row["snapshot"] is None for row in result["data"]["markets"]))
-
-    async def test_refresh_deadline_is_bounded_and_no_event_remains_explicit(self):
-        async def stalled(path, *, method):
-            await asyncio.sleep(1)
-            return self.fresh(path)
-        result = await PredictionMarketReader(request=stalled, monitor_wait_seconds=.01).fixed_review_universe()
-        self.assertTrue(all(row["snapshot"] is None for row in result["data"]["markets"]))
-
-        async def no_event(path, *, method):
-            return self.fresh(path, displayContracts={"status": "unavailable", "reason": "No current open event."})
-        result = await PredictionMarketReader(request=no_event).fixed_review_universe()
-        self.assertTrue(all(row["error"] == "No current open event." for row in result["data"]["markets"]))
-
-
 class CheckpointAndSourcesCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="review-run-v2-checkpoint-")
@@ -1574,7 +1335,7 @@ class CheckpointAndSourcesCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [])
         self.assertNotIn("balance", self.store.get_source_metadata(run["runId"])["dependencies"])
 
-    async def test_paused_checkpoint_is_stored_and_projected_as_pending(self):
+    async def test_paused_checkpoint_is_stored_and_left_out_of_sources(self):
         from analyst_review_sources import review_sources
         run, _ = self.store.create(review_kind="portfolio-review", conversation_id="chat", request_id="paused")
         self.store.update(run["runId"], state="running")
@@ -1589,10 +1350,8 @@ class CheckpointAndSourcesCacheTests(unittest.IsolatedAsyncioTestCase):
                 if state == "failed":
                     self.store.update(run["runId"], state="failed", phase="terminal", outcome="blocked")
                     saved = self.store.get_source_metadata(run["runId"])
-                item = next(row for row in review_sources(saved, self.store)["items"] if row["id"] == "portfolioPca")
-                self.assertEqual(item, {"id": "portfolioPca", "label": "PCA model", "status": "pending", "observedAt": None,
-                                        "diagnostic": {"code": "SOURCE_PAUSED",
-                                                       "reason": "Paused for now. This source returns when it is re-enabled."}})
+                # The paused PCA model is saved but no longer shown in Sources.
+                self.assertNotIn("portfolioPca", [row["id"] for row in review_sources(saved, self.store)["items"]])
 
     def test_conversation_list_can_hide_tombstoned_ids_without_touching_saved_runs(self):
         created = []

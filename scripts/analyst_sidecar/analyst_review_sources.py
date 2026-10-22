@@ -12,6 +12,7 @@ from daily_research_rollup import accepted_snapshots, publication_time, CAPTURE_
 from prediction_research_rollup import accepted_prediction_snapshots, PRODUCTS as PREDICTION_PRODUCTS
 from research_cadence import publication_matches_expected
 from hedgai_review import accepted_hedgai
+from portfolio_pca_review import portfolio_pca_enabled
 
 
 ACTIVE = {"queued", "accepted", "running", "preparing"}
@@ -533,7 +534,11 @@ def _review_sources(run, store, research_products, prediction_universe):
             items.append(item)
         items.append(dependency("marketSituation", "Market data"))
         if "portfolioPca" in dependencies or active:
-            items.append(dependency("portfolioPca", "PCA model"))
+            # The user removed the paused PCA model from Sources, including
+            # saved reviews; it returns only once the model read is re-enabled.
+            pca = _object(dependencies.get("portfolioPca"))
+            if pca.get("status") != "pending" and (pca or portfolio_pca_enabled()):
+                items.append(dependency("portfolioPca", "PCA model"))
         elif "portfolioFactors" in dependencies:
             items.append(dependency("portfolioFactors", "Factor model"))
     elif kind == "balance-review":

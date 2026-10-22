@@ -13,7 +13,6 @@ from zoneinfo import ZoneInfo
 from uuid import uuid4, uuid5, NAMESPACE_URL
 
 LOGGER = logging.getLogger('market_dashboard.analyst.workspace')
-MANUAL_METADATA_COLUMNS = 'capture_id,conversation_id,turn_id,state,created_at,updated_at,completed_at,error_code'
 FINDING_STATES = frozenset({'open', 'resolved', 'superseded', 'unavailable'})
 SLOW_DELETE_SECONDS = 1.0
 
@@ -98,8 +97,8 @@ def imported_citations(messages):
         elif isinstance(value, dict):
             if str(value.get('id', '')).startswith('cite_') and value.get('sourceUri'):
                 found[value['id']] = value
-            # Compact manual verification retains the same citation evidence
-            # as a columnar table; accept only complete, identified rows.
+            # Saved Hermes history from retired manual portfolio updates holds
+            # citations as a columnar table; accept only complete, identified rows.
             columns, rows = value.get('columns'), value.get('rows')
             citation_columns = ['id', 'documentId', 'product', 'publicationDate', 'publishedAt', 'sourceUri']
             if (columns == citation_columns and isinstance(rows, list)
@@ -186,13 +185,9 @@ class WorkspaceStore:
               CREATE INDEX IF NOT EXISTS events_conversation ON events(conversation_id, seq);
               CREATE TABLE IF NOT EXISTS deleted_conversations (id TEXT PRIMARY KEY, hermes_id TEXT, kind TEXT, trading_date TEXT, deleted_at TEXT NOT NULL);
               CREATE TABLE IF NOT EXISTS deleted_requests (request_id TEXT PRIMARY KEY);
-              CREATE TABLE IF NOT EXISTS manual_verifications (
-                capture_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
-                turn_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL,
-                sources TEXT NOT NULL, result TEXT, pages TEXT,
-                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT,
-                error_code TEXT);
-              CREATE INDEX IF NOT EXISTS manual_verification_history ON manual_verifications(conversation_id,created_at);
+              -- Manual portfolio updates were retired; their chats load as ordinary chats.
+              DROP INDEX IF EXISTS manual_verification_history;
+              DROP TABLE IF EXISTS manual_verifications;
               CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
               CREATE TABLE IF NOT EXISTS upstream_events (turn_id TEXT NOT NULL, event_id TEXT NOT NULL, PRIMARY KEY(turn_id,event_id));
               CREATE TABLE IF NOT EXISTS process_versions (
@@ -207,6 +202,7 @@ class WorkspaceStore:
                 id TEXT PRIMARY KEY, finding_id TEXT NOT NULL, recorded_at TEXT NOT NULL,
                 reason TEXT NOT NULL, record TEXT NOT NULL);
             ''')
+            db.execute("DELETE FROM settings WHERE key='manual-verification-cursor-key'")
             if 'internal' not in {row['name'] for row in db.execute('PRAGMA table_info(messages)')}:
                 db.execute('ALTER TABLE messages ADD COLUMN internal INTEGER NOT NULL DEFAULT 0')
             if 'review_post_id' not in {row['name'] for row in db.execute('PRAGMA table_info(turns)')}:
@@ -455,7 +451,7 @@ class WorkspaceStore:
             return {row['id'] for row in db.execute('SELECT id FROM deleted_conversations')}
 
     def activity(self, window_seconds):
-        """Turns and manual captures in progress and updated within the window.
+        """Turns in progress and updated within the window.
 
         Read-only. Stack restarts defer while any are reported; an orphaned
         row stops counting once it has not been updated for the window.
@@ -464,9 +460,7 @@ class WorkspaceStore:
         with self.connect() as db:
             turns = db.execute(f"SELECT COUNT(*) FROM turns WHERE state IN ('accepted','running') AND {age}",
                                (window_seconds,)).fetchone()[0]
-            manual = db.execute(f"SELECT COUNT(*) FROM manual_verifications WHERE state IN ('queued','acquiring') AND {age}",
-                                (window_seconds,)).fetchone()[0]
-        return {'turns': turns, 'manualCaptures': manual}
+        return {'turns': turns}
 
     def conversation(self, db, cid):
         row = db.execute('SELECT * FROM conversations WHERE id=?', (cid,)).fetchone()
@@ -527,78 +521,7 @@ class WorkspaceStore:
         result.update(self.review_progress(db, cid, result['lastTurn'], result['kind']))
         reference = db.execute('SELECT value FROM settings WHERE key=?', ('portfolio-reference:' + cid,)).fetchone()
         result['referenceReview'] = json.loads(reference['value']) if reference else None
-        manual = db.execute(f'SELECT {MANUAL_METADATA_COLUMNS} FROM manual_verifications WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1', (cid,)).fetchone()
-        if manual:
-            result['manualVerification'] = self.manual_metadata(manual)
         return result
-
-    @staticmethod
-    def manual_metadata(row):
-        return {'operation': 'portfolio-cross-verification', 'captureId': row['capture_id'],
-                'conversationId': row['conversation_id'], 'turnId': row['turn_id'], 'state': row['state'],
-                'checkedAt': row['updated_at'], 'capturedAt': row['completed_at'], 'errorCode': row['error_code']}
-
-    def manual_binding(self, db, params, *, active=False, include_capture=False):
-        cid = params.get('conversationId')
-        if not isinstance(cid, str) or not cid:
-            raise ValueError('An exact manual conversation reference is required')
-        conversation = db.execute('SELECT id,kind FROM conversations WHERE id=?', (cid,)).fetchone()
-        if not conversation or db.execute('SELECT 1 FROM deleted_conversations WHERE id=?', (cid,)).fetchone():
-            raise self.missing_conversation(db, cid)
-        tid, capture_id = params.get('turnId'), params.get('captureId')
-        columns = '*' if include_capture else MANUAL_METADATA_COLUMNS + ',sources'
-        row = db.execute(f'''SELECT {columns} FROM manual_verifications WHERE conversation_id=?
-            AND (? IS NULL OR turn_id=?) AND (? IS NULL OR capture_id=?)
-            ORDER BY created_at DESC,rowid DESC LIMIT 1''', (cid, tid, tid, capture_id, capture_id)).fetchone()
-        if not row:
-            raise KeyError('Manual verification not found')
-        turn = db.execute('SELECT id,state FROM turns WHERE id=? AND conversation_id=?', (row['turn_id'], cid)).fetchone()
-        latest = db.execute('SELECT id FROM turns WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1', (cid,)).fetchone()
-        if not turn or active and (not tid or not capture_id or turn['state'] not in {'accepted', 'running'} or latest['id'] != tid):
-            raise ValueError('Manual verification no longer owns its accepted turn')
-        metadata = self.manual_metadata(row)
-        return row, {**metadata, 'turnState': turn['state'], 'items': json.loads(row['sources'])}
-
-    def settle_manual(self, db, tid, state, code, gateway_verdict=None):
-        """Settle unfinished manual checks without implying a Gateway disconnect.
-
-        ``gateway_verdict`` is the acquisition's classification of its Gateway
-        check: ``disconnected`` (verified), ``unverified`` or ``connected``.
-        Without one, only a captured disconnected Gateway row is a verified one.
-        """
-        from manual_portfolio_verification import sanitize_manual_sources
-        row = db.execute(f'SELECT {MANUAL_METADATA_COLUMNS},sources FROM manual_verifications WHERE turn_id=?', (tid,)).fetchone()
-        if not row or row['state'] not in {'queued', 'acquiring'}:
-            return False
-        sources = json.loads(row['sources'])
-        gateway = next((item for item in sources if isinstance(item, dict) and item.get('id') == 'ibGateway'), {})
-        if gateway_verdict not in {'disconnected', 'unverified', 'connected'}:
-            gateway_verdict = 'disconnected' if gateway.get('connectionState') == 'disconnected' else None
-        gateway_code = (gateway.get('diagnostic') or {}).get('code') or code
-        for item in sources:
-            if item.get('status') != 'checking':
-                continue
-            if gateway_verdict == 'disconnected' and item.get('requiresIbGateway') is True:
-                # A verified disconnect settles broker-dependent checks as unavailable.
-                item.update(status='unavailable', observedAt=None, diagnostic={'code': gateway_code})
-            else:
-                item.update(status='missing', observedAt=None, diagnostic={'code': 'SOURCE_NOT_ATTEMPTED'})
-        db.execute('UPDATE manual_verifications SET state=?,sources=?,updated_at=?,completed_at=?,error_code=? WHERE turn_id=?',
-                   (state, json.dumps(sanitize_manual_sources(sources)), now(), now(), code, tid))
-        self.event(db, 'revision', row['conversation_id'], tid)
-        return True
-
-    def settle_orphaned_manual_verifications(self):
-        """Close captures left queued/acquiring by a previous sidecar process.
-
-        Call once at startup, before any new capture can start: those rows
-        have no owning acquisition task. Their chats and turns are kept.
-        """
-        with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            turns = [row['turn_id'] for row in db.execute(
-                "SELECT turn_id FROM manual_verifications WHERE state IN ('queued','acquiring')")]
-            return sum(bool(self.settle_manual(db, tid, 'interrupted', 'MANUAL_VERIFICATION_RESTARTED')) for tid in turns)
 
     def record_source_progress(self, conversation_id, run_id, source, status):
         """Record one committed review checkpoint so Sources can revalidate."""
@@ -613,44 +536,6 @@ class WorkspaceStore:
                 return False
             self.event(db, 'source-progress', conversation_id, runId=run_id, source=source, status=status)
             return True
-
-    def manual_page(self, capture_id, cursor=None, symbols=None):
-        from manual_portfolio_verification import (
-            PAGE_BUDGET, decode_cursor, detail_pages, encode_cursor, normalize_symbols,
-            summary_pages_fit, summary_transport_pages, wrapped_size,
-        )
-        if not isinstance(capture_id, str) or not capture_id or len(capture_id) > 200:
-            raise ValueError('An issued manual capture reference is required')
-        symbols = normalize_symbols(symbols)
-        scope = 'detail' if symbols else 'summary'
-        with self.connect() as db:
-            db.execute('BEGIN')
-            row = db.execute('''SELECT m.capture_id,m.state,m.pages,m.result IS NOT NULL AS has_result,
-                CASE WHEN ? THEN m.result ELSE NULL END AS result
-                FROM manual_verifications m JOIN conversations c ON c.id=m.conversation_id
-                WHERE m.capture_id=? AND NOT EXISTS(SELECT 1 FROM deleted_conversations d WHERE d.id=c.id)''', (int(bool(symbols)), capture_id)).fetchone()
-            if not row or row['state'] not in {'ready', 'partial'} or not row['has_result']:
-                raise KeyError('Captured manual evidence not found')
-            secret_row = db.execute("SELECT value FROM settings WHERE key='manual-verification-cursor-key'").fetchone()
-            secret = json.loads(secret_row['value'])
-            if symbols:
-                result = json.loads(row['result'])
-                if not set(symbols).issubset({holding.get('ticker') for holding in result.get('allHoldingsChecked') or []}):
-                    raise ValueError('Choose symbols present in this capture')
-                pages = detail_pages(capture_id, result, symbols)
-            else:
-                pages = json.loads(row['pages'])
-                if not summary_pages_fit(pages):
-                    captured = db.execute('SELECT result FROM manual_verifications WHERE capture_id=?', (capture_id,)).fetchone()
-                    pages = summary_transport_pages(capture_id, json.loads(captured['result']), pages)
-            index = decode_cursor(cursor, capture_id, scope, symbols, secret) if cursor is not None else 0
-            if index >= len(pages):
-                raise ValueError('Captured evidence page is unavailable')
-            page = pages[index]
-            page['nextCursor'] = encode_cursor(capture_id, scope, symbols, index + 1, secret) if index + 1 < len(pages) else None
-            if wrapped_size(page) >= PAGE_BUDGET:
-                raise ValueError('Captured evidence page exceeds its transport budget')
-            return page
 
     def _response_source(self, path, cid, tid, db):
         """Read a late final answer from the exact linked, latest timed-out turn.
@@ -764,9 +649,6 @@ class WorkspaceStore:
                 if run_id:
                     break
         conversation = {**dict(row), 'activeTurn': {key: active[key] for key in ('id', 'state')} if active else None}
-        manual = db.execute(f'SELECT {MANUAL_METADATA_COLUMNS} FROM manual_verifications WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1', (cid,)).fetchone()
-        if manual:
-            conversation['manualVerification'] = self.manual_metadata(manual)
         dispatch = self.review_record(db, cid, active, row['kind'])
         if dispatch and dispatch.get('startPending') is True:
             conversation['reviewStartPending'] = True
@@ -861,13 +743,11 @@ class WorkspaceStore:
                 active = timed('active-turn', "SELECT id FROM turns WHERE conversation_id=? AND state IN ('accepted','running')", (cid,)).fetchone()
                 saved_run = timed('daily-run', 'SELECT value FROM settings WHERE key=?', ('daily-run:' + cid,)).fetchone()
                 record = json.loads(saved_run['value']) if saved_run else None
-                manual = timed('manual', "SELECT capture_id FROM manual_verifications WHERE conversation_id=? AND state IN ('queued','acquiring') ORDER BY created_at DESC,rowid DESC LIMIT 1", (cid,)).fetchone()
                 message_count = timed('message-count', 'SELECT count(*) FROM messages WHERE conversation_id=? AND internal=0', (cid,)).fetchone()[0]
                 timed('tombstone', 'INSERT INTO deleted_conversations VALUES(?,?,?,?,?)', (cid, conversation['hermes_id'], conversation['kind'], conversation['trading_date'], now()))
                 timed('deleted-requests', 'INSERT OR IGNORE INTO deleted_requests SELECT request_id FROM turns WHERE conversation_id=?', (cid,))
                 timed('upstream-events', 'DELETE FROM upstream_events WHERE turn_id IN (SELECT id FROM turns WHERE conversation_id=?)', (cid,))
                 timed('messages', 'DELETE FROM messages WHERE conversation_id=?', (cid,))
-                timed('manual-verifications', 'DELETE FROM manual_verifications WHERE conversation_id=?', (cid,))
                 timed('turns', 'DELETE FROM turns WHERE conversation_id=?', (cid,))
                 timed('events', 'DELETE FROM events WHERE conversation_id=?', (cid,))
                 timed('conversation-row', 'DELETE FROM conversations WHERE id=?', (cid,))
@@ -879,8 +759,7 @@ class WorkspaceStore:
                            **({'requestedBy': requested_by} if requested_by else {}))
                 timings.append(('deleted-event', time.perf_counter() - began))
                 return {'ok': True, 'turnId': active['id'] if active else None,
-                        'cancelRunId': record.get('runId') if record and not record.get('completedAt') else None,
-                        **({'cancelManualCaptureId': manual['capture_id']} if manual else {})}
+                        'cancelRunId': record.get('runId') if record and not record.get('completedAt') else None}
         finally:
             elapsed = time.perf_counter() - started
             if elapsed > SLOW_DELETE_SECONDS:
@@ -893,7 +772,7 @@ class WorkspaceStore:
         if operation == 'delete':
             return self.delete_conversation(p)
         with self.connect() as db:
-            if operation in {'list', 'get', 'source-binding', 'request', 'manual-binding', 'manual-status', 'manual-sources', 'manual-generation'}:
+            if operation in {'list', 'get', 'source-binding', 'request'}:
                 # sqlite's connection context manager does not begin a read
                 # transaction. Keep returned rows and their event cursor in
                 # one short WAL snapshot, before any report projection occurs.
@@ -907,76 +786,6 @@ class WorkspaceStore:
                 return {'status': 'deleted' if deleted else 'accepted' if turn else 'missing',
                         'conversation': self.conversation(db, turn['conversation_id']) if turn and not deleted else None,
                         'turn': dict(turn) if turn and not deleted else None, 'requestId': request_id, 'deleted': deleted}
-            if operation in {'manual-binding', 'manual-status', 'manual-sources', 'manual-generation'}:
-                row, metadata = self.manual_binding(db, p, active=operation == 'manual-generation', include_capture=operation == 'manual-generation')
-                if operation == 'manual-sources':
-                    # startedAt anchors the header clock; it is not a source observation.
-                    return {**metadata, 'reviewKind': 'portfolio-cross-verification', 'runId': row['capture_id'], 'basis': 'manual',
-                            'startedAt': row['created_at']}
-                if operation == 'manual-generation':
-                    if row['state'] not in {'ready', 'partial'} or not row['result'] or not row['pages']:
-                        raise ValueError('Manual verification capture is not ready')
-                    captured, pages = json.loads(row['result']), json.loads(row['pages'])
-                    from manual_portfolio_verification import summary_transport_pages
-                    pages = summary_transport_pages(row['capture_id'], captured, pages)
-                    hermes = db.execute('SELECT hermes_id FROM conversations WHERE id=?', (row['conversation_id'],)).fetchone()
-                    return {'context': {**self.manual_metadata(row), 'asOf': captured['asOf'],
-                        'hermesSessionId': hermes['hermes_id'],
-                        'marketDate': captured.get('marketDate'), 'scope': captured['scope'],
-                        'complete': captured['complete'], 'positionCount': captured['holdings']['positionCount'],
-                        'summaryPageCount': len(pages), 'summaryPages': [
-                            {'pageIndex': page['pageIndex'], 'pageHash': page['pageHash']} for page in pages]},
-                        'citations': captured.get('citations') or []}
-                return metadata
-            if operation in {'manual-mark-start', 'manual-checkpoint', 'manual-complete', 'manual-fail', 'manual-cancel'}:
-                from manual_portfolio_verification import sanitize_manual_sources
-                db.execute('BEGIN IMMEDIATE')
-                try:
-                    row, metadata = self.manual_binding(db, p, active=operation != 'manual-cancel')
-                except (KeyError, ValueError):
-                    if operation in {'manual-checkpoint', 'manual-complete', 'manual-fail'}:
-                        return {'ignored': True}
-                    raise
-                tid, cid = row['turn_id'], row['conversation_id']
-                if operation == 'manual-cancel' and (p.get('turnId') != tid or p.get('captureId') != row['capture_id']):
-                    raise ValueError('An exact manual turn and capture reference is required')
-                if operation == 'manual-mark-start':
-                    if row['state'] == 'queued':
-                        db.execute("UPDATE manual_verifications SET state='acquiring',updated_at=? WHERE capture_id=?", (now(), row['capture_id']))
-                        self.event(db, 'revision', cid, tid)
-                    return self.manual_binding(db, p)[1]
-                if operation in {'manual-fail', 'manual-cancel'}:
-                    if p.get('items') is not None and row['state'] in {'queued', 'acquiring'}:
-                        db.execute('UPDATE manual_verifications SET sources=? WHERE capture_id=?',
-                                   (json.dumps(sanitize_manual_sources(p['items'])), row['capture_id']))
-                    self.settle_manual(db, tid, p.get('state') if p.get('state') in {'interrupted', 'cancelled'} else
-                                       'cancelled' if operation == 'manual-cancel' else 'failed',
-                                       p.get('errorCode') or 'MANUAL_VERIFICATION_FAILED',
-                                       gateway_verdict=p.get('gatewayVerdict'))
-                    return self.manual_binding(db, p)[1]
-                if row['state'] not in {'queued', 'acquiring'}:
-                    return {'ignored': True, **metadata}
-                sources = sanitize_manual_sources(p.get('items') or [])
-                if operation == 'manual-checkpoint':
-                    db.execute('UPDATE manual_verifications SET sources=?,updated_at=? WHERE capture_id=?',
-                               (json.dumps(sources), now(), row['capture_id']))
-                else:
-                    captured, pages = p.get('result'), p.get('pages')
-                    if (not isinstance(captured, dict) or captured.get('schemaVersion') != 1
-                            or captured.get('scope') != 'available-source-archive'
-                            or captured.get('holdings', {}).get('liveVerified') is not True
-                            or not isinstance(captured.get('allHoldingsChecked'), list)
-                            or not isinstance(pages, list) or not pages
-                            or any(page.get('captureId') != row['capture_id'] for page in pages)):
-                        raise ValueError('A complete identified manual capture is required')
-                    state = 'ready' if captured.get('complete') is True else 'partial'
-                    for source in sources:
-                        if source['status'] == 'checking':
-                            source.update(status='unavailable', observedAt=None)
-                    db.execute('UPDATE manual_verifications SET state=?,sources=?,result=?,pages=?,updated_at=?,completed_at=? WHERE capture_id=?',
-                               (state, json.dumps(sources), json.dumps(captured), json.dumps(pages), now(), now(), row['capture_id']))
-                self.event(db, 'revision', cid, tid)
-                return self.manual_binding(db, p)[1]
             if operation == 'source-binding':
                 return self.source_binding(db, p['conversationId'])
             if operation == 'reconcile-response':
@@ -1035,9 +844,6 @@ class WorkspaceStore:
                     item = dict(row)
                     turn = {'id': item.pop('latest_turn_id'), 'request_id': item.pop('latest_request_id'), 'state': item['state']}
                     item.update(self.review_progress(db, item['id'], turn, item['kind']))
-                    manual = db.execute(f'SELECT {MANUAL_METADATA_COLUMNS} FROM manual_verifications WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1', (item['id'],)).fetchone()
-                    if manual:
-                        item['manualVerification'] = self.manual_metadata(manual)
                     projected.append(item)
                 return {'conversations': projected, 'cursor': db.execute('SELECT coalesce(max(seq),0) FROM events').fetchone()[0]}
             if operation == 'get':
@@ -1055,8 +861,7 @@ class WorkspaceStore:
                 if not review_post_id and prompt['internal'] and conversation['kind'] in ('portfolio-review', 'prediction-markets-review', 'balance-review'):
                     review_post_id = 'base'
                 return {'text': prompt['text'], 'internalPrompt': bool(prompt['internal']), 'report': report,
-                        'reviewPostId': review_post_id,
-                        'operation': 'portfolio-cross-verification' if db.execute('SELECT 1 FROM manual_verifications WHERE turn_id=?', (turn['id'],)).fetchone() else None}
+                        'reviewPostId': review_post_id}
             if operation == 'events':
                 rows = db.execute('SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT 500', (int(p.get('after') or 0),)).fetchall()
                 return {'events': [{**dict(r), 'payload': self.event_payload(r)} for r in rows]}
@@ -1069,8 +874,7 @@ class WorkspaceStore:
                 text = str(p.get('text') or '').strip()
                 if not request or not text or len(text) > 20000:
                     raise ValueError('A stable request ID and 1–20,000 character message are required')
-                manual_operation = p.get('operation')
-                if manual_operation not in (None, 'portfolio-cross-verification'):
+                if p.get('operation') is not None:
                     raise ValueError('Unknown chat operation')
                 db.execute('BEGIN IMMEDIATE')
                 if db.execute('SELECT 1 FROM deleted_requests WHERE request_id=?', (request,)).fetchone():
@@ -1079,9 +883,6 @@ class WorkspaceStore:
                 if prior:
                     if (p.get('conversationId') and p['conversationId'] != prior['conversation_id']) or db.execute("SELECT text FROM messages WHERE turn_id=? AND role='user'", (prior['id'],)).fetchone()[0] != text:
                         raise ValueError('Request ID belongs to a different message')
-                    has_manual = bool(db.execute('SELECT 1 FROM manual_verifications WHERE turn_id=?', (prior['id'],)).fetchone())
-                    if has_manual != (manual_operation == 'portfolio-cross-verification'):
-                        raise ValueError('Request ID belongs to a different operation')
                     return {'created': False, 'turn': dict(prior), 'conversation': self.conversation(db, prior['conversation_id'])}
                 cid = p.get('conversationId') or str(uuid4())
                 if not p.get('conversationId'):
@@ -1096,14 +897,6 @@ class WorkspaceStore:
                            (tid, cid, request, 'accepted', None, now(), now(), str(p.get('reviewPostId') or '').strip() or None))
                 db.execute('INSERT INTO messages(id,conversation_id,turn_id,role,text,created_at,state,internal) VALUES(?,?,?,?,?,?,?,?)', (uid, cid, tid, 'user', text, now(), 'complete', int(bool(p.get('internalPrompt')))))
                 db.execute('INSERT INTO messages(id,conversation_id,turn_id,role,text,created_at,state) VALUES(?,?,?,?,?,?,?)', (aid, cid, tid, 'assistant', '', now(), 'running'))
-                if manual_operation:
-                    from manual_portfolio_verification import pending_manual_sources
-                    if conv['kind'] != 'chat':
-                        raise ValueError('Manual verification belongs to a normal chat')
-                    capture_id = str(uuid4())
-                    db.execute('INSERT INTO manual_verifications(capture_id,conversation_id,turn_id,state,sources,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',
-                               (capture_id, cid, tid, 'queued', json.dumps(pending_manual_sources()), now(), now()))
-                    db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('manual-verification-cursor-key',?)", (json.dumps(str(uuid4())),))
                 if not p.get('internalPrompt') or request.startswith('daily-turn:'):
                     db.execute('DELETE FROM settings WHERE key=?', ('portfolio-reference:' + cid,))
                 if p.get('internalPrompt') and request.startswith('daily-turn:'):
@@ -1203,8 +996,6 @@ class WorkspaceStore:
                         raise ValueError('Captured citations must be a list')
                     db.execute('UPDATE messages SET text=?,citations=?,state=? WHERE id=?', (message['text'] if content is None else str(content), json.dumps(citations), kind, message['id']))
                     db.execute('UPDATE turns SET state=?,error=?,updated_at=? WHERE id=?', (kind, p.get('error'), now(), tid))
-                    if kind in ('failed', 'interrupted'):
-                        self.settle_manual(db, tid, kind, 'MANUAL_VERIFICATION_' + kind.upper())
                 else:
                     raise ValueError('Unknown frame type')
                 db.execute('UPDATE conversations SET updated_at=? WHERE id=?', (now(), cid))
@@ -1230,7 +1021,6 @@ class WorkspaceStore:
                 for t in turns:
                     db.execute("UPDATE turns SET state='interrupted',error=?,updated_at=? WHERE id=?", ('Dashboard restarted before this response completed. Retry is available.', now(), t['id']))
                     db.execute("UPDATE messages SET state='interrupted' WHERE turn_id=? AND role='assistant'", (t['id'],))
-                    self.settle_manual(db, t['id'], 'interrupted', 'MANUAL_VERIFICATION_RESTARTED')
                     self.event(db, 'interrupted', t['conversation_id'], t['id'])
                 return {'recovered': len(turns)}
             if operation == 'deleted':

@@ -42,7 +42,7 @@ class BalanceHoldingsTests(unittest.IsolatedAsyncioTestCase):
                 if error is not None:
                     raise error
                 return payload if payload is not None else live_positions()
-            raise AssertionError(f"Holdings must not request status, quotes, settlements, or P/L: {path}")
+            raise AssertionError(f"Holdings must not request status, quotes, or P/L: {path}")
 
         result = await IbkrReader(request=request, now=lambda: NOW).holdings_context()
         return result, calls
@@ -117,20 +117,6 @@ class BalanceHoldingsTests(unittest.IsolatedAsyncioTestCase):
         failed = await reader.holdings_context()
         self.assertEqual(failed["errorCode"], "IBKR_HOLDINGS_SERVICE_UNAVAILABLE")
         self.assertEqual(paths, ["/portfolio/live-positions", "/portfolio/live-positions"])
-
-    async def test_injected_transport_also_serves_settlement_reads(self):
-        # A test that injects a transport never reaches a real settlement service.
-        urls = []
-
-        def handle(request):
-            urls.append(str(request.url))
-            return httpx.Response(200, json={"marks": []}, headers={"Cache-Control": "no-store"})
-
-        self.addAsyncCleanup(aclose_shared_clients)
-        reader = IbkrReader(base_url="http://ibkr.test", settlement_base_url="http://express.test",
-                            transport=httpx.MockTransport(handle))
-        self.assertEqual(await reader._request_settlement_marks([]), {"marks": []})
-        self.assertEqual(urls, ["http://express.test/api/prediction-markets/performance/settlement-marks"])
 
     async def test_patched_client_constructor_never_shares_a_client_with_real_reads(self):
         self.addAsyncCleanup(aclose_shared_clients)

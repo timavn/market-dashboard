@@ -177,6 +177,12 @@ function previousTradingDateKey(dateKey) {
   return candidate;
 }
 
+function nextTradingDateKey(dateKey) {
+  let candidate = addCalendarDays(dateKey, 1);
+  while (candidate && !isTradingDateKey(candidate)) candidate = addCalendarDays(candidate, 1);
+  return candidate;
+}
+
 module.exports = {
   UTC_DAY_MS,
   addCalendarDays,
@@ -186,6 +192,7 @@ module.exports = {
   easterSundayDateKey,
   getUsEquityHoliday,
   isTradingDateKey,
+  nextTradingDateKey,
   previousTradingDateKey,
   usEquityMarketHolidays,
 };

@@ -124,13 +124,10 @@ class PortfolioHoldingsProgressTests(unittest.IsolatedAsyncioTestCase):
                 return {"ok": True, "source": "ibkr_live_session", "observed_at": OBSERVED, "pnl": {}}
             raise AssertionError(path)
 
-        async def settlement(_path, **_kwargs):
-            await never.wait()
-
         async def on_holdings(value):
             published.append(value)
 
-        reader = IbkrReader(request=request, settlement_request=settlement, now=lambda: NOW)
+        reader = IbkrReader(request=request, now=lambda: NOW)
         started = time.monotonic()
         with patch.object(market, "PORTFOLIO_VALUATION_BUDGET_SECONDS", 0.2):
             result = await asyncio.wait_for(reader.portfolio_context(on_holdings=on_holdings), 2)

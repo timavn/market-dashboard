@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from dataclasses import replace
 from hashlib import sha256
 import os
@@ -148,111 +148,6 @@ def coordinator_sources() -> analyst_app.PortfolioReviewSources:
         market_situation_research=lambda: ({}, []),
         market_date=lambda: "2026-08-31",
     )
-
-
-def verified_prediction_universe(*, failed_market_id: str | None = None) -> dict:
-    markets = []
-    observed = datetime.now(timezone.utc)
-    as_of = observed.isoformat()
-    expires = (observed + timedelta(seconds=85)).isoformat()
-    for market_id, asset, venue in analyst_app.PREDICTIVE_REVIEW_UNIVERSE:
-        failed = market_id == failed_market_id
-        source = "ibkr_tws_forecastex_live" if venue == "forecastex" else "kalshi_batch_orderbooks_v2"
-        markets.append(
-            {
-                "marketId": market_id,
-                "asset": asset,
-                "requestedVenue": venue,
-                "status": "partial" if failed else "available",
-                "errorCode": "PINNED_VENUE_DATA_INCOMPLETE" if failed else None,
-                "snapshot": {
-                    "marketId": market_id,
-                    "selectedVenueId": venue,
-                    "displaySelection": {"status": "available", "venueId": venue},
-                    "displayContracts": {
-                        "status": "partial" if failed else "available",
-                        "asOf": as_of,
-                        "bookExpiresAt": expires,
-                        "event": {
-                            "ticker": f"{market_id}-event",
-                            "resolverSymbol": "NQU26" if market_id == "nasdaq100" else None,
-                            "closeTime": "2099-09-03T20:00:00Z",
-                            "status": "open",
-                            "reportMonth": "2026-08",
-                            "releaseKey": "KXCPIYOY#2026-08",
-                        },
-                        "lines": [
-                            {
-                                "ticker": f"{market_id}-contract",
-                                "threshold": 100,
-                                "isNearest": True,
-                                "yesBid": None if failed else 0.44,
-                                "yesAsk": None if failed else 0.46,
-                                "noBid": None if failed else 0.54,
-                                "noAsk": None if failed else 0.56,
-                                "source": source,
-                                "directNative": True,
-                                "evidence": {"quotes": {"source": source, "fit": "exact", "asOf": as_of}},
-                            }
-                        ],
-                    },
-                    "venues": {
-                        venue: {
-                            "settlementBasis": {
-                                "instrument": "NQU26" if market_id == "nasdaq100" else f"Official {asset} settlement",
-                                "status": "verified",
-                            },
-                            "reference": {
-                                "instrument": {"displaySymbol": "NQU26", "secType": "FUT"} if market_id == "nasdaq100" else None,
-                                "spot": {
-                                    "status": "available",
-                                    "availability": "live",
-                                    "label": asset,
-                                    "value": 100,
-                                    "asOf": as_of,
-                                    "expiresAt": expires,
-                                    "fit": "exact",
-                                    "source": "ibkr_live_quote",
-                                },
-                            },
-                            "settlementState": "open",
-                        },
-                    },
-                    "riskRange": {
-                        "status": "available",
-                        "date": "2026-08-31",
-                        "trend": "Bullish",
-                        "lrr": 95,
-                        "hrr": 105,
-                        "source": "hedgeye-risk-ranges-email",
-                    },
-                    "factors": {"trade": {"direction": "BULLISH", "status": "available", "source": "momo-tracker", "date": "2026-08-31"}},
-                    "forecastComparison": {
-                        "status": "available", "eventTicker": f"{market_id}-event", "reportMonth": "2026-08", "releaseKey": "KXCPIYOY#2026-08",
-                        "hedgeye": {"status": "available", "baseValue": 3.47, "source": "hedgeye-inflation-nowcast", "asOf": "2026-08-13"},
-                        "clevelandFed": {"status": "available", "value": 3.38, "source": "cleveland_fed_inflation_nowcasting", "asOf": "2026-09-02"},
-                    },
-                    "session": {"state": "open"},
-                },
-            }
-        )
-    available_count = sum(row["status"] == "available" for row in markets)
-    return {
-        "status": "available" if available_count == len(analyst_app.PREDICTIVE_REVIEW_UNIVERSE) else "partial",
-        "liveVerified": False,
-        "freshness": "current_monitor",
-        "asOf": "2026-08-31T16:00:00Z",
-        "data": {
-            "markets": markets,
-            "availableCount": available_count,
-            "requestedCount": len(analyst_app.PREDICTIVE_REVIEW_UNIVERSE),
-            "policy": {
-                "autoVenueAllowed": False,
-                "alternateVenueFallbackAllowed": False,
-                "recommendationsAllowed": False,
-            },
-        },
-    }
 
 
 def verified_balance_context() -> dict:
