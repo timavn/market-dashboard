@@ -131,7 +131,10 @@ const OPENS = { ADD: null, BUY: 'Long', 'BUY-SOME': 'Long', 'INITIATE-LONG': 'Lo
 // Roster removals and side-typed position changes are complete instructions, so
 // unlike a generic Sell headline they need no report prose to establish scope.
 function typedChange(event, evidence) {
-  if (event.eventType === 'signal_strength_removed') return { action: 'REMOVE', side: 'Long' }; // Signal Strength lists bullish signals only.
+  if (event.eventType === 'signal_strength_removed') return { action: 'REMOVE', side: 'Long' }; // The main list is bullish signals only.
+  // Signal Strength Shorts (since 2026-10-15) is its own bearish list.
+  if (event.eventType === 'signal_strength_short_added') return { action: 'OPEN', side: 'Short' };
+  if (event.eventType === 'signal_strength_short_removed') return { action: 'REMOVE', side: 'Short' };
   let source = {};
   try {
     const parsed = JSON.parse(event.excerpt);

@@ -274,6 +274,16 @@ test('Signal Strength removals apply to held longs only', () => {
   ctx.events = [removal('NVDA'), removal('AMD')];
   assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings.map(item => item.symbol), ['NVDA']);
 });
+test('a Signal Strength Shorts addition opposes a held long; its removal exits a held short', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'JPM', quantity: 10 }, { symbol: 'SMCI', quantity: -5 }, { symbol: 'DECK', quantity: -5 }, { symbol: 'ZG', quantity: 5 }];
+  const shorts = (symbol, eventType) => changeEvent(symbol, undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', eventType, excerpt: symbol });
+  ctx.events = [shorts('JPM', 'signal_strength_short_added'), shorts('SMCI', 'signal_strength_short_added'),
+    shorts('DECK', 'signal_strength_short_removed'), shorts('ZG', 'signal_strength_short_removed')];
+  const findings = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual(findings.map(item => [item.symbol, item.severity]).sort(), [['DECK', 'action-required'], ['JPM', 'action-required']]);
+  assert.equal(findings.find(item => item.symbol === 'JPM').presentation.rows.find(row => row.label === 'Action').text, 'Signal Strength went Short vs your Long → review');
+  assert.equal(findings.find(item => item.symbol === 'DECK').presentation.rows.find(row => row.label === 'Action').text, 'Signal Strength removed DECK (Short) → exit Short');
+});
 test('a later re-add from the same product supersedes its removal', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: 10 }];
   ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG'), changeEvent('SNOW', 'ADD', 'LONG', { publishedAt: '2026-09-22T14:00:00Z' })];

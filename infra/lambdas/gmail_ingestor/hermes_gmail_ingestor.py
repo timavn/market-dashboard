@@ -106,7 +106,7 @@ GMAIL_API_ROOT = "https://gmail.googleapis.com/gmail/v1"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
-MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "top-3-things", "inflation-nowcast", "hedgai-signals"}
+MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "top-3-things", "inflation-nowcast", "hedgai-signals", "signal-strength"}
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
 MATERIALIZED_DATA_VERSION = "gmail-materialized-v12-hedgai-signals"
 MARKET_STRUCTURE_ASSET_PREFIX = "hedgeye-email/assets/market-structure/"
@@ -2205,6 +2205,55 @@ def _compute_materialized_data_version(item: Dict[str, Any]) -> str:
     return f"{MATERIALIZED_DATA_VERSION}:{hashlib.sha256(encoded).hexdigest()}"
 
 
+SIGNAL_STRENGTH_LONG_BOOK_FIELDS = ("added", "removed", "stocks", "membershipComplete")
+
+
+def _signal_strength_books(
+    snapshot: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    data = snapshot.get("data") or {}
+    long_book = {key: data[key] for key in SIGNAL_STRENGTH_LONG_BOOK_FIELDS if key in data}
+    short_book = data.get("shorts") if isinstance(data.get("shorts"), dict) else None
+    return long_book or None, short_book
+
+
+def _merge_signal_strength_snapshot(
+    current: Dict[str, Any], candidate: Dict[str, Any]
+) -> Dict[str, Any]:
+    """The long and short lists arrive as separate same-day emails.
+
+    Each book follows its own latest edition. The day's article and long
+    count come from the long edition whenever one exists.
+    """
+    current_long, current_short = _signal_strength_books(current)
+    incoming_long, incoming_short = _signal_strength_books(candidate)
+    candidate_recency = _snapshot_recency_key(candidate)
+    take_long = incoming_long is not None and (
+        current_long is None or candidate_recency >= _snapshot_recency_key(current)
+    )
+    take_short = incoming_short is not None and (
+        current_short is None
+        or candidate_recency
+        >= (str(current_short.get("receivedAt") or ""), str(current_short.get("gmailMessageId") or ""))
+    )
+    long_book = incoming_long if take_long else current_long
+    short_book = incoming_short if take_short else current_short
+    if long_book is not None:
+        base = candidate if take_long else current
+    else:
+        base = candidate if take_short else current
+    merged = deepcopy(base)
+    merged["data"] = deepcopy(long_book or {})
+    if long_book is None:
+        merged.pop("stockCount", None)
+    if short_book is not None:
+        merged["data"]["shorts"] = deepcopy(short_book)
+        merged["shortCount"] = short_book.get("stockCount")
+    else:
+        merged.pop("shortCount", None)
+    return merged
+
+
 def _snapshot_recency_key(snapshot: Dict[str, Any]) -> Tuple[str, str]:
     """Order daily editions by immutable Gmail receipt time, then message ID."""
     return (
@@ -2335,6 +2384,8 @@ def _merge_materialized_snapshot(
 
     incoming_is_latest = _snapshot_recency_key(candidate) >= _snapshot_recency_key(current)
     merged = deepcopy(candidate if not current or incoming_is_latest else current)
+    if candidate["snapshotType"] == "signal-strength" and current:
+        merged = _merge_signal_strength_snapshot(current, candidate)
     merged["date"] = candidate["date"]
     merged["snapshotType"] = candidate["snapshotType"]
 

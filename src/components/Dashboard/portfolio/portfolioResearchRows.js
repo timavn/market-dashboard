@@ -457,6 +457,9 @@ const buildStructuredResearchFacts = (productId, evidence, symbol) => {
     if (!normalizedSymbol) return facts;
     if (kind === 'signal_strength_added') add('signalStrength', `${normalizedSymbol} was added to Signal Strength`);
     else if (kind === 'signal_strength_removed') add('signalStrength', `${normalizedSymbol} was removed from Signal Strength`);
+    else if (kind === 'signal_strength_short_added') add('signalStrength', `${normalizedSymbol} was added to Signal Strength Shorts`);
+    else if (kind === 'signal_strength_short_removed') add('signalStrength', `${normalizedSymbol} was removed from Signal Strength Shorts`);
+    else if (kind === 'signal_strength_short_membership') add('signalStrength', `${normalizedSymbol} is on Signal Strength Shorts`);
     else {
       const direction = String(reference.direction || reference.value || '').trim().toUpperCase();
       if (direction) add('signalStrength', `${normalizedSymbol} Signal Strength status is ${direction}`);

@@ -31,7 +31,7 @@ PRODUCT_MANIFEST_TABLE = os.environ.get(
     "RESEARCH_PRODUCT_MANIFEST_TABLE",
     "ResearchProductManifestsV1",
 )
-PARSER_VERSION = "security-intelligence-v4-authoritative-tracker"
+PARSER_VERSION = "security-intelligence-v5-signal-strength-books"
 MAX_MANIFEST_WRITE_RETRIES = 4
 MAX_BODY_TEXT_LENGTH = 40_000
 MANIFEST_STAGES = {"received", "parsed", "validated", "indexed", "failed"}
@@ -326,6 +326,13 @@ def _etf_pro_typed_value(value: Any) -> Optional[Dict[str, str]]:
     return {"action": action, "side": side}
 
 
+def _has_signal_strength_book(data: Any) -> bool:
+    return isinstance(data, dict) and (
+        isinstance(data.get("shorts"), dict)
+        or any(isinstance(data.get(key), list) for key in ("added", "removed", "stocks"))
+    )
+
+
 def _event_kind(product_id: str, path: str) -> str:
     lowered = path.lower()
     if product_id == "risk-ranges":
@@ -333,11 +340,14 @@ def _event_kind(product_id: str, path: str) -> str:
     if product_id == "early-look":
         return "supplemental_risk_range"
     if product_id == "signal-strength":
+        # The short list is a separate book; its events must never carry the
+        # long-list kinds that consumers read as ADDED/LISTED.
+        prefix = "signal_strength_short" if lowered.startswith("data.shorts") else "signal_strength"
         if "added" in lowered:
-            return "signal_strength_added"
+            return f"{prefix}_added"
         if "removed" in lowered:
-            return "signal_strength_removed"
-        return "signal_strength_membership"
+            return f"{prefix}_removed"
+        return f"{prefix}_membership"
     if product_id in {"momo-tracker", "bitcoin-trend-tracker"}:
         return "trend_signal"
     if product_id == "portfolio-solutions":
@@ -403,6 +413,35 @@ def _structured_ticker_references(
 ) -> List[Dict[str, Any]]:
     data = snapshot.get("data")
     references: List[Dict[str, Any]] = []
+
+    if product_id == "signal-strength" and _has_signal_strength_book(data):
+        # One typed reference per listed security. Name, sector and analyst
+        # columns must not steer direction the way the generic walker would.
+        books = [("data", data, ("positive", "negative", None))]
+        if isinstance(data.get("shorts"), dict):
+            books.append(("data.shorts", data["shorts"], ("negative", None, "negative")))
+        for book_path, book, (added_direction, removed_direction, listed_direction) in books:
+            for field, direction in (
+                ("added", added_direction),
+                ("removed", removed_direction),
+                ("stocks", listed_direction),
+            ):
+                rows = book.get(field) if isinstance(book, dict) else None
+                for index, row in enumerate(rows if isinstance(rows, list) else []):
+                    ticker = canonical_ticker(row, allow_structured_only=True)
+                    if not ticker:
+                        continue
+                    references.append(_reference(
+                        entity_type="ticker",
+                        entity_id=ticker,
+                        match_type="structured_membership",
+                        matched_text=ticker,
+                        excerpt=row if isinstance(row, str) else json.dumps(row, sort_keys=True, default=str),
+                        field_path=f"{book_path}.{field}[{index}]",
+                        product_id=product_id,
+                        direction=direction,
+                    ))
+        return references
 
     if product_id == "bitcoin-trend-tracker":
         # The tracker publishes two tables.  Treat each complete row as one
@@ -731,6 +770,10 @@ def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
             if _is_authoritative_tracker_reference(reference)
         )
     searchable_data = snapshot.get("data") or {}
+    if product_id == "signal-strength" and _has_signal_strength_book(searchable_data):
+        # The email body repeats the published table. Its typed rows are the
+        # only authority, and a short-list body must not read as membership.
+        return references
     if product_id == "investing-ideas" and isinstance(searchable_data, dict):
         # A complete Investing Ideas position book is already represented by
         # one typed row per ticker. Do not walk the article/body text as a

@@ -921,6 +921,97 @@ def _signal_strength_source_rows(
     return parsed
 
 
+SIGNAL_STRENGTH_TABLE_COLUMNS = {
+    "ticker": "ticker",
+    "name": "name",
+    "sector": "sector",
+    "analyst": "analyst",
+    "entry date": "entryDate",
+    "entry price": "entryPrice",
+    "recent price": "recentPrice",
+    "total return": "totalReturn",
+    "best idea rank": "bestIdeaRank",
+    "days held": "daysOn",
+    "holding period": "daysOn",
+}
+
+
+def _signal_strength_decimal(value: str) -> Optional[Decimal]:
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", str(value or "").replace(",", ""))
+    return Decimal(match.group(0)) if match else None
+
+
+def _signal_strength_html_rows(html_body: str, *, side: str) -> List[Dict[str, Any]]:
+    """Read the published open-positions table that replaced the SSS chart on 2026-09-25."""
+    for table_match in re.finditer(r"<table\b[^>]*>(.*?)</table>", html_body, re.IGNORECASE | re.DOTALL):
+        table_html = table_match.group(1)
+        headers = [
+            _signal_strength_header_key(_strip_tags(cell))
+            for cell in re.findall(r"<th\b[^>]*>(.*?)</th>", table_html, re.IGNORECASE | re.DOTALL)
+        ]
+        columns = {
+            SIGNAL_STRENGTH_TABLE_COLUMNS[header]: index
+            for index, header in enumerate(headers)
+            if header in SIGNAL_STRENGTH_TABLE_COLUMNS
+        }
+        if "ticker" not in columns or "entryDate" not in columns:
+            continue
+        body = re.search(r"<tbody\b[^>]*>(.*?)</tbody>", table_html, re.IGNORECASE | re.DOTALL)
+        rows: List[Dict[str, Any]] = []
+        seen = set()
+        for row_match in re.finditer(r"<tr\b[^>]*>(.*?)</tr>", body.group(1) if body else table_html, re.IGNORECASE | re.DOTALL):
+            cells = [
+                re.sub(r"\s+", " ", _strip_tags(cell)).strip()
+                for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", row_match.group(1), re.IGNORECASE | re.DOTALL)
+            ]
+
+            def cell(field: str) -> str:
+                index = columns.get(field)
+                return cells[index] if index is not None and index < len(cells) else ""
+
+            ticker = cell("ticker").upper()
+            if not re.fullmatch(r"[A-Z]{1,6}(?:\.[A-Z])?", ticker) or ticker in seen:
+                continue
+            seen.add(ticker)
+            stock: Dict[str, Any] = {"ticker": ticker, "side": side}
+            for field in ("name", "sector", "analyst", "bestIdeaRank"):
+                if cell(field):
+                    stock[field] = cell(field)
+            entry_date = _normalize_etf_date(cell("entryDate"))
+            if entry_date:
+                stock["entryDate"] = entry_date
+            for field in ("entryPrice", "recentPrice", "totalReturn"):
+                value = _signal_strength_decimal(cell(field))
+                if value is not None:
+                    stock[field] = value
+            days = re.search(r"-?\d+", cell("daysOn").replace(",", ""))
+            if days:
+                stock["daysOn"] = int(days.group(0))
+            # Hedgeye's Total Return is the position's return. Only for the
+            # long book does it equal the price change since the signal.
+            if side == "long" and "totalReturn" in stock:
+                stock["percentChangeSinceSignal"] = stock["totalReturn"]
+            rows.append(stock)
+        if rows:
+            return rows
+    return []
+
+
+def _signal_strength_change_symbols(text: str, labels: Tuple[str, ...]) -> List[str]:
+    """Read "Added:" (through 2026-09-24) or "ADDING:" (since 2026-09-25) lists.
+
+    A label with no symbols must not borrow the next label's line.
+    """
+    for label in labels:
+        value = _extract_first(rf"\b{label}[ \t]*:\s*([^\n]+)", text, re.IGNORECASE)
+        if value is None:
+            continue
+        if re.match(r"(?:ADDING|ADDED|REMOVING|REMOVED|Ticker)\b", value, re.IGNORECASE):
+            return []
+        return _extract_symbol_list(value)
+    return []
+
+
 TRACKER_TRENDS = frozenset({"BULLISH", "BEARISH", "NEUTRAL"})
 TRACKER_TICKER_PATTERN = re.compile(r"[A-Z][A-Z0-9]{0,9}(?:[./-][A-Z0-9]{1,6})?")
 TRACKER_OUTBUCKET_PATTERN = re.compile(
@@ -3570,12 +3661,18 @@ def parse_html_snapshot(
         return snapshot
 
     if report_type == "signal-strength":
-        added = _extract_label_symbols(text, "Added")
-        removed = _extract_label_symbols(text, "Removed")
-        count_text = _extract_first(r"Signal Strength Stocks:\s*(\d+)\s+Stocks", text, re.IGNORECASE)
-        stock_count = int(count_text) if count_text else len(added)
+        # Since 2026-10-15 Hedgeye sends the long list ("Signal Strength
+        # Stocks: N Stocks") and a separate short list ("Signal Strength
+        # Shorts: N Stocks"). The short book is kept under data.shorts so no
+        # consumer of the long list can read a short as a long.
+        book_match = re.search(r"Signal Strength (Stocks|Shorts):\s*(\d+)\s+Stocks", text, re.IGNORECASE)
+        side = "short" if book_match and book_match.group(1).lower() == "shorts" else "long"
+        added = _signal_strength_change_symbols(text, ("Added", "ADDING"))
+        removed = _signal_strength_change_symbols(text, ("Removed", "REMOVING"))
+        stock_count = int(book_match.group(2)) if book_match else len(added)
         if not added and not removed and not stock_count:
             return None
+        table_rows = _signal_strength_html_rows(html_body, side=side)
         snapshot = _base_snapshot(
             snapshot_type="signal-strength",
             report_type=report_type,
@@ -3585,8 +3682,8 @@ def parse_html_snapshot(
             s3_key=s3_key,
             message_id=message_id,
         )
-        source_rows: List[Dict[str, Any]] = []
-        if textract_client is not None:
+        source_rows: List[Dict[str, Any]] = table_rows
+        if not source_rows and textract_client is not None:
             try:
                 source_rows = _signal_strength_source_rows(
                     html_body=html_body,
@@ -3599,13 +3696,26 @@ def parse_html_snapshot(
                 # extraction into an inferred full membership list.
                 print(f"Signal Strength chart extraction unavailable: {error}")
         membership_complete = bool(stock_count and len(source_rows) == stock_count)
-        snapshot["stockCount"] = stock_count
-        snapshot["data"] = {
+        book = {
             "added": added,
             "removed": removed,
             "stocks": source_rows or [{"ticker": ticker} for ticker in added],
             "membershipComplete": membership_complete,
         }
+        if side == "short":
+            snapshot["shortCount"] = stock_count
+            snapshot["data"] = {
+                "shorts": {
+                    **book,
+                    "stockCount": stock_count,
+                    "publishedAt": snapshot["publishedAt"],
+                    "receivedAt": snapshot["scrapedAt"],
+                    "gmailMessageId": message_id,
+                },
+            }
+        else:
+            snapshot["stockCount"] = stock_count
+            snapshot["data"] = book
         return snapshot
 
     if report_type == "portfolio-solutions":

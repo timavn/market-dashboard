@@ -3246,6 +3246,139 @@ class HermesGmailIngestorTests(unittest.TestCase):
             [{"ticker": "AAPL", "daysOn": 12, "percentChangeSinceSignal": Decimal("4.5")}],
         )
 
+    @staticmethod
+    def _signal_strength_html(*, book, count, adding, removing, rows, stamp="10/22/2026 11:14 AM EDT"):
+        def change_line(label, symbols):
+            if symbols is None:
+                return ""
+            return (f'<p><span class="semibold">{label}: </span><span>{symbols}</span></p>')
+
+        header = "".join(f'<th class="header-cell">{label}</th>' for label in (
+            "Ticker", "Name", "Sector", "Analyst", "Entry Date", "Entry Price",
+            "Recent Price", "Total Return", "Best Idea Rank", "Days Held"))
+        body = "".join(
+            "<tr>" + "".join(f'<td class="cell">{value}</td>' for value in row) + "</tr>"
+            for row in rows
+        )
+        return f"""
+            <div>{stamp}</div>
+            <p>Signal Strength {book}: {count} Stocks</p>
+            <p>Access Signal Strength Stocks Dashboard</p>
+            {change_line("ADDING", adding)}
+            {change_line("REMOVING", removing)}
+            <div class="table-scroll"><table class="data-table open-positions-table">
+            <thead><tr class="header-row">{header}</tr></thead><tbody>{body}</tbody></table></div>
+        """
+
+    def test_signal_strength_html_table_carries_the_full_long_book(self):
+        snapshot = email_parser.parse_html_snapshot(
+            report_type="signal-strength",
+            html_body=self._signal_strength_html(
+                book="Stocks", count=2, adding="MCK, PR", removing="AMZN",
+                rows=[
+                    ("OKTA", "Okta Inc.", "Software", "Andrew Freedman", "05/26/26", "$95.20", "$204.88", "+115.12%", "Bench", "149"),
+                    ("MCK", "McKesson Corporation", "Healthcare", "Tom Tobin", "10/22/26", "$1,010.50", "$1,010.50", "+0.00%", "2/6", "0"),
+                ],
+            ),
+            received_at=datetime(2026, 10, 22, 15, 13, tzinfo=timezone.utc),
+            s3_key="signal-strength/longs.html",
+            message_id="signal-strength-longs",
+        )
+
+        self.assertEqual(snapshot["stockCount"], 2)
+        self.assertNotIn("shorts", snapshot["data"])
+        self.assertEqual(snapshot["data"]["added"], ["MCK", "PR"])
+        self.assertEqual(snapshot["data"]["removed"], ["AMZN"])
+        self.assertTrue(snapshot["data"]["membershipComplete"])
+        self.assertEqual(snapshot["data"]["stocks"][0], {
+            "ticker": "OKTA", "side": "long", "name": "Okta Inc.", "sector": "Software",
+            "analyst": "Andrew Freedman", "bestIdeaRank": "Bench", "entryDate": "2026-05-26",
+            "entryPrice": Decimal("95.20"), "recentPrice": Decimal("204.88"),
+            "totalReturn": Decimal("115.12"), "daysOn": 149,
+            "percentChangeSinceSignal": Decimal("115.12"),
+        })
+        self.assertEqual(snapshot["data"]["stocks"][1]["entryPrice"], Decimal("1010.50"))
+
+    def test_signal_strength_shorts_list_is_its_own_book(self):
+        snapshot = email_parser.parse_html_snapshot(
+            report_type="signal-strength",
+            html_body=self._signal_strength_html(
+                book="Shorts", count=1, adding=None, removing="BRBR, DECK",
+                rows=[("LULU", "lululemon athletica inc.", "Retail", "Brian McGough", "02/15/26", "$177.72", "$100.10", "+44.02%", "25/30", "249")],
+            ),
+            received_at=datetime(2026, 10, 22, 15, 14, tzinfo=timezone.utc),
+            s3_key="signal-strength/shorts.html",
+            message_id="signal-strength-shorts",
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertNotIn("stockCount", snapshot)
+        self.assertEqual(snapshot["shortCount"], 1)
+        self.assertEqual(set(snapshot["data"]), {"shorts"})
+        shorts = snapshot["data"]["shorts"]
+        self.assertEqual(shorts["added"], [])
+        self.assertEqual(shorts["removed"], ["BRBR", "DECK"])
+        self.assertTrue(shorts["membershipComplete"])
+        self.assertEqual(shorts["gmailMessageId"], "signal-strength-shorts")
+        # A short position's total return is not the price change since the signal.
+        self.assertEqual(shorts["stocks"][0]["side"], "short")
+        self.assertEqual(shorts["stocks"][0]["totalReturn"], Decimal("44.02"))
+        self.assertNotIn("percentChangeSinceSignal", shorts["stocks"][0])
+
+    def test_signal_strength_empty_adding_label_does_not_borrow_removals(self):
+        html_body = self._signal_strength_html(book="Stocks", count=1, adding=None, removing=None, rows=[]).replace(
+            "<div class=\"table-scroll\">",
+            "<p>ADDING: </p><p>REMOVING: </p><p>VREOF</p><div class=\"table-scroll\">",
+        )
+        snapshot = email_parser.parse_html_snapshot(
+            report_type="signal-strength",
+            html_body=html_body,
+            received_at=datetime(2026, 9, 25, 15, 32, tzinfo=timezone.utc),
+            s3_key="signal-strength/removal-only.html",
+            message_id="signal-strength-removal-only",
+        )
+
+        self.assertEqual(snapshot["data"]["added"], [])
+        self.assertEqual(snapshot["data"]["removed"], ["VREOF"])
+
+    def test_signal_strength_long_and_short_emails_share_one_daily_snapshot(self):
+        def parsed(book, message_id, minute, ticker):
+            return email_parser.parse_html_snapshot(
+                report_type="signal-strength",
+                html_body=self._signal_strength_html(
+                    book=book, count=1, adding=ticker, removing=None,
+                    rows=[(ticker, f"{ticker} Inc.", "Retail", "Analyst", "10/22/26", "$10.00", "$11.00", "+10.00%", "Bench", "0")],
+                ),
+                received_at=datetime(2026, 10, 22, 15, minute, tzinfo=timezone.utc),
+                s3_key=f"signal-strength/{message_id}.html",
+                message_id=message_id,
+            )
+
+        longs = parsed("Stocks", "longs-1113", 13, "MCK")
+        shorts = parsed("Shorts", "shorts-1114", 14, "SMCI")
+        for order in ((longs, shorts), (shorts, longs)):
+            table = FakeSnapshotTable()
+            db = FakeDynamoDb(table)
+            for snapshot in order:
+                ingestor.materialize_email_snapshot(deepcopy(snapshot), db)
+            stored = table.items[("2026-10-22", "signal-strength")]
+            self.assertEqual([row["ticker"] for row in stored["data"]["stocks"]], ["MCK"])
+            self.assertEqual([row["ticker"] for row in stored["data"]["shorts"]["stocks"]], ["SMCI"])
+            self.assertEqual(stored["stockCount"], 1)
+            self.assertEqual(stored["shortCount"], 1)
+            self.assertEqual(stored["gmailMessageId"], "longs-1113")
+            self.assertEqual(stored["sourceMessageIds"], ["longs-1113", "shorts-1114"])
+
+        # Replaying an earlier long edition never replaces a later one.
+        later_longs = parsed("Stocks", "longs-1130", 30, "PR")
+        table = FakeSnapshotTable()
+        db = FakeDynamoDb(table)
+        for snapshot in (later_longs, shorts, longs):
+            ingestor.materialize_email_snapshot(deepcopy(snapshot), db)
+        stored = table.items[("2026-10-22", "signal-strength")]
+        self.assertEqual([row["ticker"] for row in stored["data"]["stocks"]], ["PR"])
+        self.assertEqual([row["ticker"] for row in stored["data"]["shorts"]["stocks"]], ["SMCI"])
+
     def test_momo_tracker_extracts_the_approved_range_and_trend_table(self):
         source_root = "https://d1yhils6iwh5l5.cloudfront.net/charts/momo"
         html_body = """

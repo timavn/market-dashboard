@@ -244,6 +244,40 @@ class ResearchIntelligenceTests(unittest.TestCase):
             )
         )
 
+    def test_signal_strength_short_book_never_carries_long_list_kinds(self):
+        short_row = {"ticker": "LULU", "side": "short", "name": "lululemon athletica inc.",
+                     "sector": "Retail", "analyst": "Brian McGough", "totalReturn": Decimal("44.02")}
+        long_row = {"ticker": "OKTA", "side": "long", "name": "Okta Inc.", "sector": "Software",
+                    "analyst": "Andrew Freedman", "totalReturn": Decimal("115.12")}
+        merged = snapshot(
+            "signal-strength",
+            "signal-strength-books",
+            {
+                "added": ["MCK"],
+                "removed": ["AMZN"],
+                "stocks": [long_row],
+                "shorts": {"added": ["SMCI"], "removed": ["DECK"], "stocks": [short_row]},
+            },
+            {"bodyText": "Signal Strength Shorts: 68 Stocks ADDING: SMCI REMOVING: DECK LULU NVDA"},
+        )
+
+        references = intelligence.extract_entity_references(merged)
+
+        self.assertEqual(
+            {(reference["entityId"], reference["eventType"], reference["direction"]) for reference in references},
+            {
+                ("MCK", "signal_strength_added", "positive"),
+                ("AMZN", "signal_strength_removed", "negative"),
+                ("OKTA", "signal_strength_membership", None),
+                ("SMCI", "signal_strength_short_added", "negative"),
+                ("DECK", "signal_strength_short_removed", None),
+                ("LULU", "signal_strength_short_membership", "negative"),
+            },
+        )
+        # The body repeats the table; only typed rows count as membership.
+        self.assertNotIn("ticker#NVDA", {reference["entityKey"] for reference in references})
+        self.assertTrue(all(reference["matchType"] == "structured_membership" for reference in references))
+
     def test_same_day_publications_are_immutable_and_manifested_separately(self):
         database = FakeDynamoDb()
         first = snapshot(
