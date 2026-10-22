@@ -393,6 +393,28 @@
       }
     },
     {
+      "id": "go-anywhere",
+      "label": "Go-Anywhere Portfolio",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "go-anywhere",
+        "go anywhere"
+      ],
+      "parserModes": [
+        "html"
+      ],
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "entity_rows",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
       "id": "etf-pro",
       "dashboardConsumer": { "kind": "readiness", "checkId": "research.etf-pro", "label": "ETF Pro positions" },
       "label": "ETF Pro",

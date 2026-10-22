@@ -4190,6 +4190,70 @@ class HermesGmailIngestorTests(unittest.TestCase):
                     "unavailable",
                 )
 
+    GO_ANYWHERE_TABLE = """
+        <p>Current Open Positions</p>
+        <table>
+          <tr><th>#</th><th>Ticker</th><th>Name</th><th>Asset Class</th><th>Entry Price</th><th>Total Return ‡</th><th>Date Added</th></tr>
+          <tr><td>1</td><td>CLOZ</td><td>CLOs</td><td>fixed income </td><td> $25.89 </td><td> +1.22% </td><td>07/16/26</td></tr>
+          <tr><td>2</td><td>PFIX</td><td>Interest Rate Hedge</td><td>us fixed income </td><td> $62.25 </td><td> -5.19% </td><td>10/12/26</td></tr>
+          <tr><td>3</td><td>HGER</td><td>Commodity Strategy</td><td>commodities </td><td> $24.10 </td><td> +0.00% </td><td>10/21/26</td></tr>
+        </table>
+    """
+
+    def test_go_anywhere_subject_is_a_registered_product(self):
+        self.assertEqual(ingestor.infer_report_type("message-body.html", "10 ETF Go-Anywhere Portfolio"), "go-anywhere")
+
+    def test_go_anywhere_daily_update_is_a_full_book_checkpoint(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="go-anywhere",
+            html_body=f"<p>10 ETF Go-Anywhere Portfolio</p><p>Takeaway: </p><p>Daily Update</p>{self.GO_ANYWHERE_TABLE}",
+            received_at=datetime(2026, 10, 21, 12, 31, tzinfo=timezone.utc),
+            s3_key="hedgeye-email/messages/2026-10-21/go-anywhere/daily.html",
+            message_id="go-anywhere-daily",
+            subject="10 ETF Go-Anywhere Portfolio",
+        )
+
+        self.assertEqual(snapshot["sourceKind"], "full-book-checkpoint")
+        self.assertEqual(snapshot["data"]["changes"], [])
+        self.assertEqual(snapshot["data"]["fullBookLongs"], ["CLOZ", "PFIX", "HGER"])
+        self.assertEqual(snapshot["data"]["rows"][1], {
+            "id": "PFIX_1", "ticker": "PFIX", "etf": "Interest Rate Hedge", "assetClass": "us fixed income",
+            "call": "Long", "side": "Long", "entryPrice": 62.25, "totalReturnPct": -5.19, "dateAdded": "2026-10-12", "action": None,
+        })
+        self.assertEqual(snapshot["data"]["headline"], "10 ETF Go-Anywhere Portfolio: Daily Update")
+        self.assertEqual([kind for kind, _ in ingestor._research_event_payloads(snapshot)], ["FULL_BOOK_CHECKPOINT"])
+
+    def test_go_anywhere_update_types_adds_and_removes_as_long_position_changes(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="go-anywhere",
+            html_body=f"""
+                <p>Takeaway: </p><p>Two updates</p>
+                <p>WE ARE ADDING</p><p>HGER (Commodity Strategy)</p>
+                <p>WE ARE REMOVING</p><p>XLK (Technology Sector)</p>
+                {self.GO_ANYWHERE_TABLE}
+            """,
+            received_at=datetime(2026, 10, 21, 14, 27, tzinfo=timezone.utc),
+            s3_key="hedgeye-email/messages/2026-10-21/go-anywhere/update.html",
+            message_id="go-anywhere-update",
+            subject="10 ETF Go-Anywhere Portfolio",
+        )
+
+        self.assertEqual(
+            [(item["action"], item["side"], item["ticker"], item["etf"]) for item in snapshot["data"]["changes"]],
+            [("ADD", "Long", "HGER", "Commodity Strategy"), ("REMOVE", "Long", "XLK", "Technology Sector")],
+        )
+        self.assertEqual(snapshot["data"]["removed"], ["XLK"])
+        self.assertEqual(
+            [kind for kind, _ in ingestor._research_event_payloads(snapshot)],
+            ["POSITION_ACTION", "POSITION_ACTION", "FULL_BOOK_CHECKPOINT"],
+        )
+        typed = [
+            (event["entityId"], event["eventType"], event["action"], event["positionSide"])
+            for event in research_intelligence.build_entity_events(snapshot)
+            if event.get("action")
+        ]
+        self.assertEqual(typed, [("HGER", "position_change", "ADD", "LONG"), ("XLK", "position_change", "REMOVE", "LONG")])
+
     def test_etf_full_lineup_email_becomes_a_full_book_checkpoint(self):
         snapshot = ingestor.parse_html_snapshot(
             report_type="etf-pro",

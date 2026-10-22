@@ -2181,6 +2181,46 @@ def _extract_etf_pro_changes(text: str) -> List[Dict[str, Any]]:
     return changes
 
 
+def _extract_go_anywhere_portfolio(text: str) -> Dict[str, Any]:
+    """Go-Anywhere is a long-only ETF book: optional ADDING/REMOVING lines,
+    then a "Current Open Positions" table in every edition."""
+    changes: List[Dict[str, Any]] = []
+    for block in re.finditer(r"WE ARE\s+(ADDING|REMOVING)\s+(.+?)(?=WE ARE\s+(?:ADDING|REMOVING)|Current Open Positions|$)",
+                             text, re.IGNORECASE | re.DOTALL):
+        action = "ADD" if block.group(1).upper() == "ADDING" else "REMOVE"
+        for item in re.finditer(r"([A-Z][A-Z0-9./-]{0,9})\s*\(([^)\n]{1,80})\)", block.group(2)):
+            ticker = _normalize_etf_ticker(item.group(1))
+            if ticker:
+                changes.append({"action": action, "side": "Long", "call": "Long", "ticker": ticker,
+                                "etf": re.sub(r"\s+", " ", item.group(2)).strip()})
+    rows: List[Dict[str, Any]] = []
+    start = text.find("Current Open Positions")
+    row_pattern = re.compile(
+        r"^\s*(\d{1,2})\s*\n\s*([A-Z][A-Z0-9./-]{0,9})\s*\n\s*([^\n]+?)\s*\n\s*([^\n]+?)\s*\n"
+        r"\s*(\$[\d,.]+|-)\s*\n\s*([+-]?[\d.,]+%|-)\s*\n\s*(\d{1,2}/\d{1,2}/\d{2,4})",
+        re.MULTILINE,
+    )
+    for match in row_pattern.finditer(text[start:] if start >= 0 else ""):
+        ticker = _normalize_etf_ticker(match.group(2))
+        if not ticker:
+            continue
+        total_return = match.group(6).rstrip("%").replace(",", "")
+        rows.append({
+            "id": f"{ticker}_{len(rows)}",
+            "ticker": ticker,
+            "etf": match.group(3).strip(),
+            "assetClass": match.group(4).strip(),
+            "call": "Long",
+            "side": "Long",
+            "entryPrice": _parse_etf_money(match.group(5)),
+            "totalReturnPct": float(total_return) if total_return not in {"", "-"} else None,
+            "dateAdded": _normalize_etf_date(match.group(7)),
+            "action": None,
+        })
+    takeaway = re.search(r"Takeaway:\s*\n?\s*([^\n]+)", text)
+    return {"changes": changes, "rows": rows, "takeaway": takeaway.group(1).strip() if takeaway else None}
+
+
 def _normalize_etf_ticker(value: Any) -> Optional[str]:
     raw = str(value or "").strip()
     if raw != raw.upper():
@@ -3868,6 +3908,42 @@ def parse_html_snapshot(
         }
         snapshot["article"]["imageUrls"] = [item["url"] for item in charts]
         snapshot["article"]["charts"] = charts
+        return snapshot
+
+    if report_type == "go-anywhere":
+        book = _extract_go_anywhere_portfolio(text)
+        if not book["rows"] and not book["changes"]:
+            return None
+        snapshot = _base_snapshot(
+            snapshot_type="go-anywhere",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        changes, rows = book["changes"], book["rows"]
+        headline = f"{subject or '10 ETF Go-Anywhere Portfolio'}: {book['takeaway']}" if book["takeaway"] else subject
+        snapshot["article"]["headline"] = snapshot["article"].get("headline") or headline
+        snapshot["sourceKind"] = "full-book-checkpoint" if rows else "position-actions"
+        snapshot["itemCount"] = len(rows) or len(changes)
+        snapshot["positionCount"] = len(rows)
+        snapshot["changeCount"] = len(changes)
+        snapshot["longCount"] = len(rows)
+        snapshot["shortCount"] = 0
+        snapshot["data"] = {
+            "headline": headline,
+            "takeaway": book["takeaway"],
+            "checkpointAvailable": bool(rows),
+            "checkpointFormat": "open-positions-table" if rows else None,
+            "rows": rows,
+            "changes": changes,
+            "fullBookLongs": [row["ticker"] for row in rows],
+            "fullBookShorts": [],
+            "added": [item["ticker"] for item in changes if item["action"] == "ADD"],
+            "removed": [item["ticker"] for item in changes if item["action"] == "REMOVE"],
+        }
         return snapshot
 
     if report_type == "etf-pro":

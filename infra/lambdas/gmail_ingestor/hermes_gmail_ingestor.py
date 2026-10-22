@@ -1659,6 +1659,21 @@ def _research_event_payloads(snapshot: Dict[str, Any]) -> List[Tuple[str, Any]]:
         if not alerts and data.get("alert"):
             alerts = [data["alert"]]
         return [("POSITION_ACTION", alert) for alert in alerts if isinstance(alert, dict)]
+    if snapshot_type == "go-anywhere":
+        # Every edition republishes the whole book; an update also lists its changes.
+        payloads = [("POSITION_ACTION", change) for change in data.get("changes") or [] if isinstance(change, dict)]
+        rows = [row for row in data.get("rows") or [] if isinstance(row, dict) and str(row.get("ticker") or "").strip()]
+        if rows:
+            payloads.append(("FULL_BOOK_CHECKPOINT", {
+                "rows": deepcopy(rows),
+                "fullBookLongs": [str(row["ticker"]).upper() for row in rows],
+                "fullBookShorts": [],
+                "rowCount": len(rows),
+                "longCount": len(rows),
+                "shortCount": 0,
+                "headline": data.get("headline") or snapshot.get("article", {}).get("headline"),
+            }))
+        return payloads
     if snapshot_type == "etf-pro":
         changes = data.get("changes") if isinstance(data.get("changes"), list) else []
         if changes:

@@ -356,7 +356,7 @@ def _event_kind(product_id: str, path: str) -> str:
         return "position_reference"
     if product_id == "investing-ideas":
         return "investing_idea_position"
-    if product_id in {"real-time-alert", "etf-pro"}:
+    if product_id in {"real-time-alert", "etf-pro", "go-anywhere"}:
         return "position_change"
     return "mention"
 
@@ -479,8 +479,8 @@ def _structured_ticker_references(
         if saw_tracker_table:
             return references
 
-    if product_id == "etf-pro":
-        # ETF Pro is an actionable change feed, not a prose/newsletter feed.
+    if product_id in {"etf-pro", "go-anywhere"}:
+        # ETF Pro and Go-Anywhere are actionable change feeds, not a prose/newsletter feed.
         # Keep only explicit ADD/REMOVE + LONG/SHORT rows and emit one clean
         # typed reference per ticker.
         changes = data.get("changes") if isinstance(data, dict) else None
@@ -965,7 +965,7 @@ def build_entity_events(
                 "lrr": typed_tracker.get("lrr"),
                 "hrr": typed_tracker.get("hrr"),
             }
-        if product_id == "etf-pro" and isinstance(reference.get("value"), dict):
+        if product_id in {"etf-pro", "go-anywhere"} and isinstance(reference.get("value"), dict):
             event["value"] = reference["value"]
             event["action"] = reference["value"].get("action")
             event["positionSide"] = reference["value"].get("side")
