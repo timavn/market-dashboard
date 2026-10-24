@@ -990,6 +990,14 @@ test('retains every valid citation in one full-book table like the original cita
   assert.equal(collected.has(rows[274][0]), true);
 });
 
+test('numbers grouped citation markers without leaking their cite prefix or separators', () => {
+  const second = `cite_${'e'.repeat(32)}`;
+  const result = sanitizeCitationText(`Saved. \uE200cite\uE202${citation.id}\uE201 Added. \uE200cite\uE202${citation.id}\uE202${second}\uE201`,
+    new Set([citation.id, second]));
+  assert.equal(result.text, 'Saved. [1] Added. [1] [2]');
+  assert.deepEqual(result.accepted, [citation.id, second]);
+});
+
 test('removes invented citation tokens and projects validated history chips', () => {
   const invented = `cite_${'f'.repeat(32)}`;
   assert.equal(sanitizeCitationText(`Claim ${invented}`, new Map()).text, 'Claim');

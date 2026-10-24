@@ -12,6 +12,9 @@ const ANALYST_SOURCE = 'market-dashboard-analyst';
 const ANALYST_MCP_TOOL_PREFIX = 'mcp__market_dashboard_analyst__';
 const READ_ONLY_SKILL_TOOLS = new Set(['skills_list', 'skill_view']);
 const CITATION_TOKEN_PATTERN = /(?:\uE200\s*)?(cite_[a-f0-9]{32})(?:\s*\uE201)?/g;
+// The model may wrap IDs as \uE200cite\uE202<id>[\uE202<id>…]\uE201; the
+// literal "cite" and the \uE202 separators are markup, not answer text.
+const CITATION_GROUP_PREFIX_PATTERN = /\uE200\s*cite\s*\uE202/g;
 const LEGACY_CITATION_ARTIFACT_PATTERN = /(?:\uE200\s*)?\[invalid citation removed\](?:\s*\uE201)?/gi;
 const TOOL_RESULT_WRAPPER_PATTERN = /^<untrusted_tool_result\s+source="([^"]+)">\s*([\s\S]*?)\s*<\/untrusted_tool_result>$/;
 const APPROVED_TOOLS = new Set([
@@ -788,7 +791,8 @@ function sanitizeCitationText(value, allowedIds) {
   const accepted = [];
   const rejected = [];
   const citationNumbers = new Map();
-  let sanitized = String(value || '').replace(CITATION_TOKEN_PATTERN, (_token, citationId) => {
+  const ungrouped = String(value || '').replace(CITATION_GROUP_PREFIX_PATTERN, '\uE200').replace(/\uE202/g, ' ');
+  let sanitized = ungrouped.replace(CITATION_TOKEN_PATTERN, (_token, citationId) => {
     if (allowedIds.has(citationId)) {
       if (!citationNumbers.has(citationId)) {
         accepted.push(citationId);

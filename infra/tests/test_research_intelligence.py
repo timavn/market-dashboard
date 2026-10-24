@@ -400,6 +400,62 @@ class ResearchIntelligenceTests(unittest.TestCase):
         self.assertEqual(replayed["version"], version)
         self.assertEqual(len(replayed["reclassifiedArtifacts"]), 1)
 
+    def test_recovered_unsupported_artifact_leaves_the_unknown_manifest(self):
+        database = FakeDynamoDb()
+        content_sha256 = "e" * 64
+        target = snapshot(
+            "real-time-alert",
+            "recovered-alert",
+            {"alert": {"ticker": "BJRI", "action": "BUY", "side": "long"},
+             "alerts": [{"ticker": "BJRI", "action": "BUY", "side": "long"}]},
+        )
+        intelligence.persist_snapshot_failure(
+            snapshot("unknown", "recovered-alert", {}),
+            database,
+            content_sha256=content_sha256,
+            error="Received Hedgeye product is not registered or parseable",
+        )
+        intelligence.persist_snapshot_intelligence(
+            target, database, content_sha256=content_sha256,
+        )
+
+        moved = intelligence.reclassify_manifest_artifact(
+            target, database, source_product_id="unknown", content_sha256=content_sha256,
+        )
+
+        self.assertEqual(moved["artifacts"], [])
+        self.assertEqual(moved["failedCount"], 0)
+        self.assertEqual(moved["reclassifiedArtifacts"][0]["targetProductKey"], "real-time-alert")
+        self.assertEqual(
+            database.manifests.items[("2026-07-23", "unknown")]["state"], "indexed",
+        )
+
+    def test_unsupported_source_without_a_manifest_entry_has_nothing_to_move(self):
+        database = FakeDynamoDb()
+        content_sha256 = "d" * 64
+        target = snapshot(
+            "real-time-alert",
+            "pre-manifest-alert",
+            {"alert": {"ticker": "BJRI", "action": "BUY", "side": "long"},
+             "alerts": [{"ticker": "BJRI", "action": "BUY", "side": "long"}]},
+        )
+        intelligence.persist_snapshot_intelligence(
+            target, database, content_sha256=content_sha256,
+        )
+
+        self.assertEqual(
+            intelligence.reclassify_manifest_artifact(
+                target, database, source_product_id="unknown", content_sha256=content_sha256,
+            ),
+            {},
+        )
+        self.assertNotIn(("2026-07-23", "unknown"), database.manifests.items)
+        with self.assertRaisesRegex(RuntimeError, "Source manifest is missing"):
+            intelligence.reclassify_manifest_artifact(
+                target, database, source_product_id="signal-strength",
+                content_sha256=content_sha256,
+            )
+
     def test_reclassification_rejects_an_unindexed_target(self):
         database = FakeDynamoDb()
         content_sha256 = "9" * 64

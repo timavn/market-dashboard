@@ -5258,6 +5258,37 @@ class HermesGmailIngestorTests(unittest.TestCase):
             "MESSAGE_PROCESSED",
         )
 
+    def test_macro_week_summary_link_is_ignored_from_metadata_without_fetching_body(self):
+        table = FakeLedgerTable()
+        subject = "Macro Week Summary Notes | October 23rd, 2026"
+        metadata = {
+            "internalDate": "1792807389000",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": subject},
+                    {"name": "From", "value": "Hedgeye <info@hedgeye.com>"},
+                    {"name": "Date", "value": "Fri, 23 Oct 2026 18:03:09 -0400"},
+                ]
+            },
+        }
+
+        with patch.object(
+            ingestor, "get_message_metadata", return_value=metadata
+        ), patch.object(ingestor, "get_message") as get_message, patch.object(
+            ingestor, "s3"
+        ) as s3_client:
+            result = ingestor.process_message("token", "me", "gmail-macro-week", table)
+
+        get_message.assert_not_called()
+        s3_client.put_object.assert_not_called()
+        self.assertTrue(result["ignored"])
+        self.assertEqual(result["skipped"][0]["detail"], "macro-week-summary-link")
+        sentinel = table.items[("gmail-macro-week", ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]
+        self.assertEqual(sentinel["status"], "MESSAGE_IGNORED")
+        self.assertEqual(sentinel["ignoredReason"], "macro-week-summary-link")
+        self.assertIsNone(ingestor.link_only_notice_reason("The Macro Show | October 23rd, 2026"))
+        self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown")
+
     def test_market_situation_webcast_is_ignored_from_metadata_without_fetching_body(self):
         table = FakeLedgerTable()
         subject = (

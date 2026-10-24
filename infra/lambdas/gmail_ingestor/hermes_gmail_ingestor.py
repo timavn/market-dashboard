@@ -49,6 +49,7 @@ from global_quads import QuadStore, eligible as global_quads_eligible
 from hedgai_signals import is_publication_subject as is_hedgai_publication_subject, is_nonpublication_subject as is_hedgai_nonpublication_subject
 from research_intelligence import (
     PARSER_VERSION as SECURITY_INTELLIGENCE_PARSER_VERSION,
+    UNSUPPORTED_PRODUCT_KEY,
     finalize_snapshot_intelligence,
     persist_snapshot_failure,
     persist_snapshot_intelligence,
@@ -1172,6 +1173,22 @@ def is_market_structure_webcast_subject(subject: str) -> bool:
     )
 
 
+def link_only_notice_reason(subject: str) -> Optional[str]:
+    """Name a Hedgeye email whose body only links to research hosted elsewhere.
+
+    These carry no parseable research, so they are ignored from metadata
+    instead of being filed as unsupported publications.
+    """
+    if is_market_structure_webcast_subject(subject):
+        return "market-structure-webcast"
+    # "Macro Week Summary Notes | October 23rd, 2026" lists the edition's
+    # sections and links to the full notes on app.hedgeye.com.
+    normalized = re.sub(r"\s+", " ", str(subject or "")).strip().casefold()
+    if normalized.startswith("macro week summary notes"):
+        return "macro-week-summary-link"
+    return None
+
+
 def parse_email_with_global_quads(**kwargs):
     if os.environ.get('GLOBAL_QUADS_INGEST_ENABLED', '0') == '1' and global_quads_eligible(kwargs.get('subject'), kwargs.get('report_type')):
         QuadStore(dynamodb, s3, textract).process_html(**kwargs)
@@ -1186,7 +1203,7 @@ def infer_report_type(filename: str, subject: str) -> str:
     # A Market Situation webcast is not a text research artifact. Keep this
     # defensive classification even though new messages are rejected from
     # metadata before Gmail's full MIME body is fetched.
-    if is_market_structure_webcast_subject(subject):
+    if link_only_notice_reason(subject):
         return "unknown"
     # Real-Time Alerts can mention a refreshed SPX Risk Range in the subject.
     # Classify the alert before the broader Risk Range matcher so the RTA
@@ -2841,7 +2858,7 @@ def backfill_html_snapshot(
     ).get("Item")
     if not item or not item.get("s3Bucket") or not item.get("s3Key"):
         return False
-    if is_market_structure_webcast_subject(str(item.get("subject") or "")):
+    if link_only_notice_reason(str(item.get("subject") or "")):
         return False
     is_investing_ideas_change = bool(
         re.search(r"\b\d+\s+Changes?:", str(item.get("subject") or ""), re.IGNORECASE)
@@ -2945,7 +2962,8 @@ def backfill_html_snapshot(
                 item.get("reportType") or item.get("snapshotType") or ""
             )
             if (
-                source_product_id in RESEARCH_EVENT_SNAPSHOT_TYPES
+                source_product_id
+                in RESEARCH_EVENT_SNAPSHOT_TYPES | {UNSUPPORTED_PRODUCT_KEY}
                 and source_product_id != snapshot["snapshotType"]
             ):
                 reclassify_manifest_artifact(
@@ -3036,7 +3054,7 @@ def _should_backfill_materialized_snapshot(
 
     report_type = str(item.get("snapshotType") or item.get("reportType") or "unknown")
     subject = str(item.get("subject") or "")
-    if is_market_structure_webcast_subject(subject):
+    if link_only_notice_reason(subject):
         return False
     if allow_version_upgrade:
         inferred_report_type = infer_report_type(
@@ -3580,12 +3598,13 @@ def process_message(
         return {"messageId": message_id, "subject": metadata_headers.get("subject", ""),
                 "sender": metadata_headers.get("from", ""), "attachmentCount": 0, "stored": [],
                 "skipped": [{"filename": "", "detail": "hedgai-nonpublication"}], "ignored": True}
-    if is_market_structure_webcast_subject(metadata_headers.get("subject", "")):
+    notice_reason = link_only_notice_reason(metadata_headers.get("subject", ""))
+    if notice_reason:
         mark_message_ignored(
             table,
             message_id=message_id,
             headers=metadata_headers,
-            reason="market-structure-webcast",
+            reason=notice_reason,
         )
         return {
             "messageId": message_id,
@@ -3593,9 +3612,7 @@ def process_message(
             "sender": metadata_headers.get("from", ""),
             "attachmentCount": 0,
             "stored": [],
-            "skipped": [
-                {"filename": "", "detail": "market-structure-webcast"}
-            ],
+            "skipped": [{"filename": "", "detail": notice_reason}],
             "ignored": True,
         }
 

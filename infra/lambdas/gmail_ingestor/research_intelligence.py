@@ -33,6 +33,9 @@ PRODUCT_MANIFEST_TABLE = os.environ.get(
 )
 PARSER_VERSION = "security-intelligence-v5-signal-strength-books"
 MAX_MANIFEST_WRITE_RETRIES = 4
+# Artifacts that matched no registered product are filed under this key. A
+# later recovery under a registered product must be able to move them out.
+UNSUPPORTED_PRODUCT_KEY = "unknown"
 MAX_BODY_TEXT_LENGTH = 40_000
 MANIFEST_STAGES = {"received", "parsed", "validated", "indexed", "failed"}
 AUTHORITATIVE_TRACKER_PRODUCTS = {"momo-tracker", "bitcoin-trend-tracker"}
@@ -1271,7 +1274,10 @@ def reclassify_manifest_artifact(
     if source_product_id == target_product_id:
         raise ValueError("Manifest reclassification requires distinct products")
     known_products = set(product_ids())
-    if source_product_id not in known_products or target_product_id not in known_products:
+    if (
+        source_product_id not in known_products | {UNSUPPORTED_PRODUCT_KEY}
+        or target_product_id not in known_products
+    ):
         raise ValueError("Manifest reclassification requires registered products")
 
     market_date = str(snapshot.get("date") or "")[:10]
@@ -1322,7 +1328,12 @@ def reclassify_manifest_artifact(
             Key=source_key,
             ConsistentRead=True,
         ).get("Item") or {}
+        # An unsupported artifact received before manifests existed has no
+        # entry to move; registered sources always record their failure.
+        unsupported_source = source_product_id == UNSUPPORTED_PRODUCT_KEY
         if not existing:
+            if unsupported_source:
+                return existing
             raise RuntimeError("Source manifest is missing during reclassification")
         version = int(existing.get("version", 0))
         audits = deepcopy(existing.get("reclassifiedArtifacts") or [])
@@ -1346,7 +1357,7 @@ def reclassify_manifest_artifact(
             None,
         )
         if source_artifact is None:
-            if prior_audit is not None:
+            if prior_audit is not None or unsupported_source:
                 return existing
             raise RuntimeError("Source manifest artifact is missing during reclassification")
         if source_artifact.get("contentSha256") != content_sha256:

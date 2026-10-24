@@ -394,6 +394,11 @@ const SectionSources = ({ sources, onCitation }) => sources.length > 0 && (
   </p>
 );
 
+// Name a source by its publication title; a product ID is a fallback, and an
+// unclassified publication's "unknown" product is never a name.
+const citationLabel = citation => citation.title
+  || (/^unknown$/i.test(citation.product || '') ? '' : citation.product) || 'Source';
+
 const Message = memo(function Message({ message, onCitation, reviewKind, historical = false, captureUnavailable = false, showCapturedSources = true }) {
   const deferredPortfolio = reviewKind === 'portfolio-review' && message.role === 'assistant'
     && (message.portfolioBriefIncluded === false || message.reviewBodyIncluded === false) && !message.portfolioBrief;
@@ -448,9 +453,9 @@ const Message = memo(function Message({ message, onCitation, reviewKind, histori
       {!sectioned && Array.isArray(message.citations) && message.citations.length > 0 && (
         <div className="analyst-message-citations" aria-label="Sources">
           {message.citations.slice(0, 30).map((citation, index) => (
-            <button key={citation.id || index} type="button" className="analyst-citation-chip" onClick={() => onCitation(citation)}>
+            <button key={citation.id || index} type="button" className="analyst-citation-chip" title={citationLabel(citation)} onClick={() => onCitation(citation)}>
               <FileText size={11} aria-hidden="true" />
-              {`[${index + 1}] ${citation.product || citation.title || 'Source'}`}
+              {`[${index + 1}] ${citationLabel(citation)}`}
             </button>
           ))}
         </div>

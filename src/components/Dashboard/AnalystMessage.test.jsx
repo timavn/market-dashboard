@@ -169,3 +169,15 @@ test('manual action Source buttons open their exact captured publication and rel
   expect(markdown.urlTransform(`citation://${sources[0].id}`)).toBe(`citation://${sources[0].id}`);
   expect(message.text).toBe(text);
 });
+
+test('sources are named by publication title, and saved grouped citation markers read as numbers', () => {
+  const citation = { id: 'cite_go', product: 'unknown', title: '10 ETF Go-Anywhere Portfolio' };
+  const message = { id: 'grouped', role: 'assistant', streaming: false, citations: [citation, { id: 'cite_bare', product: 'unknown' }],
+    text: 'Recorded as unsupported. cite\uE202[1]' };
+  render(<Message message={message} reviewKind="chat" onCitation={jest.fn()} />);
+
+  expect(screen.getByText('Recorded as unsupported. [1]')).toBeVisible();
+  expect(screen.getByRole('button', { name: '[1] 10 ETF Go-Anywhere Portfolio' })).toBeVisible();
+  expect(screen.getByRole('button', { name: '[2] Source' })).toBeVisible();
+  expect(screen.queryByText(/unknown/)).not.toBeInTheDocument();
+});

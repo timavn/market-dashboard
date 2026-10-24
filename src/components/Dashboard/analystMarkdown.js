@@ -212,6 +212,9 @@ export const splitAnalystFactText = (value) => {
 
 export const cleanAnalystText = (value) => String(value || '')
   .replace(/\uE200\s*(?:cite_[a-f0-9]{32}|\[invalid citation removed\])\s*\uE201/gi, '')
+  // Saved answers can keep the "cite\uE202" prefix of a grouped citation marker.
+  .replace(/\bcite\s*\uE202\s*/g, '')
+  .replace(/\uE202/g, ' ')
   .replace(/\[invalid citation removed\]/gi, '')
   .replace(/[\uE200\uE201]/g, '');
 

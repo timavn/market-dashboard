@@ -421,7 +421,10 @@ function unknownProductRows({
     ...ledgerItems.filter(isArtifactLedgerItem).map((item) => ({ item, kind: 'artifact' })),
     ...snapshotItems.map((item) => ({ item, kind: 'snapshot' })),
     ...eventItems.map((item) => ({ item, kind: 'event' })),
-    ...manifestItems.map((item) => ({ item, kind: 'manifest' })),
+    // A manifest whose artifacts were all recovered under registered products
+    // keeps only an audit trail; nothing unsupported remains for that date.
+    ...manifestItems.filter((item) => !Array.isArray(item?.artifacts) || item.artifacts.length > 0)
+      .map((item) => ({ item, kind: 'manifest' })),
   ].filter(({ item }) => (
     itemMarketDate(item) === marketDate
     && rawProductKey(item)

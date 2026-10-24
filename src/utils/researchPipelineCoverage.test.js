@@ -385,6 +385,20 @@ describe('research pipeline coverage', () => {
     ]));
   });
 
+  test('an unsupported manifest emptied by recovery raises nothing, while a remaining artifact still does', () => {
+    const manifest = (artifacts) => ({
+      marketDate: MARKET_DATE, productKey: 'unknown', artifacts, reclassifiedArtifacts: [{ targetProductKey: 'go-anywhere' }],
+    });
+    const unsupported = (artifacts) => buildResearchPipelineCoverage({
+      now: NOW, marketDate: MARKET_DATE, products: [product('the-call')], manifestItems: [manifest(artifacts)],
+    }).products.filter(row => row.id.startsWith('unsupported:'));
+
+    expect(unsupported([])).toEqual([]);
+    expect(unsupported([{ artifactId: 'a'.repeat(64), stage: 'failed' }])).toEqual([
+      expect.objectContaining({ id: 'unsupported:unknown', status: PIPELINE_STATUS.FAILED }),
+    ]);
+  });
+
   test('fails closed when any evidence source cannot be read', () => {
     const result = buildFor('the-call', {
       collectionErrors: ['ResearchEntityEventsV1 (AccessDeniedException): denied'],

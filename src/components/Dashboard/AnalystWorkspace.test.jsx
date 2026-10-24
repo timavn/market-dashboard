@@ -3541,7 +3541,7 @@ test('verified progressive review sections display captured citations before ter
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByText(/Verified research/);
   expect(screen.getByRole('status', { name: 'Response running' })).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: '[1] risk-ranges' }));
+  fireEvent.click(screen.getByRole('button', { name: '[1] Captured Risk Ranges' }));
   expect(screen.getByRole('dialog', { name: 'Citation source' })).toHaveTextContent('Verified published reading');
   expect(conversations.a.messages[0].state).toBe('reviewing');
 });
