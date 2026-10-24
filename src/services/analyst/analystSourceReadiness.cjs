@@ -5,6 +5,10 @@ const registry = require('../../../infra/lambdas/gmail_ingestor/research_product
 const FEED_MAX_AGE_MS = 120_000;
 const INVALID_STATES = new Set(['offline', 'disconnected', 'failed', 'error', 'unavailable', 'stale', 'cache-only', 'cached', 'mock', 'seed', 'seeded', 'synthetic', 'fixture']);
 const INVALID_FLAGS = ['offline', 'disconnected', 'failed', 'stale', 'isStale', 'cacheOnly', 'cache_only', 'mock', 'isMock', 'seed', 'seeded', 'isSeed', 'synthetic', 'isSynthetic'];
+// The parser files each Crypto Quant email as the Bitcoin Tracker it carries.
+// Crypto Quant reads that evidence; the library lists the email once.
+const PUBLISHED_AS = { 'crypto-quant': 'bitcoin-trend-tracker' };
+const LIBRARY_LABELS = { 'bitcoin-trend-tracker': 'Crypto Quant · Bitcoin Tracker' };
 const text = value => typeof value === 'string' && value.trim() ? value.trim() : null;
 const timestamp = (value, now) => {
   const time = typeof value === 'string' && value.includes('T') ? Date.parse(value) : NaN;
@@ -33,9 +37,10 @@ function automatedSourceReadiness(evidence = {}, now = new Date()) {
     && !invalidEvidence(evidence) && !evidence.feedError && !(evidence.errors || []).length;
 
   return registry.products.map(product => {
-    const row = products.find(item => (item.product || item.id) === product.id);
+    const sourceId = PUBLISHED_AS[product.id] || product.id;
+    const row = products.find(item => (item.product || item.id) === sourceId);
     const publicationDate = text(row?.latestPublicationDate || row?.publicationDate)?.slice(0, 10) || null;
-    const publicationIndexes = indexed.filter(item => item.product === product.id && item.publication_date === publicationDate);
+    const publicationIndexes = indexed.filter(item => item.product === sourceId && item.publication_date === publicationDate);
     if (invalidEvidence(evidence) || invalidEvidence(row) || (publicationIndexes.length && publicationIndexes.every(invalidEvidence))) {
       return {
         id: product.id, label: product.label, publicationDate: null, observedAt: null, indexedAt: null,
@@ -67,4 +72,9 @@ function automatedSourceReadiness(evidence = {}, now = new Date()) {
   });
 }
 
-module.exports = { automatedSourceReadiness, FEED_MAX_AGE_MS };
+function sourceLibraryRows(rows) {
+  return rows.filter(row => !PUBLISHED_AS[row.id])
+    .map(row => (LIBRARY_LABELS[row.id] ? { ...row, label: LIBRARY_LABELS[row.id] } : row));
+}
+
+module.exports = { automatedSourceReadiness, sourceLibraryRows, FEED_MAX_AGE_MS };

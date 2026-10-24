@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
 const registry = require('../../../infra/lambdas/gmail_ingestor/research_products.json');
-const { automatedSourceReadiness, FEED_MAX_AGE_MS } = require('./analystSourceReadiness.cjs');
+const { automatedSourceReadiness, sourceLibraryRows, FEED_MAX_AGE_MS } = require('./analystSourceReadiness.cjs');
 const { dailyReadiness } = require('./analystPolicy.cjs');
 const { attachDailyWorkflow } = require('./analystDaily.cjs');
 
@@ -34,7 +34,7 @@ test('daily source roster requires dated provider and local index evidence and p
   const daily = dailyReadiness(input, now);
   assert.equal(daily.checkedAt, now.toISOString());
   assert.equal(daily.date, '2026-09-14');
-  assert.deepEqual(daily.automatedSources, result);
+  assert.deepEqual(daily.automatedSources, sourceLibraryRows(result));
   assert.equal(first({ ...input, feedGeneratedAt: new Date(now.getTime() - 60_000).toISOString() }).updatedAt, indexTime);
 });
 
@@ -105,6 +105,23 @@ test('missing provenance, previous publication, partial stages and unindexed cor
   input.products[0].observedAt = '2026-09-14T12:03:00.000Z';
   input.indexed[0].indexed_at = '2026-09-14T12:04:00.000Z';
   assert.equal(first(input).usableForDay, true);
+});
+
+test('a Crypto Quant email filed as its Bitcoin Tracker is ready under both ids and listed once', () => {
+  const input = evidence();
+  input.products.push({ ...input.products[0], product: 'bitcoin-trend-tracker' },
+    { product: 'crypto-quant', latestPublicationDate: '2026-09-14', observedAt: providerTime, sourceIds: [],
+      evidenceHash: 'coverage-1', status: 'not_due', stages: { received: false, parsed: false, validated: false, indexed: false } });
+  input.indexed.push({ ...input.indexed[0], product: 'bitcoin-trend-tracker', document_id: 'document-2' });
+  const rows = automatedSourceReadiness(input, now);
+  const row = id => rows.find(item => item.id === id);
+  assert.equal(row('crypto-quant').status, 'ready');
+  assert.equal(row('crypto-quant').label, 'Crypto Quant');
+  assert.equal(row('bitcoin-trend-tracker').status, 'ready');
+  const library = dailyReadiness(input, now).automatedSources;
+  assert.equal(library.some(item => item.id === 'crypto-quant'), false);
+  assert.equal(library.find(item => item.id === 'bitcoin-trend-tracker').label, 'Crypto Quant · Bitcoin Tracker');
+  assert.equal(library.length, registry.products.length - 1);
 });
 
 test('source availability guard does not alter the existing daily review gate', () => {

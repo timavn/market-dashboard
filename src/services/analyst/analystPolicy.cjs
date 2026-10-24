@@ -2,7 +2,7 @@ const { createHash } = require('crypto');
 const { isTradingDateKey } = require('../../utils/usEquityMarketCalendar.cjs');
 const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js');
 const { describeAnalystFinding, typedAnalystSignal: typedSignalEvent } = require('../../utils/analystFindingPresentation.cjs');
-const { automatedSourceReadiness } = require('./analystSourceReadiness.cjs');
+const { automatedSourceReadiness, sourceLibraryRows } = require('./analystSourceReadiness.cjs');
 const REQUIRED_PRODUCTS = Object.freeze([
   ['risk-ranges', 'Risk Ranges'], ['early-look', 'Early Look'], ['bitcoin-trend-tracker', 'Bitcoin Tracker'],
   ['momo-tracker', 'MOMO'], ['signal-strength', 'Signal Strength'], ['portfolio-solutions', 'Portfolio Solutions'],
@@ -53,7 +53,7 @@ function dailyReadiness(evidence, now = new Date()) {
     const ready = sameDate && !missingStages.length && localReady && row?.status !== 'failed';
     return { id, label, ready, missingStages, publicationDate: row?.latestPublicationDate || row?.publicationDate || null, reason: !sameDate ? 'Today’s publication has not arrived' : !localReady ? 'Local indexing of the current publication incomplete' : missingStages.length ? `Waiting for ${missingStages.join(', ')}` : row?.status === 'failed' ? 'Publication failed validation' : null, fingerprint: fingerprint([row?.evidenceHash, local.map(p => [p.document_id, p.content_hash]).sort()]) };
   });
-  return { date, checkedAt: now.toISOString(), marketDay, marketSession: marketSession(now), ready: marketDay && !errors.length && required.every(p => p.ready), required, missing: required.filter(p => !p.ready), errors, fingerprint: fingerprint(required.map(p => p.fingerprint)), automatedSources: automatedSourceReadiness(evidence, now) };
+  return { date, checkedAt: now.toISOString(), marketDay, marketSession: marketSession(now), ready: marketDay && !errors.length && required.every(p => p.ready), required, missing: required.filter(p => !p.ready), errors, fingerprint: fingerprint(required.map(p => p.fingerprint)), automatedSources: sourceLibraryRows(automatedSourceReadiness(evidence, now)) };
 }
 function setupCapacity({ market, nlv, nlvVerified, funding, fundingVerified, existingLoss, exposureVerified, unitLoss, fees = 0, proposed = Infinity }) {
   const finite = v => typeof v === 'number' && Number.isFinite(v);
