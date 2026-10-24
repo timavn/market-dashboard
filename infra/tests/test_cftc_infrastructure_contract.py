@@ -107,6 +107,11 @@ class CftcInfrastructureContractTests(unittest.TestCase):
                     "tag": "Ref",
                     "value": "ServiceHeartbeatTable",
                 },
+                "ANALYST_CHANGE_JOURNAL_ENABLED": "1",
+                "RESEARCH_EVENT_LEDGER_TABLE": {
+                    "tag": "Ref",
+                    "value": "ResearchEventLedgerV2",
+                },
             },
         )
         self.assertEqual(function["EventInvokeConfig"]["MaximumRetryAttempts"], 0)
@@ -119,6 +124,9 @@ class CftcInfrastructureContractTests(unittest.TestCase):
         by_sid = {statement["Sid"]: statement for statement in statements(function)}
         publish = by_sid["ReadAndPublishExactCftcSnapshot"]
         self.assertEqual(set(publish["Action"]), {"dynamodb:GetItem", "dynamodb:PutItem"})
+        journal = by_sid["JournalCftcAnalystChange"]
+        self.assertEqual(set(journal["Action"]), {"dynamodb:GetItem", "dynamodb:PutItem"})
+        self.assertEqual(journal["Resource"], {"tag": "GetAtt", "value": "ResearchEventLedgerV2.Arn"})
         all_actions = {
             action
             for statement in by_sid.values()

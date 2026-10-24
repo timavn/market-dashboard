@@ -647,6 +647,22 @@ def persist_snapshot(snapshot: Mapping[str, Any], table: Any) -> str:
     return "revised" if existing else "created"
 
 
+def journal_analyst_change(snapshot: Mapping[str, Any], dynamodb: Any) -> bool:
+    """Tell the Analyst's change feed about a new or revised report.
+
+    The snapshot is already the source of truth, so a journal failure is logged
+    rather than failing the run; the Analyst's full research scan still finds it.
+    """
+    try:
+        from analyst_change_journal import emit_change
+
+        emit_change(dict(snapshot), dynamodb, {"marketDate": snapshot.get("date"), "productKey": SNAPSHOT_TYPE}, [])
+        return True
+    except Exception as exc:
+        print(f"[cftc] Analyst change journal unavailable: {type(exc).__name__}")
+        return False
+
+
 def _heartbeat(
     *,
     status: str,
@@ -727,7 +743,11 @@ def lambda_handler(event: Mapping[str, Any] | None, _context: Any) -> dict[str, 
             if boto3 is None:  # pragma: no cover
                 raise RuntimeError("boto3 is required to persist the CFTC snapshot")
             table_name = os.environ.get("HEDGEYE_DAILY_SNAPSHOT_TABLE", "HedgeyeDailySnapshot")
-            result = persist_snapshot(snapshot, boto3.resource("dynamodb").Table(table_name))
+            dynamodb = boto3.resource("dynamodb")
+            result = persist_snapshot(snapshot, dynamodb.Table(table_name))
+            # Daily re-verifications of the same report are not new research.
+            if result in {"created", "revised"}:
+                journal_analyst_change(snapshot, dynamodb)
         # The staged calculation canary is read-only: no snapshot, heartbeat,
         # or readiness metric is written before activation.
         if not dry_run:

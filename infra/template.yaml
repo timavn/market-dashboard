@@ -310,6 +310,8 @@ Resources:
         Variables:
           HEDGEYE_DAILY_SNAPSHOT_TABLE: !Ref HedgeyeDailySnapshotTableName
           SERVICE_HEARTBEAT_TABLE: !Ref ServiceHeartbeatTable
+          ANALYST_CHANGE_JOURNAL_ENABLED: "1"
+          RESEARCH_EVENT_LEDGER_TABLE: !Ref ResearchEventLedgerV2
       EventInvokeConfig:
         MaximumEventAgeInSeconds: 900
         MaximumRetryAttempts: 0
@@ -320,6 +322,12 @@ Resources:
       Policies:
         - Version: '2012-10-17'
           Statement:
+            - Sid: JournalCftcAnalystChange
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt ResearchEventLedgerV2.Arn
             - Sid: ReadAndPublishExactCftcSnapshot
               Effect: Allow
               Action:

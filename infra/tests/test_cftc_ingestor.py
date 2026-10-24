@@ -352,6 +352,75 @@ class CftcCalculationTests(unittest.TestCase):
         self.assertEqual(cftc.persist_snapshot(revised, table), "revised")
         self.assertEqual(len(table.puts), 2)
 
+    def test_new_or_revised_report_reaches_the_analyst_change_feed_once(self):
+        class Ledger:
+            def __init__(self):
+                self.items = {}
+
+            def get_item(self, *, Key, **_kwargs):
+                item = self.items.get((Key["productKey"], Key["eventKey"]))
+                return {"Item": item} if item else {}
+
+            def put_item(self, *, Item):
+                self.items[(Item["productKey"], Item["eventKey"])] = Item
+
+        snapshot = cftc.build_snapshot(synthetic_source())
+        snapshots, ledger = FakeTable(), Ledger()
+
+        def run(source):
+            with patch.object(cftc, "_utc_now", return_value=datetime(2026, 8, 15, 20, 15, tzinfo=timezone.utc)), \
+                    patch.object(cftc, "fetch_official_source", return_value=source), \
+                    patch.object(cftc, "boto3") as aws, \
+                    patch.object(cftc, "_heartbeat"), \
+                    patch.dict(os.environ, {"ANALYST_CHANGE_JOURNAL_ENABLED": "1"}):
+                aws.resource.return_value.Table.side_effect = (
+                    lambda name: ledger if name == "ResearchEventLedgerV2" else snapshots)
+                return cftc.lambda_handler({"source": "aws-scheduler", "scheduleId": cftc.SCHEDULE_ID}, None)
+
+        def changes():
+            return [item for (product, _), item in ledger.items.items() if product == "analyst-change"]
+
+        source = synthetic_source()
+        self.assertEqual(run(source)["result"], "created")
+        [change] = changes()
+        self.assertEqual(change["stage"], "indexed")
+        self.assertEqual(change["snapshot"]["snapshotType"], "cftc-positioning")
+        self.assertEqual(change["snapshot"]["date"], snapshot["date"])
+        self.assertEqual(change["snapshot"]["sourceContentHash"], snapshot["sourceContentHash"])
+
+        # A daily re-verification of the same report is not new research.
+        later = copy.deepcopy(source)
+        later["retrievedAt"] = "2026-08-15T20:15:00+00:00"
+        self.assertEqual(run(later)["result"], "unchanged")
+        self.assertEqual(len(changes()), 1)
+
+        with patch.object(cftc, "_source_hash", return_value="b" * 64):
+            self.assertEqual(run(later)["result"], "revised")
+        self.assertEqual(len(changes()), 2)
+
+    def test_journal_failure_keeps_the_published_report(self):
+        snapshots = FakeTable()
+        with patch.object(cftc, "_utc_now", return_value=datetime(2026, 8, 15, 20, 15, tzinfo=timezone.utc)), \
+                patch.object(cftc, "fetch_official_source", return_value=synthetic_source()), \
+                patch.object(cftc, "boto3") as aws, \
+                patch.object(cftc, "_heartbeat") as heartbeat, \
+                patch.dict(os.environ, {"ANALYST_CHANGE_JOURNAL_ENABLED": "1"}), \
+                redirect_stdout(io.StringIO()) as log:
+            ledger = aws.resource.return_value.Table.return_value
+            aws.resource.return_value.Table.side_effect = (
+                lambda name: ledger if name == "ResearchEventLedgerV2" else snapshots)
+            ledger.get_item.side_effect = RuntimeError("ledger unavailable")
+            result = cftc.lambda_handler({"source": "aws-scheduler", "scheduleId": cftc.SCHEDULE_ID}, None)
+        self.assertEqual(result["result"], "created")
+        self.assertEqual(len(snapshots.puts), 1)
+        self.assertEqual(heartbeat.call_args.kwargs["status"], "success")
+        self.assertIn("Analyst change journal unavailable: RuntimeError", log.getvalue())
+
+    def test_lambda_carries_the_shared_analyst_change_journal(self):
+        lambdas = REPO_ROOT / "infra" / "lambdas"
+        self.assertEqual((lambdas / "cftc_ingestor" / "analyst_change_journal.py").read_bytes(),
+                         (lambdas / "gmail_ingestor" / "analyst_change_journal.py").read_bytes())
+
     def test_daily_verification_recalculates_and_refreshes_retrieval_without_changing_report(self):
         original_source = synthetic_source()
         original = cftc.build_snapshot(original_source)

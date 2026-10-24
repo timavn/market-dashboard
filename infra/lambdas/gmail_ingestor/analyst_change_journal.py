@@ -14,7 +14,9 @@ def emit_change(snapshot, dynamodb, manifest, events, content_sha256=None):
     # match them against held positions; Investing Ideas "N Changes" emails
     # carry their side and range from the email body.
     labels = {'real-time-alert': 'Real-Time Alert', 'investing-ideas': 'Investing Ideas'}
-    for alert in (snapshot.get('data') or {}).get('alerts', []):
+    data = snapshot.get('data')
+    # CFTC positioning stores its rows as a list; only dict payloads carry alerts.
+    for alert in (data if isinstance(data, dict) else {}).get('alerts', []):
         product = snapshot.get('snapshotType')
         if product not in labels or not alert.get('ticker'):
             continue
