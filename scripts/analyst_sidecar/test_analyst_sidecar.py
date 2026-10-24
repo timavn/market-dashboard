@@ -115,6 +115,21 @@ class NormalizationAndIndexTests(TempIndexTestCase):
         self.assertEqual(embedder.embed(["one", "two"]), [[1.0, 0.0], [1.0, 0.0]])
         self.assertEqual(observed, {"texts": ["one", "two"], "batch_size": 32})
 
+    def test_a_repeated_document_in_one_page_is_embedded_once(self):
+        embedded = []
+        embed = self.index.embedder.embed
+
+        def counting(texts):
+            embedded.extend(texts)
+            return embed(texts)
+
+        original = self.document(document_id="doc-1", product="signal-strength", date="2026-09-25", text="Longs: OKTA.")
+        latest = self.document(document_id="doc-1", product="signal-strength", date="2026-09-25", text="Longs: OKTA, CAKE.")
+        with patch.object(self.index.embedder, "embed", side_effect=counting):
+            result = self.index.upsert_documents([original, latest])
+        self.assertEqual(result["documents"], 1)
+        self.assertEqual(embedded, ["Longs: OKTA, CAKE."])
+
     def test_fastembed_serializes_concurrent_model_inference(self):
         state_lock = threading.Lock()
         start = threading.Barrier(3)
@@ -1872,6 +1887,46 @@ class SidecarRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(response.body), {"events": [{"id": "event-1"}], "cursor": "cursor-2", "ingestion": None})
         self.assertEqual([name for name, _thread in calls], ["feed", "recent", "cursor", "coverage"])
         self.assertTrue(all(thread != loop_thread for _name, thread in calls), calls)
+
+    async def test_a_slow_change_page_keeps_coverage_current_without_a_second_embed(self):
+        release = threading.Event()
+        upserts = []
+        coverage = []
+
+        def upsert(documents):
+            upserts.append([document.document_id for document in documents])
+            release.wait(5)
+            return {"documents": len(documents), "chunks": 0, "unchanged": 0}
+
+        client = httpx.AsyncClient
+
+        def change_client(**options):
+            feed = {"documents": [{"documentId": "doc-1", "product": "signal-strength", "publicationDate": "2026-09-25",
+                                   "title": "Signal Strength", "sourceUri": "gmail://message/doc-1", "text": "Longs: OKTA."}],
+                    "coverage": {"generatedAt": f"2026-10-23T18:5{len(coverage)}:00Z", "products": []},
+                    "events": [{"id": "event-1"}], "cursor": "cursor-2"}
+            return client(transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=feed)), **options)
+
+        request = AsyncMock()
+        request.path_params = {"operation": "changes"}
+        request.json.return_value = {}
+        with patch.object(analyst_app.workspace_store, "dispatch", return_value={"value": "cursor-1"}), \
+                patch.object(analyst_app.research_index, "set_sync_state", side_effect=lambda _key, value: coverage.append(json.loads(value)["generatedAt"])), \
+                patch.object(analyst_app.research_index, "upsert_documents", side_effect=upsert), \
+                patch.object(analyst_app, "CHANGE_INDEX_WAIT_SECONDS", 0.05), \
+                patch.object(analyst_app, "_change_indexing", None), \
+                patch.object(analyst_app.httpx, "AsyncClient", side_effect=change_client):
+            first = json.loads((await analyst_app.workspace_route(request)).body)
+            retry = json.loads((await analyst_app.workspace_route(request)).body)
+            release.set()
+            await analyst_app._change_indexing
+            settled = json.loads((await analyst_app.workspace_route(request)).body)
+
+        self.assertEqual(first, {"events": [], "cursor": None, "ingestion": None})
+        self.assertEqual(retry, first)
+        self.assertEqual(settled, {"events": [{"id": "event-1"}], "cursor": "cursor-2", "ingestion": None})
+        self.assertEqual(coverage, ["2026-10-23T18:50:00Z", "2026-10-23T18:51:00Z", "2026-10-23T18:52:00Z"])
+        self.assertEqual(upserts, [["doc-1"], ["doc-1"]])
 
     async def test_activity_reports_in_progress_work_from_both_stores_off_the_loop(self):
         from review_runs_v2 import ReviewRunV2Store

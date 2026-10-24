@@ -412,7 +412,9 @@ class ResearchIndex:
         )
 
     def upsert_documents(self, documents: Iterable[NormalizedDocument]) -> dict[str, int]:
-        materialized = [document for document in documents if document.text]
+        # A feed page can repeat a document (a replay and its original receipt);
+        # embed each identity once, keeping its latest version.
+        materialized = list({document.document_id: document for document in documents if document.text}.values())
         if not materialized:
             return {"documents": 0, "chunks": 0, "unchanged": 0}
         unchanged = 0

@@ -218,6 +218,9 @@ SYNC_MAX_PAGES_PER_CYCLE = min(
     100,
     max(1, int(os.environ.get("ANALYST_SYNC_MAX_PAGES_PER_CYCLE", "4"))),
 )
+# A replayed change-feed page can take minutes to embed, longer than the
+# worker's request timeout. Coverage must not wait for it.
+CHANGE_INDEX_WAIT_SECONDS = 20
 MAX_BRIEFING_EXCERPT_CHARS = 16_000
 MAX_BRIEFING_CITATION_PREVIEW_CHARS = 256
 MARKET_SITUATION_PRODUCT_ID = "market-structure"
@@ -524,6 +527,35 @@ def research_coverage(
         "sync": dict(runtime_state),
         "marketTimeZone": REGISTRY.get("marketTimeZone", "America/New_York"),
     }
+
+
+_change_indexing: asyncio.Future | None = None
+
+
+def _change_indexing_settled(task: asyncio.Future) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        LOGGER.warning("Change-feed indexing failed (%s)", type(task.exception()).__name__)
+
+
+async def index_change_page(documents: list[NormalizedDocument]) -> bool:
+    """Index one change-feed page, or report False while it is still running.
+
+    An abandoned request's thread keeps embedding, so a retry joins that work
+    instead of queueing another copy. The finished page is unchanged on the
+    next request, which then returns quickly with its events and cursor.
+    """
+    global _change_indexing
+    if _change_indexing is not None and not _change_indexing.done():
+        return False
+    _change_indexing = task = asyncio.ensure_future(
+        asyncio.to_thread(research_index.upsert_documents, documents)
+    )
+    task.add_done_callback(_change_indexing_settled)
+    try:
+        await asyncio.wait_for(asyncio.shield(task), CHANGE_INDEX_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        return False
+    return True
 
 
 async def sync_research_feed() -> dict[str, Any]:
@@ -4159,10 +4191,13 @@ async def workspace_route(request: Request) -> JSONResponse:
                 response.raise_for_status()
                 changes = response.json()
             documents = [NormalizedDocument.from_payload(row) for row in changes.get("documents", [])]
-            if documents:
-                await asyncio.to_thread(research_index.upsert_documents, documents)
+            # Coverage reports the ingestor, not this index; readiness checks
+            # local indexing separately. Store it before embedding the page.
             if changes.get("coverage"):
                 await asyncio.to_thread(lambda: research_index.set_sync_state("feed_coverage", json.dumps(changes["coverage"])))
+            if documents and not await index_change_page(documents):
+                # The page's events and cursor wait until its documents are indexed.
+                return JSONResponse({"events": [], "cursor": None, "ingestion": changes.get("ingestion")})
             return JSONResponse({"events": changes.get("events", []), "cursor": changes.get("cursor"), "ingestion": changes.get("ingestion")})
         if operation == "response-source":
             source = await asyncio.to_thread(
