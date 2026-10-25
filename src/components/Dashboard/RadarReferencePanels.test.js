@@ -489,9 +489,13 @@ describe('radar reference volume card', () => {
     const moneyFlow = screen.getByRole('region', { name: 'Money Flow' });
     expect(cards).toHaveLength(4);
     expect(cards).toEqual([cftc, quads, liquidity, moneyFlow]);
-    expect(await within(moneyFlow).findByText('Neutral')).toBeInTheDocument();
-    expect(within(moneyFlow).getByText('$5.80T · mixed')).toBeInTheDocument();
-    expect(within(moneyFlow).getByText('0.98 · balanced')).toBeInTheDocument();
+    expect(await within(moneyFlow).findByText('Neutral')).toHaveClass('money-flow-block--flat');
+    expect(within(moneyFlow).getByText('$5.80T')).toBeInTheDocument();
+    expect(within(moneyFlow).getByText('mixed')).toHaveClass('money-flow-block--flat');
+    expect(within(moneyFlow).getByText('−$116B')).toBeInTheDocument();
+    expect(within(moneyFlow).getByText('contracting')).toHaveClass('money-flow-block--down');
+    expect(within(moneyFlow).getByText('0.98')).toBeInTheDocument();
+    expect(within(moneyFlow).getAllByRole('row')).toHaveLength(12);
     expect(liquidity).toContainElement(volume);
     const liquidityMetric = await within(liquidity).findByText('U.S. stack / GDP');
     expect(liquidityMetric.compareDocumentPosition(volume))

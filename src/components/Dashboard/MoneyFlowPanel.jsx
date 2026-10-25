@@ -37,42 +37,86 @@ const shortDate = (date) => {
   return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 };
 
-const directionClass = (direction = '') => {
-  if (['expanding', 'accumulation', 'inflow', 'confirmed advance'].includes(direction)) return 'is-up';
-  if (['contracting', 'distribution', 'outflow', 'confirmed decline'].includes(direction)) return 'is-down';
-  if (!direction || direction === 'unavailable') return 'is-muted';
-  return 'is-flat';
+// Same four-color blocks as Global Quads: green adds money to stocks, red
+// drains it, yellow is mixed or low conviction, white is no reading.
+const UP_READS = new Set([
+  'inflow', 'expanding', 'accumulation', 'confirmed advance', 'leverage rising', 'cash drawing down', 'tga adding', 'green',
+]);
+const DOWN_READS = new Set([
+  'outflow', 'contracting', 'distribution', 'confirmed decline', 'leverage falling', 'cash building', 'tga draining',
+  'red risk',
+]);
+
+const readTone = (read = '') => {
+  const normalized = String(read || '').toLowerCase();
+  if (UP_READS.has(normalized)) return 'up';
+  if (DOWN_READS.has(normalized)) return 'down';
+  if (!normalized || normalized === 'unavailable') return 'none';
+  return 'flat';
 };
 
-export const VerdictPill = ({ verdict }) => (
-  <span className={`money-flow-verdict ${directionClass(verdict)}`}>
-    {VERDICT_LABELS[verdict] || VERDICT_LABELS.unavailable}
+const directionClass = (direction = '') => ({
+  up: 'is-up', down: 'is-down', flat: 'is-flat', none: 'is-muted',
+}[readTone(direction)]);
+
+export const ReadBlock = ({ read, label = read, strong = false }) => (
+  <span className={`money-flow-block money-flow-block--${readTone(read)}${strong ? ' money-flow-block--strong' : ''}`}>
+    {label || '—'}
   </span>
 );
+
+export const VerdictPill = ({ verdict }) => (
+  <ReadBlock read={verdict} label={VERDICT_LABELS[verdict] || VERDICT_LABELS.unavailable} strong />
+);
+
+// The Treasury account fills when it takes cash out of the system.
+const treasuryAccountRead = (history = []) => {
+  const [prior, latest] = history.slice(-2);
+  const change = latest && prior ? latest.treasuryGeneralAccount - prior.treasuryGeneralAccount : null;
+  if (!isNumber(change)) return { change: null, read: 'unavailable' };
+  if (Math.abs(change) < 10) return { change, read: 'flat' };
+  return { change, read: change > 0 ? 'tga draining' : 'tga adding' };
+};
 
 export const MoneyFlowPreview = ({ data, loading = false }) => {
   if (!data) {
     return <div className="efr-reference-empty">{loading ? 'Loading money flow…' : 'No verified data available'}</div>;
   }
-  const net = data.layers?.netLiquidity?.latest;
+  const netModel = data.layers?.netLiquidity;
+  const net = netModel?.latest;
   const participation = data.layers?.participation;
+  const margin = data.layers?.margin?.latest;
+  const funds = data.layers?.moneyFunds?.latest;
+  const tga = treasuryAccountRead(netModel?.history);
+  const change = (key) => net?.changes?.[key];
   const rows = [
-    ['Fed net liquidity', net ? `${formatBillions(net.netLiquidity)} · ${net.regime}` : '—', net?.regime],
-    ['13W change', formatBillions(net?.changes?.['13w']?.change, { signed: true }), net?.changes?.['13w']?.direction],
-    ['Up/down volume 1M', participation?.windows?.['1m']
-      ? `${formatRatio(participation.windows['1m'].upDownRatio)} · ${participation.regime}` : '—', participation?.regime],
-    [`Last session${participation?.asOf ? ` ${shortDate(participation.asOf)}` : ''}`, participation?.latest?.signal || '—', participation?.latest?.signal],
+    ['Fed net liquidity', formatBillions(net?.netLiquidity), net?.regime],
+    ['1W change', formatBillions(change('1w')?.change, { signed: true }), change('1w')?.direction],
+    ['4W change', formatBillions(change('4w')?.change, { signed: true }), change('4w')?.direction],
+    ['13W change', formatBillions(change('13w')?.change, { signed: true }), change('13w')?.direction],
+    ['52W change', formatBillions(change('52w')?.change, { signed: true }), change('52w')?.direction],
+    ['Treasury cash 1W', formatBillions(tga.change, { signed: true }), tga.read, tga.read.replace('tga ', '')],
+    ['Up/down volume 1M', formatRatio(participation?.windows?.['1m']?.upDownRatio), participation?.windows?.['1m']?.regime],
+    ['Up/down volume 3M', formatRatio(participation?.windows?.['3m']?.upDownRatio), participation?.windows?.['3m']?.regime],
+    [
+      `S&P ${participation?.asOf ? shortDate(participation.asOf) : 'last session'}`,
+      participation?.latest ? `${formatPct(participation.latest.change, 2)} · vol ${formatPct(participation.latest.volumeVs1m, 0)}` : '—',
+      participation?.latest?.signal,
+    ],
+    ['Margin debt 3M', formatPct(margin?.changes?.['3m']?.marginDebt), margin ? `leverage ${margin.leverage}` : null, margin?.leverage],
+    ['Retail money funds 13W', formatPct(funds?.change13w), funds ? `cash ${funds.cash}` : null, funds?.cash],
   ];
   return (
     <table className="efr-mini-table money-flow-mini" aria-label="Money flow">
       <thead>
-        <tr><th>Verdict</th><th><VerdictPill verdict={data.verdict} /></th></tr>
+        <tr><th>Verdict</th><th>Supply + volume</th><th><VerdictPill verdict={data.verdict} /></th></tr>
       </thead>
       <tbody>
-        {rows.map(([label, value, direction]) => (
+        {rows.map(([label, value, read, readLabel]) => (
           <tr key={label}>
             <td>{label}</td>
-            <td className={directionClass(direction)}>{value}</td>
+            <td>{value}</td>
+            <td><ReadBlock read={read} label={readLabel || read} /></td>
           </tr>
         ))}
       </tbody>
@@ -92,7 +136,7 @@ const SupplySection = ({ model }) => {
             <span>Fed balance sheet − Treasury account − reverse repo</span>
           </div>
         </div>
-        <span className={`money-flow-direction ${directionClass(latest?.regime)}`}>{latest?.regime || 'unavailable'}</span>
+        <ReadBlock read={latest?.regime || 'unavailable'} strong />
       </div>
       {!latest ? (
         <div className="dollar-liquidity-empty">
@@ -158,9 +202,7 @@ const ParticipationSection = ({ participation }) => {
             <span>Cboe consolidated volume by S&amp;P 500 close direction</span>
           </div>
         </div>
-        <span className={`money-flow-direction ${directionClass(participation?.regime)}`}>
-          {participation?.regime || 'unavailable'}
-        </span>
+        <ReadBlock read={participation?.regime || 'unavailable'} strong />
       </div>
       {participation?.status !== 'ok' ? (
         <div className="dollar-liquidity-empty">
@@ -178,7 +220,7 @@ const ParticipationSection = ({ participation }) => {
             <div><span>Volume vs 1M</span><strong>{formatPct(participation.latest?.volumeVs1m)}</strong></div>
             <div>
               <span>Read</span>
-              <strong className={directionClass(participation.latest?.signal)}>{participation.latest?.signal}</strong>
+              <strong><ReadBlock read={participation.latest?.signal} /></strong>
             </div>
           </div>
           <table className="dollar-liquidity-growth-table">
@@ -193,7 +235,7 @@ const ParticipationSection = ({ participation }) => {
                   <td>{stats?.downDays ?? '—'}</td>
                   <td>{formatShares(stats?.upVolumeAvg)}</td>
                   <td>{formatShares(stats?.downVolumeAvg)}</td>
-                  <td className={directionClass(stats?.regime)}>{formatRatio(stats?.upDownRatio)}</td>
+                  <td>{formatRatio(stats?.upDownRatio)} <ReadBlock read={stats?.regime} /></td>
                 </tr>
               ))}
             </tbody>
@@ -226,6 +268,14 @@ const monthLabel = (date) => {
     : parsed.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 };
 
+// Idle brokerage cash piling up is money parked outside stocks.
+const cashRead = (pct) => {
+  if (!isNumber(pct)) return 'unavailable';
+  if (pct > 0.005) return 'cash building';
+  if (pct < -0.005) return 'cash drawing down';
+  return 'cash flat';
+};
+
 const ContextSection = ({ layers = {} }) => {
   const { usStack, margin, moneyFunds } = layers;
   const marginLatest = margin?.latest;
@@ -252,7 +302,7 @@ const ContextSection = ({ layers = {} }) => {
       label: 'Brokerage free credit',
       level: formatBillions(marginLatest?.freeCredit),
       change: marginLatest ? `3M ${formatPct(marginLatest.changes?.['3m']?.freeCredit)}` : '—',
-      read: marginLatest ? 'cash in brokerage accounts' : margin?.status,
+      read: marginLatest ? cashRead(marginLatest.changes?.['3m']?.freeCredit) : margin?.status,
       asOf: marginLatest ? monthLabel(marginLatest.asOf) : '—',
       source: 'FINRA',
       stale: margin?.status === 'stale',
@@ -280,7 +330,7 @@ const ContextSection = ({ layers = {} }) => {
               <td>{row.label}</td>
               <td>{row.level}</td>
               <td>{row.change}</td>
-              <td>{row.read || 'unavailable'}</td>
+              <td><ReadBlock read={row.read || 'unavailable'} /></td>
               <td className={row.stale ? 'is-flat' : undefined}>{row.asOf}{row.stale ? ' · stale' : ''}</td>
               <td>{row.source}</td>
             </tr>
