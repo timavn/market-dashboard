@@ -38,8 +38,11 @@ const GMAIL_SERVICE_DEFINITION = (SERVICE_MANIFEST.services || [])
 const { createExchangeVolumeService } = require('./src/services/exchangeVolumeService.cjs');
 const { createExUsVolumeService } = require('./src/services/exUsVolumeService.cjs');
 const { createRegionalVolumeService } = require('./src/services/regionalVolumeService.cjs');
+const { exchangeVolumeFreshness } = require('./src/utils/exchangeVolume.cjs');
+const { createMoneyFlowService } = require('./src/services/moneyFlowService.cjs');
+const usExchangeVolumeService = createExchangeVolumeService();
 const exchangeVolumeService = createRegionalVolumeService({
-  usService: createExchangeVolumeService(),
+  usService: usExchangeVolumeService,
   exUsService: createExUsVolumeService(),
 });
 const { buildMomoTrackerCsvRows } = require('./src/utils/momoTrackerCsv.cjs');
@@ -4788,9 +4791,17 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
       if (!itemDate) return 'missing';
       return itemDate === today ? 'fresh' : 'stale';
     };
+    // Published only when Hedgeye releases a new edition (no daily cadence), so
+    // the latest stored release is current until a newer one is ingested.
+    const RELEASE_DRIVEN_SNAPSHOT_TYPES = new Set(['inflation-nowcast']);
 
     const results = {};
     const alerts = [];
+    // Volume is measured from Cboe consolidated share volume, not the retired
+    // Hedgeye Volume PDF; start the fetch now so it overlaps the DynamoDB reads.
+    const volumeFreshnessRequest = exchangeVolumeService.fetchSnapshot({ days: 2 })
+      .then((snapshot) => exchangeVolumeFreshness(snapshot, new Date()))
+      .catch((err) => ({ status: 'error', error: err.message, source: 'CboeHistoricalMarketVolume' }));
 
     // 1. Processing Risk Ranges (HedgeyeRiskRanges Table)
     try {
@@ -4819,7 +4830,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
     // Other types are stored as single snapshot items per day
-    const snapshotTypes = ['top-3-things', 'early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'volume', 'market-structure', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
+    const snapshotTypes = ['top-3-things', 'early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'market-structure', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
 
     // Query one bounded latest row per product through the metadata-only GSI.
     // This replaced the previous full-table scan on every status refresh.
@@ -4884,7 +4895,9 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
         const itemCount = Number.isFinite(numericCount) ? numericCount : 0;
 
         results[snapshotType] = {
-          status: getFreshnessStatus(latestSnapshot.date),
+          status: RELEASE_DRIVEN_SNAPSHOT_TYPES.has(snapshotType)
+            ? 'current'
+            : getFreshnessStatus(latestSnapshot.date),
           lastUpdated: latestSnapshot.date, // Use content date as primary
           scrapedAt: latestSnapshot.scrapedAt,
           itemCount: itemCount,
@@ -4948,6 +4961,8 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
       console.error('[API] Error reading ETF Pro for freshness:', err.message);
       results['etf-pro'] = { status: 'error', error: err.message };
     }
+
+    results.volume = await volumeFreshnessRequest;
 
     // 4. Hermes Gmail ingestor — DynamoDB ledger of mailbox attachments.
     try {
@@ -7466,29 +7481,35 @@ const liquidityModelsCache = {
 };
 const LIQUIDITY_MODELS_CACHE_TTL = 6 * 60 * 60 * 1000;
 
+async function loadLiquidityModelsCached({ refresh = false } = {}) {
+  if (
+    !refresh &&
+    liquidityModelsCache.data &&
+    Date.now() - liquidityModelsCache.timestamp < LIQUIDITY_MODELS_CACHE_TTL
+  ) {
+    return liquidityModelsCache.data;
+  }
+  const data = await buildLiquidityModels({
+    baseDir: __dirname,
+    now: new Date(),
+  });
+  liquidityModelsCache.timestamp = Date.now();
+  liquidityModelsCache.data = data;
+  return data;
+}
+
+const moneyFlowService = createMoneyFlowService({
+  exchangeVolumeService: usExchangeVolumeService,
+  loadLiquidityModels: loadLiquidityModelsCached,
+});
+
 // Dollar Liquidity Models endpoint
 app.get('/api/liquidity-indicators', async (req, res) => {
   const startTime = Date.now();
   try {
     console.log('[API] /api/liquidity-indicators called');
 
-    const forceRefresh = req.query.refresh === 'true';
-    if (
-      !forceRefresh &&
-      liquidityModelsCache.data &&
-      Date.now() - liquidityModelsCache.timestamp < LIQUIDITY_MODELS_CACHE_TTL
-    ) {
-      console.log(`[API] /api/liquidity-indicators returning cached data (${Date.now() - startTime}ms)`);
-      return res.json(liquidityModelsCache.data);
-    }
-
-    const data = await buildLiquidityModels({
-      baseDir: __dirname,
-      now: new Date(),
-    });
-
-    liquidityModelsCache.timestamp = Date.now();
-    liquidityModelsCache.data = data;
+    const data = await loadLiquidityModelsCached({ refresh: req.query.refresh === 'true' });
 
     const totalTime = Date.now() - startTime;
     console.log(`[API] /api/liquidity-indicators completed in ${totalTime}ms`);
@@ -8196,6 +8217,18 @@ app.get('/api/indicators/vix', createVixHandler({ fetchVIXData }));
 app.get('/api/indicators/volatility/:ticker', createVolatilityHandler({ fetchVolatilityData }));
 
 app.get('/api/volatility-snapshot', createVolatilitySnapshotHandler({ volatilitySnapshotService }));
+
+// Money flow: Fed net liquidity (supply) confirmed by up/down volume participation.
+app.get('/api/money-flow', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const data = await moneyFlowService.getMoneyFlow({ refresh: req.query.refresh === 'true' });
+    res.status(data.verdict === 'unavailable' ? 503 : 200).json(data);
+  } catch (error) {
+    console.error('[API] Error in /api/money-flow:', error);
+    res.status(500).json({ error: 'Failed to build money flow', details: error.message });
+  }
+});
 
 // Each completed-session volume source is verified independently on refresh.
 app.get('/api/volume/market-share', createExchangeVolumeHandler({ exchangeVolumeService }));

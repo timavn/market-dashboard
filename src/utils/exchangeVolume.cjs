@@ -88,6 +88,28 @@ function isVerifiedExchangeVolumeResponse(response, now = new Date()) {
     && percentages.some(key => Number.isFinite(metrics[key]));
 }
 
+// Products-panel status for the Volume row. A session Cboe has not posted yet is
+// pending (it normally lands the next morning); any other failure is an error.
+function exchangeVolumeFreshness(response, now = new Date()) {
+  const expectedDate = expectedVolumeTradingDate(now);
+  const base = { lastUpdated: null, date: null, source: 'CboeHistoricalMarketVolume' };
+  if (isVerifiedExchangeVolumeResponse(response, now)) {
+    return {
+      ...base,
+      status: 'current',
+      lastUpdated: response.asOf,
+      date: response.asOf,
+      scrapedAt: response.meta.fetchedAt,
+      itemCount: response.totalExchange.length,
+    };
+  }
+  const errorCode = response?.meta?.errorCode || 'CBOE_VOLUME_UNVERIFIED_RESPONSE';
+  if (errorCode === 'CBOE_VOLUME_SESSION_UNAVAILABLE') {
+    return { ...base, status: 'pending', reason: `Cboe has not posted the ${expectedDate} session yet.` };
+  }
+  return { ...base, status: 'error', errorCode, reason: `Cboe volume could not be verified (${errorCode}).` };
+}
+
 module.exports = {
   EXCHANGE_VOLUME_METHODOLOGY,
   EXCHANGE_VOLUME_WINDOWS,
@@ -99,4 +121,5 @@ module.exports = {
   calculateExchangeVolumeMetrics,
   hasUnverifiedVolumeFlags,
   isVerifiedExchangeVolumeResponse,
+  exchangeVolumeFreshness,
 };

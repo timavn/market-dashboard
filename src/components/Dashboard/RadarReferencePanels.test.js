@@ -20,6 +20,7 @@ jest.mock('axios', () => ({ get: jest.fn() }));
 jest.mock('../../services/api/marketDataService', () => ({
   MarketDataService: {
     getDollarLiquidityModels: jest.fn(),
+    getMoneyFlow: jest.fn(),
     getHedgeyeSnapshot: jest.fn(),
     getMarketShareVolume: jest.fn(),
   },
@@ -396,6 +397,24 @@ describe('radar reference volume card', () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-07-13T21:00:00.000Z'));
     MarketDataService.getDollarLiquidityModels.mockResolvedValue({ models: {} });
+    MarketDataService.getMoneyFlow.mockResolvedValue({
+      verdict: 'neutral',
+      reasons: ['Net liquidity is mixed while volume is balanced; the two do not agree on a direction.'],
+      layers: {
+        netLiquidity: {
+          status: 'ok',
+          latest: {
+            date: '2026-10-21', netLiquidity: 5801, regime: 'mixed',
+            changes: { '13w': { change: -116, direction: 'contracting' } },
+          },
+        },
+        participation: {
+          status: 'ok', regime: 'balanced', asOf: '2026-10-23',
+          windows: { '1m': { upDownRatio: 0.98 } },
+          latest: { signal: 'light decline' },
+        },
+      },
+    });
     MarketDataService.getHedgeyeSnapshot.mockResolvedValue(null);
     MarketDataService.getMarketShareVolume.mockReset();
     global.fetch = jest.fn().mockResolvedValue({
@@ -446,7 +465,7 @@ describe('radar reference volume card', () => {
     expect(card.querySelector('header time')).not.toBeInTheDocument();
   });
 
-  test('renders three reference cards with Volume below Dollar Liquidity', async () => {
+  test('renders four reference cards with Volume below Dollar Liquidity and Money Flow last', async () => {
     MarketDataService.getDollarLiquidityModels.mockResolvedValue({
       models: { us: { latest: { date: '2026-07-10', stackToGdp: 0.939 } } },
     });
@@ -467,8 +486,12 @@ describe('radar reference volume card', () => {
     const quads = screen.getByRole('region', { name: 'Global Quads' });
     const liquidity = screen.getByRole('region', { name: 'Dollar Liquidity' });
     const volume = screen.getByRole('region', { name: 'Volume' });
-    expect(cards).toHaveLength(3);
-    expect(cards).toEqual([cftc, quads, liquidity]);
+    const moneyFlow = screen.getByRole('region', { name: 'Money Flow' });
+    expect(cards).toHaveLength(4);
+    expect(cards).toEqual([cftc, quads, liquidity, moneyFlow]);
+    expect(await within(moneyFlow).findByText('Neutral')).toBeInTheDocument();
+    expect(within(moneyFlow).getByText('$5.80T · mixed')).toBeInTheDocument();
+    expect(within(moneyFlow).getByText('0.98 · balanced')).toBeInTheDocument();
     expect(liquidity).toContainElement(volume);
     const liquidityMetric = await within(liquidity).findByText('U.S. stack / GDP');
     expect(liquidityMetric.compareDocumentPosition(volume))
@@ -561,6 +584,7 @@ describe('radar reference volume card', () => {
       'global-quads',
       'dollar-liquidity',
       'volume',
+      'money-flow',
     ]);
     expect(latestStatuses.find(({ id }) => id === 'global-quads')).toEqual(expect.objectContaining({
       status: expect.stringMatching(/loading|unavailable/),

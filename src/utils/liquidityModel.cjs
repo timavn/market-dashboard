@@ -6,6 +6,9 @@ const {
   GLOBAL_LIQUIDITY_REGIME_THRESHOLDS,
   GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS,
   GLOBAL_LIQUIDITY_WEIGHTS,
+  NET_LIQUIDITY_DIRECTION_TOLERANCE,
+  NET_LIQUIDITY_MAX_AGE_DAYS,
+  NET_LIQUIDITY_WINDOWS_WEEKS,
   US_LIQUIDITY_ACCELERATION_TOLERANCE,
   US_LIQUIDITY_GREEN_STACK_TO_GDP,
 } = require('../constants/liquidityModelMetadata.cjs');
@@ -102,6 +105,16 @@ const US_STACK_CONFIG = {
     },
   ],
 };
+
+// All three are reported in billions after scaling. WALCL and WTREGEN are
+// Wednesday levels in millions; RRPONTSYD is a daily series in billions.
+const NET_LIQUIDITY_CONFIG = {
+  fedBalanceSheet: { kind: 'fred', seriesId: 'WALCL', label: 'Fed total assets', scale: 0.001 },
+  treasuryGeneralAccount: { kind: 'fred', seriesId: 'WTREGEN', label: 'Treasury General Account', scale: 0.001 },
+  reverseRepo: { kind: 'fred', seriesId: 'RRPONTSYD', label: 'Overnight reverse repo', scale: 1 },
+};
+const NET_LIQUIDITY_HISTORY_WEEKS = 156;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function toMonthKey(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -725,6 +738,117 @@ function numberOrNull(value) {
   return Number.isFinite(value) ? value : null;
 }
 
+async function loadDailySeries(source, options, missingInputs, sources) {
+  try {
+    const raw = options.loadSeriesOverride
+      ? await options.loadSeriesOverride(source)
+      : await fetchFredCsv(source.seriesId, options.axiosClient);
+    const scale = source.scale == null ? 1 : Number(source.scale);
+    const series = (raw || [])
+      .map((point) => ({ date: String(point.date).slice(0, 10), value: Number(point.value) * scale }))
+      .filter((point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.value))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (!series.length) throw new Error('No observations returned');
+    sources.push(sourceMeta(source, 'ok'));
+    return series;
+  } catch (error) {
+    sources.push(sourceMeta(source, 'missing', error));
+    missingInputs.push(source.label || source.seriesId);
+    return null;
+  }
+}
+
+// Latest observation on or before date, within maxGapDays; no lookahead.
+function asOfValue(series, date, maxGapDays = 7) {
+  let low = 0;
+  let high = series.length - 1;
+  let found = null;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (series[mid].date <= date) {
+      found = series[mid];
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  if (!found) return null;
+  const gapDays = (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${found.date}T00:00:00Z`)) / DAY_MS;
+  return gapDays <= maxGapDays ? found.value : null;
+}
+
+function directionLabel(change, level, tolerance = NET_LIQUIDITY_DIRECTION_TOLERANCE) {
+  if (!Number.isFinite(change) || !Number.isFinite(level) || level <= 0) return 'unavailable';
+  const share = change / level;
+  if (share > tolerance) return 'expanding';
+  if (share < -tolerance) return 'contracting';
+  return 'flat';
+}
+
+function netLiquidityRegime(changes) {
+  const short = changes['4w']?.direction;
+  const medium = changes['13w']?.direction;
+  if (!short || !medium || short === 'unavailable' || medium === 'unavailable') return 'unavailable';
+  if (short === 'expanding' && medium === 'expanding') return 'expanding';
+  if (short === 'contracting' && medium === 'contracting') return 'contracting';
+  return 'mixed';
+}
+
+async function buildNetLiquidityModel(options = {}) {
+  const now = options.now || new Date();
+  const sources = [];
+  const missingInputs = [];
+  const [fed, tga, rrp] = await Promise.all([
+    loadDailySeries(NET_LIQUIDITY_CONFIG.fedBalanceSheet, options, missingInputs, sources),
+    loadDailySeries(NET_LIQUIDITY_CONFIG.treasuryGeneralAccount, options, missingInputs, sources),
+    loadDailySeries(NET_LIQUIDITY_CONFIG.reverseRepo, options, missingInputs, sources),
+  ]);
+  const unavailable = {
+    status: 'unavailable', latest: null, history: [], sources, missingInputs,
+  };
+  if (!fed || !tga || !rrp) return unavailable;
+
+  // The Fed balance sheet's Wednesday dates are the weekly index.
+  const rows = fed.map((point) => {
+    const treasuryGeneralAccount = asOfValue(tga, point.date);
+    const reverseRepo = asOfValue(rrp, point.date);
+    const complete = Number.isFinite(treasuryGeneralAccount) && Number.isFinite(reverseRepo);
+    return {
+      date: point.date,
+      fedBalanceSheet: point.value,
+      treasuryGeneralAccount,
+      reverseRepo,
+      netLiquidity: complete ? point.value - treasuryGeneralAccount - reverseRepo : null,
+    };
+  }).filter((row) => Number.isFinite(row.netLiquidity));
+  if (!rows.length) return unavailable;
+
+  const latestIndex = rows.length - 1;
+  const latest = rows[latestIndex];
+  const changes = Object.fromEntries(Object.entries(NET_LIQUIDITY_WINDOWS_WEEKS).map(([key, weeks]) => {
+    const prior = rows[latestIndex - weeks];
+    // Only compare against the row that is exactly that many weeks back.
+    const expected = new Date(Date.parse(`${latest.date}T00:00:00Z`) - weeks * 7 * DAY_MS).toISOString().slice(0, 10);
+    if (!prior || prior.date !== expected) return [key, { change: null, pct: null, direction: 'unavailable' }];
+    const change = latest.netLiquidity - prior.netLiquidity;
+    return [key, {
+      change,
+      pct: prior.netLiquidity > 0 ? change / prior.netLiquidity : null,
+      direction: directionLabel(change, prior.netLiquidity),
+    }];
+  }));
+  const ageDays = (new Date(now).getTime() - Date.parse(`${latest.date}T00:00:00Z`)) / DAY_MS;
+  const stale = ageDays > NET_LIQUIDITY_MAX_AGE_DAYS;
+
+  return {
+    status: stale ? 'stale' : 'ok',
+    latest: { ...latest, changes, regime: netLiquidityRegime(changes) },
+    history: rows.slice(-NET_LIQUIDITY_HISTORY_WEEKS),
+    sources,
+    missingInputs,
+  };
+}
+
 async function buildLiquidityModels(options = {}) {
   const now = options.now || new Date();
   const baseOptions = {
@@ -735,14 +859,15 @@ async function buildLiquidityModels(options = {}) {
     now,
   };
 
-  const [global, us] = await Promise.all([
+  const [global, us, netLiquidity] = await Promise.all([
     buildGlobalModel(baseOptions),
     buildUsModel(baseOptions),
+    buildNetLiquidityModel(baseOptions),
   ]);
 
   return {
     timestamp: now.toISOString(),
-    models: { global, us },
+    models: { global, us, netLiquidity },
   };
 }
 
@@ -752,6 +877,7 @@ module.exports = {
   alignNoLookahead,
   buildLiquidityModels,
   buildGlobalModel,
+  buildNetLiquidityModel,
   buildUsModel,
   deriveSubtract,
   parseCsvSeries,

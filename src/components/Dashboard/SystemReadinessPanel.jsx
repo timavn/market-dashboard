@@ -190,7 +190,7 @@ const HEDGEYE_PRODUCT_DEFINITIONS = [
   { id: 'the-macro-show', label: 'The Macro Show', summary: 'Long, short, and neutral macro summary notes.' },
   { id: 'the-call', label: 'The Call', summary: 'Long, short, and neutral call summary notes.' },
   { id: 'real-time-alert', label: 'Real-Time Alert', summary: 'Published alert headlines, tickers, and signal phrases.' },
-  { id: 'volume', label: 'Volume', summary: 'Market-volume snapshots and market-share data.' },
+  { id: 'volume', label: 'Volume', summary: 'Cboe consolidated U.S. share volume vs. 1M, 3M, and 1Y averages.' },
   { id: 'market-structure', label: 'Market Structure', summary: 'Market-structure snapshot data and notes.' },
   { id: 'cftc-positioning', label: 'CFTC Positioning', summary: 'Positioning metrics, weekly changes, and Z-scores.' },
   { id: 'etf-pro', label: 'ETF Pro', summary: 'Long and short ETF lists with reported changes.' },
@@ -1316,7 +1316,7 @@ const SystemReadinessPanel = ({
             <span className="sr-service__scope" title={products[0]?.reason || undefined}>
               {deriveProductsStatus(products) === 'unknown' && !products[0]?.checking
                 ? products[0]?.reason
-                : 'Hedgeye research feeds'}
+                : 'Research and market feeds'}
             </span>
             <span className="sr-service__result">
               <span className="sr-service__status">

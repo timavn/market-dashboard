@@ -8,7 +8,7 @@ import {
 } from './dashboardStatus';
 
 describe('dashboard card status registry', () => {
-  test('defines the eight main cards in display order', () => {
+  test('defines the nine main cards in display order', () => {
     expect(DASHBOARD_CARD_DEFINITIONS.map(({ id }) => id)).toEqual([
       'volatility',
       'usd',
@@ -18,6 +18,7 @@ describe('dashboard card status registry', () => {
       'global-quads',
       'dollar-liquidity',
       'volume',
+      'money-flow',
     ]);
   });
 
@@ -32,7 +33,7 @@ describe('dashboard card status registry', () => {
       issues: ['Dataset is preliminary.'],
     });
 
-    expect(Object.keys(next)).toHaveLength(8);
+    expect(Object.keys(next)).toHaveLength(9);
     expect(next.volume).toEqual(expect.objectContaining({
       status: 'delayed',
       statusLabel: 'PROVISIONAL',

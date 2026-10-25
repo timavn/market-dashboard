@@ -26,6 +26,7 @@ export { default as Globe } from 'lucide-react/dist/esm/icons/globe.js';
 export { default as Grid } from 'lucide-react/dist/esm/icons/grid.js';
 export { default as History } from 'lucide-react/dist/esm/icons/history.js';
 export { default as Info } from 'lucide-react/dist/esm/icons/info.js';
+export { default as Landmark } from 'lucide-react/dist/esm/icons/landmark.js';
 export { default as LayoutGrid } from 'lucide-react/dist/esm/icons/layout-grid.js';
 export { default as LineChart } from 'lucide-react/dist/esm/icons/line-chart.js';
 export { default as Link } from 'lucide-react/dist/esm/icons/link.js';

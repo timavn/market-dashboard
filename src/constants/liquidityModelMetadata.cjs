@@ -29,6 +29,13 @@ const GLOBAL_LIQUIDITY_REGIME_THRESHOLDS = deepFreeze({
   yellowRiskBelow: 80,
 });
 
+// Fed net liquidity = Fed balance sheet - Treasury General Account - overnight
+// reverse repo. A move smaller than this share of the level counts as flat.
+const NET_LIQUIDITY_DIRECTION_TOLERANCE = 0.0025;
+const NET_LIQUIDITY_WINDOWS_WEEKS = deepFreeze({ '1w': 1, '4w': 4, '13w': 13, '52w': 52 });
+// Weekly H.4.1 data posts Thursday for Wednesday; older than this is stale.
+const NET_LIQUIDITY_MAX_AGE_DAYS = 15;
+
 const GLOBAL_LIQUIDITY_RATIO_PRESSURE_WEIGHTS = deepFreeze({
   level: 0.50,
   trend3m: 0.25,
@@ -41,6 +48,9 @@ module.exports = {
   GLOBAL_LIQUIDITY_REGIME_THRESHOLDS,
   GLOBAL_LIQUIDITY_SCORE_BREAKPOINTS,
   GLOBAL_LIQUIDITY_WEIGHTS,
+  NET_LIQUIDITY_DIRECTION_TOLERANCE,
+  NET_LIQUIDITY_MAX_AGE_DAYS,
+  NET_LIQUIDITY_WINDOWS_WEEKS,
   US_LIQUIDITY_ACCELERATION_TOLERANCE,
   US_LIQUIDITY_GREEN_STACK_TO_GDP,
 };

@@ -296,6 +296,23 @@ describe('SystemReadinessPanel', () => {
     expect(deriveProductsStatus(normalized)).toBe('attention');
   });
 
+  test('keeps an older release-driven Inflation Nowcast out of Attention', () => {
+    const normalized = normalizeHedgeyeProducts({
+      date: '2026-10-24',
+      marketSession: 'closed',
+      meta: { timestamp: '2026-10-24T18:00:00.000Z' },
+      dataTypes: Object.fromEntries([
+        ...Object.keys(productsPayload().dataTypes).map((id) => [id, { status: 'stale', date: '2026-10-23' }]),
+        ['inflation-nowcast', { status: 'current', date: '2026-10-16' }],
+      ]),
+    });
+
+    const nowcast = normalized.find(({ id }) => id === 'inflation-nowcast');
+    expect(nowcast.status).toBe('online');
+    expect(nowcast.reason).toBe('');
+    expect(deriveProductsStatus(normalized)).toBe('closed');
+  });
+
   test('loads on first open and does not request again solely because it reopened', async () => {
     MarketDataService.getSystemStatus.mockResolvedValue(statusPayload());
     const { rerender } = render(
@@ -409,7 +426,7 @@ describe('SystemReadinessPanel', () => {
     expect(within(dialog).getByText('Verification unavailable')).toBeInTheDocument();
     expect(within(dialog).getByText('Prediction-market inputs')).toBeInTheDocument();
     expect(within(dialog).getByText('Products')).toBeInTheDocument();
-    expect(within(dialog).getByText('Hedgeye research feeds')).toBeInTheDocument();
+    expect(within(dialog).getByText('Research and market feeds')).toBeInTheDocument();
     expect(within(dialog).queryByText('Gateway signed out')).not.toBeInTheDocument();
     expect(within(dialog).queryByText('Morning operations checklist')).not.toBeInTheDocument();
     expect(within(dialog).queryByText('What needs attention')).not.toBeInTheDocument();
@@ -634,11 +651,12 @@ describe('SystemReadinessPanel', () => {
     expect(screen.queryByRole('list', { name: 'Portfolio checklist' }))
       .not.toBeInTheDocument();
     const dashboardChecklist = screen.getByRole('list', { name: 'Dashboard checklist' });
-    expect(within(dashboardChecklist).getAllByRole('listitem')).toHaveLength(10);
+    expect(within(dashboardChecklist).getAllByRole('listitem')).toHaveLength(11);
     expect(within(dashboardChecklist).getByText('API server')).toBeInTheDocument();
     expect(within(dashboardChecklist).getByText('React UI')).toBeInTheDocument();
     expect(within(dashboardChecklist).getByText('Volatility')).toBeInTheDocument();
     expect(within(dashboardChecklist).getByText('Volume')).toBeInTheDocument();
+    expect(within(dashboardChecklist).getByText('Money Flow')).toBeInTheDocument();
     expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
     expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
 

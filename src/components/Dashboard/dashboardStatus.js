@@ -37,7 +37,12 @@ export const DASHBOARD_CARD_DEFINITIONS = Object.freeze([
   Object.freeze({
     id: 'volume',
     label: 'Volume',
-    summary: 'Market-volume snapshots',
+    summary: 'Cboe consolidated volume',
+  }),
+  Object.freeze({
+    id: 'money-flow',
+    label: 'Money Flow',
+    summary: 'Net liquidity confirmed by volume',
   }),
 ]);
 

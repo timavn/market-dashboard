@@ -1317,6 +1317,19 @@ export class MarketDataService {
     }
   }
 
+  // Money flow verdict: Fed net liquidity confirmed by up/down volume. A 503
+  // still carries the layered payload, so its body is returned for display.
+  static async getMoneyFlow() {
+    try {
+      const response = await dedupedGet('/api/money-flow', { timeout: 45000 });
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 503 && error.response.data?.verdict) return error.response.data;
+      console.error('Error fetching money flow:', error);
+      throw error;
+    }
+  }
+
   // Get chart data for expanded market cards (OHLC, multiple time ranges)
   // Returns: { symbol, name, current, ohlc, chartData, meta }
   static async getChartData(symbol, range = '1d') {

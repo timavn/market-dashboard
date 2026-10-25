@@ -744,6 +744,13 @@ export const DASHBOARD_RESOURCE_DEFINITIONS = Object.freeze({
     storage: storage(true, 'market-dashboard.reference.dollar-liquidity.v1', 30 * DAY_MS),
     warmup: Object.freeze({ eligible: true, providerPure: true }),
   }),
+  'money-flow': definition('money-flow', {
+    classification: DASHBOARD_RESOURCE_CLASSIFICATIONS.DATED_REFERENCE,
+    cacheKey: 'dashboard-reference',
+    scopeKey: 'money-flow',
+    storage: storage(true, 'market-dashboard.reference.money-flow.v1', 30 * DAY_MS),
+    warmup: Object.freeze({ eligible: true, providerPure: true }),
+  }),
   'market-volume': definition('market-volume', {
     classification: DASHBOARD_RESOURCE_CLASSIFICATIONS.DATED_REFERENCE,
     cacheKey: 'market-share-volume-v2',

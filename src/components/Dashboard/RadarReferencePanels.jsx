@@ -6,6 +6,7 @@ import CFTCNetLongCard, { getCftcFreshness } from './CFTCNetLongCard';
 import DelayedDataMarker from './DelayedDataMarker';
 import { delayedMarkerMarketContext } from '../../utils/delayedMarkerMarketContext';
 import DollarLiquidityModels from './DollarLiquidityModels';
+import MoneyFlowPanel, { MoneyFlowPreview } from './MoneyFlowPanel';
 import GlobalQuadsCard, { QuadsPreview } from './GlobalQuadsCard';
 import { useGlobalQuads } from '../../hooks/useGlobalQuads';
 import MarketSituationReportCard, {
@@ -34,6 +35,7 @@ const PANEL_TITLES = {
   quads: 'Global Quads',
   liquidity: 'Dollar Liquidity',
   volume: 'Volume',
+  'money-flow': 'Money Flow',
 };
 
 const requireReferenceObject = (payload) => {
@@ -312,6 +314,7 @@ const FullReferencePanel = ({
   cftcState,
   marketSituationState,
   liquidityState,
+  moneyFlowState,
   quadsResource,
   volumeTitle,
 }) => {
@@ -400,6 +403,9 @@ const FullReferencePanel = ({
           <PersistentSurface active={activePanel === 'volume'}>
             <MarketVolumeTable showDetails showAsOf={false} />
           </PersistentSurface>
+          <PersistentSurface active={activePanel === 'money-flow'}>
+            <MoneyFlowPanel resourceState={moneyFlowState} />
+          </PersistentSurface>
         </div>
       </section>
     </PersistentSurface>
@@ -425,6 +431,10 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     () => MarketDataService.getDollarLiquidityModels(),
     [],
   );
+  const loadMoneyFlow = useCallback(
+    () => MarketDataService.getMoneyFlow(),
+    [],
+  );
   const cftcResource = useDashboardResource('cftc', {}, {
     fetcher: loadCftc,
     validate: requireReferenceObject,
@@ -439,6 +449,13 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     getObservedAt: (payload) => (
       payload?.models?.us?.latest?.date || payload?.models?.global?.latest?.date || null
     ),
+    pollIntervalMs: ANALYTICS_REFRESH_MS,
+    active: true,
+  });
+  const moneyFlowResource = useDashboardResource('money-flow', {}, {
+    fetcher: loadMoneyFlow,
+    validate: requireReferenceObject,
+    getObservedAt: (payload) => payload?.layers?.participation?.asOf || payload?.layers?.netLiquidity?.latest?.date || null,
     pollIntervalMs: ANALYTICS_REFRESH_MS,
     active: true,
   });
@@ -459,6 +476,13 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     loading: liquidityResource.initialLoading && !liquidityResource.data,
     refreshing: liquidityResource.refreshing,
     error: liquidityResource.error?.message || null,
+  };
+
+  const moneyFlowState = {
+    data: moneyFlowResource.data,
+    loading: moneyFlowResource.initialLoading && !moneyFlowResource.data,
+    refreshing: moneyFlowResource.refreshing,
+    error: moneyFlowResource.error?.message || null,
   };
 
   const openPanel = useCallback((panelId) => {
@@ -548,6 +572,18 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
       : liquidityAvailable
         ? 'historical'
         : 'unavailable';
+  const moneyFlowDate = moneyFlowState.data?.layers?.participation?.asOf
+    || moneyFlowState.data?.layers?.netLiquidity?.latest?.date
+    || null;
+  const moneyFlowVerdict = moneyFlowState.data?.verdict || null;
+  const moneyFlowStale = moneyFlowState.data?.layers?.netLiquidity?.status === 'stale';
+  const moneyFlowStatus = moneyFlowState.loading
+    ? 'loading'
+    : !moneyFlowVerdict || moneyFlowVerdict === 'unavailable'
+      ? 'unavailable'
+      : moneyFlowStale
+        ? 'delayed'
+        : 'historical';
   const dashboardCardStatuses = useMemo(() => [
     {
       id: 'cftc-positioning',
@@ -632,7 +668,30 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
       ],
       issues: volumeSourceIssues,
     },
+    {
+      id: 'money-flow',
+      status: moneyFlowStatus,
+      date: moneyFlowDate ? formatDate(moneyFlowDate) : undefined,
+      sourceDate: moneyFlowDate || undefined,
+      statusLabel: moneyFlowVerdict ? moneyFlowVerdict.toUpperCase() : undefined,
+      detail: moneyFlowDate ? `AS OF ${formatDate(moneyFlowDate)}` : undefined,
+      diagnostics: [
+        { label: 'Verdict', value: moneyFlowVerdict || 'Checking' },
+        { label: 'Net liquidity', value: moneyFlowState.data?.layers?.netLiquidity?.latest?.date || 'Unavailable' },
+      ],
+      issues: [
+        moneyFlowState.error ? `Money flow request: ${moneyFlowState.error}` : null,
+        moneyFlowStale ? 'The latest weekly Fed release is older than expected.' : null,
+        ...(moneyFlowVerdict === 'unavailable' ? moneyFlowState.data?.reasons || [] : []),
+      ].filter(Boolean),
+    },
   ], [
+    moneyFlowDate,
+    moneyFlowStale,
+    moneyFlowState.data,
+    moneyFlowState.error,
+    moneyFlowStatus,
+    moneyFlowVerdict,
     cftcDate,
     cftcAvailable,
     cftcDecisionEligible,
@@ -716,6 +775,14 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
               />
             </PreviewCard>
           </PreviewCard>
+          <PreviewCard
+            id="money-flow"
+            title="Money Flow"
+            status={moneyFlowStatus}
+            onOpen={openPanel}
+          >
+            <MoneyFlowPreview data={moneyFlowState.data} loading={moneyFlowState.loading} />
+          </PreviewCard>
         </div>
       </section>
       {typeof document !== 'undefined' && createPortal(
@@ -725,6 +792,7 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
           cftcState={cftcState}
           marketSituationState={marketSituationState}
           liquidityState={liquidityState}
+          moneyFlowState={moneyFlowState}
           quadsResource={quadsResource}
           volumeTitle={volumeTitle}
         />,

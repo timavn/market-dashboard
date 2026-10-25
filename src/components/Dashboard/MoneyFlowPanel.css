@@ -1,0 +1,88 @@
+.money-flow-verdict {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  background: #e6e6e6;
+  color: #000080;
+}
+
+.money-flow-verdict.is-up { background: #dcfce7; color: #166534; }
+.money-flow-verdict.is-down { background: #fee2e2; color: #991b1b; }
+.money-flow-verdict.is-flat { background: #fef3c7; color: #92400e; }
+
+.money-flow-mini .is-up,
+.money-flow-panel .is-up { color: #15803d; }
+.money-flow-mini .is-down,
+.money-flow-panel .is-down { color: #b91c1c; }
+.money-flow-mini .is-flat,
+.money-flow-panel .is-flat { color: #a16207; }
+.money-flow-mini .is-muted,
+.money-flow-panel .is-muted { color: #64748b; }
+
+.money-flow-mini td:last-child,
+.money-flow-mini th:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.money-flow-direction {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.money-flow-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #d3d3d3;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.money-flow-summary .money-flow-verdict {
+  font-size: 13px;
+  padding: 4px 12px;
+}
+
+.money-flow-summary p {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: #000080;
+}
+
+.money-flow-summary .money-flow-rule {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.money-flow-note {
+  margin: 4px 0;
+  font-size: 11px;
+  color: #a16207;
+}
+
+.money-flow-context {
+  margin-top: 12px;
+}
+
+.money-flow-context h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #000080;
+}
+
+.money-flow-context h3 span {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.money-flow-panel .dollar-liquidity-headlines {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}

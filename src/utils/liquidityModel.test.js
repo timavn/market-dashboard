@@ -2,6 +2,7 @@ const {
   annualizedRate,
   alignNoLookahead,
   buildGlobalModel,
+  buildNetLiquidityModel,
   buildUsModel,
   deriveSubtract,
   toMonthly,
@@ -146,5 +147,62 @@ describe('global liquidity input integrity', () => {
       'UK broad money',
       'China nominal GDP',
     ]));
+  });
+});
+
+describe('Fed net liquidity model', () => {
+  // 60 Wednesdays ending 2026-10-21; Fed assets grow $10B a week in millions.
+  const wednesdays = Array.from({ length: 60 }, (_, index) => (
+    new Date(Date.parse('2026-10-21T00:00:00Z') - (59 - index) * 7 * 86400000).toISOString().slice(0, 10)
+  ));
+  const weekly = (valueAt) => wednesdays.map((date, index) => ({ date, value: valueAt(index) }));
+  const series = {
+    WALCL: weekly((index) => 6_000_000 + index * 10_000),
+    WTREGEN: weekly(() => 800_000),
+    // Daily reverse repo posted the day before each Wednesday, in billions.
+    RRPONTSYD: wednesdays.map((date) => ({
+      date: new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10),
+      value: 100,
+    })),
+  };
+  const loadSeriesOverride = async (source) => series[source.seriesId];
+
+  test('nets the Fed balance sheet against the TGA and reverse repo in billions', async () => {
+    const model = await buildNetLiquidityModel({ loadSeriesOverride, now: new Date('2026-10-23T12:00:00Z') });
+
+    expect(model.status).toBe('ok');
+    expect(model.latest).toMatchObject({
+      date: '2026-10-21',
+      fedBalanceSheet: 6590,
+      treasuryGeneralAccount: 800,
+      reverseRepo: 100,
+      netLiquidity: 5690,
+      regime: 'expanding',
+    });
+    expect(model.latest.changes['4w']).toMatchObject({ change: 40, direction: 'expanding' });
+    expect(model.latest.changes['52w'].change).toBeCloseTo(520);
+    expect(model.history).toHaveLength(60);
+  });
+
+  test('marks contraction when the TGA drains liquidity on both windows', async () => {
+    const draining = { ...series, WTREGEN: weekly((index) => 800_000 + index * 25_000) };
+    const model = await buildNetLiquidityModel({
+      loadSeriesOverride: async (source) => draining[source.seriesId],
+      now: new Date('2026-10-23T12:00:00Z'),
+    });
+
+    expect(model.latest.changes['13w'].direction).toBe('contracting');
+    expect(model.latest.regime).toBe('contracting');
+  });
+
+  test('flags stale weekly data and reports missing inputs instead of estimating', async () => {
+    const stale = await buildNetLiquidityModel({ loadSeriesOverride, now: new Date('2026-11-20T12:00:00Z') });
+    expect(stale.status).toBe('stale');
+
+    const missing = await buildNetLiquidityModel({
+      loadSeriesOverride: async (source) => (source.seriesId === 'RRPONTSYD' ? [] : series[source.seriesId]),
+      now: new Date('2026-10-23T12:00:00Z'),
+    });
+    expect(missing).toMatchObject({ status: 'unavailable', latest: null, missingInputs: ['Overnight reverse repo'] });
   });
 });

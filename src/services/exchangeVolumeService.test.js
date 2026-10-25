@@ -3,6 +3,7 @@ const fixture = require('./__fixtures__/exchange-volume-cboe-2026.json');
 const { createExchangeVolumeService, parseCboeVolumeCsv, requiredVolumeDates, CBOE_VOLUME_URL } = require('./exchangeVolumeService.cjs');
 const {
   calculateExchangeVolumeMetrics, expectedVolumeTradingDate, isVerifiedExchangeVolumeResponse,
+  exchangeVolumeFreshness,
   EXCHANGE_VOLUME_WINDOWS,
 } = require('../utils/exchangeVolume.cjs');
 
@@ -271,5 +272,29 @@ describe('volume response provenance and freshness', () => {
     const result = JSON.parse(JSON.stringify(await makeService().fetchSnapshot()));
     alter(result);
     expect(isVerifiedExchangeVolumeResponse(result, NOW)).toBe(false);
+  });
+});
+
+describe('Products-panel Volume freshness', () => {
+  test('reports a verified Cboe session as current with its trading date', async () => {
+    const result = await makeService().fetchSnapshot({ days: 2 });
+    expect(exchangeVolumeFreshness(result, NOW)).toMatchObject({
+      status: 'current', date: '2026-09-08', lastUpdated: '2026-09-08', source: 'CboeHistoricalMarketVolume',
+    });
+  });
+
+  test('reports a session Cboe has not posted yet as pending', async () => {
+    const result = await makeService(clientFor(fixture.dailyTotals.filter(row => row.date !== '2026-09-08'))).fetchSnapshot();
+    expect(exchangeVolumeFreshness(result, NOW)).toMatchObject({
+      status: 'pending', date: null, reason: 'Cboe has not posted the 2026-09-08 session yet.',
+    });
+  });
+
+  test('reports any other unverified response as an error', async () => {
+    const client = { get: jest.fn(async () => ({ status: 200, data: '<html>blocked</html>' })) };
+    const result = await makeService(client).fetchSnapshot();
+    expect(exchangeVolumeFreshness(result, NOW)).toMatchObject({
+      status: 'error', errorCode: 'CBOE_VOLUME_INVALID_CSV',
+    });
   });
 });
