@@ -23,23 +23,23 @@
   font-size: 10px;
 }
 
-.money-flow-mini td:last-child,
-.money-flow-mini th:last-child {
+/* The read column is colored edge to edge, like the Global Quads cells. */
+.money-flow-mini .money-flow-read {
   width: 34%;
-  padding-right: 0;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.money-flow-mini .money-flow-block {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  height: calc(var(--dashboard-table-row-height, 14px) - 2px);
-}
-
-.money-flow-mini td:nth-child(2),
-.money-flow-mini th:nth-child(2) {
+.money-flow-mini td:nth-child(2) {
   text-align: right;
   white-space: nowrap;
+}
+
+.efr-reference-card__body .money-flow-mini thead th {
+  text-align: center;
 }
 
 .money-flow-mini .is-up,
@@ -103,3 +103,9 @@
 .money-flow-panel .dollar-liquidity-headlines {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
+
+/* Outrank the shared mini-table header and cell backgrounds. */
+.efr-reference-card__body .money-flow-mini .money-flow-read.money-flow-block--up { background: var(--dashboard-quad-1); color: #fff; }
+.efr-reference-card__body .money-flow-mini .money-flow-read.money-flow-block--flat { background: var(--dashboard-quad-3); color: #332900; }
+.efr-reference-card__body .money-flow-mini .money-flow-read.money-flow-block--down { background: var(--dashboard-quad-4); color: #fff; }
+.efr-reference-card__body .money-flow-mini .money-flow-read.money-flow-block--none { background: #fff; color: #667085; }

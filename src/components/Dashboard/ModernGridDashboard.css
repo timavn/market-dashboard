@@ -650,8 +650,26 @@
   box-shadow: var(--modern-grid-shadow);
 }
 
+/* Dollar Liquidity stretches its table so it and Volume fill the card. */
+.dashboard-shell--modern-grid .efr-reference-card--liquidity {
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-shell--modern-grid .efr-reference-card--liquidity > .efr-reference-card__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dashboard-shell--modern-grid .efr-reference-card--liquidity > .efr-reference-card__body > .efr-mini-table {
+  flex: 1 1 auto;
+}
+
 .dashboard-shell--modern-grid .efr-reference-card--liquidity .efr-reference-card--volume {
-  margin-top: 6px;
+  flex: 0 0 auto;
+  margin-top: 0;
   border: 0;
   border-top: 1px solid var(--modern-grid-line);
   box-shadow: none;

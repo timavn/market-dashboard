@@ -109,14 +109,20 @@ export const MoneyFlowPreview = ({ data, loading = false }) => {
   return (
     <table className="efr-mini-table money-flow-mini" aria-label="Money flow">
       <thead>
-        <tr><th>Verdict</th><th>Supply + volume</th><th><VerdictPill verdict={data.verdict} /></th></tr>
+        <tr>
+          <th>Verdict</th>
+          <th>Supply + volume</th>
+          <th className={`money-flow-read money-flow-block--${readTone(data.verdict)}`}>
+            {VERDICT_LABELS[data.verdict] || VERDICT_LABELS.unavailable}
+          </th>
+        </tr>
       </thead>
       <tbody>
         {rows.map(([label, value, read, readLabel]) => (
           <tr key={label}>
             <td>{label}</td>
             <td>{value}</td>
-            <td><ReadBlock read={read} label={readLabel || read} /></td>
+            <td className={`money-flow-read money-flow-block--${readTone(read)}`}>{readLabel || read || '—'}</td>
           </tr>
         ))}
       </tbody>
