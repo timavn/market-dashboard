@@ -74,7 +74,9 @@ class PortfolioRefreshIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(analyst_app, "_portfolio_refresh_research", side_effect=AssertionError("Saved reports must not fetch providers")):
             brief = build_portfolio_brief(saved, analyst_app.portfolio_metrics(self.book()), {}, daily_research={})
         self.assertEqual(brief["refreshReport"], captured)
-        self.assertEqual(brief["dailyRollup"]["sections"][:4], captured["sections"][:4])
+        # The captured refresh facts stay on the brief; its four sections stay out of the report.
+        self.assertFalse({section["id"] for section in captured["sections"]}
+                         & {section["id"] for section in brief["dailyRollup"]["sections"]})
 
     async def test_historical_book_cannot_authorize_current_actions_when_broker_refresh_failed(self):
         historical = {"verifiedAtCapture": True, "runId": "prior", "portfolio": self.book(), "balance": None}

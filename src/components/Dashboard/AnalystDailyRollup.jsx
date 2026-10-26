@@ -5,7 +5,6 @@ import PortfolioReviewDateline from './PortfolioReviewDateline';
 import { PortfolioReviewTextProvider } from './PortfolioReviewTextContext';
 import { portfolioTopicTitle } from '../../utils/portfolioReviewTypography';
 import { rollupDateline } from '../../utils/portfolioReviewDates';
-import { displayRealignmentTable, isRealignmentTable } from '../../utils/portfolioRealignmentTable';
 import usePortfolioSecurityNames from '../../hooks/usePortfolioSecurityNames';
 import './AnalystDailyRollup.css';
 import LoadingIndicator from '../common/LoadingIndicator';
@@ -47,15 +46,15 @@ const trendShiftTable = block => !isTrendShift(block.columns) ? block : { ...blo
   }) };
 const isSecurityTable = columns => columns[0] === 'Ticker' && columns[1] === 'Security';
 const isFactorTable = (section, block) => section.id === 'factor-exposure' && block.columns[0] === 'Factor';
-const isPositionAlignment = section => ['position-confirmations', 'position-contradictions'].includes(section.id);
-const expandableReportLists = [
-  { id: 'refresh-realignment', title: 'Highest-priority realignment', aliases: [], label: 'realignments' },
-  { id: 'refresh-watch-list', title: 'Watch list', aliases: ['position-contradictions'], label: 'watch list items' },
-  { id: 'refresh-aligned', title: 'What is already aligned', aliases: ['position-confirmations'], label: 'aligned items' },
-];
-const expandableListFor = section => expandableReportLists.find(list =>
-  [list.id, ...list.aliases].includes(section.slotId || section.id)
-  || list.title.toLowerCase() === text(section.title).toLowerCase());
+// The full-book refresh sections (and their older position-alignment names)
+// restated dated publisher actions with no current call; saved captures keep
+// the facts, but Portfolio Review no longer shows them.
+const retiredSectionIds = new Set(['refresh-realignment', 'refresh-watch-list', 'refresh-aligned', 'refresh-sequence',
+  'position-confirmations', 'position-contradictions']);
+const retiredSectionTitles = new Set(['highest-priority realignment', 'watch list', 'what is already aligned', 'recommended sequence',
+  'position confirmations', 'position contradictions']);
+const isRetiredSection = section => retiredSectionIds.has(section?.id)
+  || retiredSectionTitles.has(text(section?.title).toLowerCase());
 const capturedSecurityName = value => /^(?:—|-|unavailable|unknown)$/i.test(text(value)) ? '' : text(value);
 const isResearchPositioning = (section, block) => (['macro-show', 'company-catalysts', 'the-call'].includes(section.id)
   || /^(?:Macro Show|Company catalysts & sector research|The Call)$/i.test(text(section.title)))
@@ -124,7 +123,7 @@ const blocksFor = section => marketStructureDates(section, (Array.isArray(sectio
     && Array.isArray(block.rows) && block.rows.some(row => Array.isArray(row?.cells) && row.cells.some(text))))
   .map(block => {
     if (block.type !== 'table') return block;
-    const displayed = displayRealignmentTable(section, displayTable(block));
+    const displayed = displayTable(block);
     return section.id === 'hedgai-signals' ? { ...displayed,
       columns: displayed.columns.map(column => ['Now', 'HedgAI'].includes(column) ? 'Tick' : column),
       disclosure: text(displayed.disclosure).replace(/^Full HedgAI book\b/, 'Full Tick book'),
@@ -133,7 +132,7 @@ const blocksFor = section => marketStructureDates(section, (Array.isArray(sectio
   .filter(block => block.type !== 'table' || block.columns.length > 0));
 
 export const dailyRollupSections = rollup => rollup?.version === 1 && Array.isArray(rollup.sections)
-  ? rollup.sections.filter(section => text(section?.title) && blocksFor(section).length) : [];
+  ? rollup.sections.filter(section => text(section?.title) && !isRetiredSection(section) && blocksFor(section).length) : [];
 
 const dailySectionSlots = [
   { id: 'market-drivers', title: "Today's market drivers" },
@@ -145,20 +144,14 @@ const dailySectionSlots = [
   { id: 'signal-strength', title: 'Signal Strength' },
   { id: 'market-structure', title: 'Market structure & flows' },
 ];
-const refreshSectionSlots = [
-  { id: 'refresh-realignment', title: 'Highest-priority realignment' },
-  { id: 'refresh-watch-list', title: 'Watch list', aliases: ['position-contradictions'] },
-  { id: 'refresh-aligned', title: 'What is already aligned', aliases: ['position-confirmations'] },
-  { id: 'refresh-sequence', title: 'Recommended sequence' },
-];
 const modelSectionSlots = [
   { id: 'pca-risk', title: 'PCA risk' },
   { id: 'factor-exposure', title: 'Factor exposure' },
 ];
 const stableDailySections = rollup => {
-  const captured = rollup?.version === 1 ? array(rollup.sections).filter(section => text(section?.title)) : [];
+  const captured = rollup?.version === 1 ? array(rollup.sections).filter(section => text(section?.title) && !isRetiredSection(section)) : [];
   const byId = new Map(captured.map(section => [section.id, section]));
-  const slots = [...refreshSectionSlots, ...modelSectionSlots, ...dailySectionSlots];
+  const slots = [...modelSectionSlots, ...dailySectionSlots];
   const used = new Set();
   const projected = slots.map(slot => {
     const matches = [slot.id, ...array(slot.aliases)].map(id => byId.get(id)).filter(Boolean);
@@ -209,16 +202,6 @@ function ReportParagraph({ block }) {
     <h3 className="analyst-portfolio-topic analyst-process--title"><AnalystSemanticText>{title}</AnalystSemanticText></h3>
     <p><AnalystSemanticText>{body}</AnalystSemanticText></p>
   </div>;
-}
-
-function ProductReference({ label, row, ids, sources, onCitation }) {
-  const evidence = [...new Set(array(ids))].map(id => sources.get(id)).filter(Boolean);
-  if (!onCitation || !evidence.length) return <>{label || '—'}</>;
-  const highlightTexts = [...new Set(array(row.evidenceTexts).map(text).filter(Boolean))];
-  const relatedSources = evidence.map(source => ({ ...source, highlightTexts }));
-  const detail = evidence.map(source => [source.title || sourceName(source), sourceDate(source)].filter(Boolean).join(' · ')).join('; ');
-  return <button type="button" className="analyst-product-reference" title={detail} aria-label={`Product evidence: ${label}`}
-    onClick={() => onCitation(evidence[0], { highlightTexts, ...(evidence.length > 1 ? { relatedSources } : {}) })}>{label}</button>;
 }
 
 function SecurityName({ row, cellIndex, currentIdentity }) {
@@ -274,7 +257,6 @@ function TableDisclosure({ block, children }) {
 }
 
 export default function AnalystDailyRollup({ rollup, citations = [], onCitation, holdingsAsOf, stableLayout = false, loading = false }) {
-  const [expandedLists, setExpandedLists] = useState({});
   const sections = stableLayout ? stableDailySections(rollup) : dailyRollupSections(rollup);
   const securityNames = usePortfolioSecurityNames(sections.flatMap(section =>
     blocksFor(section).filter(block => block.type === 'table' && isSecurityTable(block.columns)).flatMap(block =>
@@ -290,28 +272,15 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
     const contentBlocks = blocks.filter(block => block !== dates.consumed);
     // A source the user paused keeps its slot with a compact Pending state.
     const paused = section.status === 'pending' && !contentBlocks.length;
-    const sectionKey = section.slotId || section.id || section.title;
-    const expandableList = expandableListFor(section);
-    const listExpanded = expandedLists[sectionKey] === true;
-    let itemCount = 0;
-    const displayedBlocks = expandableList ? contentBlocks.map(block => {
-      if (block.type !== 'table' || text(block.disclosure)) return block;
-      const rows = block.rows.filter(row => {
-        if (!Array.isArray(row?.cells) || !row.cells.some(text)) return false;
-        itemCount += 1;
-        return itemCount <= 10 || listExpanded;
-      });
-      return { ...block, rows };
-    }).filter(block => block.type !== 'table' || block.rows.length > 0) : contentBlocks;
-    const shownBlocks = displayedBlocks.map(block => block.type === 'table' ? trendShiftTable(block) : block);
+    const shownBlocks = contentBlocks.map(block => block.type === 'table' ? trendShiftTable(block) : block);
     const content = <>
       {stableLayout && !contentBlocks.length && <p className="portfolio-review-section-status">{paused ? 'Pending' : loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Unavailable'}</p>}
       {shownBlocks.map((block, blockIndex) => block.type === 'paragraph'
         ? <ReportParagraph key={blockIndex} block={block} />
         : isResearchPositioning(section, block) ? <PositioningList key={blockIndex} block={block} />
         : isMacroPositioningChange(section, block) ? <PositioningList key={blockIndex} block={block} changes />
-        : <TableDisclosure block={block} key={blockIndex}>{() => <div className={`portfolio-brief-table-scroll${isRealignmentTable(section, block) ? ' analyst-realignment-table-wrap' : ''}`}>
-          <table className={`portfolio-brief-table${isSecurityTable(block.columns) ? ' analyst-security-table' : ''}${isFactorTable(section, block) ? ' analyst-factor-table' : ''}${isRealignmentTable(section, block) ? ' analyst-refresh-realignment' : ''}${isPositionAlignment(section) ? ' analyst-position-alignment' : ''}${block.trendShift ? ' analyst-trend-shift' : ''}${section.id === 'hedgai-signals' && block.groupRows ? ` analyst-hedgai-table${block.disclosure ? ' analyst-hedgai-full-book' : ' analyst-hedgai-summary'}` : ''}${isSecurityComparison(block.columns) ? ` analyst-security-comparison${block.columns.length === 4 ? ' analyst-trend-comparison' : ''}${hasRangeBoundaries(block.columns) ? ' analyst-range-boundary-comparison' : ''}` : ''}`} aria-label={tableCaption(section, block) || sectionTitle(section)}>
+        : <TableDisclosure block={block} key={blockIndex}>{() => <div className="portfolio-brief-table-scroll">
+          <table className={`portfolio-brief-table${isSecurityTable(block.columns) ? ' analyst-security-table' : ''}${isFactorTable(section, block) ? ' analyst-factor-table' : ''}${block.trendShift ? ' analyst-trend-shift' : ''}${section.id === 'hedgai-signals' && block.groupRows ? ` analyst-hedgai-table${block.disclosure ? ' analyst-hedgai-full-book' : ' analyst-hedgai-summary'}` : ''}${isSecurityComparison(block.columns) ? ` analyst-security-comparison${block.columns.length === 4 ? ' analyst-trend-comparison' : ''}${hasRangeBoundaries(block.columns) ? ' analyst-range-boundary-comparison' : ''}` : ''}`} aria-label={tableCaption(section, block) || sectionTitle(section)}>
             {tableCaption(section, block) && <caption>{tableCaption(section, block)}</caption>}
             {isSecurityTable(block.columns) && <colgroup>{block.columns.map((column, index) => <col key={index}
               className={isSecurityComparison(block.columns) || index < 2 ? comparisonColumnClass(column, index) : undefined} />)}</colgroup>}
@@ -326,21 +295,15 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
                     ? <span className="analyst-factor-name" title={text(row.cellTitles?.[cellIndex]) || text(row.cells[cellIndex])}><AnalystSemanticText context="Factor">{text(row.cells[cellIndex]) || '—'}</AnalystSemanticText></span>
                   : section.id === 'hedgai-signals' && ['Tick', 'Position'].includes(columnLabel(column))
                     ? <TickReading row={row} cellIndex={cellIndex} column={column} />
-                  : isPositionAlignment(section) && columnLabel(column) === 'Product'
-                    ? <ProductReference label={text(row.cells[cellIndex])} row={row} ids={row.cellCitationIds?.[cellIndex]} sources={sources} onCitation={onCitation} />
                   : block.trendShift && cellIndex === 2
                     ? <span className="analyst-trend-shift-value"><AnalystSemanticText context="Prior Trend">{row.trendShift[0]}</AnalystSemanticText>{' → '}<AnalystSemanticText context="Trend">{row.trendShift[1]}</AnalystSemanticText></span>
                   : hasRangeBoundaries(block.columns) && ['LOW', 'HIGH'].includes(column)
                     ? <span className={`analyst-range-boundary analyst-process--${boundaryTone(text(row.cells[cellIndex]))}`}>{text(row.cells[cellIndex]) || '—'}</span>
-                  : <AnalystSemanticText context={(section.id === 'hedgai-signals' || isPositionAlignment(section) || isRealignmentTable(section, block)) && cellIndex > 1 ? `Position ${text(column)}` : text(column)}>{text(row.cells[cellIndex]) || '—'}</AnalystSemanticText>}
+                  : <AnalystSemanticText context={section.id === 'hedgai-signals' && cellIndex > 1 ? `Position ${text(column)}` : text(column)}>{text(row.cells[cellIndex]) || '—'}</AnalystSemanticText>}
               </td>)}</tr>
               </React.Fragment>)}</tbody>
           </table>
         </div>}</TableDisclosure>)}
-      {itemCount > 10 && <button type="button" className="portfolio-brief-more"
-        aria-expanded={listExpanded} onClick={() => setExpandedLists(current => ({ ...current, [sectionKey]: !listExpanded }))}>
-        {listExpanded ? `Show fewer ${expandableList.label}` : `Show all ${itemCount} ${expandableList.label}`}
-      </button>}
       <Citations ids={[...array(section.citationIds), ...blocksFor(section).flatMap(block => [
         ...array(block.citationIds), ...array(block.rows).flatMap(row => array(row?.citationIds)),
       ])]} section={section} sources={sources} onCitation={onCitation} />

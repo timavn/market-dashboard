@@ -12,86 +12,6 @@ jest.mock('../../hooks/usePortfolioSecurityNames', () => ({ __esModule: true, de
 
 const source = { id: 'early', product: 'early-look', title: 'The Great Finding Out', publicationDate: '2026-09-18' };
 
-test('saved high-priority realignment uses compact separate columns and retains all eight captured rows and evidence', () => {
-  const citation = { id: 'refresh-rta', product: 'real-time-alerts', productLabel: 'Real-Time Alerts', title: 'Captured partial sale', publicationDate: '2026-09-30' };
-  const rows = [
-    ['EWZ', '—', 'Long · 3.12%', 'Removed source Long', 'Requalify against the dated source action', 'Sep 28, 2026'],
-    ['VFLO', '—', 'Long · 2.85%', 'Removed source Long', 'Requalify against the dated source action', 'Sep 17, 2026'],
-    ['GSL', '—', 'Long · 2.47%', 'Sell some', 'Requalify against the dated source action', 'Sep 24, 2026'],
-    ['CVI', 'CVR Energy', 'Long · 2.20%', 'Sell some', 'Review partial Long reduction', 'Sep 30, 2026'],
-    ['EMIF', '—', 'Short · 2.19%', 'Removed source Short', 'Requalify against the dated source action', 'Aug 31, 2026'],
-    ['AAPL', '—', 'Long · 2.10%', 'Sell some', 'Review partial Long reduction', 'Sep 30, 2026'],
-    ['MSFT', '—', 'Long · 2.02%', 'Sell some', 'Requalify against the dated source action', 'Aug 19, 2026'],
-    ['CHH', '—', 'Short · 2.00%', 'Cover', 'Requalify against the dated source action', 'Sep 24, 2026'],
-  ];
-  const data = { version: 1, citations: [citation], sections: [{ id: 'refresh-realignment', title: 'Highest-priority realignment', blocks: [{
-    type: 'table', columns: ['Ticker', 'Security', 'Position', 'Source reading', 'Review action', 'Date'],
-    rows: rows.map(cells => ({ cells, citationIds: [citation.id] })),
-  }] }] };
-  const saved = JSON.stringify(data);
-  const onCitation = jest.fn();
-  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} holdingsAsOf="2026-09-30T17:53:10Z" />);
-  const table = screen.getByRole('table', { name: 'Highest-priority realignment' });
-  expect(table).toHaveClass('analyst-refresh-realignment');
-  expect(table.parentElement).toHaveClass('analyst-realignment-table-wrap');
-  expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Ticker', 'Security', 'Bias', 'Size', 'Source action', 'Notes', 'Source date']);
-  const displayedRows = [...table.querySelectorAll('tbody tr')];
-  expect(displayedRows).toHaveLength(8);
-  displayedRows.forEach((row, index) => {
-    const [bias, size] = rows[index][2].split(' · ');
-    expect([...row.querySelectorAll('td')].map(cell => cell.textContent)).toEqual([rows[index][0], rows[index][1], bias, size, ...rows[index].slice(3)]);
-    within(row).getAllByText(bias).forEach(word => expect(word).toHaveClass(bias === 'Long' ? 'analyst-process--positive' : 'analyst-process--negative'));
-  });
-  const dateline = screen.getByRole('region', { name: 'Highest-priority realignment' }).querySelector('.portfolio-review-dateline');
-  expect(dateline).toHaveClass('has-period');
-  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 30, 2026 10:53 PDT');
-  expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Sep 30, 2026');
-  expect(dateline).not.toHaveTextContent(/·|Research:/);
-  expect(within(table).getByText('CVR Energy').closest('.analyst-security-name')).toHaveAttribute('title', 'CVR Energy');
-  fireEvent.click(screen.getByRole('button', { name: 'Source: Captured partial sale · Sep 30, 2026' }));
-  expect(onCitation).toHaveBeenCalledWith(citation, expect.objectContaining({ highlightTexts: expect.arrayContaining(['Sell some', 'Review partial Long reduction', 'Sep 30, 2026']) }));
-  expect(JSON.stringify(data)).toBe(saved);
-});
-
-test('new compact realignment keeps unavailable size and short-term prose distinct from position directions', () => {
-  const data = { version: 1, sections: [{ id: 'refresh-realignment', title: 'Highest-priority realignment', blocks: [{
-    type: 'table', columns: ['Ticker', 'Security', 'Bias', 'Size', 'Source action', 'Notes', 'Source date'], rows: [{
-      cells: ['CHH', 'Choice Hotels', 'Short', '—', 'Cover some', 'Review a partial Short cover; short-term trend unchanged.', 'Sep 24, 2026'],
-    }],
-  }] }] };
-  render(<AnalystDailyRollup rollup={data} />);
-  const table = screen.getByRole('table', { name: 'Highest-priority realignment' });
-  expect(table.querySelector('tbody td:nth-child(4)')).toHaveTextContent('—');
-  expect(table.querySelector('tbody td:nth-child(5)')).toHaveTextContent('Cover some');
-  within(table).getAllByText('Short').forEach(word => expect(word).toHaveClass('analyst-process--negative'));
-  expect(table.querySelector('tbody td:nth-child(6)')).toHaveTextContent('short-term trend unchanged');
-  expect(within(table).queryByText('short-term', { selector: '.analyst-process--negative' })).not.toBeInTheDocument();
-});
-
-test('all portfolio alignment sections separate their captured holdings date from the complete source period', () => {
-  const sections = ['position-confirmations', 'position-contradictions', 'refresh-realignment', 'refresh-watch-list', 'refresh-aligned', 'refresh-sequence'];
-  const citations = [
-    { id: 'prior', product: 'the-call', publicationDate: '2026-09-27' },
-    { id: 'current', product: 'risk-ranges', publicationDate: '2026-09-29' },
-  ];
-  const cells = ['SPY', 'SPDR S&P 500 ETF Trust', 'Bullish', 'Sep 27, 2026'];
-  const data = { version: 1, citations, sections: sections.map(id => ({ id, title: id, citationIds: ['current'], blocks: [{
-    type: 'table', columns: ['Ticker', 'Security', 'Reading', 'Source date'], rows: [{ cells, citationIds: ['prior'] }],
-  }] })) };
-  const captured = JSON.stringify(data);
-  render(<AnalystDailyRollup rollup={data} holdingsAsOf="2026-09-30T17:53:10Z" />);
-  for (const id of sections) {
-    const region = screen.getByRole('region', { name: id });
-    const dateline = region.querySelector('.portfolio-review-dateline');
-    expect(dateline).toHaveClass('has-period');
-    expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 30, 2026 10:53 PDT');
-    expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Sep 27, 2026 – Sep 29, 2026');
-    expect(dateline).not.toHaveTextContent(/·|Research:/);
-    expect(within(region).getAllByRole('cell').map(cell => cell.textContent)).toEqual(cells);
-  }
-  expect(JSON.stringify(data)).toBe(captured);
-});
-
 test('research comparisons retain the latest publication at left and the full source interval at right', () => {
   const citations = [
     { id: 'first-range', product: 'risk-ranges', publicationDate: '2026-08-31' },
@@ -178,79 +98,13 @@ test.each(['Sep 24, 2026', '—'])('market structure does not claim a shared dat
   expect(screen.getByRole('cell', { name: otherDate })).toBeVisible();
 });
 
-test('bottom position tables keep product evidence visible and the explanation in the rightmost column', () => {
-  const call = { id: 'call', product: 'the-call', productLabel: 'The Call', title: 'The Call — Sep 29', publishedAt: '2026-09-29T14:00:00Z' };
-  const current = { id: 'risk-new', product: 'risk-ranges', productLabel: 'Risk Ranges', title: 'Risk Ranges — Sep 29', publicationDate: '2026-09-29' };
-  const prior = { ...current, id: 'risk-prior', title: 'Risk Ranges — Sep 28', publicationDate: '2026-09-28' };
-  const columns = ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'];
-  const confirmRow = {
-    cells: ['MSFT', 'Microsoft Corporation', 'Long 3.18%', 'The Call · Sep 29', 'Buying opportunity', 'The buying opportunity supports the held Long.'],
-    citationIds: [call.id], cellCitationIds: [[], [], [], [call.id], [call.id], [call.id]],
-    evidenceTexts: ['Microsoft remains a buying opportunity.'],
-  };
-  const contradictionRow = {
-    cells: ['XLE', 'Energy Select Sector SPDR Fund', 'Long 3.00%', 'Risk Ranges · Sep 29', 'Bullish → Bearish', 'Trend turned Bearish against the held Long; review the position.'],
-    citationIds: [current.id, prior.id], cellCitationIds: [[], [], [], [current.id, prior.id], [current.id, prior.id], [current.id]],
-    evidenceTexts: ['XLE Bearish', 'XLE Bullish'],
-  };
-  const data = { version: 1, citations: [call, current, prior], sections: [
-    { id: 'research', title: 'Research', blocks: [{ type: 'paragraph', text: 'The captured daily research.' }] },
-    { id: 'position-confirmations', title: 'Position confirmations', blocks: [{ type: 'table', columns, rows: [confirmRow] }] },
-    { id: 'position-contradictions', title: 'Position contradictions', blocks: [{ type: 'table', columns, rows: [contradictionRow] }] },
-  ] };
-  const before = JSON.stringify(data);
-  const onCitation = jest.fn();
-  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
-  expect(screen.getAllByRole('region').map(region => region.getAttribute('aria-label'))).toEqual(['Research', 'Position confirmations', 'Position contradictions']);
-  for (const title of ['Position confirmations', 'Position contradictions']) {
-    const region = screen.getByRole('region', { name: title });
-    const table = within(region).getByRole('table', { name: title });
-    expect(table).toHaveClass('analyst-security-table', 'analyst-position-alignment');
-    expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(columns);
-    expect(table.querySelector('tbody tr td:last-child')).toHaveTextContent(/held Long/);
-    expect(within(region).getByRole('heading', { name: title })).toHaveClass('analyst-portfolio-title');
-    expect(region.querySelector('details')).not.toBeInTheDocument();
-    within(table).getAllByText('Long').forEach(word => expect(word).toHaveClass('analyst-process--positive'));
-  }
-  const confirmations = screen.getByRole('region', { name: 'Position confirmations' });
-  const contradictions = screen.getByRole('region', { name: 'Position contradictions' });
-  expect(within(confirmations).getByText('MSFT')).toHaveClass('analyst-process--ticker');
-  expect(within(contradictions).getByText('Energy Select Sector SPDR Fund').closest('.analyst-security-name')).toHaveAttribute('title', 'Energy Select Sector SPDR Fund');
-  expect(within(contradictions).getByText('Bullish')).toHaveClass('analyst-process--positive');
-  within(contradictions).getAllByText('Bearish').forEach(word => expect(word).toHaveClass('analyst-process--negative'));
-  fireEvent.click(within(confirmations).getByRole('button', { name: 'Product evidence: The Call · Sep 29' }));
-  expect(onCitation).toHaveBeenLastCalledWith(call, { highlightTexts: confirmRow.evidenceTexts });
-  fireEvent.click(within(contradictions).getByRole('button', { name: 'Product evidence: Risk Ranges · Sep 29' }));
-  expect(onCitation).toHaveBeenLastCalledWith(current, {
-    highlightTexts: contradictionRow.evidenceTexts,
-    relatedSources: [{ ...current, highlightTexts: contradictionRow.evidenceTexts }, { ...prior, highlightTexts: contradictionRow.evidenceTexts }],
-  });
-  expect(within(confirmations).getByRole('button', { name: 'Source: The Call — Sep 29 · Sep 29, 2026 07:00 PDT' })).toBeVisible();
-  expect(within(contradictions).getByRole('button', { name: 'Source: Risk Ranges' })).toBeVisible();
-  expect(JSON.stringify(data)).toBe(before);
-});
-
-test('position tables show uncited products as text and preserve an unavailable position without inventing evidence', () => {
-  const data = { version: 1, sections: [{ id: 'position-confirmations', title: 'Position confirmations', blocks: [{
-    type: 'table', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: [{
-      cells: ['MSFT', 'Microsoft', 'Unavailable', 'The Call', 'Bullish', 'Published research only.'],
-      cellCitationIds: [[], [], [], ['missing-source']],
-    }],
-  }] }] };
-  render(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
-  expect(screen.getByText('The Call')).toBeVisible();
-  expect(screen.getByText('Unavailable')).toBeVisible();
-  expect(screen.queryByRole('button')).not.toBeInTheDocument();
-  expect(screen.queryByText(/\d+\.\d+%/)).not.toBeInTheDocument();
-});
-
-test.each(['position-confirmations', 'refresh-realignment', 'refresh-watch-list', 'refresh-aligned'])('%s and other research tables resolve missing descriptive names while captured names stay immutable', id => {
+test('research security tables resolve missing descriptive names while captured names stay immutable', () => {
   usePortfolioSecurityNames.mockReturnValueOnce({
     DBMF: { name: 'iMGP DBi Managed Futures Strategy ETF', source: 'Verified security catalog' },
     MSFT: { name: 'Current Microsoft name', source: 'Verified security catalog' },
   });
   const data = { version: 1, sections: [
-    { id, title: 'Position confirmations', blocks: [{ type: 'table', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: [
+    { id: 'company-catalysts', title: 'Company catalysts & sector research', blocks: [{ type: 'table', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: [
       { cells: ['DBMF', '—', 'Long 2.20%', 'The Call', 'Bullish', 'Supports the captured Long.'] },
       { cells: ['MSFT', 'Captured Microsoft name', 'Long 3.18%', 'The Call', 'Bullish', 'Supports the captured Long.'] },
     ] }] },
@@ -261,7 +115,7 @@ test.each(['position-confirmations', 'refresh-realignment', 'refresh-watch-list'
   expect(usePortfolioSecurityNames).toHaveBeenLastCalledWith([
     { holding: 'DBMF', securityName: '' }, { holding: 'MSFT', securityName: 'Captured Microsoft name' }, { holding: 'DBMF', securityName: '' },
   ]);
-  const region = screen.getByRole('region', { name: 'Position confirmations' });
+  const region = screen.getByRole('region', { name: 'Company catalysts & sector research' });
   expect(within(region).getByText('iMGP DBi Managed Futures Strategy ETF').closest('.analyst-security-name')).toHaveAttribute('title', 'iMGP DBi Managed Futures Strategy ETF · Current security name · Verified security catalog');
   expect(within(region).getByText('Captured Microsoft name').closest('.analyst-security-name')).toHaveAttribute('title', 'Captured Microsoft name');
   expect(screen.queryByText('Current Microsoft name')).not.toBeInTheDocument();
@@ -885,11 +739,9 @@ test('empty and unsupported block types do not leave empty report headings', () 
 });
 
 test('Portfolio Review keeps each research section through absent, partial, ready and unavailable captures without reserved heights', () => {
-  const titles = ['Highest-priority realignment', 'Watch list', 'What is already aligned', 'Recommended sequence',
-    'PCA risk', 'Factor exposure', "Today's market drivers", 'Tick', 'Trend/Ranges/Coverage/Outbucket',
+  const titles = ['PCA risk', 'Factor exposure', "Today's market drivers", 'Tick', 'Trend/Ranges/Coverage/Outbucket',
     'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Market structure & flows'];
-  const ids = ['refresh-realignment', 'refresh-watch-list', 'refresh-aligned', 'refresh-sequence',
-    'pca-risk', 'factor-exposure', 'market-drivers', 'hedgai-signals', 'risk-ranges',
+  const ids = ['pca-risk', 'factor-exposure', 'market-drivers', 'hedgai-signals', 'risk-ranges',
     'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'market-structure'];
   const { rerender } = render(<AnalystDailyRollup stableLayout loading />);
   const cards = screen.getAllByRole('region');
@@ -906,7 +758,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
     });
   };
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(14);
+  expect(screen.getAllByText('Loading…')).toHaveLength(10);
   cards.forEach(card => {
     expect(card).toHaveAttribute('aria-busy', 'true');
     expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
@@ -919,7 +771,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
   const onCitation = jest.fn();
   rerender(<AnalystDailyRollup stableLayout loading rollup={partial} onCitation={onCitation} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(13);
+  expect(screen.getAllByText('Loading…')).toHaveLength(9);
   const drivers = screen.getByRole('region', { name: "Today's market drivers" });
   expect(drivers).not.toHaveAttribute('aria-busy');
   expect(within(drivers.querySelector('.portfolio-review-section-body')).getByText('Captured market reading.')).toBeVisible();
@@ -941,9 +793,29 @@ test('Portfolio Review keeps each research section through absent, partial, read
 
   rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [] }} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Unavailable')).toHaveLength(14);
+  expect(screen.getAllByText('Unavailable')).toHaveLength(10);
   expect(screen.queryByText(/Captured reading|Captured market reading/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});
+
+test.each([false, true])('saved realignment, watch list, aligned and sequence sections stay out of the report (stable layout: %s)', stableLayout => {
+  const retired = [
+    ['refresh-realignment', 'Highest-priority realignment'], ['refresh-watch-list', 'Watch list'],
+    ['refresh-aligned', 'What is already aligned'], ['refresh-sequence', 'Recommended sequence'],
+    ['position-confirmations', 'Position confirmations'], ['position-contradictions', 'Position contradictions'],
+  ];
+  const data = { version: 1, sections: [
+    ...retired.map(([id, title]) => ({ id, title, blocks: [{ type: 'paragraph', text: `Retired ${id}.` }] })),
+    { id: 'macro-show', title: 'Macro Show', blocks: [{ type: 'paragraph', text: 'Captured Macro Show reading.' }] },
+  ] };
+  const saved = JSON.stringify(data);
+  render(<AnalystDailyRollup stableLayout={stableLayout} rollup={data} />);
+  retired.forEach(([id, title]) => {
+    expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument();
+    expect(screen.queryByText(`Retired ${id}.`)).not.toBeInTheDocument();
+  });
+  expect(screen.getByText('Captured Macro Show reading.')).toBeVisible();
+  expect(JSON.stringify(data)).toBe(saved);
 });
 
 test('a paused PCA section keeps its slot with a compact Pending state while other sections load', () => {
@@ -966,187 +838,6 @@ test('a paused PCA section keeps its slot with a compact Pending state while oth
   expect(screen.getByText('Captured PCA reading.')).toBeVisible();
   expect(screen.queryByText('Pending')).not.toBeInTheDocument();
   expect(JSON.stringify(pending)).toBe(saved);
-});
-
-test('legacy alignment and fresh refresh evidence occupy the same fixed cards without inserting rows above daily research', () => {
-  const { rerender } = render(<AnalystDailyRollup stableLayout loading />);
-  const watch = screen.getByRole('region', { name: 'Watch list' });
-  const aligned = screen.getByRole('region', { name: 'What is already aligned' });
-  const drivers = screen.getByRole('region', { name: "Today's market drivers" });
-  const legacy = { version: 1, sections: [
-    { id: 'position-confirmations', title: 'Position confirmations', blocks: [{ type: 'paragraph', text: 'Captured confirmation.' }] },
-    { id: 'position-contradictions', title: 'Position contradictions', blocks: [{ type: 'paragraph', text: 'Captured contradiction.' }] },
-  ] };
-  rerender(<AnalystDailyRollup stableLayout rollup={legacy} />);
-  expect(screen.getByRole('region', { name: 'Position confirmations' })).toBe(aligned);
-  expect(screen.getByRole('region', { name: 'Position contradictions' })).toBe(watch);
-  expect(screen.getByRole('region', { name: "Today's market drivers" })).toBe(drivers);
-  expect(screen.getAllByRole('region')).toHaveLength(14);
-  expect(aligned).toHaveTextContent('Captured confirmation.');
-  expect(watch).toHaveTextContent('Captured contradiction.');
-
-  const refresh = { version: 1, sections: [{ id: 'refresh-aligned', title: 'What is already aligned',
-    blocks: [{ type: 'paragraph', text: 'New captured alignment.' }],
-  }] };
-  rerender(<AnalystDailyRollup stableLayout rollup={refresh} />);
-  expect(screen.getByRole('region', { name: 'What is already aligned' })).toBe(aligned);
-  expect(screen.getByRole('region', { name: 'Watch list' })).toBe(watch);
-  expect(screen.getByRole('region', { name: "Today's market drivers" })).toBe(drivers);
-  expect(screen.getAllByRole('region')).toHaveLength(14);
-  expect(aligned).toHaveTextContent('New captured alignment.');
-  expect(screen.queryByText(/Captured confirmation|Captured contradiction/)).not.toBeInTheDocument();
-});
-
-test('fixed research cards preserve extra captured sections and both refresh and legacy evidence when a saved capture has both', () => {
-  const data = { version: 1, sections: [
-    { id: 'refresh-aligned', title: 'What is already aligned', blocks: [{ type: 'paragraph', text: 'Captured refresh alignment.' }] },
-    { id: 'position-confirmations', title: 'Position confirmations', blocks: [{ type: 'paragraph', text: 'Captured legacy confirmation.' }] },
-    { id: 'other-research', title: 'Other captured research', blocks: [{ type: 'paragraph', text: 'Additional captured evidence.' }] },
-  ] };
-  const saved = JSON.stringify(data);
-  render(<AnalystDailyRollup stableLayout rollup={data} />);
-  const aligned = screen.getByRole('region', { name: 'What is already aligned' });
-  expect(aligned).toHaveTextContent('Captured refresh alignment.');
-  expect(aligned.querySelector('.portfolio-review-section-body')).toContainElement(screen.getByRole('region', { name: 'Position confirmations' }));
-  expect(aligned).toHaveTextContent('Captured legacy confirmation.');
-  expect(screen.getAllByRole('region').at(-1)).toHaveAccessibleName('Other captured research');
-  expect(screen.getByText('Additional captured evidence.')).toBeVisible();
-  expect(JSON.stringify(data)).toBe(saved);
-});
-
-const listPreviewCases = [
-  { id: 'refresh-realignment', title: 'Highest-priority realignment', itemLabel: 'realignments', stableLayout: true },
-  { id: 'refresh-watch-list', title: 'Watch list', itemLabel: 'watch list items', stableLayout: true },
-  { id: 'refresh-aligned', title: 'What is already aligned', itemLabel: 'aligned items', stableLayout: true },
-  { id: 'position-contradictions', title: 'Position contradictions', itemLabel: 'watch list items', stableLayout: false },
-  { id: 'position-confirmations', title: 'Position confirmations', itemLabel: 'aligned items', stableLayout: false },
-];
-const capturedListRows = (count, prefix = 'PRIORITY') => Array.from({ length: count }, (_, index) => ({
-  cells: [`${prefix}_${index}`, `Captured security ${index}`, ['Long', 'Unavailable', 'Short', 'Neutral'][index % 4],
-    'Captured source', `Captured priority ${index}`, 'Captured explanation'],
-  citationIds: [source.id],
-}));
-const capturedListSection = (spec, rows) => ({ id: spec.id, title: spec.title, blocks: [
-  { type: 'paragraph', text: 'Captured section context.' },
-  { type: 'table', title: 'First captured group', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: rows.slice(0, 4) },
-  { type: 'table', title: 'Second captured group', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: rows.slice(4) },
-] });
-const sectionTickers = section => [...section.querySelectorAll('tbody tr td:first-child')].map(cell => cell.textContent);
-
-test.each(listPreviewCases)('$title previews ten total captured items across tables and expands the exact capture inline', spec => {
-  const hiddenSource = { ...source, id: 'overflow-source', product: 'the-call', title: 'Captured overflow research' };
-  const rows = capturedListRows(15).map((row, index) => ({ ...row,
-    citationIds: [index >= 10 ? hiddenSource.id : source.id],
-    trade: 'BULLISH', trend: 'BEARISH',
-  }));
-  const data = { version: 1, citations: [source, hiddenSource], sections: [capturedListSection(spec, rows)] };
-  const saved = JSON.stringify(data);
-  const onCitation = jest.fn();
-  render(<AnalystDailyRollup stableLayout={spec.stableLayout} rollup={data} onCitation={onCitation} />);
-  const section = screen.getByRole('region', { name: spec.title });
-  const tables = within(section).getAllByRole('table');
-  expect(sectionTickers(section)).toEqual(rows.slice(0, 10).map(row => row.cells[0]));
-  expect(sectionTickers(section)).toContain('PRIORITY_9');
-  expect(sectionTickers(section)).not.toContain('PRIORITY_10');
-  expect(section).toHaveTextContent('Captured section context.');
-  const expand = within(section).getByRole('button', { name: `Show all 15 ${spec.itemLabel}` });
-  expect(expand).toHaveAttribute('aria-expanded', 'false');
-  const content = spec.stableLayout ? section.querySelector('.portfolio-review-section-body') : section;
-  expect(content).toContainElement(expand);
-  fireEvent.click(expand);
-  expect(sectionTickers(section)).toEqual(rows.map(row => row.cells[0]));
-  within(section).getAllByRole('table').forEach((table, index) => expect(table).toBe(tables[index]));
-  const collapse = within(section).getByRole('button', { name: `Show fewer ${spec.itemLabel}` });
-  expect(collapse).toHaveAttribute('aria-expanded', 'true');
-  fireEvent.click(collapse);
-  expect(sectionTickers(section)).toEqual(rows.slice(0, 10).map(row => row.cells[0]));
-  fireEvent.click(within(section).getByRole('button', { name: /Source: Captured overflow research/ }));
-  expect(onCitation).toHaveBeenCalledWith(hiddenSource, expect.objectContaining({ highlightTexts: expect.arrayContaining(['PRIORITY_10', 'PRIORITY_14']) }));
-  expect(JSON.stringify(data)).toBe(saved);
-});
-
-test.each(listPreviewCases.flatMap(spec => [9, 10].map(count => ({ ...spec, count }))))('$title with $count items has no redundant expansion control', spec => {
-  const rows = capturedListRows(spec.count);
-  render(<AnalystDailyRollup stableLayout={spec.stableLayout} rollup={{ version: 1, sections: [capturedListSection(spec, rows)] }} />);
-  const section = screen.getByRole('region', { name: spec.title });
-  expect(sectionTickers(section)).toEqual(rows.map(row => row.cells[0]));
-  expect(within(section).queryByRole('button', { name: /Show all|Show fewer/ })).not.toBeInTheDocument();
-});
-
-test('realignment, watch list and aligned expansions are independent and preserve each captured priority order', () => {
-  const specs = listPreviewCases.slice(0, 3);
-  const rows = specs.map((spec, index) => capturedListRows(13, `SECTION${index}`));
-  render(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: specs.map((spec, index) => capturedListSection(spec, rows[index])) }} />);
-  const regions = specs.map(spec => screen.getByRole('region', { name: spec.title }));
-  regions.forEach((region, index) => expect(sectionTickers(region)).toEqual(rows[index].slice(0, 10).map(row => row.cells[0])));
-  fireEvent.click(within(regions[1]).getByRole('button', { name: 'Show all 13 watch list items' }));
-  expect(sectionTickers(regions[0])).toHaveLength(10);
-  expect(sectionTickers(regions[1])).toEqual(rows[1].map(row => row.cells[0]));
-  expect(sectionTickers(regions[2])).toHaveLength(10);
-  fireEvent.click(within(regions[2]).getByRole('button', { name: 'Show all 13 aligned items' }));
-  expect(sectionTickers(regions[0])).toHaveLength(10);
-  expect(sectionTickers(regions[1])).toHaveLength(13);
-  expect(sectionTickers(regions[2])).toEqual(rows[2].map(row => row.cells[0]));
-  fireEvent.click(within(regions[1]).getByRole('button', { name: 'Show fewer watch list items' }));
-  expect(sectionTickers(regions[1])).toEqual(rows[1].slice(0, 10).map(row => row.cells[0]));
-  expect(sectionTickers(regions[2])).toHaveLength(13);
-});
-
-test('the ten-item list previews leave Tick readings and its full-book disclosure unchanged', () => {
-  const tickRows = capturedListRows(13, 'TICK').map(row => ({ ...row, group: 'Captured Tick group' }));
-  const fullBookRows = capturedListRows(24, 'FULLBOOK').map(row => ({ ...row, group: 'Full captured book' }));
-  const data = { version: 1, sections: [
-    capturedListSection(listPreviewCases[0], capturedListRows(12, 'REALIGN')),
-    { id: 'hedgai-signals', title: 'Tick', blocks: [
-      { type: 'table', groupRows: true, columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: tickRows },
-      { type: 'table', groupRows: true, disclosure: 'Full captured Tick book', columns: ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'], rows: fullBookRows },
-    ] },
-  ] };
-  const saved = JSON.stringify(data);
-  render(<AnalystDailyRollup stableLayout rollup={data} />);
-  const tick = screen.getByRole('region', { name: 'Tick' });
-  expect(sectionTickers(tick)).toEqual(tickRows.map(row => row.cells[0]));
-  expect(within(tick).getAllByRole('table')).toHaveLength(1);
-  expect(within(tick).queryByRole('button', { name: /Show all|Show fewer/ })).not.toBeInTheDocument();
-  fireEvent.click(within(tick).getByText('Full captured Tick book'));
-  expect(sectionTickers(tick)).toEqual([...tickRows, ...fullBookRows].map(row => row.cells[0]));
-  expect(within(tick).getAllByRole('table')).toHaveLength(2);
-  fireEvent.click(screen.getByRole('button', { name: 'Show all 12 realignments' }));
-  expect(sectionTickers(tick)).toEqual([...tickRows, ...fullBookRows].map(row => row.cells[0]));
-  fireEvent.click(within(tick).getByText('Full captured Tick book'));
-  expect(sectionTickers(tick)).toEqual(tickRows.map(row => row.cells[0]));
-  expect(JSON.stringify(data)).toBe(saved);
-});
-
-test('aligned preview counts only alignment items while All holdings checked keeps its independent complete roster', () => {
-  const columns = ['Ticker', 'Security', 'Position', 'Product', 'Reading', 'Why'];
-  const alignedRows = capturedListRows(12, 'ALIGNED');
-  const allHoldings = capturedListRows(24, 'ALLHOLDINGS');
-  const data = { version: 1, sections: [{ id: 'refresh-aligned', title: 'What is already aligned', blocks: [
-    { type: 'table', title: 'Captured alignments', columns, rows: alignedRows },
-    { type: 'table', title: 'Captured holdings roster', disclosure: 'All holdings checked · 24 securities', columns, rows: allHoldings },
-  ] }] };
-  const saved = JSON.stringify(data);
-  render(<AnalystDailyRollup stableLayout rollup={data} />);
-  const section = screen.getByRole('region', { name: 'What is already aligned' });
-  const aligned = within(section).getByRole('table', { name: 'Captured alignments' });
-  expect(sectionTickers(aligned)).toEqual(alignedRows.slice(0, 10).map(row => row.cells[0]));
-  expect(within(section).getByRole('button', { name: 'Show all 12 aligned items' })).toBeVisible();
-  expect(within(section).queryByRole('button', { name: 'Show all 36 aligned items' })).not.toBeInTheDocument();
-  expect(within(section).queryByRole('table', { name: 'Captured holdings roster' })).not.toBeInTheDocument();
-
-  fireEvent.click(within(section).getByText(wholeText('All holdings checked · 24 securities')));
-  const roster = within(section).getByRole('table', { name: 'Captured holdings roster' });
-  expect(sectionTickers(roster)).toEqual(allHoldings.map(row => row.cells[0]));
-  expect(sectionTickers(aligned)).toHaveLength(10);
-  fireEvent.click(within(section).getByRole('button', { name: 'Show all 12 aligned items' }));
-  expect(sectionTickers(aligned)).toEqual(alignedRows.map(row => row.cells[0]));
-  expect(sectionTickers(roster)).toEqual(allHoldings.map(row => row.cells[0]));
-  expect(within(section).getByRole('table', { name: 'Captured holdings roster' })).toBe(roster);
-  fireEvent.click(within(section).getByRole('button', { name: 'Show fewer aligned items' }));
-  expect(sectionTickers(aligned)).toEqual(alignedRows.slice(0, 10).map(row => row.cells[0]));
-  expect(sectionTickers(roster)).toHaveLength(24);
-  expect(JSON.stringify(data)).toBe(saved);
 });
 
 test('wide Portfolio Review research tables fit their report width with visible overflow and wrapped cells', () => {

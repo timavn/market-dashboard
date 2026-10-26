@@ -32,18 +32,6 @@
 .analyst-factor-name { display: block; max-width: 21ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .analyst-tick-reading { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .analyst-factor-table :is(th, td):first-child { width: 22%; }
-.analyst-realignment-table-wrap { min-width: 0; overflow-x: visible; }
-.portfolio-brief-table.analyst-refresh-realignment { width: 100%; min-width: 0; font-size: inherit; line-height: inherit; }
-.analyst-refresh-realignment col:nth-child(1) { width: 6.8421%; }
-.analyst-refresh-realignment col:nth-child(2) { width: 16.5789%; }
-.analyst-refresh-realignment col:nth-child(3) { width: 7.1053%; }
-.analyst-refresh-realignment col:nth-child(4) { width: 7.1053%; }
-.analyst-refresh-realignment col:nth-child(5) { width: 16.3158%; }
-.analyst-refresh-realignment col:nth-child(6) { width: 32.1053%; }
-.analyst-refresh-realignment col:nth-child(7) { width: 13.9474%; }
-.analyst-refresh-realignment th, .analyst-refresh-realignment td { white-space: normal; overflow-wrap: anywhere; }
-.analyst-security-table.analyst-refresh-realignment td:first-child { white-space: normal; }
-.portfolio-brief-table.analyst-refresh-realignment thead th { font-weight: 400; }
 .has-range-boundaries .analyst-security-comparison { min-width: 680px; }
 .has-range-boundaries .analyst-security-comparison .analyst-ticker-column { width: 10%; }
 .has-range-boundaries .analyst-security-comparison .analyst-security-column { width: 22%; }
@@ -62,16 +50,6 @@
 .analyst-hedgai-summary col:nth-child(5) { width: 17%; }
 .analyst-hedgai-summary col:nth-child(6) { width: 20%; }
 .analyst-hedgai-full-book { min-width: 1200px; }
-.portfolio-brief-table.analyst-position-alignment { min-width: 700px; font-size: inherit; line-height: inherit; }
-.analyst-position-alignment col:nth-child(1) { width: 7%; }
-.analyst-position-alignment col:nth-child(2) { width: 20%; }
-.analyst-position-alignment col:nth-child(3) { width: 11%; }
-.analyst-position-alignment col:nth-child(4) { width: 14%; }
-.analyst-position-alignment col:nth-child(5) { width: 17%; }
-.analyst-position-alignment col:nth-child(6) { width: 31%; }
-.analyst-position-alignment td:nth-child(n+4) { white-space: normal; overflow-wrap: break-word; }
-.portfolio-brief .analyst-product-reference { padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.portfolio-brief .analyst-product-reference:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
 .analyst-daily-rollup--stable .portfolio-brief-table-scroll { min-width: 0; max-width: 100%; overflow: visible; }
 .analyst-daily-rollup--stable .portfolio-brief-table { width: 100%; min-width: 0; max-width: 100%; table-layout: fixed; }
 .analyst-daily-rollup--stable .portfolio-brief-table th,

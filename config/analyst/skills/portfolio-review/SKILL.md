@@ -11,9 +11,8 @@ The dashboard owns the ReviewRunV2 report and its calculations. Preserve its com
 
 ## Captured full-book refresh
 
-A captured Portfolio Review may include the existing `portfolio-refresh-v1` reconciliation. Read the [captured refresh template](references/report-template.md) only when explaining that section's four ordered sections, all-holdings checks, or capture completeness. Use the saved capture's exact facts, source dates, citations, product coverage, and template version. A bounded follow-up context may omit holding detail; do not invent the omitted rows or rewrite the saved review with today's book or publications.
+A captured Portfolio Review may include the existing `portfolio-refresh-v1` reconciliation. Its four sections (Highest-priority realignment, Watch list, What is already aligned, Recommended sequence) are no longer shown in Portfolio Review; do not recreate them. Read the [captured refresh template](references/report-template.md) only when explaining a saved capture's refresh facts, all-holdings checks, or capture completeness. Use the saved capture's exact facts, source dates, citations, product coverage, and template version. A bounded follow-up context may omit holding detail; do not invent the omitted rows or rewrite the saved review with today's book or publications.
 
-Highest-priority realignment uses `Ticker | Security | Bias | Size | Source action | Notes | Source date`: keep captured Long/Short separate from verified size, preserve partial source actions, and leave an unavailable size as `—`. Other captured refresh tables keep their existing columns. Fit the table to the report column with wrapped source action and notes; keep names compact with their full captured value on hover.
 
 ## Explain the review
 

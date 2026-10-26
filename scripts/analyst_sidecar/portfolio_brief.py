@@ -332,6 +332,9 @@ def build_portfolio_brief(run, metrics, intelligence, sizing_inputs=None, open_o
         daily_rollup = with_portfolio_refresh(daily_rollup or {}, refresh_report)
         existing_ids = {source.get("id") for source in citations}
         citations += [source for source in refresh_report.get("citations") or [] if source.get("id") not in existing_ids]
+    elif daily_rollup:
+        daily_rollup = {**daily_rollup, "sections": [section for section in daily_rollup.get("sections") or []
+                                                     if section.get("id") not in RETIRED_REFRESH_SECTION_IDS]}
     return {"version": 1, "runId": run["runId"], "reportRevision": run.get("reportRevision") or run.get("updatedAt"), "asOf": metrics.get("observedAt"),
             "available": available, "historical": True,
             "metrics": {key: metrics.get(key) for key in METRICS} if available else {},
@@ -353,13 +356,23 @@ def build_portfolio_brief(run, metrics, intelligence, sizing_inputs=None, open_o
                                   if not available or review.get("historicalHoldings") is True else None)}
 
 
+RETIRED_REFRESH_SECTION_IDS = {"refresh-realignment", "refresh-watch-list", "refresh-aligned", "refresh-sequence",
+                               "position-confirmations", "position-contradictions"}
+
+
 def with_portfolio_refresh(rollup, report):
-    """Use the captured template facts when displaying either a new or saved review."""
+    """Attach the captured refresh facts to a new or saved review's rollup.
+
+    The refresh report still supplies Product readings and capture completeness,
+    but its four sections restated dated publisher actions without a current
+    call, so they (and their older position-alignment names) stay out of the
+    report.
+    """
     projected = deepcopy(rollup)
     refresh_ids = {section.get("id") for section in report.get("sections") or []}
-    projected["sections"] = deepcopy(report.get("sections") or []) + [
+    projected["sections"] = [
         section for section in projected.get("sections") or []
-        if section.get("id") not in refresh_ids | {"position-confirmations", "position-contradictions"}
+        if section.get("id") not in refresh_ids | RETIRED_REFRESH_SECTION_IDS
     ]
     citations = {row["id"]: row for row in projected.get("citations") or [] if row.get("id")}
     citations.update({row["id"]: row for row in report.get("citations") or [] if row.get("id")})

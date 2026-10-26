@@ -134,9 +134,6 @@ test('every review section dates its captured inputs without refreshing old rese
     { id: 'company-catalysts', title: 'Company catalysts & sector research', blocks: [
       { type: 'paragraph', text: 'Captured research.', citationIds: ['old-call'] },
     ] },
-    { id: 'position-confirmations', title: 'Position confirmations', blocks: [
-      { type: 'paragraph', text: 'Captured confirmation.', citationIds: ['old-call'] },
-    ] },
   ] };
   const original = JSON.stringify(data);
   render(<AnalystPortfolioBrief message={data} onCitation={jest.fn()} />);
@@ -148,11 +145,6 @@ test('every review section dates its captured inputs without refreshing old rese
   const company = screen.getByRole('region', { name: 'Company catalysts & sector research' });
   expect(within(company).getByText(wholeText('Sep 3, 2026'))).toBeVisible();
   expect(company.querySelector('.portfolio-review-dateline')).not.toHaveClass('has-period');
-  const confirmation = screen.getByRole('region', { name: 'Position confirmations' });
-  expect(confirmation.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 4, 2026 13:05 PDT');
-  expect(confirmation.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Sep 3, 2026');
-  expect(confirmation.querySelector('.portfolio-review-dateline')).toHaveClass('has-period');
-  expect(confirmation.querySelector('.portfolio-review-dateline')).not.toHaveTextContent('·');
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -877,7 +869,7 @@ test('the launch and deferred-history placeholder keeps the full report without 
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveClass('analyst-captured-report-placeholder', 'analyst-historical-report');
   expect(report).toHaveAttribute('data-message-id', 'deferred-post');
-  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(16);
+  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(12);
   expect(report).not.toHaveTextContent('$');
   expect(screen.getByRole('table', { name: 'Portfolio exposure' })).toBeVisible();
   expect(screen.getByRole('table', { name: 'Position exceptions' })).toHaveTextContent('Loading…');

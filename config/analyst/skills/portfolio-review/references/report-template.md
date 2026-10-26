@@ -1,5 +1,7 @@
 # Captured portfolio refresh — portfolio-refresh-v1
 
+> Portfolio Review no longer displays the four sections below, in new or saved captures. The projection still runs and its facts remain in each capture (Product readings, all-holdings checks, completeness). Use this reference only to explain those saved facts; do not recreate the sections in a reply.
+
 Read this reference only when explaining the existing full-book refresh section inside a captured Portfolio Review. The Python `portfolio_refresh.build_portfolio_refresh` projection owns its reconciliation and tables. ReviewRunV2 persists the captured holdings, available source archive and evidence before rendering. A formal refresh creates a new capture; it does not revise an earlier capture's narrative or facts. Hermes explains the result without rebuilding the report.
 
 ## Captured report sections

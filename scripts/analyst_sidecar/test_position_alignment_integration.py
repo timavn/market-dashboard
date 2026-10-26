@@ -109,8 +109,9 @@ class PositionAlignmentIntegrationTests(unittest.TestCase):
             self.assertEqual(rows(store.get(run["runId"])["sections"][0]["dailyRollup"])[0]["cells"][1], "Apple Inc.")
             brief = build_portfolio_brief(saved, portfolio_metrics(project_portfolio_context(store.read_evidence(saved, "portfolio"))),
                 store.read_evidence(saved, "heldResearchEvents"), daily_research=store.read_evidence(saved, "dailyResearch"))
-            self.assertEqual(rows(brief["dailyRollup"])[0]["cells"][2], "Long · 3.18%")
-            self.assertIn("Bullish Trend", rows(brief["dailyRollup"])[0]["cells"][4])
+            # Portfolio Review no longer shows the position-alignment sections.
+            self.assertFalse({"position-confirmations", "position-contradictions"}
+                             & {section["id"] for section in brief["dailyRollup"]["sections"]})
             exported = public_review_run(saved)["reportMarkdown"]
             self.assertIn("Ticker | Security | Position | Product | Reading | Why", exported)
             self.assertLess(exported.index("Position confirmations"), exported.index("Position contradictions"))

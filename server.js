@@ -1789,10 +1789,13 @@ async function fetchTreasuryParQuote(upperSym) {
   };
 }
 
-// Yahoo has no 2-year yield index and the Treasury par curve only publishes
-// after the close, so the session's 2Y reading comes from CNBC's Tradeweb feed.
+// Treasury yields come from CNBC's Tradeweb feed, which follows the cash market
+// through the Asia, London and New York sessions. CBOE's ^TNX/^TYX only print
+// 7:20am-2pm CT, and Yahoo has no 2Y index; both stay as fallbacks.
 const CNBC_TREASURY_SYMBOLS = {
   'UST2Y': 'US2Y',
+  'UST10Y': 'US10Y',
+  'UST30Y': 'US30Y',
 };
 // International 10Y yields read the same CNBC benchmark feed, so every
 // sovereign row shares one methodology and same-day timing.
@@ -2734,6 +2737,9 @@ compositeMarketDataProvider.setSpecialQuoteFetcher(async (symbol) => {
     quoteData = await fetchCnbcTreasuryQuote(upperSym)
       || await fetchTreasuryParQuote(upperSym)
       || await fetchFredQuote(mapping.ticker);
+  } else if (CNBC_TREASURY_SYMBOLS[upperSym]) {
+    // Null falls through to the Yahoo CBOE index.
+    quoteData = await fetchCnbcTreasuryQuote(upperSym);
   } else if (mapping.source === 'fred') {
     quoteData = await fetchFredQuote(mapping.ticker);
   }
@@ -3525,6 +3531,14 @@ async function computePeriodReturnsForSymbol(symbol, instrument = null, referenc
     // A quote from another benchmark cannot borrow a different history, and
     // monthly averages never fill daily period columns.
     if (!closes) return null;
+  } else if (isRateProxy && referenceQuote?.source === 'cnbc') {
+    // A Tradeweb quote cannot borrow CBOE index history.
+    const cnbcCloses = await fetchCnbcTreasuryDailyCloses(upperSym);
+    if (!cnbcCloses) return null;
+    closes = withLiveTreasuryClose(cnbcCloses, referenceQuote);
+    periodReturnsSource = 'cnbc';
+    periodSourceSeriesId = referenceQuote.sourceSeriesId;
+    periodSourceInstrument = referenceQuote.sourceInstrument;
   } else if (instrument?.provider === 'ibkr') {
     closes = await fetchIbkrDailyClosesSeries(instrument);
     periodReturnsSource = 'ibkr';

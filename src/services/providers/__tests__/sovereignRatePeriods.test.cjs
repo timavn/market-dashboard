@@ -203,3 +203,22 @@ test('when CNBC is down the official daily history answers, and source changes c
   assert.equal(officialPeriods.periodReturnsSource, 'bundesbank');
   assert.equal(officialPeriods.fifteenDayChangeBps, 20);
 });
+
+test('a Tradeweb UST10Y quote takes its periods from the same CNBC series, and a CBOE quote keeps Yahoo history', async () => {
+  const yahooCloses = daily.map((row) => ({ ...row, close: row.close + 1 }));
+  const context = load({
+    getTickerMapping: () => ({ source: 'yahoo', ticker: '^TNX' }),
+    fetchCnbcTreasuryDailyCloses: async () => daily,
+    fetchYahooDailyClosesSeries: async () => yahooCloses,
+  });
+  const tradewebQuote = { ...cnbcQuote, sourceSeriesId: 'US10Y', sourceInstrument: 'US 10 Year Treasury (Tradeweb)' };
+  const periods = await context.computePeriodReturnsForSymbol('UST10Y', null, tradewebQuote);
+  assert.equal(periods.periodReturnsSource, 'cnbc');
+  assert.equal(periods.periodSourceSeriesId, 'US10Y');
+  assert.equal(periods.asOf, '2026-09-25T00:00:00.000Z');
+  assert.equal(periods.dayChangeBps, 10);
+  const cboePeriods = await context.computePeriodReturnsForSymbol('UST10Y', null, { source: 'yahoo', price: '4.3' });
+  assert.equal(cboePeriods.periodReturnsSource, 'yahoo');
+  context.fetchCnbcTreasuryDailyCloses = async () => null;
+  assert.equal(await context.computePeriodReturnsForSymbol('UST10Y', null, tradewebQuote), null);
+});
