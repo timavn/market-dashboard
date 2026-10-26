@@ -23,6 +23,7 @@ import {
   PERFORMANCE_DEFINITIONS,
   formatPerformanceValue,
 } from '../../utils/portfolioPerformanceUtils';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const formatMoney = (v) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v || 0);
 
@@ -113,7 +114,7 @@ const PortfolioPerformanceDashboard = ({ isDark = false, realizedKPIs, observedA
         </div>
       </div>
 
-      <p role="status">{loading ? 'Loading verified realized history…' : error || 'Portfolio returns and risk metrics require verified account-equity history.'}</p>
+      <p role="status">{loading ? <LoadingIndicator label="Loading verified realized history…" size="sm" announce={false} /> : error || 'Portfolio returns and risk metrics require verified account-equity history.'}</p>
 
       <div className="border border-[#e5e7eb] dark:border-gray-700 rounded-xl p-5 bg-white dark:bg-gray-800/50 shadow-sm flex flex-col gap-6">
 

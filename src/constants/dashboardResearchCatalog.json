@@ -65,6 +65,7 @@
   { "symbol": "ADA", "aliases": ["ADA", "ADA-USD"], "names": ["Cardano", "Cardano/USD"] },
   { "symbol": "DOGE", "aliases": ["DOGE", "DOGE-USD"], "names": ["Dogecoin", "Dogecoin/USD"] },
   { "symbol": "LINK", "aliases": ["LINK", "LINK-USD"], "names": ["Chainlink", "Chainlink/USD"] },
+  { "symbol": "TRX", "aliases": ["TRX", "TRX-USD"], "names": ["TRON", "TRON/USD"] },
   { "symbol": "USD", "aliases": ["USD", "DXY", "$USD", "DX-Y.NYB"], "names": ["U.S. Dollar Index", "US Dollar Index", "Dollar Index", "USD Index"] },
   { "symbol": "UUP", "aliases": ["UUP"], "names": ["Invesco DB US Dollar Index Bullish Fund"] },
   { "symbol": "USDEUR", "aliases": ["USDEUR", "USD/EUR", "USDEUR=X"], "names": ["U.S. Dollar to Euro"] },

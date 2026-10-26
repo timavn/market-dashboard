@@ -5,7 +5,6 @@ import RefreshButton from '../../common/RefreshButton';
 
 export default function DashboardWorkflowPanel({
   showWorkflowStatus,
-  showContractPnl,
   getSidebarPanelZIndex,
   closeSidebarPanel,
   setShowWorkflowStatus,
@@ -18,8 +17,6 @@ export default function DashboardWorkflowPanel({
         aria-label="Analytics"
         manageFocus
         active={showWorkflowStatus}
-        occluded={showContractPnl}
-        data-contract-pnl-coverable="true"
         style={{
           zIndex: getSidebarPanelZIndex('analytics', showWorkflowStatus),
         }}

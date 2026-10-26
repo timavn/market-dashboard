@@ -142,6 +142,7 @@ function normalizeAdjustedPriceBars(bars = []) {
     }
 
     const parsedTimestamp = timestampMs(row?.timestamp ?? row?.t);
+    const volume = finiteNumber(row?.volume);
     byDate.set(date, {
       date,
       timestamp: parsedTimestamp == null
@@ -153,6 +154,7 @@ function normalizeAdjustedPriceBars(bars = []) {
       adjustedClose,
       adjustedHigh: adjustedHigh == null ? null : adjustedHigh,
       adjustedLow: adjustedLow == null ? null : adjustedLow,
+      ...(volume != null && volume >= 0 ? { volume } : {}),
     });
   }
 
@@ -185,6 +187,7 @@ function parseYahooChartBars(chartResult, { now = Date.now(), dropIncompleteSess
     close: quote.close?.[index],
     high: quote.high?.[index],
     low: quote.low?.[index],
+    volume: quote.volume?.[index],
   }));
   return normalizeAdjustedPriceBars(rows);
 }

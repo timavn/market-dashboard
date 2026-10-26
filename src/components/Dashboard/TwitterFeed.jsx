@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, Text, Button } from '@tremor/react';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const TwitterFeed = () => {
   const [loading, setLoading] = useState(true);
@@ -760,7 +761,7 @@ const TwitterFeed = () => {
 
       {loading && !error && (
         <div className="flex items-center justify-center" style={{ flex: 1, minHeight: '500px' }}>
-          <Text className="text-gray-500 dark:text-gray-400">Loading Twitter feed...</Text>
+          <LoadingIndicator label="Loading Twitter feed…" />
         </div>
       )}
 

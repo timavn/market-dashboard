@@ -49,7 +49,6 @@ function createHarness({ legacyMode = '', readAnalystActivity, readPortfolioClos
   const listWorkerDefinitions = jest.fn(() => []);
   const service = createSystemReadinessService({
     sidecarRequest,
-    getCurrentPredictionMarkets: jest.fn().mockResolvedValue({ events: [] }),
     getDirectorSnapshot,
     buildWorkflowStatusSnapshot: jest.fn().mockResolvedValue({}),
     getHermesInboxStatus: jest.fn().mockResolvedValue({}),
@@ -116,8 +115,8 @@ function createHarness({ legacyMode = '', readAnalystActivity, readPortfolioClos
 describe('live Analyst activity check', () => {
   test('reads live counts on demand without starting or entering the cached collection', async () => {
     const readAnalystActivity = jest.fn()
-      .mockResolvedValueOnce({ reviews: 0, manualCaptures: 0, turns: 0, windowSeconds: 1800 })
-      .mockResolvedValueOnce({ reviews: 1, manualCaptures: 0, turns: 1, windowSeconds: 1800 });
+      .mockResolvedValueOnce({ reviews: 0, turns: 0, windowSeconds: 1800 })
+      .mockResolvedValueOnce({ reviews: 1, turns: 1, windowSeconds: 1800 });
     const harness = createHarness({ readAnalystActivity });
 
     expect(ANALYST_ACTIVITY_WINDOW_SECONDS).toBe(30 * 60);
@@ -127,13 +126,13 @@ describe('live Analyst activity check', () => {
       errorCode: null,
       summary: 'No Analyst work is in progress.',
       observedAt: new Date(START_MS).toISOString(),
-      provenance: { windowSeconds: 1800, reviews: 0, manualCaptures: 0, turns: 0 },
+      provenance: { windowSeconds: 1800, reviews: 0, turns: 0 },
     });
     harness.advance(30_000);
     expect(await harness.service.collectLiveCheck('analyst.activity')).toMatchObject({
       status: 'warn',
       errorCode: 'ANALYST_WORK_ACTIVE',
-      summary: 'Analyst work is in progress: 1 review run, 0 manual captures, 1 turn.',
+      summary: 'Analyst work is in progress: 1 review run, 1 turn.',
       observedAt: new Date(START_MS + 30_000).toISOString(),
     });
     expect(readAnalystActivity).toHaveBeenNthCalledWith(1, { windowSeconds: 1800 });
@@ -149,9 +148,9 @@ describe('live Analyst activity check', () => {
   test('an unreadable or malformed activity read is unverified, never idle', async () => {
     for (const readAnalystActivity of [
       jest.fn().mockRejectedValue(new Error('Analyst sidecar HTTP 409')),
-      jest.fn().mockResolvedValue({ reviews: 0, turns: 0 }),
-      jest.fn().mockResolvedValue({ reviews: -1, manualCaptures: 0, turns: 0 }),
-      jest.fn().mockResolvedValue({ reviews: '0', manualCaptures: 0, turns: 0 }),
+      jest.fn().mockResolvedValue({ reviews: 0 }),
+      jest.fn().mockResolvedValue({ reviews: -1, turns: 0 }),
+      jest.fn().mockResolvedValue({ reviews: '0', turns: 0 }),
       undefined,
     ]) {
       const harness = createHarness({ readAnalystActivity });

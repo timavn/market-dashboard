@@ -3,7 +3,6 @@ import DashboardWorkspaceWindow from './DashboardWorkspaceWindow';
 
 export default function DashboardCallPanel({
   showCall,
-  showContractPnl,
   getSidebarPanelZIndex,
   children
 }) {
@@ -13,8 +12,6 @@ export default function DashboardCallPanel({
         aria-label="Call"
         manageFocus
         active={showCall}
-        occluded={showContractPnl}
-        data-contract-pnl-coverable="true"
         style={{
           zIndex: getSidebarPanelZIndex('call', showCall),
         }}

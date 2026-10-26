@@ -8,7 +8,6 @@ This dashboard is **read-only** and **non-execution**. IBKR Desktop remains the 
 - Historical bars (recent ranges; long-range charts may use Yahoo/FRED)
 - Account values, positions, buying power, margin fields
 - Portfolio analytics and reconciliation with uploaded statements
-- Prediction market / event contract quotes when configured
 
 ## Not implemented (by design)
 

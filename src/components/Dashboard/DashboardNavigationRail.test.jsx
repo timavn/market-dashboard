@@ -3,80 +3,45 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import DashboardNavigationRail from './DashboardNavigationRail';
 
-describe('DashboardNavigationRail prediction-market indicators', () => {
-  test('puts the tone and accessible research description on only the matching button', () => {
-    const onSp500 = jest.fn();
-    const onWti = jest.fn();
+jest.mock('../../services/analyst/analystClient', () => ({
+  analystWorkspaceApi: { request: jest.fn(() => new Promise(() => {})) },
+}));
+jest.mock('../../utils/processDocumentDrafts', () => ({ synchronizeProcessDrafts: jest.fn() }));
+
+describe('DashboardNavigationRail', () => {
+  test('renders each destination as a card that marks and selects only its own window', () => {
+    const onPortfolio = jest.fn();
+    const onBalance = jest.fn();
     render(<DashboardNavigationRail
-      activeItemId="predictionMonitor-wti"
-      activeItemIds={['predictionMonitor-wti']}
+      activeItemId="balance"
+      activeItemIds={['balance']}
       items={[
-        {
-          id: 'predictionMonitor-sp500', group: 'primary', label: 'SP500',
-          onSelect: onSp500,
-        },
-        {
-          id: 'predictionMonitor-wti', group: 'primary', label: 'WTI',
-          title: 'WTI Prediction Monitor', onSelect: onWti,
-          indicatorTone: 'bearish',
-          indicatorDescription: 'Aligned bearish Trade and Trend in the upper Risk Range third.',
-        },
+        { id: 'portfolio', group: 'primary', label: 'Portfolio', onSelect: onPortfolio },
+        { id: 'balance', group: 'primary', label: 'Balance', title: 'Portfolio balance', onSelect: onBalance },
       ]}
       systemReadinessStatus="unknown"
     />);
 
-    const sp500 = screen.getByRole('button', { name: 'SP500' });
-    const wti = screen.getByRole('button', { name: 'WTI' });
-    expect(sp500).not.toHaveAttribute('data-indicator-tone');
-    expect(wti).toHaveAttribute('data-indicator-tone', 'bearish');
-    expect(wti).toHaveAccessibleDescription(
-      'Aligned bearish Trade and Trend in the upper Risk Range third.',
-    );
-    expect(wti).toHaveAttribute(
-      'title',
-      'WTI Prediction Monitor. Aligned bearish Trade and Trend in the upper Risk Range third.',
-    );
-    expect(wti).toHaveClass('is-active');
+    const portfolio = screen.getByRole('button', { name: 'Portfolio' });
+    const balance = screen.getByRole('button', { name: 'Balance' });
+    expect(portfolio).toHaveClass('dashboard-navigation-rail__card');
+    expect(portfolio).not.toHaveClass('is-active');
+    expect(balance).toHaveClass('is-active');
+    expect(balance).toHaveAttribute('aria-current', 'page');
+    expect(balance).toHaveAttribute('title', 'Portfolio balance');
 
-    wti.focus();
-    expect(wti).toHaveFocus();
-    fireEvent.click(wti);
-    expect(onWti).toHaveBeenCalledTimes(1);
-    expect(onSp500).not.toHaveBeenCalled();
+    fireEvent.click(balance);
+    expect(onBalance).toHaveBeenCalledTimes(1);
+    expect(onPortfolio).not.toHaveBeenCalled();
   });
 
-  test('ignores unsupported tones instead of exposing an indicator', () => {
+  test('exposes system readiness on the Systems card', () => {
     render(<DashboardNavigationRail
-      items={[{
-        id: 'predictionMonitor-gold', group: 'primary', label: 'Gold', onSelect: jest.fn(),
-        indicatorTone: 'warning', indicatorDescription: 'Unverified signal',
-      }]}
-      systemReadinessStatus="unknown"
+      items={[{ id: 'system', group: 'utility', label: 'Systems', onSelect: jest.fn() }]}
+      systemReadinessStatus="offline"
     />);
 
-    const gold = screen.getByRole('button', { name: 'Gold' });
-    expect(gold).not.toHaveAttribute('data-indicator-tone');
-    expect(gold).not.toHaveAttribute('aria-describedby');
-  });
-
-  test('renders prediction-market tiers as labeled groups without changing the card template', () => {
-    render(<DashboardNavigationRail
-      items={[
-        { id: 'portfolio', group: 'primary', label: 'Portfolio', onSelect: jest.fn() },
-        { id: 'predictionMonitor-silver', group: 'primary', sectionLabel: 'T1', label: 'Silver', onSelect: jest.fn() },
-        { id: 'predictionMonitor-gold', group: 'primary', sectionLabel: 'T1', label: 'Gold', onSelect: jest.fn() },
-        { id: 'predictionMonitor-sp500', group: 'primary', sectionLabel: 'T2', label: 'SP500', onSelect: jest.fn() },
-      ]}
-      systemReadinessStatus="unknown"
-    />);
-
-    const tierOne = screen.getByRole('region', { name: 'T1 prediction markets' });
-    const tierTwo = screen.getByRole('region', { name: 'T2 prediction markets' });
-    expect(tierOne).toHaveAttribute('data-navigation-tier', 'T1');
-    expect(tierTwo).toHaveAttribute('data-navigation-tier', 'T2');
-    expect(tierOne).toHaveTextContent('Silver');
-    expect(tierOne).toHaveTextContent('Gold');
-    expect(tierTwo).toHaveTextContent('SP500');
-    expect(screen.getByRole('button', { name: 'Silver' })).toHaveClass('dashboard-navigation-rail__card');
+    expect(screen.getByRole('button', { name: 'Systems' })).toHaveAttribute('data-readiness-status', 'offline');
+    expect(screen.getByText('System status: offline')).toBeInTheDocument();
   });
 });

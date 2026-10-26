@@ -1,6 +1,7 @@
 import React, { useId, useState } from 'react';
 import { previewQuarters } from '../../utils/globalQuadsPeriods';
 import './GlobalQuadsCard.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 export { previewQuarters } from '../../utils/globalQuadsPeriods';
 
@@ -66,7 +67,7 @@ export function QuadsPreview({ snapshot, loading }) {
   const rows = group?.rows || [];
   const preferred = [rows.find(r => r.aggregate), ...['United States', 'China', 'Germany', 'Japan', 'United Kingdom', 'Canada', 'India', 'South Korea', 'Australia', 'Brazil'].map(name => rows.find(r => r.country === name))]
     .filter(row => row && group.currentCountries.includes(row.country));
-  if (!preferred.length || !columns.length) return <div className="efr-preview-empty">{loading ? 'Loading…' : 'UNAVAILABLE'}</div>;
+  if (!preferred.length || !columns.length) return <div className="efr-preview-empty">{loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'UNAVAILABLE'}</div>;
   return <div className="global-quads-preview">
     <QuadTable columns={columns} rows={preferred} sources={sources} label="G20 quad preview" compact />
   </div>;
@@ -90,7 +91,7 @@ export default function GlobalQuadsCard({ resourceState }) {
     event.currentTarget.parentElement.querySelectorAll('[role="tab"]')[next].focus();
     setActiveGroup(tabs[next][0]);
   };
-  if (!Object.keys(groups).length) return <p className="global-quads-empty">{resourceState?.initialLoading ? 'Loading…' : 'UNAVAILABLE'}</p>;
+  if (!Object.keys(groups).length) return <p className="global-quads-empty">{resourceState?.initialLoading ? <LoadingIndicator label="Loading…" size="sm" /> : 'UNAVAILABLE'}</p>;
   return <div className="global-quads-full">
     <div className="global-quads-toolbar">
       <div role="tablist" aria-label="Global Quads tables" className="global-quads-tabs">

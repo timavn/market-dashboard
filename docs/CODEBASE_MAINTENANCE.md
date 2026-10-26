@@ -11,17 +11,16 @@ rules, remove compatibility paths, or restart/deploy services.
 | Portfolio card sections and positions presentation | `src/components/Dashboard/portfolio/` |
 | Portfolio research/current-history and market-context requests | `src/hooks/usePortfolioResearch.js`, `usePortfolioMarketContext.js` |
 | Portfolio positions interactions and pure calculations | `portfolio/usePortfolioPositions.js`, `portfolioPositionsModel.js` |
-| Active prediction cards, chart model/drawing and card reference hooks | `src/components/Dashboard/predictionMonitor/` |
-| Dashboard resource lifecycles | `src/hooks/useDashboardPortfolio.js`, `useDashboardOverviewResources.js`, `useDashboardEtfProResource.js`, `useDashboardChangelog.js`, `useDashboardPredictionIndicators.js` |
+| Dashboard resource lifecycles | `src/hooks/useDashboardPortfolio.js`, `useDashboardOverviewResources.js`, `useDashboardEtfProResource.js`, `useDashboardChangelog.js` |
 | Saved workspace and resizing | `src/hooks/useDashboardWorkspaceState.js`, `useDashboardPanelResize.js`; `src/constants/dashboardWorkspace.js`; `src/utils/dashboardWorkspaceState.js` |
 | Persistent panel presentation | `src/components/Dashboard/workspace/` |
 | Reference-comparison projection and market-period merge | `src/utils/dashboardReferenceProjection.js`, `dashboardMarketPeriods.js` |
 | Thin reference, volatility and correlation HTTP handlers | `src/routes/referenceHandlers.cjs`, `volatilityHandlers.cjs`, `correlationHandlers.cjs` |
 | Currency endpoint without a verified provider | `src/routes/currencyPairsHandler.cjs` (503, empty unavailable response) |
 
-`PortfolioBreakdown`, `PredictionMarketResolverTest` and `PortfolioDashboard`
-remain orchestration/compatibility owners. Keep lazy loaders, shared resource
-decisions and keyed prediction-market instances in their established owners.
+`PortfolioBreakdown` and `PortfolioDashboard` remain orchestration/compatibility
+owners. Keep lazy loaders and shared resource decisions in their established
+owners.
 Server provider construction, middleware, listeners, shutdown and WebSockets
 remain in their current architecture. A shorter file is not itself a success;
 a clear, independently testable responsibility is.

@@ -115,6 +115,17 @@ test('genuine delayed data stays a delayed reference, and cannot be relabeled li
   assert.equal(validate({ ...value, dataType: 'live', entitlementStatus: 'live' }).rejectionReason, 'observation_source_mismatch');
 });
 
+test('CNBC session Treasury yields are delayed references that expire, never live', () => {
+  const raw = { symbol: 'UST2Y', source: 'cnbc', dataType: 'delayed', timestamp: new Date(observed).toISOString(),
+    price: '4.693', sourceSeriesId: 'US2Y', observationFrequency: 'intraday', executable: false, displayOnly: true };
+  const value = withQuoteObservation(raw, { instrument: 'UST2Y', receivedAt: receipt });
+  assert.equal(validateQuoteObservation(value, { now: receipt }).valid, true);
+  assert.equal(value.observation.classification, 'delayed_reference');
+  assert.notEqual(value.expiresAt, null);
+  assert.equal(buildQuoteMetadata(value).availability, 'delayed');
+  assert.equal(withQuoteObservation({ ...raw, dataType: 'live' }, { receivedAt: receipt }).observation.valid, false);
+});
+
 test('dated FRED references keep source dates and no executable expiry, including negative rates', () => {
   const value = withQuoteObservation({ symbol: 'RATE', source: 'fred', dataType: 'historical', timestamp: '2020-01-01T00:00:00Z', price: '-0.5' }, { instrument: 'RATE', receivedAt: receipt });
   assert.equal(validateQuoteObservation(value, { now: receipt }).valid, true);

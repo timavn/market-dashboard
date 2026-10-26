@@ -65,6 +65,9 @@
         "fit": "proxy",
         "label": "Gold futures (front month)"
       },
+      "volume": {
+        "symbol": "GLD"
+      },
       "volatility": {
         "symbol": "GVZ",
         "source": "volatility-snapshot",
@@ -124,6 +127,9 @@
         "symbol": "SI=F",
         "fit": "proxy",
         "label": "Silver futures (front month)"
+      },
+      "volume": {
+        "symbol": "SLV"
       },
       "volatility": {
         "symbol": "VXSLV",
@@ -185,6 +191,9 @@
         "fit": "proxy",
         "label": "Copper futures (front month)"
       },
+      "volume": {
+        "symbol": "CPER"
+      },
       "usdCorrelationKey": "COPPER"
     },
     {
@@ -238,6 +247,9 @@
         "fit": "exact",
         "label": "WTI futures (front month)"
       },
+      "volume": {
+        "symbol": "USO"
+      },
       "volatility": {
         "symbol": "OVX",
         "source": "volatility-snapshot",
@@ -246,6 +258,69 @@
         "regimeKey": "OVX"
       },
       "usdCorrelationKey": "WTI"
+    },
+    {
+      "id": "brent",
+      "label": "Brent",
+      "group": "oil",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXBRENTD",
+        "title": "Brent Oil Daily",
+        "settlementSources": [
+          {
+            "name": "Pyth - Brent",
+            "url": "https://app.pyth.com/explore/Commodities.Index.BRENT%2FUSD?returnUrl=%2Fexplore%3Fsearch%3Dbrent%2Bindex%26state%3Dstable"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXBRENTD-26OCT2017",
+        "exampleRule": "If the close price of the 1-minute candlestick for brent crude oil on October 20, 2026 at 5:00 PM EDT is above 100 USD/Bbl, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "next 5:00 PM ET event",
+        "underlying": "Brent USD/bbl (Pyth Commodities.Index.BRENT/USD 1-minute close at 5:00 PM ET)",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "BRENT",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "BRENT",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "BRENT"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "BNO",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "notes": "Hedgeye's BRENT Risk Range is the Brent Crude Oil Continuous Contract; Kalshi settles on its published Pyth front-month close.",
+      "price": {
+        "symbol": "BZ=F",
+        "fit": "exact",
+        "label": "Brent futures (front month)"
+      },
+      "volume": {
+        "symbol": "BNO"
+      },
+      "volatility": {
+        "symbol": "OVX",
+        "source": "volatility-snapshot",
+        "key": "OVX",
+        "label": "Cboe Crude Oil Volatility",
+        "regimeKey": "OVX"
+      },
+      "usdCorrelationKey": "BRENT"
     },
     {
       "id": "bitcoin",
@@ -307,6 +382,9 @@
         "fit": "close",
         "label": "BTC-USD"
       },
+      "volume": {
+        "symbol": "IBIT"
+      },
       "volatility": {
         "symbol": "BITVX",
         "source": "volatility-snapshot",
@@ -367,6 +445,9 @@
         "fit": "close",
         "label": "ETH-USD"
       },
+      "volume": {
+        "symbol": "ETHA"
+      },
       "usdCorrelationKey": "ETH"
     },
     {
@@ -419,6 +500,9 @@
         "symbol": "^GSPC",
         "fit": "exact",
         "label": "S&P 500 index"
+      },
+      "volume": {
+        "symbol": "SPY"
       },
       "volatility": {
         "symbol": "VIX",
@@ -484,6 +568,9 @@
         "symbol": "^NDX",
         "fit": "exact",
         "label": "Nasdaq-100 index"
+      },
+      "volume": {
+        "symbol": "QQQ"
       },
       "volatility": {
         "symbol": "VXN",
@@ -608,6 +695,10 @@
         "fit": "exact",
         "label": "2Y Treasury yield"
       },
+      "volume": {
+        "symbol": "SHY",
+        "inverse": true
+      },
       "volatility": {
         "symbol": "MOVE",
         "source": "volatility-snapshot",
@@ -692,6 +783,10 @@
         "fit": "close",
         "label": "10Y Treasury yield"
       },
+      "volume": {
+        "symbol": "IEF",
+        "inverse": true
+      },
       "volatility": {
         "symbol": "MOVE",
         "source": "volatility-snapshot",
@@ -775,6 +870,10 @@
         "fit": "close",
         "label": "30Y Treasury yield"
       },
+      "volume": {
+        "symbol": "TLT",
+        "inverse": true
+      },
       "volatility": {
         "symbol": "MOVE",
         "source": "volatility-snapshot",
@@ -836,6 +935,7 @@
     "label": "US Dollar Index",
     "riskRangeTicker": "DXY",
     "tradeTicker": "DXY",
-    "tickTicker": "UUP"
+    "tickTicker": "UUP",
+    "volumeSymbol": "UUP"
   }
 }

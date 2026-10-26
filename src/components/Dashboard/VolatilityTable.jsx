@@ -17,6 +17,7 @@ import {
 import DelayedDataMarker from './DelayedDataMarker';
 import { delayedMarkerMarketContext } from '../../utils/delayedMarkerMarketContext';
 import './VolatilityTable.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 // Keep the table aligned with the shared volatility roster.
 const ALL_SERIES = VOLATILITY_SERIES;
@@ -100,7 +101,7 @@ const VolatilityTable = ({
 
   if (loading) {
     return (
-      <div className="volatility-table-loading">Loading volatility data...</div>
+      <div className="volatility-table-loading"><LoadingIndicator label="Loading volatility data..." size="sm" /></div>
     );
   }
 

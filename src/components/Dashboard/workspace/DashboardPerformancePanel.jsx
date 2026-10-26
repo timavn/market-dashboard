@@ -4,7 +4,6 @@ import { Title } from '@tremor/react';
 
 export default function DashboardPerformancePanel({
   showPerformanceTracking,
-  showContractPnl,
   getSidebarPanelZIndex,
   closeSidebarPanel,
   setShowPerformanceTracking,
@@ -16,8 +15,6 @@ export default function DashboardPerformancePanel({
         aria-label="Performance"
         manageFocus
         active={showPerformanceTracking}
-        occluded={showContractPnl}
-        data-contract-pnl-coverable="true"
         style={{
           zIndex: getSidebarPanelZIndex('performance', showPerformanceTracking),
         }}

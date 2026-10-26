@@ -9,7 +9,7 @@ import './DashboardTopNavigation.css';
 
 const PORTFOLIO_ITEM_IDS = new Set(['portfolio', 'exposureLab', 'balance']);
 const OCCLUDING_ITEM_IDS = ['process', 'dashboardGuide', 'exposureGuide'];
-const MENU_LABELS = { research: 'Research', portfolio: 'Portfolio' };
+const MENU_LABELS = { research: 'Playbook', portfolio: 'Portfolio' };
 const inboxNotificationIds = (result) => result.findings
   .filter((finding) => (finding?.unread === true || finding?.unread === 1) && typeof finding.id === 'string')
   .map((finding) => finding.id);
@@ -95,9 +95,11 @@ const DashboardTopNavigation = ({
     const dock = trigger.closest('nav')?.getBoundingClientRect();
     const anchorTop = dock?.height > 0 ? Math.min(rect.top, dock.top) : rect.top;
     const width = Math.min(224, window.innerWidth - 16);
+    // Center the menu over its trigger, kept inside the viewport.
+    const centeredLeft = rect.left + (rect.width || 0) / 2 - width / 2;
     setMenuPosition({
       bottom: window.innerHeight - anchorTop + 7,
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+      left: Math.max(8, Math.min(centeredLeft, window.innerWidth - width - 8)),
       width,
       maxHeight: Math.max(0, anchorTop - 15),
     });
@@ -243,6 +245,8 @@ const DashboardTopNavigation = ({
   const renderMenuTrigger = (group) => {
     const options = menuItemsByGroup[group];
     if (!options.length) return null;
+    // A menu of one adds a click; the tab opens its lone destination itself.
+    if (options.length === 1) return renderItem(options[0]);
     const isActive = options.some((item) => activeIds.has(item.id));
     const expanded = menuOpen === group;
     return (
@@ -282,9 +286,12 @@ const DashboardTopNavigation = ({
         <div className="dashboard-top-navigation__links" data-navigation-group="primary">
           {renderMenuTrigger('portfolio')}
           <MarketEventsQuickReference compact />
-          {renderMenuTrigger('research')}
         </div>
-        {utilityItems.length > 0 && <div className="dashboard-top-navigation__utilities" data-navigation-group="utility">{utilityItems.map((item) => renderItem(item))}</div>}
+        {/* Playbook closes the dock, after The Analyst and Systems. */}
+        {(utilityItems.length > 0 || researchItems.length > 0) && <div className="dashboard-top-navigation__utilities" data-navigation-group="utility">
+          {utilityItems.map((item) => renderItem(item))}
+          {renderMenuTrigger('research')}
+        </div>}
         {menuOpen && createPortal(
           <div ref={menuRef} id={menuId} role="menu" aria-label={MENU_LABELS[menuOpen]} className="dashboard-top-navigation__menu" style={menuPosition} onKeyDown={handleMenuKey}>
             {openMenuItems.map((item) => renderItem(item, true))}

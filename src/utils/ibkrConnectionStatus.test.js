@@ -27,15 +27,6 @@ function livePortfolio(overrides = {}) {
   };
 }
 
-const livePredictionProvider = {
-  providers: {
-    ibkr: {
-      status: 'connected',
-      gateway: { ok: true },
-      contracts_total: 7,
-    },
-  },
-};
 
 describe('getIbkrConnectionDisplay', () => {
   it('returns connected when ibkr.connected is true', () => {
@@ -215,7 +206,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
       loading: true,
       rtaPositions: null,
       etfProSnapshot: null,
-      predictionMarketProviderStatus: null,
     });
 
     expect(status.status).toBe('stale');
@@ -235,7 +225,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
       loading: false,
       rtaPositions: null,
       etfProSnapshot: null,
-      predictionMarketProviderStatus: null,
     });
 
     expect(status.status).toBe('inactive');
@@ -347,7 +336,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
         ],
         dataQuality: { status: 'ok', warnings: [] },
       },
-      predictionMarketProviderStatus: livePredictionProvider,
     });
 
     expect(status.status).toBe('active');
@@ -378,7 +366,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
         ],
         dataQuality: { status: 'warning', warnings: ['ETF Pro Gmail ingestion is stale.'] },
       },
-      predictionMarketProviderStatus: livePredictionProvider,
     });
 
     expect(status.status).toBe('stale');
@@ -594,7 +581,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
         rows: [{ ticker: 'SPY', call: 'Long' }],
         dataQuality: { status: 'ok', warnings: [] },
       },
-      predictionMarketProviderStatus: livePredictionProvider,
     });
 
     const rta = status.sources.find((source) => source.id === 'rta');
@@ -628,7 +614,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
           reason: rawReason,
         },
       },
-      predictionMarketProviderStatus: livePredictionProvider,
     });
 
     const rta = status.sources.find((source) => source.id === 'rta');
@@ -675,7 +660,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
           dataQuality: { status: 'ok', warnings: [] },
         },
       },
-      predictionMarketProviderStatus: livePredictionProvider,
     });
 
     const etf = status.sources.find((source) => source.id === 'etf-pro');
@@ -688,270 +672,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
         text: 'Gmail ingestion (GMAIL_POLL_STALE): The last Gmail service heartbeat is older than 45 minutes.',
       }),
     ]));
-  });
-
-  it('turns yellow when CPI provider is positions-only while portfolio and signals are otherwise live', () => {
-    const today = currentDate();
-    const status = getIbkrPortfolioStatusDot({
-      connection: { connected: true, kind: 'connected' },
-      portfolioData: livePortfolio(),
-      loading: false,
-      rtaPositions: {
-        available: true,
-        lastUpdated: `${today}T16:00:00Z`,
-        longCount: 1,
-        shortCount: 1,
-      },
-      etfProSnapshot: {
-        meta: { snapshotDate: today },
-        rows: [
-          { ticker: 'A', call: 'Long' },
-          { ticker: 'B', call: 'Short' },
-        ],
-        dataQuality: { status: 'ok', warnings: [] },
-      },
-      predictionMarketProviderStatus: {
-        providers: {
-          ibkr: {
-            status: 'connected_positions_only',
-            message: 'IBKR connected; CPI positions loaded from portfolio, contract catalog missing',
-            gateway: { ok: true },
-          },
-        },
-      },
-    });
-
-    expect(status.status).toBe('stale');
-    expect(status.emoji).toBe('🟡');
-    expect(status.sources.find((source) => source.id === 'prediction-markets')?.detailRows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          text: 'Prediction markets: IBKR connected; CPI positions loaded from portfolio, contract catalog missing',
-        }),
-      ]),
-    );
-    expect(status.sources.find((source) => source.id === 'prediction-markets')?.detail).toBe('Error');
-  });
-
-  it('turns red and replaces a raw prediction catalog IAM denial with an actionable repair', () => {
-    const today = currentDate();
-    const rawError = 'User: arn:aws:iam::915328198276:user/market-dashboard-local is not authorized to perform: dynamodb:Query on resource: arn:aws:dynamodb:us-west-1:915328198276:table/PredictionMarketCatalogV2 because no identity-based policy allows the dynamodb:Query action';
-    const status = getIbkrPortfolioStatusDot({
-      connection: { connected: true, kind: 'connected' },
-      portfolioData: livePortfolio(),
-      loading: false,
-      rtaPositions: {
-        available: true,
-        current: true,
-        dataAvailability: { current: true, ingestionStatus: 'healthy' },
-        lastUpdated: `${today}T16:00:00Z`,
-        longCount: 1,
-        shortCount: 0,
-      },
-      etfProSnapshot: {
-        available: true,
-        current: true,
-        dataAvailability: { current: true, ingestionStatus: 'healthy' },
-        meta: { snapshotDate: today },
-        rows: [{ ticker: 'SPY', call: 'Long' }],
-        dataQuality: { status: 'ok', warnings: [] },
-      },
-      predictionMarketProviderStatus: {
-        providers: {
-          ibkr: {
-            status: 'catalog_unavailable',
-            errorCode: 'PREDICTION_CATALOG_ACCESS_DENIED',
-            message: rawError,
-          },
-        },
-      },
-    });
-
-    const prediction = status.sources.find((source) => source.id === 'prediction-markets');
-    expect(status).toMatchObject({ status: 'inactive', emoji: '🔴' });
-    expect(prediction).toMatchObject({ detail: 'Error', status: 'defective' });
-    expect(prediction.detailRows.map((row) => row.text)).toEqual([
-      'Code: PREDICTION_CATALOG_ACCESS_DENIED',
-      'market-dashboard-local lacks dynamodb:Query and dynamodb:TransactWriteItems on PredictionMarketCatalogV2.',
-      'Admin fix: attach infra/iam/local-readiness-catalog-policy.json using infra/scripts/install_local_principal_policies.sh.',
-    ]);
-    expect(prediction.detailRows.map((row) => row.text).join(' ')).not.toContain('arn:aws:iam');
-  });
-
-  it('keeps portfolio status green when CPI positions-only has complete combined strike coverage', () => {
-    const today = currentDate();
-    const status = getIbkrPortfolioStatusDot({
-      connection: { connected: true, kind: 'connected' },
-      portfolioData: livePortfolio(),
-      loading: false,
-      rtaPositions: {
-        available: true,
-        lastUpdated: `${today}T16:00:00Z`,
-        longCount: 1,
-        shortCount: 1,
-      },
-      etfProSnapshot: {
-        meta: { snapshotDate: today },
-        rows: [
-          { ticker: 'A', call: 'Long' },
-          { ticker: 'B', call: 'Short' },
-        ],
-        dataQuality: { status: 'ok', warnings: [] },
-      },
-      predictionMarketProviderStatus: {
-        providers: {
-          ibkr: {
-            status: 'connected_positions_only',
-            message: 'IBKR connected; CPI positions loaded from portfolio, Kalshi covers the full target ladder',
-            gateway: { ok: true },
-            contracts_total: 4,
-            portfolio_seed_count: 4,
-            portfolio_cpi_positions: 4,
-            cpi_discovery: {
-              targetStrikes: [3.6, 3.7, 3.8, 3.9, 4, 4.1, 4.2],
-              foundStrikes: [3.6, 3.7, 3.8, 3.9, 4, 4.1, 4.2],
-              missingStrikes: [],
-              contracts_total: 7,
-            },
-          },
-        },
-      },
-    });
-
-    expect(status.status).toBe('active');
-    expect(status.emoji).toBe('🟢');
-    expect(status.sources.find((source) => source.id === 'prediction-markets')?.detail).toBe('Live');
-  });
-
-  it('turns yellow when CPI provider is connected without discovered contract counts', () => {
-    const today = currentDate();
-    const status = getIbkrPortfolioStatusDot({
-      connection: { connected: true, kind: 'connected' },
-      portfolioData: livePortfolio(),
-      loading: false,
-      rtaPositions: {
-        available: true,
-        lastUpdated: `${today}T16:00:00Z`,
-        longCount: 1,
-        shortCount: 1,
-      },
-      etfProSnapshot: {
-        meta: { snapshotDate: today },
-        rows: [
-          { ticker: 'A', call: 'Long' },
-          { ticker: 'B', call: 'Short' },
-        ],
-        dataQuality: { status: 'ok', warnings: [] },
-      },
-      predictionMarketProviderStatus: {
-        providers: {
-          ibkr: {
-            status: 'connected',
-            gateway: { ok: true },
-          },
-        },
-      },
-    });
-
-    expect(status.status).toBe('stale');
-    expect(status.emoji).toBe('🟡');
-    expect(status.sources.find((source) => source.id === 'prediction-markets')?.detailRows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          text: 'Prediction markets: no executable CPI contracts discovered',
-        }),
-      ]),
-    );
-    expect(status.sources.find((source) => source.id === 'prediction-markets')?.detail).toBe('Error');
-  });
-
-  it('turns yellow when CPI provider reports connected with an incomplete contract catalog', () => {
-    const today = currentDate();
-    const status = getIbkrPortfolioStatusDot({
-      connection: { connected: true, kind: 'connected' },
-      portfolioData: livePortfolio(),
-      loading: false,
-      rtaPositions: {
-        available: true,
-        lastUpdated: `${today}T16:00:00Z`,
-        longCount: 1,
-        shortCount: 1,
-      },
-      etfProSnapshot: {
-        meta: { snapshotDate: today },
-        rows: [
-          { ticker: 'A', call: 'Long' },
-          { ticker: 'B', call: 'Short' },
-        ],
-        dataQuality: { status: 'ok', warnings: [] },
-      },
-      predictionMarketProviderStatus: {
-        providers: {
-          ibkr: {
-            status: 'connected',
-            gateway: { ok: true },
-            contracts_total: 4,
-            portfolio_seed_count: 4,
-            cpi_discovery: {
-              targetStrikes: [3.6, 3.7, 3.8, 3.9, 4, 4.1, 4.2],
-              foundStrikes: [3.8, 4, 4.1, 4.2],
-              missingStrikes: [3.6, 3.7, 3.9],
-            },
-          },
-        },
-      },
-    });
-
-    expect(status.status).toBe('stale');
-    expect(status.emoji).toBe('🟡');
-    expect(status.sources.find((source) => source.id === 'prediction-markets')?.detailRows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          text: 'Prediction markets: CPI contract catalog incomplete; missing strikes 3.6%, 3.7%, 3.9%',
-        }),
-        expect.objectContaining({
-          text: 'Prediction markets: discovered 4 of 7 target CPI contracts',
-        }),
-        expect.objectContaining({
-          text: 'Prediction markets: only portfolio-seeded CPI contracts are available; executable contract catalog is incomplete',
-        }),
-      ]),
-    );
-    expect(status.sources.find((source) => source.id === 'prediction-markets')?.detail).toBe('Error');
-  });
-
-  it('uses a simple live detail when CPI contracts are current', () => {
-    const today = currentDate();
-    const status = getIbkrPortfolioStatusDot({
-      connection: { connected: true, kind: 'connected' },
-      portfolioData: livePortfolio(),
-      loading: false,
-      rtaPositions: {
-        available: true,
-        lastUpdated: `${today}T16:00:00Z`,
-        longCount: 1,
-        shortCount: 1,
-      },
-      etfProSnapshot: {
-        meta: { snapshotDate: today },
-        rows: [
-          { ticker: 'A', call: 'Long' },
-          { ticker: 'B', call: 'Short' },
-        ],
-        dataQuality: { status: 'ok', warnings: [] },
-      },
-      predictionMarketProviderStatus: livePredictionProvider,
-    });
-
-    expect(status.status).toBe('active');
-    expect(status.emoji).toBe('🟢');
-    expect(status.sources.map((source) => source.id)).toEqual([
-      'portfolio',
-      'rta',
-      'etf-pro',
-      'prediction-markets',
-    ]);
-    expect(status.sources.find((source) => source.id === 'prediction-markets')?.detail).toBe('Live');
   });
 
   it('stays red when Gateway or portfolio live data is unavailable even if dependent sources exist', () => {
@@ -974,7 +694,6 @@ describe('getIbkrPortfolioStatusDot dependency aggregation', () => {
         ],
         dataQuality: { status: 'ok', warnings: [] },
       },
-      predictionMarketProviderStatus: livePredictionProvider,
     });
 
     expect(status.status).toBe('inactive');

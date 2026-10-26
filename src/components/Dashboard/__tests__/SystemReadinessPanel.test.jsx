@@ -20,13 +20,8 @@ test('consolidated status definitions contain no legacy worker surface', () => {
     label: 'AI',
     summary: 'Analyst + ingestion',
   });
-  expect(definitions).toContainEqual({
-    id: 'resolver-sources',
-    label: 'Resolver sources',
-    summary: 'Prediction-market inputs',
-    nonCore: true,
-  });
-  expect(JSON.stringify(definitions)).not.toMatch(/Hermes|research-ingestion/i);
+  expect(definitions.map(({ id }) => id)).not.toContain('resolver-sources');
+  expect(JSON.stringify(definitions)).not.toMatch(/Hermes|research-ingestion|Resolver|Prediction/i);
 });
 
 jest.mock('../../../services/api/marketDataService', () => ({
@@ -79,63 +74,6 @@ const onlineServices = [
     details: [
       { id: 'analyst-runtime', label: 'The Analyst', status: 'online' },
       { id: 'gmail-ingestion', label: 'Gmail Function', status: 'online' },
-    ],
-  },
-  {
-    id: 'resolver-sources',
-    label: 'Resolver sources',
-    status: 'online',
-    nonCore: true,
-    details: [
-      {
-        id: 'ibkr-dated-futures',
-        label: 'IBKR dated futures',
-        status: 'online',
-        sourceStatus: 'live',
-        role: 'live_dated_futures',
-        neutral: false,
-        coverage: { requested: 3, verified: 3, rejected: 0, status: 'complete' },
-        optionalCoverage: { requested: 1, verified: 0, rejected: 1 },
-        symbols: [
-          { symbol: 'CLU6', status: 'offline', sourceStatus: 'unavailable', errorCode: 'LIVE_MARKET_MARK_REQUIRED' },
-          { symbol: 'GCQ6', status: 'online', sourceStatus: 'live' },
-          { symbol: 'ESU6', status: 'online', sourceStatus: 'live' },
-          { symbol: 'NQU6', status: 'online', sourceStatus: 'live' },
-        ],
-      },
-      {
-        id: 'kalshi-resolver',
-        label: 'Kalshi resolver venues',
-        status: 'online',
-        sourceStatus: 'available',
-        role: 'resolver_venue',
-        neutral: false,
-      },
-      {
-        id: 'forecastex-publications',
-        label: 'ForecastEx public publications',
-        status: 'online',
-        sourceStatus: 'available',
-        role: 'official_publication',
-        neutral: false,
-      },
-      {
-        id: 'coinbase-proxy',
-        label: 'Coinbase proxy',
-        status: 'online',
-        sourceStatus: 'available',
-        role: 'proxy_only',
-        neutral: false,
-      },
-      {
-        id: 'bls-cpi-publication',
-        label: 'BLS CPI publication',
-        status: 'online',
-        sourceStatus: 'pending_release',
-        role: 'official_publication',
-        neutral: true,
-        due: false,
-      },
     ],
   },
 ];
@@ -325,7 +263,7 @@ describe('SystemReadinessPanel', () => {
     rerender(<SystemReadinessPanel open onClose={jest.fn()} />);
 
     expect(await screen.findByRole('dialog', { name: 'Systems' })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(7));
+    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(6));
     await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
     expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
     expect(MarketDataService.getLoginStatus).toHaveBeenCalledTimes(1);
@@ -338,7 +276,7 @@ describe('SystemReadinessPanel', () => {
     expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
     expect(MarketDataService.getLoginStatus).toHaveBeenCalledTimes(1);
     expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByText('Online')).toHaveLength(7);
+    expect(screen.getAllByText('Online')).toHaveLength(6);
   });
 
   test('closing during a request cannot leave or restore a transient rail state', async () => {
@@ -377,7 +315,7 @@ describe('SystemReadinessPanel', () => {
 
     render(<SystemReadinessPanel open onClose={jest.fn()} />);
 
-    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(6));
+    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(5));
     expect(screen.getByRole('button', { name: 'Expand Products' })).toBeInTheDocument();
     expect(screen.getByText('Checking')).toBeInTheDocument();
     expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
@@ -388,11 +326,11 @@ describe('SystemReadinessPanel', () => {
       await pendingProducts;
     });
 
-    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(7));
+    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(6));
     expect(screen.getByTitle('Refresh systems')).not.toBeDisabled();
   });
 
-  test('renders Logins first among seven concise categories and treats a peripheral outage as attention', async () => {
+  test('renders Logins first among six concise categories and treats a peripheral outage as attention', async () => {
     const onStatusChange = jest.fn();
     MarketDataService.getSystemStatus.mockResolvedValue(statusPayload({
       services: onlineServices.map((service) => {
@@ -410,21 +348,20 @@ describe('SystemReadinessPanel', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Systems' });
     await within(dialog).findByText('Error');
-    const categoryRows = within(within(dialog).getByRole('list', { name: 'Current system status' }))
+    const categoryRows = within(within(dialog).getByRole('list', { name: 'System status' }))
       .getAllByRole('listitem');
-    expect(categoryRows).toHaveLength(7);
+    expect(categoryRows).toHaveLength(6);
     expect(within(categoryRows[0]).getByText('Logins')).toBeInTheDocument();
     expect(within(dialog).getByText('Logins')).toBeInTheDocument();
     expect(within(dialog).getByText('Dashboard')).toBeInTheDocument();
     expect(within(dialog).getByText('Market data')).toBeInTheDocument();
     expect(within(dialog).getByText('Portfolio')).toBeInTheDocument();
     expect(within(dialog).getByText('AI')).toBeInTheDocument();
-    expect(within(dialog).getByText('Resolver sources')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Resolver sources')).not.toBeInTheDocument();
     expect(within(dialog).getByText('API + UI')).toBeInTheDocument();
     expect(within(dialog).getByText('Quotes + freshness')).toBeInTheDocument();
     expect(within(dialog).getByText('IBKR session')).toBeInTheDocument();
     expect(within(dialog).getByText('Verification unavailable')).toBeInTheDocument();
-    expect(within(dialog).getByText('Prediction-market inputs')).toBeInTheDocument();
     expect(within(dialog).getByText('Products')).toBeInTheDocument();
     expect(within(dialog).getByText('Research and market feeds')).toBeInTheDocument();
     expect(within(dialog).queryByText('Gateway signed out')).not.toBeInTheDocument();
@@ -436,149 +373,15 @@ describe('SystemReadinessPanel', () => {
     expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
   });
 
-  test('allowlists resolver-source details and excludes the non-core service from rail aggregation', () => {
-    const suppliedResolver = {
-      id: 'resolver-sources',
-      label: 'Caller-controlled label',
-      status: 'attention',
-      nonCore: false,
-      reason: 'One dated future is unavailable.',
-      details: [
-        {
-          id: 'ibkr-dated-futures',
-          label: 'Caller-controlled futures label',
-          status: 'attention',
-          sourceStatus: 'degraded',
-          coverage: { requested: 3, verified: 2, rejected: 1, status: 'partial' },
-          optionalCoverage: { requested: 1, verified: 1, rejected: 0 },
-          symbols: [
-            { symbol: 'NQU6', status: 'offline', sourceStatus: 'unavailable', errorCode: 'QUOTE_STALE' },
-            { symbol: 'CLU6', status: 'online', sourceStatus: 'live' },
-            { symbol: 'UNSAFE', status: 'online', sourceStatus: 'live' },
-          ],
-        },
-        {
-          id: 'kalshi-resolver',
-          status: 'unknown',
-          sourceStatus: 'not_started',
-          neutral: true,
-          reason: 'Not yet observed.',
-        },
-        { id: 'forecastex-publications', status: 'online', sourceStatus: 'available' },
-        {
-          id: 'coinbase-proxy',
-          label: 'Exact crypto resolver',
-          role: 'resolver',
-          status: 'online',
-          sourceStatus: 'available',
-        },
-        {
-          id: 'bls-cpi-publication',
-          status: 'online',
-          sourceStatus: 'pending_release',
-          neutral: true,
-          due: false,
-          released: false,
-          releaseAt: '2026-08-19T12:30:00.000Z',
-        },
-        { id: 'hedgeye-risk-ranges', status: 'online' },
-      ],
-    };
+  test('ignores a retired resolver-sources service if the server still reports it', () => {
     const normalized = normalizeSystemStatus(statusPayload({
       services: [
-        ...onlineServices.filter((service) => service.id !== 'resolver-sources'),
-        suppliedResolver,
+        ...onlineServices,
+        { id: 'resolver-sources', label: 'Resolver sources', status: 'attention', nonCore: true, details: [] },
       ],
     }));
-    const resolver = normalized.services.find((service) => service.id === 'resolver-sources');
-
-    expect(resolver).toMatchObject({
-      label: 'Resolver sources',
-      status: 'attention',
-      nonCore: true,
-    });
-    expect(resolver.details.map((detail) => detail.id)).toEqual([
-      'ibkr-dated-futures',
-      'kalshi-resolver',
-      'forecastex-publications',
-      'coinbase-proxy',
-      'bls-cpi-publication',
-    ]);
-    expect(resolver.details[0]).toMatchObject({
-      label: 'IBKR dated futures',
-      summary: '2/3 exact verified · CLU6 optional proxy live',
-      coverage: { requested: 3, verified: 2, rejected: 1, status: 'partial' },
-    });
-    expect(resolver.details[0].symbols.map(({ symbol }) => symbol)).toEqual(['CLU6', 'NQU6']);
-    expect(resolver.details.find(({ id }) => id === 'coinbase-proxy')).toMatchObject({
-      label: 'Coinbase proxy',
-      role: 'proxy_only',
-    });
-    expect(resolver.details.find(({ id }) => id === 'kalshi-resolver')).toMatchObject({
-      status: 'unknown',
-      neutral: true,
-      statusLabel: 'Not observed',
-    });
-    expect(resolver.details.find(({ id }) => id === 'bls-cpi-publication')).toMatchObject({
-      status: 'online',
-      neutral: true,
-      due: false,
-      released: false,
-      statusLabel: 'Scheduled',
-    });
+    expect(normalized.services.map(({ id }) => id)).not.toContain('resolver-sources');
     expect(deriveSystemRailStatus(normalized.services)).toBe('online');
-  });
-
-  test('keeps Resolver sources collapsed and renders five source rows without another request', async () => {
-    const resolver = onlineServices.find((service) => service.id === 'resolver-sources');
-    const attentionResolver = {
-      ...resolver,
-      status: 'attention',
-      reason: 'IBKR dated-futures coverage is partial.',
-      details: resolver.details.map((detail) => (
-        detail.id === 'ibkr-dated-futures'
-          ? {
-            ...detail,
-            status: 'attention',
-            sourceStatus: 'degraded',
-            coverage: { requested: 3, verified: 2, rejected: 1, status: 'partial' },
-            reason: 'NQU6 does not have a fresh verified quote.',
-          }
-          : detail
-      )),
-    };
-    const onStatusChange = jest.fn();
-    MarketDataService.getSystemStatus.mockResolvedValue(statusPayload({
-      services: onlineServices.map((service) => (
-        service.id === 'resolver-sources' ? attentionResolver : service
-      )),
-    }));
-
-    render(<SystemReadinessPanel open onClose={jest.fn()} onStatusChange={onStatusChange} />);
-    const expand = await screen.findByRole('button', {
-      name: 'Expand Resolver sources checklist',
-    });
-    await waitFor(() => expect(
-      within(screen.getByTestId('system-service-summary-resolver-sources')).getByText('Attention'),
-    ).toBeInTheDocument());
-    expect(screen.queryByRole('list', { name: 'Resolver sources checklist' }))
-      .not.toBeInTheDocument();
-
-    fireEvent.click(expand);
-    const checklist = screen.getByRole('list', { name: 'Resolver sources checklist' });
-    expect(within(checklist).getAllByRole('listitem')).toHaveLength(5);
-    expect(within(checklist).getByText('IBKR dated futures')).toBeInTheDocument();
-    expect(within(checklist).getByText('2/3 exact verified · CLU6 optional proxy unavailable')).toBeInTheDocument();
-    expect(within(checklist).getByText('Kalshi resolver venues')).toBeInTheDocument();
-    expect(within(checklist).getByText('ForecastEx public publications')).toBeInTheDocument();
-    expect(within(checklist).getByText('Coinbase proxy')).toBeInTheDocument();
-    expect(within(checklist).getByText('Non-resolving spot reference only')).toBeInTheDocument();
-    expect(within(checklist).getByText('BLS CPI publication')).toBeInTheDocument();
-    expect(within(checklist).getByText('Scheduled')).toBeInTheDocument();
-    expect(within(checklist).queryByText(/Hedgeye|Risk Ranges/i)).not.toBeInTheDocument();
-    expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
-    expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(onStatusChange).toHaveBeenLastCalledWith('online'));
   });
 
   test('expands one concise checklist at a time without another request', async () => {
@@ -651,12 +454,16 @@ describe('SystemReadinessPanel', () => {
     expect(screen.queryByRole('list', { name: 'Portfolio checklist' }))
       .not.toBeInTheDocument();
     const dashboardChecklist = screen.getByRole('list', { name: 'Dashboard checklist' });
-    expect(within(dashboardChecklist).getAllByRole('listitem')).toHaveLength(11);
+    expect(within(dashboardChecklist).getAllByRole('listitem')).toHaveLength(9);
     expect(within(dashboardChecklist).getByText('API server')).toBeInTheDocument();
     expect(within(dashboardChecklist).getByText('React UI')).toBeInTheDocument();
     expect(within(dashboardChecklist).getByText('Volatility')).toBeInTheDocument();
-    expect(within(dashboardChecklist).getByText('Volume')).toBeInTheDocument();
+    expect(within(dashboardChecklist).getByText('Dollar')).toBeInTheDocument();
+    expect(within(dashboardChecklist).getByText('Global Markets')).toBeInTheDocument();
     expect(within(dashboardChecklist).getByText('Money Flow')).toBeInTheDocument();
+    // Dollar Liquidity and Volume now report through the Money Flow card.
+    expect(within(dashboardChecklist).queryByText('Dollar Liquidity')).not.toBeInTheDocument();
+    expect(within(dashboardChecklist).queryByText('Volume')).not.toBeInTheDocument();
     expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
     expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
 
@@ -854,7 +661,7 @@ describe('SystemReadinessPanel', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getAllByText('2026-07-29')).toHaveLength(6);
+    expect(screen.getAllByText('2026-07-29')).toHaveLength(5);
     expect(screen.queryByText('2026-07-30')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', {
@@ -1133,7 +940,7 @@ describe('SystemReadinessPanel', () => {
 
     const { rerender } = render(<SystemReadinessPanel open onClose={jest.fn()} />);
 
-    await waitFor(() => expect(screen.getAllByText('Check failed')).toHaveLength(5));
+    await waitFor(() => expect(screen.getAllByText('Check failed')).toHaveLength(4));
     expect(screen.queryByText('Error')).not.toBeInTheDocument();
     expect(screen.getByTestId('system-service-summary-dashboard'))
       .toHaveTextContent('Dashboard check did not return a usable status.');
@@ -1144,7 +951,7 @@ describe('SystemReadinessPanel', () => {
 
     rerender(<SystemReadinessPanel open={false} onClose={jest.fn()} />);
     rerender(<SystemReadinessPanel open onClose={jest.fn()} />);
-    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(7));
+    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(6));
     expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(2);
   });
 
@@ -1172,13 +979,13 @@ describe('SystemReadinessPanel', () => {
       rejectCheck = reject;
     }));
     render(<SystemReadinessPanel open onClose={jest.fn()} />);
-    await waitFor(() => expect(screen.getAllByText('Checking')).toHaveLength(5));
+    await waitFor(() => expect(screen.getAllByText('Checking')).toHaveLength(4));
     expect(screen.queryByText('Check failed')).not.toBeInTheDocument();
     expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
 
     await act(async () => rejectCheck(new Error('Network Error')));
 
-    expect(screen.getAllByText('Check failed')).toHaveLength(5);
+    expect(screen.getAllByText('Check failed')).toHaveLength(4);
     expect(screen.queryByText('Checking')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('The browser could not reach the status service.');
     expect(screen.queryByText('Error')).not.toBeInTheDocument();
@@ -1195,7 +1002,7 @@ describe('SystemReadinessPanel', () => {
     rerender(<SystemReadinessPanel open={false} onClose={jest.fn()} />);
     rerender(<SystemReadinessPanel open onClose={jest.fn()} />);
 
-    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(7));
+    await waitFor(() => expect(screen.getAllByText('Online')).toHaveLength(6));
     expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByText('Check failed')).not.toBeInTheDocument();
@@ -1215,13 +1022,13 @@ describe('SystemReadinessPanel', () => {
     MarketDataService.getHedgeyeFreshness.mockReturnValueOnce(new Promise((resolve) => { resolveProducts = resolve; }));
     fireEvent.click(screen.getByTitle('Refresh systems'));
     await waitFor(() => expect(screen.getAllByText('Checking')).toHaveLength(2));
-    expect(screen.getAllByText('Online')).toHaveLength(5);
+    expect(screen.getAllByText('Online')).toHaveLength(4);
 
     await act(async () => {
       resolveLogin(loginPayload());
       resolveProducts(productsPayload());
     });
-    expect(screen.getAllByText('Online')).toHaveLength(7);
+    expect(screen.getAllByText('Online')).toHaveLength(6);
     expect(screen.queryByText('Check failed')).not.toBeInTheDocument();
   });
 
@@ -1248,7 +1055,7 @@ describe('SystemReadinessPanel', () => {
     render(<SystemReadinessPanel open onClose={jest.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Expand Logins checklist' }));
     const checklist = screen.getByRole('list', { name: 'Logins checklist' });
-    expect(within(checklist).getByText('Brokerage + prediction markets')).toBeInTheDocument();
+    expect(within(checklist).getByText('Brokerage + market data')).toBeInTheDocument();
     expect(within(checklist).getAllByText('Required').length).toBeGreaterThan(0);
     expect(await within(checklist).findByText('Disconnected')).toBeInTheDocument();
     expect(within(checklist).getAllByText('Online')).toHaveLength(3);
@@ -1381,12 +1188,12 @@ describe('SystemReadinessPanel', () => {
 
     render(<SystemReadinessPanel open onClose={jest.fn()} />);
     await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
-    expect(screen.getAllByText('Online')).toHaveLength(7);
+    expect(screen.getAllByText('Online')).toHaveLength(6);
 
     fireEvent.click(screen.getByTitle('Refresh systems'));
 
     await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
-    expect(screen.getAllByText('Check failed')).toHaveLength(5);
+    expect(screen.getAllByText('Check failed')).toHaveLength(4);
     expect(screen.getAllByText('Online')).toHaveLength(2);
     expect(screen.getByRole('alert')).toHaveTextContent('API connection refused');
     expect(screen.getByRole('alert')).toHaveTextContent('Use Refresh to retry.');
@@ -1404,7 +1211,7 @@ describe('SystemReadinessPanel', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.getAllByText('Online')).toHaveLength(7);
+    expect(screen.getAllByText('Online')).toHaveLength(6);
 
     for (let minute = 0; minute < 5; minute += 1) {
       await act(async () => {
@@ -1414,8 +1221,9 @@ describe('SystemReadinessPanel', () => {
       });
     }
 
-    expect(screen.getAllByText('Last checked · Online')).toHaveLength(5);
-    expect(screen.getByText(/Status expired; refresh/)).toBeInTheDocument();
+    expect(screen.getAllByText('Online')).toHaveLength(6);
+    expect(screen.queryByText(/Last checked/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Status expired/)).not.toBeInTheDocument();
     expect(onStatusChange).toHaveBeenLastCalledWith('unknown');
     expect(MarketDataService.getSystemStatus).toHaveBeenCalledTimes(1);
     expect(MarketDataService.getHedgeyeFreshness).toHaveBeenCalledTimes(1);
@@ -1451,7 +1259,7 @@ describe('SystemReadinessPanel', () => {
 
     await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
     expect(screen.getAllByText('Online')).toHaveLength(1);
-    expect(screen.getAllByText('Check failed')).toHaveLength(6);
+    expect(screen.getAllByText('Check failed')).toHaveLength(5);
     expect(screen.getByRole('alert')).toHaveTextContent('more than 30 seconds old');
     await waitFor(() => expect(screen.getByTitle('Refresh systems')).not.toBeDisabled());
   });

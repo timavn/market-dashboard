@@ -8,8 +8,11 @@
   --sr-attention: var(--dashboard-attention);
   --sr-red: #c62828;
   --sr-expanded-surface: #eff6ff;
-  --sr-expanded-header: #e2effc;
   --sr-expanded-border: #c8ddf2;
+  --sr-row-online: #ecfdf3;
+  --sr-row-closed: #eff6ff;
+  --sr-row-attention: #fefce8;
+  --sr-row-offline: #fef2f2;
   /* Keep the light header and controls aligned with the closed status cobalt. */
   --sr-focus-ring: var(--sr-blue);
   --sr-date-column: 72px;
@@ -32,8 +35,11 @@
   --sr-attention: var(--dashboard-attention);
   --sr-red: var(--dashboard-negative);
   --sr-expanded-surface: #172a3d;
-  --sr-expanded-header: #1d354b;
   --sr-expanded-border: #31516d;
+  --sr-row-online: #12291f;
+  --sr-row-closed: #172a3d;
+  --sr-row-attention: #2b2614;
+  --sr-row-offline: #321a1c;
   --sr-focus-ring: #78b7ff;
 }
 
@@ -80,6 +86,14 @@
   letter-spacing: -0.01em;
 }
 
+.sr-panel__checked {
+  color: var(--sr-blue);
+  font-size: 10px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .sr-panel__toolbar > .app-refresh-btn {
   min-height: 24px;
   color: var(--sr-focus-ring);
@@ -112,6 +126,7 @@
   gap: 8px;
   min-height: 42px;
   padding: 8px 12px;
+  cursor: pointer;
 }
 
 .sr-service__summary--expanded {
@@ -154,9 +169,6 @@
   transition: transform 140ms ease;
 }
 
-.sr-service__trigger[aria-expanded='true'] .sr-chevron { transform: rotate(45deg); }
-
-.sr-service__trigger:hover .sr-chevron { border-color: var(--sr-text); }
 
 .sr-service__trigger:focus-visible {
   outline: 2px solid var(--sr-focus-ring);
@@ -242,6 +254,48 @@
   white-space: nowrap;
 }
 
+/* The window clips by default; Systems lets its detail flyout sit outside it. */
+.dashboard-shell.dashboard-shell--modern-grid .dashboard-workspace-window.system-status-flyout {
+  overflow: visible;
+}
+
+/* Positioned against the Systems window, outside the panel's scroll area.
+   positionFlyout() sets top, left, and width. */
+.sr-flyout {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 8px);
+  z-index: 1;
+  width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--dashboard-window-border);
+  background: var(--sr-panel);
+  box-shadow: var(--dashboard-window-shadow);
+  animation: sr-flyout-in 160ms ease-out;
+}
+
+.sr-flyout > .sr-service__details,
+.sr-flyout > .sr-product__details {
+  border-top: 0;
+  background: var(--sr-panel);
+}
+
+/* Each detail row carries a light tint of its status; unknown stays plain. */
+.sr-flyout li[data-status='online'] { background: var(--sr-row-online); }
+.sr-flyout li[data-status='closed'] { background: var(--sr-row-closed); }
+.sr-flyout li[data-status='attention'] { background: var(--sr-row-attention); }
+.sr-flyout li[data-status='offline'] { background: var(--sr-row-offline); }
+
+@keyframes sr-flyout-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-flyout { animation: none; }
+}
+
 .sr-service__details {
   margin: 0;
   padding: 0;
@@ -269,9 +323,9 @@
   min-height: 29px !important;
   padding-top: 7px !important;
   padding-bottom: 6px !important;
-  border-bottom: 1px solid var(--sr-expanded-border);
+  border-bottom: 1px solid var(--sr-border);
   color: color-mix(in srgb, var(--sr-text) 78%, var(--sr-muted)) !important;
-  background: var(--sr-expanded-header);
+  background: var(--sr-panel);
   font-size: 9px !important;
   font-weight: 820;
   letter-spacing: 0.08em;

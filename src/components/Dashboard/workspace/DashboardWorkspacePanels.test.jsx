@@ -1,11 +1,9 @@
 import React, { createRef, useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import PersistentSurface, { useSurfaceActivity } from '../../common/PersistentSurface';
+import { useSurfaceActivity } from '../../common/PersistentSurface';
 import DashboardPortfolioPanel from './DashboardPortfolioPanel';
-import DashboardPredictionWorkspace from './DashboardPredictionWorkspace';
 import DashboardAnalystPanel from './DashboardAnalystPanel';
-import DashboardContractPnlPanel from './DashboardContractPnlPanel';
 import DashboardBookReader from './DashboardBookReader';
 import DashboardExposurePanel from './DashboardExposurePanel';
 import DashboardPerformancePanel from './DashboardPerformancePanel';
@@ -33,7 +31,6 @@ const zIndex = () => 1307;
 
 test.each([
   [DashboardPortfolioPanel, 'showPortfolioBreakdown', 'Portfolio'],
-  [DashboardPredictionWorkspace, 'showPredictionMonitor', 'Prediction Markets'],
   [DashboardExposurePanel, 'showExposureLab', 'PCA'],
   [DashboardPerformancePanel, 'showPerformanceTracking', 'Performance'],
   [DashboardWorkflowPanel, 'showWorkflowStatus', 'Analytics'],
@@ -53,44 +50,20 @@ test.each([
   }
 });
 
-test('the portfolio shell retains its exact surface and child state across occlusion and closing', () => {
-  const view = props => <DashboardPortfolioPanel showPortfolioBreakdown showContractPnl={false} getSidebarPanelZIndex={zIndex} {...props}><Draft name="portfolio" /></DashboardPortfolioPanel>;
+test('the portfolio shell retains its exact surface and child state across closing', () => {
+  const view = props => <DashboardPortfolioPanel showPortfolioBreakdown getSidebarPanelZIndex={zIndex} {...props}><Draft name="portfolio" /></DashboardPortfolioPanel>;
   const { rerender } = render(view({}));
   const surface = screen.getByTestId('portfolio-breakdown-panel');
   const draft = screen.getByRole('textbox', { name: 'portfolio draft' });
   fireEvent.change(draft, { target: { value: 'keep this note' } });
   expect(surface.style.zIndex).toBe('1307');
-  rerender(view({ showContractPnl: true }));
-  expect(screen.getByTestId('portfolio-breakdown-panel')).toBe(surface);
-  expect(surface).toHaveAttribute('data-surface-occluded', 'true');
-  expect(screen.getByTestId('portfolio-active')).toHaveTextContent('false');
+  expect(surface).not.toHaveAttribute('data-contract-pnl-coverable');
   rerender(view({ showPortfolioBreakdown: false }));
   expect(surface).not.toBeVisible();
   rerender(view({}));
   expect(screen.getByRole('textbox', { name: 'portfolio draft' })).toBe(draft);
   expect(draft).toHaveValue('keep this note');
   expect(screen.getByTestId('portfolio-active')).toHaveTextContent('true');
-});
-
-test('the prediction shell preserves keyed market instances and inactive polling context', () => {
-  const view = (market, open = true) => <DashboardPredictionWorkspace showPredictionMonitor={open} showContractPnl={false} getSidebarPanelZIndex={zIndex}>
-    {['sp500', 'cpi'].map(marketId => <PersistentSurface key={marketId} active={open && market === marketId} preserveLayoutWhenInactive data-testid={`market-${marketId}`}><Draft name={marketId} /></PersistentSurface>)}
-  </DashboardPredictionWorkspace>;
-  const { rerender } = render(view('sp500'));
-  const sp500 = screen.getByRole('textbox', { name: 'sp500 draft' });
-  fireEvent.change(sp500, { target: { value: 'SP500 note' } });
-  rerender(view('cpi'));
-  const cpi = screen.getByRole('textbox', { name: 'cpi draft' });
-  fireEvent.change(cpi, { target: { value: 'CPI note' } });
-  expect(screen.getByTestId('sp500-active')).toHaveTextContent('false');
-  rerender(view('sp500', false));
-  expect(screen.getByTestId('cpi-active')).toHaveTextContent('false');
-  rerender(view('sp500'));
-  expect(screen.getByRole('textbox', { name: 'sp500 draft' })).toBe(sp500);
-  expect(sp500).toHaveValue('SP500 note');
-  rerender(view('cpi'));
-  expect(screen.getByRole('textbox', { name: 'cpi draft' })).toBe(cpi);
-  expect(cpi).toHaveValue('CPI note');
 });
 
 test('the Analyst shell keeps its DOM ref, resize accessibility and exact reset value', () => {
@@ -117,59 +90,6 @@ test('the Analyst shell keeps its DOM ref, resize accessibility and exact reset 
   expect(resizeKey).toHaveBeenCalledTimes(1);
   fireEvent.doubleClick(separator);
   expect(setWidth).toHaveBeenCalledWith(440);
-});
-
-test('the Contract P&L shell preserves both edge callbacks and ignores legacy position offsets', () => {
-  const surfaceRef = createRef();
-  const resize = jest.fn();
-  const resizeKey = jest.fn();
-  const reset = jest.fn();
-  const close = jest.fn();
-  render(<DashboardContractPnlPanel
-    showContractPnl contractPnlPanelSurfaceRef={surfaceRef} contractPnlPanelResizing={false}
-    contractPnlOverlay={{ style: { top: '8px' } }} sidebarPanelStack={['portfolio']}
-    contractPnlPanelDisplayedWidth={870} contractPnlPanelRightExtension={50}
-    beginContractPnlPanelResize={resize} handleContractPnlPanelResizeKeyDown={resizeKey}
-    resetContractPnlPanelSize={reset} setShowContractPnl={close}
-  ><Draft name="pnl" /></DashboardContractPnlPanel>);
-  const surface = screen.getByTestId('contract-pnl-panel-slot');
-  expect(surfaceRef.current).toBe(surface);
-  expect(surface.style.getPropertyValue('--dashboard-balance-panel-width')).toBe('870px');
-  expect(surface.style.getPropertyValue('--dashboard-contract-pnl-right-extension')).toBe('');
-  expect(surface.style.top).toBe('');
-  expect(surface).toHaveClass('dashboard-workspace-window');
-  const right = screen.getByRole('separator', { name: 'Resize Contract P&L from the right edge' });
-  fireEvent.pointerDown(right, { button: 0, clientX: 900 });
-  expect(resize).toHaveBeenCalledWith(expect.any(Object), 'right');
-  fireEvent.keyDown(right, { key: 'ArrowRight' });
-  expect(resizeKey).toHaveBeenCalledWith(expect.any(Object), 'right');
-  fireEvent.doubleClick(right);
-  expect(reset).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole('button', { name: 'Close Contract P&L' }));
-  expect(close).toHaveBeenCalledWith(false);
-});
-
-test('development-only P&L timing attaches to its own surface from mount through local updates and reopen', () => {
-  const previousEnvironment = process.env.NODE_ENV;
-  process.env.NODE_ENV = 'development';
-  try {
-    const view = (active) => <DashboardContractPnlPanel
-      showContractPnl={active} contractPnlPanelSurfaceRef={createRef()} contractPnlPanelResizing={false}
-      contractPnlOverlay={{ style: {} }} sidebarPanelStack={[]} contractPnlPanelDisplayedWidth={870}
-      contractPnlPanelRightExtension={0} beginContractPnlPanelResize={jest.fn()}
-      handleContractPnlPanelResizeKeyDown={jest.fn()} resetContractPnlPanelSize={jest.fn()} setShowContractPnl={jest.fn()}
-    ><Draft name="pnl-timing" /></DashboardContractPnlPanel>;
-    const { rerender } = render(view(true));
-    const surface = screen.getByTestId('contract-pnl-surface');
-    const samples = () => JSON.parse(surface.getAttribute('data-contract-pnl-timing'));
-    expect(samples()[0]).toEqual({ phase: 'mount', duration: expect.any(Number) });
-    fireEvent.change(screen.getByRole('textbox', { name: 'pnl-timing draft' }), { target: { value: 'private note' } });
-    expect(samples().at(-1).phase).toBe('update');
-    rerender(view(false)); rerender(view(true));
-    expect(samples().length).toBeGreaterThanOrEqual(4);
-    expect(surface.getAttribute('data-contract-pnl-timing')).not.toContain('private note');
-    expect(document.body.hasAttribute('data-contract-pnl-timing')).toBe(false);
-  } finally { process.env.NODE_ENV = previousEnvironment; }
 });
 
 test('the book reader stays controlled by the original selection and close handlers', () => {

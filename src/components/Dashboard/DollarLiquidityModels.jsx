@@ -1,11 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { AreaChart, Area, BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { DollarSign as BadgeDollarSign, Globe as Globe2, RefreshCw } from 'lucide-react';
-import LoadingIndicator from '../common/LoadingIndicator';
-import { MarketDataService } from '../../services/api/marketDataService';
+import { DollarSign as BadgeDollarSign } from 'lucide-react';
 
 const PERIODS = ['1m', '3m', '6m', '12m'];
-const DOLLAR_LIQUIDITY_ICON = '/assets/dollar-liquidity-washington.png';
 
 const formatPercent = (value) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
@@ -16,11 +13,6 @@ const formatPercent = (value) => {
 const formatRatio = (value) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
   return Number(value).toFixed(3);
-};
-
-const formatScore = (value) => {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-  return `${Number(value).toFixed(1)}/100`;
 };
 
 const formatUsdLevel = (value) => {
@@ -58,15 +50,6 @@ const getRegimeClass = (regime = '') => {
   return 'is-muted';
 };
 
-const DollarLiquidityHeaderIcon = () => (
-  <img
-    src={DOLLAR_LIQUIDITY_ICON}
-    alt=""
-    className="dollar-liquidity-title-image"
-    aria-hidden="true"
-  />
-);
-
 const MissingInputs = ({ items }) => {
   if (!items || items.length === 0) return null;
   return (
@@ -84,7 +67,7 @@ const MissingInputs = ({ items }) => {
   );
 };
 
-const GrowthTable = ({ growth, growthGap }) => (
+const GrowthTable = ({ growth }) => (
   <table className="dollar-liquidity-growth-table">
     <thead>
       <tr>
@@ -97,78 +80,18 @@ const GrowthTable = ({ growth, growthGap }) => (
         <td>Growth</td>
         {PERIODS.map((period) => <td key={period}>{formatPercent(growth?.[period])}</td>)}
       </tr>
-      {growthGap && (
-        <tr>
-          <td>Gap</td>
-          {PERIODS.map((period) => <td key={period}>{formatPercent(growthGap?.[period])}</td>)}
-        </tr>
-      )}
     </tbody>
   </table>
 );
 
-const GlobalModelPanel = ({ model }) => {
+// The onshore U.S. stack (deposits, money funds, currency) against GDP. It is
+// the monthly backdrop inside Money Flow's expanded view; the global G4+China
+// model is not shown because its regional GDP inputs are not published freely.
+const UsDollarLiquidityPanel = ({ model }) => {
   const latest = model?.latest;
   const history = model?.history || [];
-  return (
-    <section className="dollar-liquidity-model">
-      <div className="dollar-liquidity-model-header">
-        <div className="dollar-liquidity-title-block">
-          <Globe2 size={16} />
-          <div>
-            <h3>Global Liquidity</h3>
-            <span>G4+China USD M2</span>
-          </div>
-        </div>
-        <span className={`dollar-liquidity-status ${model?.status || 'unavailable'}`}>
-          {getStatusLabel(model?.status)}
-        </span>
-      </div>
-
-      {!latest ? (
-        <div className="dollar-liquidity-empty">
-          <strong>No verified global model yet</strong>
-          <span>Manual regional inputs are required before this becomes a complete global signal.</span>
-          <MissingInputs items={model?.missingInputs} />
-        </div>
-      ) : (
-        <>
-          <div className="dollar-liquidity-headlines">
-            <div>
-              <span>Risk score</span>
-              <strong>{formatScore(latest.riskScore)}</strong>
-            </div>
-            <div>
-              <span>M2/GDP</span>
-              <strong>{formatRatio(latest.m2ToGdp)}</strong>
-            </div>
-            <div>
-              <span>Regime</span>
-              <strong className={getRegimeClass(latest.regime)}>{latest.regime}</strong>
-            </div>
-          </div>
-          <GrowthTable growth={latest.growth} growthGap={latest.growthGap} />
-          <div className="dollar-liquidity-chart">
-            <ResponsiveContainer width="100%" height={150}>
-              <AreaChart data={history} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                <XAxis dataKey="date" tickFormatter={compactDate} tick={{ fontSize: 10 }} minTickGap={24} />
-                <YAxis tick={{ fontSize: 10 }} width={48} />
-                <Tooltip labelFormatter={formatDate} formatter={(value) => [formatScore(value), 'Risk score']} />
-                <Area type="monotone" dataKey="riskScore" stroke="#2563eb" fill="#bfdbfe" strokeWidth={1.5} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </>
-      )}
-    </section>
-  );
-};
-
-const UsModelPanel = ({ model }) => {
-  const latest = model?.latest;
-  const history = model?.history || [];
-  const components = model?.components || [];
-  const componentData = useMemo(() => components.map((component) => ({
+  const components = model?.components;
+  const componentData = useMemo(() => (components || []).map((component) => ({
     ...component,
     displayName: component.name.replace('Money market funds', 'MMF'),
   })), [components]);
@@ -234,7 +157,7 @@ const UsModelPanel = ({ model }) => {
             </div>
           </div>
           <div className="dollar-liquidity-components">
-            {components.map((component) => (
+            {componentData.map((component) => (
               <div key={component.code}>
                 <span>{component.name}</span>
                 <strong>{formatUsdLevel(component.value)}</strong>
@@ -248,100 +171,4 @@ const UsModelPanel = ({ model }) => {
   );
 };
 
-const DollarLiquidityModels = ({ resourceState = null }) => {
-  const [localData, setData] = useState(null);
-  const [localLoading, setLoading] = useState(true);
-  const [localError, setError] = useState(null);
-
-  useEffect(() => {
-    if (resourceState) return undefined;
-    let active = true;
-
-    const fetchModels = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await MarketDataService.getDollarLiquidityModels();
-        if (active) setData(response);
-      } catch (err) {
-        if (active) setError(err.message || 'Failed to fetch dollar liquidity models');
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    fetchModels();
-    return () => {
-      active = false;
-    };
-  }, [resourceState]);
-
-  const data = resourceState ? resourceState.data : localData;
-  const loading = resourceState ? resourceState.loading : localLoading;
-  const error = resourceState ? resourceState.error : localError;
-
-  if (loading && !data) {
-    return (
-      <section className="dashboard-card-chrome dollar-liquidity-panel">
-        <div className="dollar-liquidity-panel-header">
-          <div className="dollar-liquidity-title-block">
-            <DollarLiquidityHeaderIcon />
-            <div>
-              <h2>Dollar Liquidity Models</h2>
-              <span>Global and U.S. liquidity regimes</span>
-            </div>
-          </div>
-        </div>
-        <LoadingIndicator label="Loading dollar liquidity models..." size="lg" centered className="py-8" />
-      </section>
-    );
-  }
-
-  if (error && !data) {
-    return (
-      <section className="dashboard-card-chrome dollar-liquidity-panel">
-        <div className="dollar-liquidity-panel-header">
-          <div className="dollar-liquidity-title-block">
-            <DollarLiquidityHeaderIcon />
-            <div>
-              <h2>Dollar Liquidity Models</h2>
-              <span>Global and U.S. liquidity regimes</span>
-            </div>
-          </div>
-        </div>
-        <div className="dollar-liquidity-empty error">
-          <strong>Unable to load liquidity models</strong>
-          <span>{error}</span>
-        </div>
-      </section>
-    );
-  }
-
-  const updatedAt = data?.timestamp ? new Date(data.timestamp) : null;
-
-  return (
-    <section className="dashboard-card-chrome dollar-liquidity-panel">
-      <div className="dollar-liquidity-panel-header">
-        <div className="dollar-liquidity-title-block">
-          <DollarLiquidityHeaderIcon />
-          <div>
-            <h2>Dollar Liquidity Models</h2>
-            <span>Global and U.S. liquidity regimes</span>
-          </div>
-        </div>
-        {updatedAt && (
-          <span className="dollar-liquidity-updated">
-            <RefreshCw size={12} />
-            {updatedAt.toLocaleString()}
-          </span>
-        )}
-      </div>
-      <div className="dollar-liquidity-grid">
-        <GlobalModelPanel model={data?.models?.global} />
-        <UsModelPanel model={data?.models?.us} />
-      </div>
-    </section>
-  );
-};
-
-export default DollarLiquidityModels;
+export default UsDollarLiquidityPanel;

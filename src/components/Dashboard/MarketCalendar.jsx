@@ -7,6 +7,7 @@ import {
   useMarketEvents,
 } from '../../hooks/useMarketEvents';
 import { notesService } from '../../services/api/notesService';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const formatDateKey = (date) => {
   const year = date.getFullYear();
@@ -445,7 +446,7 @@ const MarketCalendar = () => {
         style={{ marginBottom: '10px', minHeight: '18px', display: 'flex', alignItems: 'center', gap: '6px' }}
       >
         {marketEventsResource.initialLoading || ['idle', 'loading'].includes(marketEventsResource.availability) ? (
-          <span>Loading verified market events… Notes remain available.</span>
+          <LoadingIndicator label="Loading verified market events… Notes remain available." size="sm" />
         ) : !marketEventsAvailable ? (
           <>
             <span title={marketEventsResource.error?.message || undefined}>
@@ -756,7 +757,7 @@ const MarketCalendar = () => {
 
       {loading && (
         <div className="flex items-center justify-center" style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(249, 250, 251, 0.75)', zIndex: 10 }}>
-          <Text className="text-gray-500 dark:text-gray-400">Loading calendar notes...</Text>
+          <LoadingIndicator label="Loading calendar notes..." size="sm" />
         </div>
       )}
     </Card>

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { isFreshForToday } from '../../utils/dateFreshness';
 import ReferencePanelShell from './ReferencePanelShell';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const PAGE_SIZE = 30;
 
@@ -203,7 +204,7 @@ const EtfProPanel = ({ snapshot, loading = false, refreshing = false, error = nu
                   <td className={`reference-table__number ${row.relativePerformance > 0 ? 'reference-table__positive' : row.relativePerformance < 0 ? 'reference-table__negative' : ''}`}>{formatPercent(row.relativePerformance)}</td>
                 </tr>
               ))}
-              {!visibleRows.length && <tr><td colSpan="11" className="reference-table__empty">{loading ? 'Loading ETF Pro…' : 'No ETF Pro positions match this view.'}</td></tr>}
+              {!visibleRows.length && <tr><td colSpan="11" className="reference-table__empty">{loading ? <LoadingIndicator label="Loading ETF Pro…" size="sm" /> : 'No ETF Pro positions match this view.'}</td></tr>}
             </tbody>
           </table>
         </div>

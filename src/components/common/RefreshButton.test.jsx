@@ -26,9 +26,11 @@ describe('RefreshButton', () => {
     expect(container.querySelector('.app-refresh-btn-icon')).not.toBeNull();
   });
 
-  test('applies spin class when loading', () => {
+  test('shows the shared loading ring and seconds when loading', () => {
     renderButton({ loading: true });
-    expect(container.querySelector('.app-spin')).not.toBeNull();
+    expect(container.querySelector('.analyst-spinner')).not.toBeNull();
+    expect(container.querySelector('.analyst-spinner-elapsed').textContent).toBe('0s');
+    expect(container.querySelector('.app-refresh-btn-icon')).toBeNull();
   });
 
   test('disables when loading or disabled', () => {

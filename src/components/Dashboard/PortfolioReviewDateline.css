@@ -1,9 +1,15 @@
-.portfolio-review-section { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; }
-.portfolio-review-section > h2 { grid-column: 1; }
-.portfolio-review-section > .portfolio-review-dateline { grid-column: 2; justify-self: end; text-align: right; }
-.portfolio-review-section > :not(h2):not(.portfolio-review-dateline) { grid-column: 1 / -1; }
+.portfolio-review-section { display: flex; flex-direction: column; align-items: center; }
+.portfolio-review-section > h2 { justify-content: center; text-align: center; }
+.portfolio-review-section > .portfolio-review-dateline { text-align: center; }
+.portfolio-review-section > :not(h2):not(.portfolio-review-dateline) { align-self: stretch; min-width: 0; text-align: center; }
+.portfolio-review-section.analyst-hedgai-section > :not(h2):not(.portfolio-review-dateline) { text-align: left; }
 .portfolio-brief .portfolio-review-section > h2,
 .portfolio-brief .portfolio-review-section > .portfolio-review-dateline { margin: 0; }
-.portfolio-review-dateline.has-period { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 0 12px; }
+.portfolio-brief .portfolio-review-section > h2 { color: var(--analyst-ink, #172033); }
+.portfolio-review-dateline.has-period { display: flex; flex-direction: column; align-items: center; }
 .portfolio-review-primary-date, .portfolio-review-period { max-width: 100%; }
-.portfolio-review-period { text-align: right; }
+/* Equal side tracks keep the dates centered; the second date's label hangs in the left track. */
+.portfolio-review-dateline.is-paired { display: grid; grid-template-columns: 1fr auto 1fr; column-gap: 4px; }
+.portfolio-review-dateline.is-paired > :is(.portfolio-review-previous, .portfolio-review-period) { display: contents; }
+.portfolio-review-dateline.is-paired :is(.portfolio-review-primary-date, .portfolio-review-dateline-date) { grid-column: 2; text-align: left; white-space: nowrap; }
+.portfolio-review-dateline.is-paired .portfolio-review-dateline-label { grid-column: 1; justify-self: end; white-space: nowrap; }

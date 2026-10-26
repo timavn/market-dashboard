@@ -30,7 +30,7 @@ function load(overrides = {}) {
   const names = [
     'findCloseAtOrBefore', 'findClosestClose', 'computePeriodBpsFromCloses',
     'computePeriodPercentsFromCloses', 'symbolIsYahooRateProxy', 'computePeriodReturnsForSymbol',
-    'getPeriodReturnsCached', 'fetchIntlBondQuote', 'buildQuoteRow',
+    'getPeriodReturnsCached', 'fetchIntlBondQuote', 'buildQuoteRow', 'withLiveTreasuryClose',
   ];
   const context = {
     Date, console, DAY_MS, ONE_YEAR_REFERENCE_MAX_GAP_MS: 7 * DAY_MS,
@@ -38,6 +38,8 @@ function load(overrides = {}) {
     toQuoteInstrument, INTL_BOND_FRED_FALLBACK: { BUND10Y: 'IRLTLT01DEM156N' },
     STOOQ_BOND_SYMBOLS: {},
     getTickerMapping: () => ({ source: 'fred', ticker: 'IRLTLT01DEM156N' }),
+    fetchCnbcTreasuryQuote: async () => null,
+    fetchCnbcTreasuryDailyCloses: async () => null,
     fetchOfficialSovereignSeries: async () => official,
     fetchFredDailyClosesSeries: async () => monthly,
     fetchTradingEconomicsBondSnapshot: async () => new Map(),
@@ -53,23 +55,15 @@ function load(overrides = {}) {
   return context;
 }
 
-test('monthly references retain their levels and genuine month horizons without inventing submonthly returns', async () => {
-  const context = load();
-  const periods = await context.computePeriodReturnsForSymbol('BUND10Y', null, { source: 'fred' });
-  assert.equal(periods.asOf, '2026-08-01T00:00:00.000Z');
-  assert.equal(periods.observationFrequency, 'monthly');
-  assert.equal(periods.periodReturnsSource, 'fred');
-  assert.equal(periods.periodSourceSeriesId, 'IRLTLT01DEM156N');
-  for (const period of ['day', 'week', 'fifteenDay']) {
-    assert.equal(periods[`${period}ChangeBps`], null);
-    assert.equal(periods[`${period}ChangePct`], null);
-    assert.equal(periods.backdropPercentageReturns[`${period}ChangePct`], null);
-  }
-  assert.equal(periods.monthChangePct, 6);
-  assert.equal(periods.monthChangeBps, 18);
-  assert.equal(periods.threeMonthChangePct, 13.57);
-  assert.equal(periods.oneYearChangePct, 59);
-  assert.equal(periods.latestObservationChange.interval, 'monthly');
+test('without a daily source the quote and its periods are unavailable instead of a monthly average', async () => {
+  const context = load({
+    fetchOfficialSovereignSeries: async () => null,
+    fetchFredQuote: async () => { throw new Error('Unexpected monthly quote'); },
+    fetchFredDailyClosesSeries: async () => { throw new Error('Unexpected monthly history'); },
+  });
+  assert.equal(await context.fetchIntlBondQuote('BUND10Y'), null);
+  assert.equal(await context.computePeriodReturnsForSymbol('BUND10Y', null, { source: 'fred' }), null);
+  assert.equal(await context.computePeriodReturnsForSymbol('BUND10Y', null, null), null);
 });
 
 test('daily rate horizons require an observation near the requested date and reject missing values', () => {
@@ -173,17 +167,39 @@ test('newer official history cannot change a cached quote endpoint or inherit ol
   assert.equal(await context.computePeriodReturnsForSymbol('BUND10Y', null, { ...firstQuote, price: '3.31' }), null);
 });
 
-test('fallback stays explicitly monthly, and changing quote sources cannot reuse its period cache', async () => {
-  const context = load({ fetchOfficialSovereignSeries: async () => null });
-  const monthlyQuote = await context.fetchIntlBondQuote('BUND10Y');
-  assert.equal(monthlyQuote.observationFrequency, 'monthly');
-  assert.equal(monthlyQuote.sourceSeriesId, 'IRLTLT01DEM156N');
-  assert.equal(monthlyQuote.timestamp, '2026-08-01T00:00:00Z');
-  const monthlyPeriods = await context.getPeriodReturnsCached('BUND10Y', null, monthlyQuote);
-  assert.equal(monthlyPeriods.fifteenDayChangeBps, null);
-  context.fetchOfficialSovereignSeries = async () => official;
-  const dailyQuote = await context.fetchIntlBondQuote('BUND10Y');
-  const dailyPeriods = await context.getPeriodReturnsCached('BUND10Y', null, dailyQuote);
-  assert.equal(dailyPeriods.observationFrequency, 'daily');
-  assert.equal(dailyPeriods.fifteenDayChangeBps, 20);
+const cnbcQuote = {
+  price: '3.400', change: '0.100', changePercent: '3.03', timestamp: '2026-09-25T09:10:00.000Z',
+  sessionDate: '2026-09-25', source: 'cnbc', sourceSeriesId: 'DE10Y-DE',
+  sourceInstrument: 'Germany 10 Year Bond (Germany)', observationFrequency: 'intraday', dataType: 'delayed',
+};
+
+test('the CNBC benchmark leads, and its periods come from the same CNBC daily closes plus the live reading', async () => {
+  const context = load({
+    fetchCnbcTreasuryQuote: async () => cnbcQuote,
+    fetchCnbcTreasuryDailyCloses: async () => daily,
+    fetchOfficialSovereignSeries: async () => { throw new Error('Official history is the fallback only'); },
+  });
+  const quote = await context.fetchIntlBondQuote('BUND10Y');
+  assert.equal(quote, cnbcQuote);
+  const periods = await context.computePeriodReturnsForSymbol('BUND10Y', null, quote);
+  assert.equal(periods.observationFrequency, 'daily');
+  assert.equal(periods.periodReturnsSource, 'cnbc');
+  assert.equal(periods.periodSourceSeriesId, 'DE10Y-DE');
+  assert.equal(periods.asOf, '2026-09-25T00:00:00.000Z');
+  assert.equal(periods.dayChangeBps, 10);
+  context.fetchCnbcTreasuryDailyCloses = async () => null;
+  assert.equal(await context.computePeriodReturnsForSymbol('BUND10Y', null, quote), null);
+});
+
+test('when CNBC is down the official daily history answers, and source changes cannot reuse a period cache', async () => {
+  const context = load({ fetchCnbcTreasuryQuote: async () => cnbcQuote, fetchCnbcTreasuryDailyCloses: async () => daily });
+  const cnbcPeriods = await context.getPeriodReturnsCached('BUND10Y', null, await context.fetchIntlBondQuote('BUND10Y'));
+  assert.equal(cnbcPeriods.periodReturnsSource, 'cnbc');
+  context.fetchCnbcTreasuryQuote = async () => null;
+  const officialQuote = await context.fetchIntlBondQuote('BUND10Y');
+  assert.equal(officialQuote.source, 'bundesbank');
+  assert.equal(officialQuote.observationFrequency, 'daily');
+  const officialPeriods = await context.getPeriodReturnsCached('BUND10Y', null, officialQuote);
+  assert.equal(officialPeriods.periodReturnsSource, 'bundesbank');
+  assert.equal(officialPeriods.fifteenDayChangeBps, 20);
 });

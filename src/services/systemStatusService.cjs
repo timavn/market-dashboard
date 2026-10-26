@@ -12,7 +12,6 @@ const SERVICE_DEFINITIONS = Object.freeze([
   Object.freeze({ id: 'dashboard', label: 'Dashboard' }),
   Object.freeze({ id: 'market-data', label: 'Market data' }),
   Object.freeze({ id: 'live-portfolio', label: 'Portfolio' }),
-  Object.freeze({ id: 'resolver-sources', label: 'Resolver sources', nonCore: true }),
   Object.freeze({ id: 'ai', label: 'AI' }),
 ]);
 
@@ -31,13 +30,6 @@ const DETAIL_DEFINITIONS = Object.freeze({
     Object.freeze({ id: 'managed-account', label: 'Managed account' }),
     Object.freeze({ id: 'fresh-session', label: 'Session' }),
   ]),
-  'resolver-sources': Object.freeze([
-    Object.freeze({ id: 'ibkr-dated-futures', label: 'IBKR dated futures' }),
-    Object.freeze({ id: 'kalshi-resolver', label: 'Kalshi resolver venues' }),
-    Object.freeze({ id: 'forecastex-publications', label: 'ForecastEx public publications' }),
-    Object.freeze({ id: 'coinbase-proxy', label: 'Coinbase proxy' }),
-    Object.freeze({ id: 'bls-cpi-publication', label: 'BLS CPI publication' }),
-  ]),
   ai: Object.freeze([
     Object.freeze({ id: 'analyst-runtime', label: 'The Analyst' }),
     Object.freeze({ id: 'gmail-ingestion', label: 'Gmail Function' }),
@@ -48,14 +40,6 @@ const DEFAULT_PROBE_TIMEOUT_MS = 650;
 const DEFAULT_GMAIL_HEARTBEAT_TIMEOUT_MS = 450;
 const DEFAULT_MARKET_EVIDENCE_MAX_AGE_MS = 60_000;
 const DEFAULT_PORTFOLIO_EVIDENCE_MAX_AGE_MS = 120_000;
-const DEFAULT_RESOLVER_SOURCE_MAX_AGE_MS = 15_000;
-const DEFAULT_RESOLVER_FUTURES_MAX_AGE_MS = 10_000;
-const RESOLVER_FUTURES = Object.freeze([
-  Object.freeze({ symbol: 'CLU6', role: 'proxy', required: false }),
-  Object.freeze({ symbol: 'GCQ6', role: 'exact', required: true }),
-  Object.freeze({ symbol: 'ESU6', role: 'exact', required: true }),
-  Object.freeze({ symbol: 'NQU6', role: 'exact', required: true }),
-]);
 const MAX_FUTURE_CLOCK_SKEW_MS = 30_000;
 
 function safeNow(nowProvider = () => new Date()) {
@@ -277,355 +261,6 @@ function portfolioFreshnessReason(value, now, maxAgeMs) {
     return `The verified live portfolio timestamp is ${Math.ceil(Math.abs(ageMs) / 1000)}s ahead of the local clock.`;
   }
   return `The last verified live portfolio snapshot is ${Math.ceil(Math.max(0, ageMs) / 1000)}s old; the freshness limit is ${Math.round(maxAgeMs / 1000)}s.`;
-}
-
-function normalizedIso(value) {
-  const parsed = Date.parse(String(value || ''));
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
-}
-
-function latestIso(values = []) {
-  return values
-    .map(normalizedIso)
-    .filter(Boolean)
-    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] || null;
-}
-
-function resolverSourceStatus(value, fallback = 'unverified') {
-  return String(value || fallback).trim().toLowerCase() || fallback;
-}
-
-function publicResolverDetail(definition, provider, {
-  role,
-  label,
-  lastAttemptAt,
-  now,
-  maxAgeMs,
-} = {}) {
-  if (!provider || typeof provider !== 'object') {
-    const reason = `${label} health is unverified.`;
-    return detailResult(definition, STATUS.UNKNOWN, reason, {
-      sourceStatus: 'unverified',
-      role,
-      neutral: false,
-      lastSuccessAt: null,
-      observedAt: null,
-    });
-  }
-
-  const sourceStatus = resolverSourceStatus(provider.status);
-  const lastSuccessAt = normalizedIso(provider.lastSuccessAt);
-  const attemptAt = normalizedIso(lastAttemptAt);
-  const common = {
-    sourceStatus,
-    role,
-    neutral: ['not_started', 'not_applicable'].includes(sourceStatus),
-    lastSuccessAt,
-    observedAt: sourceStatus === 'unavailable' ? attemptAt : lastSuccessAt,
-  };
-  if (sourceStatus === 'not_applicable') {
-    return detailResult(definition, STATUS.UNKNOWN, 'Not applicable to the selected prediction market.', {
-      ...common,
-      statusLabel: 'Not applicable',
-    });
-  }
-  if (sourceStatus === 'not_started') {
-    return detailResult(definition, STATUS.UNKNOWN, 'Not yet observed.', common);
-  }
-  if (sourceStatus === 'available') {
-    if (timestampIsFresh(lastSuccessAt, now, maxAgeMs)) {
-      return detailResult(definition, STATUS.ONLINE, null, common);
-    }
-    return detailResult(
-      definition,
-      STATUS.UNKNOWN,
-      `${label} last successful observation is stale.`,
-      common,
-    );
-  }
-  if (sourceStatus === 'partial') {
-    return detailResult(
-      definition,
-      STATUS.ATTENTION,
-      shortReason(provider.error?.message, `${label} is only partially available.`),
-      common,
-    );
-  }
-  if (sourceStatus === 'unavailable') {
-    const recentFailure = timestampIsFresh(attemptAt, now, maxAgeMs);
-    const reason = recentFailure
-      ? shortReason(provider.error?.message, `${label} is unavailable.`)
-      : `${label} has no recent verified observation.`;
-    return detailResult(
-      definition,
-      recentFailure ? STATUS.OFFLINE : STATUS.UNKNOWN,
-      reason,
-      common,
-    );
-  }
-  return detailResult(definition, STATUS.UNKNOWN, `${label} health is unverified.`, common);
-}
-
-function ibkrResolverDetail(definition, provider, { now, maxAgeMs } = {}) {
-  const raw = provider && typeof provider === 'object' ? provider : {};
-  const sourceStatus = resolverSourceStatus(raw.status);
-  const rawSymbols = raw.symbols && typeof raw.symbols === 'object' ? raw.symbols : {};
-  const symbols = RESOLVER_FUTURES.map(({ symbol, role, required }) => {
-    const state = rawSymbols[symbol] || {};
-    const symbolSourceStatus = resolverSourceStatus(state.status);
-    const lastQuoteAt = normalizedIso(state.lastQuoteAt || state.lastTradeAt);
-    const definitionVerified = state.definition?.valid === true;
-    const fresh = symbolSourceStatus === 'live'
-      && definitionVerified
-      && timestampIsFresh(lastQuoteAt, now, maxAgeMs);
-    const pending = ['starting', 'not_started'].includes(symbolSourceStatus);
-    return {
-      symbol,
-      role,
-      required,
-      status: fresh ? STATUS.ONLINE : pending ? STATUS.UNKNOWN : STATUS.OFFLINE,
-      sourceStatus: symbolSourceStatus,
-      lastQuoteAt,
-      errorCode: state.error?.code
-        || (state.definition?.valid === false ? state.definition?.code : null)
-        || (!definitionVerified ? 'RESOLVER_FUTURES_DEFINITION_UNVERIFIED' : null)
-        || (!fresh && symbolSourceStatus === 'live' ? 'RESOLVER_FUTURES_QUOTE_STALE' : null),
-    };
-  });
-  const requiredSymbols = symbols.filter((symbol) => symbol.required);
-  const optionalSymbols = symbols.filter((symbol) => !symbol.required);
-  const requested = requiredSymbols.length;
-  const verified = requiredSymbols.filter((symbol) => symbol.status === STATUS.ONLINE).length;
-  const rejected = Math.max(0, requested - verified);
-  const coverageStatus = requested > 0 && verified === requested
-    ? 'complete'
-    : verified > 0 ? 'partial' : 'none';
-  const provenanceVerified = raw.dataType === 'live_only'
-    && raw.cachePolicy === 'no_fallback';
-  const common = {
-    sourceStatus,
-    role: 'live_dated_futures',
-    neutral: false,
-    observedAt: normalizedIso(raw.lastMessageAt),
-    lastSuccessAt: ['live', 'degraded'].includes(sourceStatus)
-      ? normalizedIso(raw.lastMessageAt)
-      : null,
-    coverage: {
-      requested,
-      verified,
-      rejected,
-      status: coverageStatus,
-    },
-    symbols,
-    optionalCoverage: {
-      requested: optionalSymbols.length,
-      verified: optionalSymbols.filter((symbol) => symbol.status === STATUS.ONLINE).length,
-      rejected: optionalSymbols.filter((symbol) => symbol.status !== STATUS.ONLINE).length,
-    },
-  };
-
-  if (
-    ['live', 'degraded'].includes(sourceStatus)
-    && raw.connected === true
-    && provenanceVerified
-    && requested > 0
-    && verified === requested
-  ) {
-    return detailResult(definition, STATUS.ONLINE, null, common);
-  }
-  if (
-    ['live', 'degraded'].includes(sourceStatus)
-    && raw.connected === true
-    && provenanceVerified
-    && verified < requested
-    && verified > 0
-  ) {
-    return detailResult(
-      definition,
-      STATUS.ATTENTION,
-      shortReason(raw.message, `IBKR exact dated-futures coverage is partial (${verified}/${requested}).`),
-      common,
-    );
-  }
-  if (['unavailable', 'disabled'].includes(sourceStatus) || raw.connected === false) {
-    return detailResult(
-      definition,
-      STATUS.OFFLINE,
-      shortReason(raw.message, 'Fresh verified IBKR dated-futures quotes are unavailable.'),
-      common,
-    );
-  }
-  const reason = ['live', 'degraded'].includes(sourceStatus) && !provenanceVerified
-    ? 'IBKR dated-futures live-only provenance is unverified.'
-    : ['live', 'degraded'].includes(sourceStatus) && verified < requested
-      ? `IBKR exact dated-futures coverage is stale or incomplete (${verified}/${requested}).`
-      : 'IBKR dated-futures health is not yet verified.';
-  return detailResult(definition, STATUS.UNKNOWN, reason, common);
-}
-
-function blsResolverDetail(definition, evidence, { now, maxAgeMs } = {}) {
-  const providers = evidence?.providers || {};
-  const schedule = evidence?.schedule?.blsCpi;
-  const releaseAt = normalizedIso(schedule?.releaseAt);
-  const windowOpensAt = normalizedIso(schedule?.windowOpensAt);
-  const reportMonth = schedule?.reportMonth ? String(schedule.reportMonth) : null;
-  const sources = {
-    release: resolverSourceStatus(providers.blsRelease?.status, 'not_started'),
-    rss: resolverSourceStatus(providers.blsRss?.status, 'not_started'),
-    api: resolverSourceStatus(providers.blsApi?.status, 'not_started'),
-  };
-  const base = {
-    role: 'official_publication',
-    releaseAt,
-    reportMonth,
-    windowOpensAt,
-    sources,
-    lastSuccessAt: null,
-    observedAt: null,
-  };
-  if (!releaseAt || !windowOpensAt) {
-    return detailResult(
-      definition,
-      STATUS.UNKNOWN,
-      'BLS CPI publication schedule is unverified.',
-      {
-        ...base,
-        sourceStatus: 'unverified',
-        neutral: false,
-        due: false,
-        released: false,
-      },
-    );
-  }
-
-  const due = now.getTime() >= Date.parse(windowOpensAt);
-  const released = now.getTime() >= Date.parse(releaseAt);
-  if (!due) {
-    return detailResult(definition, STATUS.ONLINE, null, {
-      ...base,
-      sourceStatus: 'pending_release',
-      statusLabel: 'Scheduled',
-      neutral: true,
-      due,
-      released,
-    });
-  }
-
-  const expectedKeys = released
-    ? ['blsRelease', 'blsRss', 'blsApi']
-    : ['blsRelease', 'blsRss'];
-  const lastSuccessAt = latestIso(expectedKeys.map((key) => providers[key]?.lastSuccessAt));
-  const lastAttemptAt = normalizedIso(evidence?.lastSnapshotAt);
-  const anyUnavailable = expectedKeys.some((key) => (
-    resolverSourceStatus(providers[key]?.status, 'not_started') === 'unavailable'
-  ));
-  const allFresh = expectedKeys.every((key) => (
-    resolverSourceStatus(providers[key]?.status, 'not_started') === 'available'
-    && timestampIsFresh(providers[key]?.lastSuccessAt, now, maxAgeMs)
-  ));
-  const common = {
-    ...base,
-    neutral: false,
-    due,
-    released,
-    lastSuccessAt,
-    observedAt: anyUnavailable ? lastAttemptAt : lastSuccessAt,
-  };
-  if (allFresh) {
-    return detailResult(definition, STATUS.ONLINE, null, {
-      ...common,
-      sourceStatus: 'available',
-    });
-  }
-  if (anyUnavailable && timestampIsFresh(lastAttemptAt, now, maxAgeMs)) {
-    return detailResult(
-      definition,
-      STATUS.OFFLINE,
-      'One or more due BLS CPI publication sources are unavailable.',
-      { ...common, sourceStatus: 'unavailable' },
-    );
-  }
-  const anyAvailable = expectedKeys.some((key) => (
-    resolverSourceStatus(providers[key]?.status, 'not_started') === 'available'
-  ));
-  return detailResult(
-    definition,
-    STATUS.UNKNOWN,
-    anyAvailable
-      ? 'BLS CPI publication evidence is stale or incomplete.'
-      : 'BLS CPI publication has not yet been observed in its due window.',
-    { ...common, sourceStatus: anyAvailable ? 'stale' : 'not_started' },
-  );
-}
-
-function evaluateResolverSourcesEvidence(evidence, {
-  now = new Date(),
-  sourceMaxAgeMs = DEFAULT_RESOLVER_SOURCE_MAX_AGE_MS,
-  futuresMaxAgeMs = DEFAULT_RESOLVER_FUTURES_MAX_AGE_MS,
-} = {}) {
-  const definitions = DETAIL_DEFINITIONS['resolver-sources'];
-  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
-    const reason = 'Resolver-source health could not be verified.';
-    return {
-      ...serviceResult(
-        STATUS.UNKNOWN,
-        reason,
-        definitions.map((definition) => detailResult(
-          definition,
-          STATUS.UNKNOWN,
-          reason,
-          { neutral: false },
-        )),
-      ),
-      nonCore: true,
-    };
-  }
-
-  const providers = evidence.providers && typeof evidence.providers === 'object'
-    ? evidence.providers
-    : {};
-  const publicOptions = {
-    lastAttemptAt: evidence.lastSnapshotAt,
-    now,
-    maxAgeMs: Math.max(1, Number(sourceMaxAgeMs) || DEFAULT_RESOLVER_SOURCE_MAX_AGE_MS),
-  };
-  const details = [
-    ibkrResolverDetail(definitions[0], providers.ibkrFutures, {
-      now,
-      maxAgeMs: Math.max(
-        1,
-        Number(futuresMaxAgeMs) || DEFAULT_RESOLVER_FUTURES_MAX_AGE_MS,
-      ),
-    }),
-    publicResolverDetail(definitions[1], providers.kalshi, {
-      ...publicOptions,
-      role: 'resolver_venue',
-      label: 'Kalshi resolver venue',
-    }),
-    publicResolverDetail(definitions[2], providers.forecastex, {
-      ...publicOptions,
-      role: 'official_publication',
-      label: 'ForecastEx public publication',
-    }),
-    publicResolverDetail(definitions[3], providers.coinbase, {
-      ...publicOptions,
-      role: 'proxy_only',
-      label: 'Coinbase proxy',
-    }),
-    blsResolverDetail(definitions[4], evidence, publicOptions),
-  ];
-  const active = details.filter((detail) => detail.neutral !== true);
-  const issue = active.find((detail) => detail.status !== STATUS.ONLINE);
-  let status = STATUS.ONLINE;
-  if (active.length > 0 && active.every((detail) => detail.status === STATUS.OFFLINE)) {
-    status = STATUS.OFFLINE;
-  } else if (issue) {
-    status = STATUS.ATTENTION;
-  }
-  return {
-    ...serviceResult(status, issue?.reason || null, details),
-    nonCore: true,
-  };
 }
 
 function isRecentCompletedMarketQuote(value, now) {
@@ -1111,7 +746,6 @@ function createSystemStatusService({
   readDashboardEvidence,
   readMarketDataEvidence,
   readLivePortfolioEvidence,
-  readResolverSourcesEvidence,
   readAiEvidence,
   now = () => new Date(),
   probeTimeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
@@ -1119,7 +753,7 @@ function createSystemStatusService({
   const boundedTimeoutMs = Math.min(850, Math.max(10, Number(probeTimeoutMs) || 0));
 
   async function collect(context = {}) {
-    const [dashboard, marketData, livePortfolio, resolverSources, ai] = await Promise.all([
+    const [dashboard, marketData, livePortfolio, ai] = await Promise.all([
       runBoundedProbe({
         serviceId: 'dashboard',
         read: readDashboardEvidence,
@@ -1151,16 +785,6 @@ function createSystemStatusService({
         context,
       }),
       runBoundedProbe({
-        serviceId: 'resolver-sources',
-        read: readResolverSourcesEvidence,
-        evaluate: evaluateResolverSourcesEvidence,
-        nowProvider: now,
-        timeoutMs: boundedTimeoutMs,
-        timeoutReason: 'Resolver-source check timed out.',
-        unavailableReason: 'Resolver-source health could not be verified.',
-        context,
-      }),
-      runBoundedProbe({
         serviceId: 'ai',
         read: readAiEvidence,
         evaluate: evaluateAiEvidence,
@@ -1176,7 +800,6 @@ function createSystemStatusService({
       ['dashboard', dashboard],
       ['market-data', marketData],
       ['live-portfolio', livePortfolio],
-      ['resolver-sources', resolverSources],
       ['ai', ai],
     ]);
     const services = SERVICE_DEFINITIONS.map((definition) => ({
@@ -1197,8 +820,6 @@ function createSystemStatusService({
 module.exports = {
   DEFAULT_GMAIL_HEARTBEAT_TIMEOUT_MS,
   DEFAULT_PROBE_TIMEOUT_MS,
-  DEFAULT_RESOLVER_FUTURES_MAX_AGE_MS,
-  DEFAULT_RESOLVER_SOURCE_MAX_AGE_MS,
   DETAIL_DEFINITIONS,
   SERVICE_DEFINITIONS,
   STATUS,
@@ -1212,5 +833,4 @@ module.exports = {
   gmailHeartbeatStoreFailureReason,
   evaluateLivePortfolioEvidence,
   evaluateMarketDataEvidence,
-  evaluateResolverSourcesEvidence,
 };

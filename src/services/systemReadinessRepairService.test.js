@@ -373,32 +373,6 @@ describe('system readiness repair service', () => {
     expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
   });
 
-  test('reconciles only the server-owned current CPI release', async () => {
-    const reconcilePredictionCatalog = jest.fn().mockResolvedValue({
-      outcome: { status: 'succeeded', code: 'CATALOG_RECONCILED' },
-    });
-    const service = createSystemReadinessRepairService({ reconcilePredictionCatalog });
-
-    await service.run('reconcile-prediction-catalog', { remoteAddress: '127.0.0.1' });
-
-    expect(reconcilePredictionCatalog).toHaveBeenCalledWith();
-  });
-
-  test('does not report a failed prediction reconciliation as accepted', async () => {
-    const service = createSystemReadinessRepairService({
-      reconcilePredictionCatalog: jest.fn().mockResolvedValue({
-        outcome: {
-          status: 'failed',
-          code: 'UNSUPPORTED_OR_NOT_ENTITLED',
-          message: 'No qualified current-release contract is available.',
-        },
-      }),
-    });
-
-    await expect(service.run('reconcile-prediction-catalog', { remoteAddress: '127.0.0.1' }))
-      .rejects.toMatchObject({ statusCode: 503, code: 'UNSUPPORTED_OR_NOT_ENTITLED' });
-  });
-
   test('rejects remote, unknown, and non-automatic actions without spawning', async () => {
     const spawnProcess = jest.fn(() => spawnedChild());
     const service = createSystemReadinessRepairService({ spawnProcess });

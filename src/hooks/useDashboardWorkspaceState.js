@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { SIDEBAR_PANEL_Z_INDEX_BASE, CONTRACT_PNL_PANEL_MAX_WIDTH, ANALYST_PANEL_POSITIONS, ANALYST_PANEL_DEFAULT_POSITION, PREDICTION_MONITOR_MARKETS } from '../constants/dashboardWorkspace';
-import { readDashboardPanelState, writeDashboardPanelState, readPersistedBoolean, clampAnalystPanelWidth, clampContractPnlPanelWidth, normalizeAnalystPanelPosition, migratePredictionMarketsPanelState, readPersistedSidebarStack } from '../utils/dashboardWorkspaceState';
+import { SIDEBAR_PANEL_Z_INDEX_BASE, ANALYST_PANEL_POSITIONS, ANALYST_PANEL_DEFAULT_POSITION } from '../constants/dashboardWorkspace';
+import { readDashboardPanelState, writeDashboardPanelState, readPersistedBoolean, clampAnalystPanelWidth, normalizeAnalystPanelPosition, migrateLegacyPanelState, readPersistedSidebarStack } from '../utils/dashboardWorkspaceState';
 
 export function useDashboardWorkspaceState({ isProcessOpen }) {
   const persistedPanelState = useMemo(
-    () => migratePredictionMarketsPanelState(readDashboardPanelState()),
+    () => migrateLegacyPanelState(readDashboardPanelState()),
     [],
   );
 
@@ -27,32 +27,7 @@ export function useDashboardWorkspaceState({ isProcessOpen }) {
 
   const analystPanelResizeEdge = 'right';
 
-  const [contractPnlPanelWidth, setContractPnlPanelWidth] = useState(() => {
-    const savedWidth = clampContractPnlPanelWidth(persistedPanelState.contractPnlPanelWidth);
-    if (persistedPanelState.contractPnlGeometryVersion === 2) {
-      // Keep the user's total width while discarding the old one-sided offset.
-      const extension = Math.max(0, Number(persistedPanelState.contractPnlPanelRightExtension) || 0);
-      return clampContractPnlPanelWidth(savedWidth + extension);
-    }
-    return persistedPanelState.contractPnlGeometryVersion === 3
-      ? savedWidth
-      : Math.max(720, savedWidth);
-  });
-
-  const [contractPnlPanelRightExtension, setContractPnlPanelRightExtension] = useState(0);
-
-  const [contractPnlSizeCustomized, setContractPnlSizeCustomized] = useState(
-    [2, 3].includes(persistedPanelState.contractPnlGeometryVersion) && persistedPanelState.contractPnlSizeCustomized === true,
-  );
-
-  const contractPnlPanelDisplayedWidth = Math.min(
-    CONTRACT_PNL_PANEL_MAX_WIDTH,
-    contractPnlPanelWidth,
-  );
-
   const [showPortfolioBalance, setShowPortfolioBalance] = useState(false);
-
-  const [showContractPnl, setShowContractPnl] = useState(false);
 
   const [showMorningTldr, setShowMorningTldr] = useState(() => readPersistedBoolean(persistedPanelState, 'showMorningTldr'));
 
@@ -64,16 +39,6 @@ export function useDashboardWorkspaceState({ isProcessOpen }) {
 
   const [showPerformanceTracking, setShowPerformanceTracking] = useState(() => readPersistedBoolean(persistedPanelState, 'showPerformanceTracking'));
 
-  const [showPredictionMonitor, setShowPredictionMonitor] = useState(() => (
-    readPersistedBoolean(persistedPanelState, 'showPredictionMonitor')
-  ));
-
-  const [activePredictionMonitorMarket, setActivePredictionMonitorMarket] = useState(() => (
-    PREDICTION_MONITOR_MARKETS.has(persistedPanelState.activePredictionMonitorMarket)
-      ? persistedPanelState.activePredictionMonitorMarket
-      : 'sp500'
-  ));
-
   const [showSignalStrength, setShowSignalStrength] = useState(() => readPersistedBoolean(persistedPanelState, 'showSignalStrength'));
 
   const [showEtfPro, setShowEtfPro] = useState(() => readPersistedBoolean(persistedPanelState, 'showEtfPro'));
@@ -84,9 +49,8 @@ export function useDashboardWorkspaceState({ isProcessOpen }) {
 
   const [showPortfolioBreakdown, setShowPortfolioBreakdown] = useState(() => readPersistedBoolean(persistedPanelState, 'showPortfolioBreakdown'));
 
-  const [showExposureLab, setShowExposureLab] = useState(() => readPersistedBoolean(persistedPanelState, 'showExposureLab'));
-
-  const [showBitcoinResearch, setShowBitcoinResearch] = useState(() => readPersistedBoolean(persistedPanelState, 'showBitcoinResearch'));
+  // PCA has no navigation entry, so a window saved open would have no way back.
+  const [showExposureLab, setShowExposureLab] = useState(false);
 
   const [sidebarPanelStack, setSidebarPanelStack] = useState(() => readPersistedSidebarStack(persistedPanelState));
 
@@ -113,22 +77,15 @@ export function useDashboardWorkspaceState({ isProcessOpen }) {
       showMorningTldr,
       showAnalyst,
       analystPanelWidth,
-      contractPnlPanelWidth,
-      contractPnlPanelRightExtension,
-      contractPnlSizeCustomized,
-      contractPnlGeometryVersion: 3,
       showSystemReadiness,
       showWorkflowStatus,
       showPerformanceTracking,
-      showPredictionMonitor,
-      activePredictionMonitorMarket,
       showSignalStrength,
       showEtfPro,
       showMacroShow,
       showCall,
       showPortfolioBreakdown,
       showExposureLab,
-      showBitcoinResearch,
       sidebarPanelStack,
     };
     if (analystPanelPosition !== ANALYST_PANEL_DEFAULT_POSITION) {
@@ -140,22 +97,16 @@ export function useDashboardWorkspaceState({ isProcessOpen }) {
     showAnalyst,
     analystPanelWidth,
     analystPanelPosition,
-    contractPnlPanelWidth,
-    contractPnlPanelRightExtension,
-    contractPnlSizeCustomized,
     showMorningTldr,
     showSystemReadiness,
     showWorkflowStatus,
     showPerformanceTracking,
-    showPredictionMonitor,
-    activePredictionMonitorMarket,
     showSignalStrength,
     showEtfPro,
     showMacroShow,
     showCall,
     showPortfolioBreakdown,
     showExposureLab,
-    showBitcoinResearch,
     sidebarPanelStack,
   ]);
 
@@ -167,17 +118,8 @@ export function useDashboardWorkspaceState({ isProcessOpen }) {
     setAnalystPanelPosition,
     selectedAnalystPanelPosition,
     analystPanelResizeEdge,
-    contractPnlPanelWidth,
-    setContractPnlPanelWidth,
-    contractPnlPanelRightExtension,
-    setContractPnlPanelRightExtension,
-    contractPnlSizeCustomized,
-    setContractPnlSizeCustomized,
-    contractPnlPanelDisplayedWidth,
     showPortfolioBalance,
     setShowPortfolioBalance,
-    showContractPnl,
-    setShowContractPnl,
     showMorningTldr,
     setShowMorningTldr,
     showAnalyst,
@@ -188,10 +130,6 @@ export function useDashboardWorkspaceState({ isProcessOpen }) {
     setShowSystemReadiness,
     showPerformanceTracking,
     setShowPerformanceTracking,
-    showPredictionMonitor,
-    setShowPredictionMonitor,
-    activePredictionMonitorMarket,
-    setActivePredictionMonitorMarket,
     showSignalStrength,
     setShowSignalStrength,
     showEtfPro,
@@ -204,8 +142,6 @@ export function useDashboardWorkspaceState({ isProcessOpen }) {
     setShowPortfolioBreakdown,
     showExposureLab,
     setShowExposureLab,
-    showBitcoinResearch,
-    setShowBitcoinResearch,
     sidebarPanelStack,
     setSidebarPanelStack,
     bringSidebarPanelToFront,

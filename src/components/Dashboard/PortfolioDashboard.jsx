@@ -6,29 +6,21 @@ import {
   PieChart,
   Scale,
   Share2,
-  Table2,
-  Target,
 } from 'lucide-react';
 import { MarketDataService } from '../../services/api/marketDataService';
-import predictionMarketTestService from '../../services/api/predictionMarketTestService';
 import { useTheme } from '../../context/ThemeContext';
 import USDMacroDashboard from './USDMacroDashboard';
 import LoadingIndicator from '../common/LoadingIndicator';
 import AnalystLoading from './AnalystLoading';
 import PersistentSurface, { useSurfaceActivity } from '../common/PersistentSurface';
-import useContractPnlOverlay from '../../hooks/useContractPnlOverlay';
-import { preloadContractPerformanceHistory } from '../../hooks/useContractPerformance';
 import { useDashboardWorkspaceState } from '../../hooks/useDashboardWorkspaceState';
 import { useDashboardPanelResize } from '../../hooks/useDashboardPanelResize';
 import useDashboardOverviewFit from '../../hooks/useDashboardOverviewFit';
-import { ANALYST_PANEL_DEFAULT_POSITION, PREDICTION_MONITOR_MARKETS, SIDEBAR_PANEL_Z_INDEX_BASE } from '../../constants/dashboardWorkspace';
-import { normalizeAnalystPanelPosition, migratePredictionMarketsPanelState } from '../../utils/dashboardWorkspaceState';
-
-export { migratePredictionMarketsPanelState };
+import { ANALYST_PANEL_DEFAULT_POSITION, SIDEBAR_PANEL_Z_INDEX_BASE } from '../../constants/dashboardWorkspace';
+import { normalizeAnalystPanelPosition } from '../../utils/dashboardWorkspaceState';
 import { useDashboardPortfolio } from '../../hooks/useDashboardPortfolio';
 import { useDashboardOverviewResources } from '../../hooks/useDashboardOverviewResources';
 import { useDashboardEtfProResource } from '../../hooks/useDashboardEtfProResource';
-import { useDashboardPredictionIndicators } from '../../hooks/useDashboardPredictionIndicators';
 import { useDashboardChangelog } from '../../hooks/useDashboardChangelog';
 import DashboardTopNavigation from './DashboardTopNavigation';
 import './DashboardNavigationRail.css';
@@ -45,14 +37,11 @@ import { getProcessDocument } from '../../constants/processDocuments';
 import { isDashboardSessionRetentionEnabled } from '../../config/dashboardSessionRetention';
 import { createDashboardWarmupQueue } from '../../utils/dashboardWarmupQueue';
 import { warmDashboardResource } from '../../utils/dashboardResourceWarmup';
-import { canonicalPredictionMonitorContext } from '../../utils/predictionMonitorIdentity';
 import DashboardBalancePanel from './workspace/DashboardBalancePanel';
-import DashboardContractPnlPanel from './workspace/DashboardContractPnlPanel';
 import DashboardBookReader from './workspace/DashboardBookReader';
 import DashboardPerformancePanel from './workspace/DashboardPerformancePanel';
 import DashboardPortfolioPanel from './workspace/DashboardPortfolioPanel';
 import DashboardExposurePanel from './workspace/DashboardExposurePanel';
-import DashboardPredictionWorkspace from './workspace/DashboardPredictionWorkspace';
 import DashboardAnalystPanel from './workspace/DashboardAnalystPanel';
 import DashboardSignalStrengthPanel from './workspace/DashboardSignalStrengthPanel';
 import DashboardEtfProPanel from './workspace/DashboardEtfProPanel';
@@ -60,7 +49,6 @@ import DashboardMacroShowPanel from './workspace/DashboardMacroShowPanel';
 import DashboardCallPanel from './workspace/DashboardCallPanel';
 import DashboardSystemPanel from './workspace/DashboardSystemPanel';
 import DashboardWorkflowPanel from './workspace/DashboardWorkflowPanel';
-import DashboardWorkspaceWindow from './workspace/DashboardWorkspaceWindow';
 
 const loadReactMarkdownModule = () => import('react-markdown');
 const loadSystemReadinessModule = () => import('./SystemReadinessPanel');
@@ -68,7 +56,6 @@ const loadWorkflowStatusModule = () => import('./WorkflowStatus');
 const loadPerformanceTrackingModule = () => import('./PerformanceTracking');
 const loadPortfolioBreakdownModule = () => import('./PortfolioBreakdown');
 const loadExposureLabModule = () => import('./PcaRiskWorkspace');
-const loadPredictionMonitorModule = () => import('./PredictionMarketResolverTest');
 const loadSignalStrengthModule = () => import('./SignalStrengthPanel');
 const loadEtfProModule = () => import('./EtfProPanel');
 const loadHedgeyeShowModule = () => import('./HedgeyeShowPanel');
@@ -76,8 +63,6 @@ const loadMorningTldrModule = () => import('./MorningTldrOverlay');
 const loadAnalystModule = () => import('./AnalystPanel');
 const loadProcessModule = () => import('../Process/ProcessOverlay');
 const loadBalanceModule = () => import('./portfolio/PortfolioBalanceScenarioPlanner');
-const loadContractPnlModule = () => import('./PredictionMarketPerformanceCard');
-const loadBitcoinResearchModule = () => import('./BitcoinResearch');
 
 const ReactMarkdown = lazy(loadReactMarkdownModule);
 const SystemReadinessPanel = lazy(loadSystemReadinessModule);
@@ -85,7 +70,6 @@ const WorkflowStatus = lazy(loadWorkflowStatusModule);
 const PerformanceTracking = lazy(loadPerformanceTrackingModule);
 const PortfolioBreakdown = lazy(loadPortfolioBreakdownModule);
 const PcaRiskWorkspace = lazy(loadExposureLabModule);
-const PredictionMarketResolverTestPanel = lazy(loadPredictionMonitorModule);
 const SignalStrengthPanel = lazy(loadSignalStrengthModule);
 const EtfProPanel = lazy(loadEtfProModule);
 const HedgeyeShowPanel = lazy(loadHedgeyeShowModule);
@@ -93,8 +77,6 @@ const MorningTldrOverlay = lazy(loadMorningTldrModule);
 const AnalystPanel = lazy(loadAnalystModule);
 const ProcessOverlay = lazy(loadProcessModule);
 const PortfolioBalanceScenarioPlanner = lazy(loadBalanceModule);
-const PredictionMarketPerformanceCard = lazy(loadContractPnlModule);
-const BitcoinResearch = lazy(loadBitcoinResearchModule);
 
 const DASHBOARD_LAZY_WARMUPS = Object.freeze([
   Object.freeze({ key: 'chunk:system-readiness', run: loadSystemReadinessModule }),
@@ -102,7 +84,6 @@ const DASHBOARD_LAZY_WARMUPS = Object.freeze([
   Object.freeze({ key: 'chunk:performance', run: loadPerformanceTrackingModule }),
   Object.freeze({ key: 'chunk:portfolio', run: loadPortfolioBreakdownModule }),
   Object.freeze({ key: 'chunk:exposure-lab', run: loadExposureLabModule }),
-  Object.freeze({ key: 'chunk:prediction-monitor', run: loadPredictionMonitorModule }),
   Object.freeze({ key: 'chunk:signal-strength', run: loadSignalStrengthModule }),
   Object.freeze({ key: 'chunk:etf-pro', run: loadEtfProModule }),
   Object.freeze({ key: 'chunk:hedgeye-show', run: loadHedgeyeShowModule }),
@@ -110,12 +91,10 @@ const DASHBOARD_LAZY_WARMUPS = Object.freeze([
   Object.freeze({ key: 'chunk:analyst', run: loadAnalystModule }),
   Object.freeze({ key: 'chunk:process', run: loadProcessModule }),
   Object.freeze({ key: 'chunk:balance', run: loadBalanceModule }),
-  Object.freeze({ key: 'chunk:contract-pnl', run: loadContractPnlModule }),
 ]);
 
 const PANEL_WARMUP_TASK_KEYS = Object.freeze({
   balance: Object.freeze(['chunk:balance']),
-  contractPnl: Object.freeze(['chunk:contract-pnl']),
   process: Object.freeze(['chunk:process']),
   dashboardGuide: Object.freeze(['chunk:process']),
   exposureGuide: Object.freeze(['chunk:process']),
@@ -124,7 +103,6 @@ const PANEL_WARMUP_TASK_KEYS = Object.freeze({
   performance: Object.freeze(['chunk:performance']),
   portfolio: Object.freeze(['chunk:portfolio']),
   exposureLab: Object.freeze(['chunk:exposure-lab']),
-  predictionMonitor: Object.freeze(['chunk:prediction-monitor']),
   ss: Object.freeze(['chunk:signal-strength']),
   etfPro: Object.freeze(['chunk:etf-pro', 'resource:etf-pro']),
   macroShow: Object.freeze(['chunk:hedgeye-show']),
@@ -166,26 +144,6 @@ const LazyPanelFallback = ({ label = 'Loading...' }) => (
     <LoadingIndicator label={label} size="sm" />
   </div>
 );
-
-
-
-
-
-
-
-// Repeated contract cadences share one monitor; menuGroup controls its dock menu.
-const PREDICTION_MONITOR_NAV_ITEMS = Object.freeze([
-  Object.freeze({ marketId: 'silver', label: 'Silver', menuGroup: 'perpetual', sectionLabel: 'Metals', description: 'IBKR Silver futures and weekly threshold contracts' }),
-  Object.freeze({ marketId: 'gold', label: 'Gold', menuGroup: 'perpetual', sectionLabel: 'Metals', indicatorMarketId: 'gold', description: 'IBKR Gold daily, weekly, and futures threshold contracts' }),
-  Object.freeze({ marketId: 'bitcoin', label: 'BTC', menuGroup: 'perpetual', sectionLabel: 'Crypto', description: 'Bitcoin market monitor' }),
-  Object.freeze({ marketId: 'ethereum', label: 'ETH', menuGroup: 'perpetual', sectionLabel: 'Crypto', description: 'Ethereum market monitor' }),
-  Object.freeze({ marketId: 'wti', label: 'WTI', sectionLabel: 'Energy', indicatorMarketId: 'wti', description: 'Kalshi/IBKR WTI daily, weekly, and futures threshold contracts' }),
-  Object.freeze({ marketId: 'brent', label: 'Brent', sectionLabel: 'Energy', description: 'Kalshi/IBKR Brent daily and weekly threshold contracts' }),
-  Object.freeze({ marketId: 'sp500', label: 'SP500', sectionLabel: 'Equities', indicatorMarketId: 'sp500', description: 'IBKR S&P 500 futures threshold contracts' }),
-  Object.freeze({ marketId: 'cpi', label: 'CPI', sectionLabel: 'Economic Data', description: 'Kalshi headline CPI YoY contracts with Hedgeye, Cleveland Fed, and BLS context' }),
-  Object.freeze({ marketId: 'gdp', label: 'GDP', sectionLabel: 'Economic Data', description: 'ForecastEx Q3 2026 real GDP contracts with forecasts and BEA readings' }),
-]);
-
 
 
 export { mergeMarketDataPreservingPeriods };
@@ -235,10 +193,7 @@ const PortfolioDashboard = ({
     ibkrConnection, providerStatus, fetchPortfolio,
     refreshProviderStatus, resolvePortfolioAccount,
   } = useDashboardPortfolio({ surfaceActive });
-  useEffect(() => {
-    if (selectedAccount) preloadContractPerformanceHistory(selectedAccount);
-  }, [selectedAccount]);
-                                  const {
+  const {
     persistedPanelState,
     analystPanelWidth,
     setAnalystPanelWidth,
@@ -246,17 +201,8 @@ const PortfolioDashboard = ({
     setAnalystPanelPosition,
     selectedAnalystPanelPosition,
     analystPanelResizeEdge,
-    contractPnlPanelWidth,
-    setContractPnlPanelWidth,
-    contractPnlPanelRightExtension,
-    setContractPnlPanelRightExtension,
-    contractPnlSizeCustomized,
-    setContractPnlSizeCustomized,
-    contractPnlPanelDisplayedWidth,
     showPortfolioBalance,
     setShowPortfolioBalance,
-    showContractPnl,
-    setShowContractPnl,
     showMorningTldr,
     setShowMorningTldr,
     showAnalyst,
@@ -267,10 +213,6 @@ const PortfolioDashboard = ({
     setShowSystemReadiness,
     showPerformanceTracking,
     setShowPerformanceTracking,
-    showPredictionMonitor,
-    setShowPredictionMonitor,
-    activePredictionMonitorMarket,
-    setActivePredictionMonitorMarket,
     showSignalStrength,
     setShowSignalStrength,
     showEtfPro,
@@ -283,28 +225,18 @@ const PortfolioDashboard = ({
     setShowPortfolioBreakdown,
     showExposureLab,
     setShowExposureLab,
-    showBitcoinResearch,
-    setShowBitcoinResearch,
     sidebarPanelStack,
     bringSidebarPanelToFront,
     removeSidebarPanelFromStack,
     getSidebarPanelZIndex
   } = useDashboardWorkspaceState({ isProcessOpen });
-  const contractPnlOverlay = useContractPnlOverlay(showContractPnl);
-  const prepareContractPnlOverlay = contractPnlOverlay.prepare;
   const {
     analystPanelResizing,
     analystPanelSurfaceRef,
-    contractPnlPanelResizing,
-    contractPnlPanelSurfaceRef,
     beginAnalystPanelResize,
     handleAnalystPanelResizeKeyDown,
-    beginContractPnlPanelResize,
-    handleContractPnlPanelResizeKeyDown,
-    resetContractPnlPanelSize
   } = useDashboardPanelResize({
     analyst: { analystPanelWidth, analystPanelPosition, analystPanelResizeEdge, setAnalystPanelWidth },
-    contractPnl: { contractPnlPanelWidth, contractPnlPanelRightExtension, contractPnlPanelDisplayedWidth, setContractPnlPanelWidth, setContractPnlPanelRightExtension, setContractPnlSizeCustomized, showContractPnl, contractPnlOverlay },
   });
   const [showBookMenu, setShowBookMenu] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
@@ -348,7 +280,6 @@ const PortfolioDashboard = ({
     () => refreshEtfProResource(),
     [refreshEtfProResource],
   );
-  const predictionMarketIndicators = useDashboardPredictionIndicators();
   const { currentMarketResource, periodReturnsResource } = useDashboardOverviewResources({ surfaceActive });
   const multiRegionMarketData = useMemo(() => (
     currentMarketResource.data
@@ -389,23 +320,6 @@ const PortfolioDashboard = ({
           fetcher: () => MarketDataService.getHedgeyeEtfPro(),
         }),
       },
-      ...PREDICTION_MONITOR_NAV_ITEMS.map(({ marketId }) => {
-        const monitorContext = canonicalPredictionMonitorContext({
-          marketId,
-          venue: 'auto',
-          generationId: null,
-        });
-        return {
-          key: `resource:prediction-monitor:${marketId}`,
-          run: ({ signal }) => warmDashboardResource('prediction-monitor', monitorContext, {
-            fetcher: () => predictionMarketTestService.getMonitor(marketId, {
-              signal,
-              venue: monitorContext.venue,
-              generationId: monitorContext.generationId,
-            }),
-          }),
-        };
-      }),
     ];
 
     const tasks = [...DASHBOARD_LAZY_WARMUPS, ...resourceWarmups];
@@ -414,19 +328,12 @@ const PortfolioDashboard = ({
     // enqueue any other surface without loading every monitor on each visit.
     const restoredKeys = [...(persistedPanelState.sidebarPanelStack || [])]
       .flatMap((panel) => PANEL_WARMUP_TASK_KEYS[panel] || []);
-    if (persistedPanelState.showPredictionMonitor) {
-      restoredKeys.push('chunk:prediction-monitor', `resource:prediction-monitor:${activePredictionMonitorMarket}`);
-    }
     tasks.filter((task) => restoredKeys.includes(task.key)).forEach((task) => {
       queue.enqueue(task).catch(() => {});
     });
-  }, [activePredictionMonitorMarket, dashboardInitialSettled, persistedPanelState, surfaceActive]);
+  }, [dashboardInitialSettled, persistedPanelState, surfaceActive]);
   const warmNavigationItem = useCallback((id) => {
-    if (id.startsWith('predictionMonitor-')) {
-      promoteDashboardWarmups(['chunk:prediction-monitor', `resource:prediction-monitor:${id.slice('predictionMonitor-'.length)}`]);
-    } else {
-      promoteDashboardWarmups(PANEL_WARMUP_TASK_KEYS[id] || []);
-    }
+    promoteDashboardWarmups(PANEL_WARMUP_TASK_KEYS[id] || []);
   }, [promoteDashboardWarmups]);
 
   const [bookContentMap, setBookContentMap] = useState(null);
@@ -461,8 +368,7 @@ const PortfolioDashboard = ({
   useEffect(() => {
     if (isProcessOpen || (!showAnalyst && !showMorningTldr)) return;
     setShowPortfolioBalance(false);
-    setShowContractPnl(false);
-  }, [isProcessOpen, setShowContractPnl, setShowPortfolioBalance, showAnalyst, showMorningTldr]);
+  }, [isProcessOpen, setShowPortfolioBalance, showAnalyst, showMorningTldr]);
 
 
 
@@ -473,7 +379,6 @@ const PortfolioDashboard = ({
 
       if (nextVisible) {
         setShowPortfolioBalance(false);
-        setShowContractPnl(false);
         bringSidebarPanelToFront(panelKey);
       } else {
         removeSidebarPanelFromStack(panelKey);
@@ -481,7 +386,7 @@ const PortfolioDashboard = ({
 
       return nextVisible;
     });
-  }, [bringSidebarPanelToFront, promoteDashboardWarmups, removeSidebarPanelFromStack, setShowContractPnl, setShowPortfolioBalance]);
+  }, [bringSidebarPanelToFront, promoteDashboardWarmups, removeSidebarPanelFromStack, setShowPortfolioBalance]);
 
   const setAnalystPanelDock = useCallback((position) => {
     const nextPosition = normalizeAnalystPanelPosition(position);
@@ -498,42 +403,6 @@ const PortfolioDashboard = ({
   const closeExposureLab = useCallback(() => {
     closeSidebarPanel('exposureLab', setShowExposureLab);
   }, [closeSidebarPanel, setShowExposureLab]);
-
-  const closePredictionMonitor = useCallback(() => {
-    setShowPredictionMonitor(false);
-    removeSidebarPanelFromStack('predictionMonitor');
-  }, [removeSidebarPanelFromStack, setShowPredictionMonitor]);
-
-  const togglePredictionMonitor = useCallback((marketId) => {
-    if (!PREDICTION_MONITOR_MARKETS.has(marketId)) return;
-    promoteDashboardWarmups([
-      'chunk:prediction-monitor',
-      `resource:prediction-monitor:${marketId}`,
-    ]);
-    if (showPredictionMonitor && activePredictionMonitorMarket === marketId) {
-      closePredictionMonitor();
-      return;
-    }
-    setShowPortfolioBalance(false);
-    setShowContractPnl(false);
-    setActivePredictionMonitorMarket(marketId);
-    setShowPredictionMonitor(true);
-    bringSidebarPanelToFront('predictionMonitor');
-  }, [activePredictionMonitorMarket, bringSidebarPanelToFront, closePredictionMonitor, promoteDashboardWarmups, setActivePredictionMonitorMarket, setShowContractPnl, setShowPortfolioBalance, setShowPredictionMonitor, showPredictionMonitor]);
-
-
-  const togglePortfolioBalance = useCallback(() => {
-    setShowContractPnl(false);
-    setShowPortfolioBalance((isVisible) => !isVisible);
-  }, [setShowContractPnl, setShowPortfolioBalance]);
-
-  const toggleContractPnl = useCallback(() => {
-    if (!showContractPnl) {
-      const defaultWidth = prepareContractPnlOverlay();
-      if (!contractPnlSizeCustomized) setContractPnlPanelWidth(defaultWidth);
-    }
-    setShowContractPnl((isVisible) => !isVisible);
-  }, [contractPnlSizeCustomized, prepareContractPnlOverlay, setContractPnlPanelWidth, setShowContractPnl, showContractPnl]);
 
 
 
@@ -554,10 +423,7 @@ const PortfolioDashboard = ({
       showAnalyst && 'analyst',
       showPortfolioBreakdown && 'portfolio',
       showExposureLab && 'exposureLab',
-      showBitcoinResearch && 'bitcoinResearch',
       showPortfolioBalance && 'balance',
-      showContractPnl && 'contractPnl',
-      showPredictionMonitor && `predictionMonitor-${activePredictionMonitorMarket}`,
     ].filter(Boolean);
   }, [
     isProcessOpen,
@@ -565,13 +431,9 @@ const PortfolioDashboard = ({
     isExposureGuideOpen,
     showAnalyst,
     showMorningTldr,
-    showContractPnl,
     showPortfolioBalance,
     showPortfolioBreakdown,
     showExposureLab,
-    showBitcoinResearch,
-    showPredictionMonitor,
-    activePredictionMonitorMarket,
     showSystemReadiness,
   ]);
 
@@ -581,27 +443,25 @@ const PortfolioDashboard = ({
       if (isExposureGuideOpen) return 'exposureGuide';
       return 'process';
     }
-    if (showContractPnl) return 'contractPnl';
     if (showPortfolioBalance) return 'balance';
 
     return [...sidebarPanelStack]
       .reverse()
-      .map((panelKey) => panelKey === 'predictionMonitor'
-        ? `predictionMonitor-${activePredictionMonitorMarket}`
-        : panelKey)
       .find((panelKey) => activeNavigationItemIds.includes(panelKey))
       || activeNavigationItemIds[activeNavigationItemIds.length - 1]
       || null;
   }, [
     activeNavigationItemIds,
-    activePredictionMonitorMarket,
     isProcessOpen,
     isDashboardGuideOpen,
     isExposureGuideOpen,
-    showContractPnl,
     showPortfolioBalance,
     sidebarPanelStack,
   ]);
+
+  const togglePortfolioBalance = useCallback(() => {
+    setShowPortfolioBalance((isVisible) => !isVisible);
+  }, [setShowPortfolioBalance]);
 
   const navigationItems = useMemo(() => [
     {
@@ -612,16 +472,6 @@ const PortfolioDashboard = ({
       description: 'Core system status and health',
       title: 'Systems',
       onSelect: () => toggleSidebarPanel('system', setShowSystemReadiness),
-    },
-    {
-      id: 'x',
-      group: 'primary',
-      icon: 'x',
-      label: 'X.com',
-      description: 'Monitor X.com activity',
-      title: 'Open X (Twitter) List',
-      external: true,
-      onSelect: () => window.open('https://x.com/i/lists/1986465259113357401', '_blank', 'noopener,noreferrer'),
     },
     ANALYST_NAVIGATION.showLegacyTldr
       ? {
@@ -674,7 +524,7 @@ const PortfolioDashboard = ({
       id: 'dashboardGuide',
       group: 'primary',
       icon: FileText,
-      label: 'Dashboard Guide',
+      label: 'Dashboard',
       description: 'How to read every front-page card and calculation',
       title: 'Dashboard Guide',
       buttonRef: dashboardGuideButtonRef,
@@ -696,7 +546,7 @@ const PortfolioDashboard = ({
       id: 'exposureGuide',
       group: 'primary',
       icon: FileText,
-      label: 'PCA Guide',
+      label: 'PCA',
       description: 'How to read PCA concentration and compare candidate changes',
       title: 'PCA Guide',
       buttonRef: exposureGuideButtonRef,
@@ -726,15 +576,6 @@ const PortfolioDashboard = ({
       onAnalystPanelPositionChange: setAnalystPanelDock,
     },
     {
-      id: 'bitcoinResearch',
-      group: 'primary',
-      icon: FileText,
-      label: 'Bitcoin Research',
-      description: 'Historical BTC entry ranges, regimes and dollar conditions',
-      title: 'Bitcoin Research',
-      onSelect: () => toggleSidebarPanel('bitcoinResearch', setShowBitcoinResearch),
-    },
-    {
       id: 'portfolio',
       group: 'primary',
       icon: PieChart,
@@ -742,15 +583,6 @@ const PortfolioDashboard = ({
       description: 'Track performance and exposure',
       title: 'Portfolio Breakdown',
       onSelect: () => toggleSidebarPanel('portfolio', setShowPortfolioBreakdown),
-    },
-    {
-      id: 'exposureLab',
-      group: 'primary',
-      icon: Table2,
-      label: 'PCA',
-      description: 'Portfolio concentration and common risk exposures',
-      title: 'PCA',
-      onSelect: () => toggleSidebarPanel('exposureLab', setShowExposureLab),
     },
     {
       id: 'balance',
@@ -761,32 +593,7 @@ const PortfolioDashboard = ({
       title: 'Portfolio balance',
       onSelect: togglePortfolioBalance,
     },
-    {
-      id: 'contractPnl',
-      group: 'primary',
-      icon: FileText,
-      label: 'Contract P&L',
-      description: 'Prediction-market contract profit and loss',
-      title: 'Contract P&L',
-      onSelect: toggleContractPnl,
-    },
-    ...PREDICTION_MONITOR_NAV_ITEMS.map(({ marketId, label, menuGroup, sectionLabel, indicatorMarketId, description }) => {
-      const indicator = indicatorMarketId ? predictionMarketIndicators[indicatorMarketId] : null;
-      return {
-        id: `predictionMonitor-${marketId}`,
-        group: 'primary',
-        menuGroup,
-        sectionLabel,
-        icon: Target,
-        label,
-        description,
-        title: `${label} Prediction Monitor`,
-        indicatorTone: indicator?.tone,
-        indicatorDescription: indicator?.description,
-        onSelect: () => togglePredictionMonitor(marketId),
-      };
-    }),
-  ].filter(Boolean), [selectedAnalystPanelPosition, setAnalystPanelDock, togglePortfolioBalance, toggleContractPnl, toggleSidebarPanel, setShowSystemReadiness, setShowMorningTldr, setShowAnalyst, isDashboardGuideOpen, isExposureGuideOpen, isProcessOpen, openProcess, onNavigateProcess, onCloseProcess, setShowPortfolioBreakdown, setShowExposureLab, setShowBitcoinResearch, predictionMarketIndicators, togglePredictionMonitor]);
+  ].filter(Boolean), [selectedAnalystPanelPosition, setAnalystPanelDock, togglePortfolioBalance, toggleSidebarPanel, setShowSystemReadiness, setShowMorningTldr, setShowAnalyst, isDashboardGuideOpen, isExposureGuideOpen, isProcessOpen, openProcess, onNavigateProcess, onCloseProcess, setShowPortfolioBreakdown]);
 
 
   const handleSystemReadinessStatus = useCallback((status) => {
@@ -1094,10 +901,8 @@ const PortfolioDashboard = ({
   // the same front window the browser paints above the shared backdrop.
   const workspaceLayers = [
     ['performance', showPerformanceTracking, setShowPerformanceTracking],
-    ['bitcoinResearch', showBitcoinResearch, setShowBitcoinResearch],
     ['portfolio', showPortfolioBreakdown, setShowPortfolioBreakdown],
     ['exposureLab', showExposureLab, setShowExposureLab],
-    ['predictionMonitor', showPredictionMonitor, setShowPredictionMonitor],
     ['analyst', showAnalyst, setShowAnalyst],
     ['ss', showSignalStrength, setShowSignalStrength],
     ['etfPro', showEtfPro, setShowEtfPro],
@@ -1109,14 +914,9 @@ const PortfolioDashboard = ({
     zIndex: getSidebarPanelZIndex(key, visible),
     close: () => closeSidebarPanel(key, setVisible),
   }));
-  [
-    [showPortfolioBalance, setShowPortfolioBalance],
-    [showContractPnl, setShowContractPnl],
-  ].forEach(([visible, setVisible]) => {
-    if (visible) workspaceLayers.push({
-      zIndex: SIDEBAR_PANEL_Z_INDEX_BASE + sidebarPanelStack.length + 1,
-      close: () => setVisible(false),
-    });
+  if (showPortfolioBalance) workspaceLayers.push({
+    zIndex: SIDEBAR_PANEL_Z_INDEX_BASE + sidebarPanelStack.length + 1,
+    close: () => setShowPortfolioBalance(false),
   });
   const frontWorkspace = workspaceLayers.reduce((front, layer) => (
     !front || layer.zIndex >= front.zIndex ? layer : front
@@ -1201,7 +1001,7 @@ const PortfolioDashboard = ({
                   event.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                {bookContentLoading ? 'Loading...' : file.name}
+                {bookContentLoading ? <LoadingIndicator label="Loading..." size="sm" /> : file.name}
               </button>
             ))}
           </div>
@@ -1240,26 +1040,11 @@ const PortfolioDashboard = ({
 
       <DashboardBalancePanel
         showPortfolioBalance={showPortfolioBalance}
-        showContractPnl={showContractPnl}
         sidebarPanelStack={sidebarPanelStack}
         setShowPortfolioBalance={setShowPortfolioBalance}
       >
         <Suspense fallback={<LazyPanelFallback label="Loading balance..." />}><PortfolioBalanceScenarioPlanner accountId={selectedAccount} /></Suspense>
       </DashboardBalancePanel>
-
-      <DashboardContractPnlPanel
-        showContractPnl={showContractPnl}
-        contractPnlPanelSurfaceRef={contractPnlPanelSurfaceRef}
-        contractPnlPanelResizing={contractPnlPanelResizing}
-        sidebarPanelStack={sidebarPanelStack}
-        contractPnlPanelDisplayedWidth={contractPnlPanelDisplayedWidth}
-        beginContractPnlPanelResize={beginContractPnlPanelResize}
-        handleContractPnlPanelResizeKeyDown={handleContractPnlPanelResizeKeyDown}
-        resetContractPnlPanelSize={resetContractPnlPanelSize}
-        setShowContractPnl={setShowContractPnl}
-      >
-        <Suspense fallback={<LazyPanelFallback label="Loading Contract P&L..." />}><PredictionMarketPerformanceCard accountId={selectedAccount} /></Suspense>
-      </DashboardContractPnlPanel>
 
       {/* Book/Notes Modal */}
       <DashboardBookReader
@@ -1283,7 +1068,6 @@ const PortfolioDashboard = ({
       {/* Securities A–Z list panel */}
       <DashboardPerformancePanel
         showPerformanceTracking={showPerformanceTracking}
-        showContractPnl={showContractPnl}
         getSidebarPanelZIndex={getSidebarPanelZIndex}
         closeSidebarPanel={closeSidebarPanel}
         setShowPerformanceTracking={setShowPerformanceTracking}
@@ -1294,24 +1078,8 @@ const PortfolioDashboard = ({
       </DashboardPerformancePanel>
 
       {/* Portfolio Breakdown Panel */}
-      <DashboardWorkspaceWindow
-        size="wide"
-        aria-label="Bitcoin Research"
-        manageFocus
-        active={showBitcoinResearch}
-        occluded={showContractPnl}
-        data-testid="bitcoin-research-panel"
-        data-layout="centered-workspace"
-        style={{ zIndex: getSidebarPanelZIndex('bitcoinResearch', showBitcoinResearch) }}
-      >
-        <Suspense fallback={<LazyPanelFallback label="Loading Bitcoin Research…" />}>
-          <BitcoinResearch onClose={() => closeSidebarPanel('bitcoinResearch', setShowBitcoinResearch)} />
-        </Suspense>
-      </DashboardWorkspaceWindow>
-
       <DashboardPortfolioPanel
         showPortfolioBreakdown={showPortfolioBreakdown}
-        showContractPnl={showContractPnl}
         getSidebarPanelZIndex={getSidebarPanelZIndex}
       >
         <Suspense fallback={<LazyPanelFallback label="Loading portfolio breakdown..." />}>
@@ -1328,7 +1096,6 @@ const PortfolioDashboard = ({
       {/* Independent post-close portfolio risk, retaining the saved workspace identity. */}
       <DashboardExposurePanel
         showExposureLab={showExposureLab}
-        showContractPnl={showContractPnl}
         getSidebarPanelZIndex={getSidebarPanelZIndex}
       >
         <Suspense fallback={<LazyPanelFallback label="Loading PCA..." />}>
@@ -1344,42 +1111,6 @@ const PortfolioDashboard = ({
             />
           </Suspense>
       </DashboardExposurePanel>
-
-      {/* Each market owns a persistent instance so switching markets never
-          mutates and clears a shared monitor component. */}
-      <DashboardPredictionWorkspace
-        showPredictionMonitor={showPredictionMonitor}
-        showContractPnl={showContractPnl}
-        getSidebarPanelZIndex={getSidebarPanelZIndex}
-      >
-        <Suspense fallback={<LazyPanelFallback label="Loading prediction monitor..." />}>
-            {PREDICTION_MONITOR_NAV_ITEMS.map(({ marketId }) => (
-              <PersistentSurface
-                manageFocus
-                key={marketId}
-                active={showPredictionMonitor && activePredictionMonitorMarket === marketId}
-                preserveLayoutWhenInactive
-                data-testid={`prediction-market-surface-${marketId}`}
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  minHeight: 0,
-                  overflow: 'hidden',
-                }}
-              >
-                <PredictionMarketResolverTestPanel
-                  marketId={marketId}
-                  onMarketChange={togglePredictionMonitor}
-                  onClose={closePredictionMonitor}
-                  portfolioData={portfolioData}
-                  selectedAccount={selectedAccount}
-                />
-              </PersistentSurface>
-            ))}
-          </Suspense>
-      </DashboardPredictionWorkspace>
 
       {/* Morning TL;DR - indexed dated research brief */}
       <PersistentSurface manageFocus active={showMorningTldr}>
@@ -1412,7 +1143,6 @@ const PortfolioDashboard = ({
       {/* Signal Strength Reference Panel */}
       <DashboardSignalStrengthPanel
         showSignalStrength={showSignalStrength}
-        showContractPnl={showContractPnl}
         getSidebarPanelZIndex={getSidebarPanelZIndex}
       >
         <Suspense fallback={<LazyPanelFallback label="Loading SS..." />}>
@@ -1429,7 +1159,6 @@ const PortfolioDashboard = ({
       {/* ETF Pro Reference Panel */}
       <DashboardEtfProPanel
         showEtfPro={showEtfPro}
-        showContractPnl={showContractPnl}
         getSidebarPanelZIndex={getSidebarPanelZIndex}
       >
         <Suspense fallback={<LazyPanelFallback label="Loading ETF Pro..." />}>
@@ -1447,7 +1176,6 @@ const PortfolioDashboard = ({
       {/* Macro Show Reference Panel */}
       <DashboardMacroShowPanel
         showMacroShow={showMacroShow}
-        showContractPnl={showContractPnl}
         getSidebarPanelZIndex={getSidebarPanelZIndex}
       >
         <Suspense fallback={<LazyPanelFallback label="Loading Macro Show..." />}>
@@ -1462,7 +1190,6 @@ const PortfolioDashboard = ({
       {/* Call Reference Panel */}
       <DashboardCallPanel
         showCall={showCall}
-        showContractPnl={showContractPnl}
         getSidebarPanelZIndex={getSidebarPanelZIndex}
       >
         <Suspense fallback={<LazyPanelFallback label="Loading Call..." />}>
@@ -1486,7 +1213,6 @@ const PortfolioDashboard = ({
               onClose={() => closeSidebarPanel('system', setShowSystemReadiness)}
               onStatusChange={handleSystemReadinessStatus}
               dashboardCards={dashboardCardStatuses}
-              resolverMarketId={showPredictionMonitor ? activePredictionMonitorMarket : null}
             />
           </Suspense>
       </DashboardSystemPanel>
@@ -1494,7 +1220,6 @@ const PortfolioDashboard = ({
       {/* Workflow Status Panel */}
       <DashboardWorkflowPanel
         showWorkflowStatus={showWorkflowStatus}
-        showContractPnl={showContractPnl}
         getSidebarPanelZIndex={getSidebarPanelZIndex}
         closeSidebarPanel={closeSidebarPanel}
         setShowWorkflowStatus={setShowWorkflowStatus}

@@ -3,7 +3,6 @@ import DashboardWorkspaceWindow from './DashboardWorkspaceWindow';
 
 export default function DashboardEtfProPanel({
   showEtfPro,
-  showContractPnl,
   getSidebarPanelZIndex,
   children
 }) {
@@ -13,8 +12,6 @@ export default function DashboardEtfProPanel({
         aria-label="ETF Pro"
         manageFocus
         active={showEtfPro}
-        occluded={showContractPnl}
-        data-contract-pnl-coverable="true"
         style={{
           zIndex: getSidebarPanelZIndex('etfPro', showEtfPro),
         }}

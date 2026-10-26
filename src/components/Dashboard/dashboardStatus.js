@@ -6,12 +6,12 @@ export const DASHBOARD_CARD_DEFINITIONS = Object.freeze([
   }),
   Object.freeze({
     id: 'usd',
-    label: 'USD',
+    label: 'Dollar',
     summary: 'Currencies + correlations',
   }),
   Object.freeze({
     id: 'market-backdrop',
-    label: 'Market Backdrop',
+    label: 'Global Markets',
     summary: 'Global markets + returns',
   }),
   Object.freeze({
@@ -30,19 +30,9 @@ export const DASHBOARD_CARD_DEFINITIONS = Object.freeze([
     summary: 'Published macro readings',
   }),
   Object.freeze({
-    id: 'dollar-liquidity',
-    label: 'Dollar Liquidity',
-    summary: 'Liquidity models',
-  }),
-  Object.freeze({
-    id: 'volume',
-    label: 'Volume',
-    summary: 'Cboe consolidated volume',
-  }),
-  Object.freeze({
     id: 'money-flow',
     label: 'Money Flow',
-    summary: 'Net liquidity confirmed by volume',
+    summary: 'Liquidity, volume and positioning',
   }),
 ]);
 

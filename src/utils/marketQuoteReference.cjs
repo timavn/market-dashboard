@@ -1,6 +1,6 @@
 // Shared provenance checks for the dashboard's dated, non-executable readings.
 const ALLOWED_SOURCES = new Set(['ibkr', 'yahoo', 'fred', 'stooq', 'derived', 'trading_economics',
-  'bundesbank', 'japan_mof', 'bank_of_england']);
+  'bundesbank', 'japan_mof', 'bank_of_england', 'us_treasury', 'cnbc']);
 const VERIFIED_AVAILABILITIES = new Set(['current', 'delayed', 'historical']);
 const SYNTHETIC_EVIDENCE = /mock|seed|synthetic|inferred|portfolio-derived|cost-basis/i;
 const FAILED_EVIDENCE = /stale|expired|offline|disconnected|cache|not[_ -]?entitled|unentitled/i;

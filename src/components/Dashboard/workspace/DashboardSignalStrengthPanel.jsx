@@ -3,7 +3,6 @@ import DashboardWorkspaceWindow from './DashboardWorkspaceWindow';
 
 export default function DashboardSignalStrengthPanel({
   showSignalStrength,
-  showContractPnl,
   getSidebarPanelZIndex,
   children
 }) {
@@ -13,8 +12,6 @@ export default function DashboardSignalStrengthPanel({
         aria-label="Signal Strength"
         manageFocus
         active={showSignalStrength}
-        occluded={showContractPnl}
-        data-contract-pnl-coverable="true"
         style={{
           zIndex: getSidebarPanelZIndex('ss', showSignalStrength),
         }}

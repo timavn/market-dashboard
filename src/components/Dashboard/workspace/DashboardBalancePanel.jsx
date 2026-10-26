@@ -4,7 +4,6 @@ import { SIDEBAR_PANEL_Z_INDEX_BASE } from '../../../constants/dashboardWorkspac
 
 export default function DashboardBalancePanel({
   showPortfolioBalance,
-  showContractPnl,
   sidebarPanelStack,
   setShowPortfolioBalance,
   children
@@ -15,13 +14,10 @@ export default function DashboardBalancePanel({
         manageFocus
         as="section"
         active={showPortfolioBalance}
-        occluded={showContractPnl}
-        data-contract-pnl-coverable="true"
         className="dashboard-navigation-rail__balance-panel"
         style={{
           zIndex: SIDEBAR_PANEL_Z_INDEX_BASE + sidebarPanelStack.length + 1,
           '--dashboard-balance-panel-width': '295px',
-          '--dashboard-contract-pnl-right-extension': '0px',
         }}
         data-testid="portfolio-balance-planner-slot"
         aria-label="Balance"

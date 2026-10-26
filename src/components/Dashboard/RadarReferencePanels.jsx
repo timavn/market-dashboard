@@ -5,8 +5,7 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import CFTCNetLongCard, { getCftcFreshness } from './CFTCNetLongCard';
 import DelayedDataMarker from './DelayedDataMarker';
 import { delayedMarkerMarketContext } from '../../utils/delayedMarkerMarketContext';
-import DollarLiquidityModels from './DollarLiquidityModels';
-import MoneyFlowPanel, { MoneyFlowPreview } from './MoneyFlowPanel';
+import MoneyFlowPanel, { MoneyFlowPreview, VerdictPill } from './MoneyFlowPanel';
 import GlobalQuadsCard, { QuadsPreview } from './GlobalQuadsCard';
 import { useGlobalQuads } from '../../hooks/useGlobalQuads';
 import MarketSituationReportCard, {
@@ -33,8 +32,6 @@ const PANEL_TITLES = {
   cftc: 'CFTC Positioning',
   situation: 'Market Situation',
   quads: 'Global Quads',
-  liquidity: 'Dollar Liquidity',
-  volume: 'Volume',
   'money-flow': 'Money Flow',
 };
 
@@ -288,26 +285,6 @@ const CftcPreview = ({ data, refreshFailed = false }) => {
   );
 };
 
-const LiquidityPreview = ({ data }) => {
-  const global = data?.models?.global?.latest;
-  const us = data?.models?.us?.latest;
-  if (!global && !us) return <EmptyPreview />;
-  const rows = [
-    ['Global risk score', global?.riskScore, (value) => `${formatNumber(value, 1)}/100`],
-    ['Global M2 / GDP', global?.m2ToGdp, (value) => formatNumber(value, 3)],
-    ['U.S. stack / GDP', us?.stackToGdp, (value) => formatNumber(value, 3)],
-    ['Global regime', global?.regime, (value) => value || '—'],
-    ['U.S. regime', us?.regime, (value) => value || '—'],
-    ['U.S. liquidity growth · 3M', us?.growth?.['3m'], (value) => isFiniteNumber(value) ? formatSigned(Number(value) * 100, '%') : '—'],
-  ];
-  return (
-    <table className="efr-mini-table">
-      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-      <tbody>{rows.map(([label, value, formatter]) => <tr key={label}><td>{label}</td><td>{formatter(value)}</td></tr>)}</tbody>
-    </table>
-  );
-};
-
 const FullReferencePanel = ({
   activePanel,
   onClose,
@@ -316,7 +293,6 @@ const FullReferencePanel = ({
   liquidityState,
   moneyFlowState,
   quadsResource,
-  volumeTitle,
 }) => {
   const dialogRef = useRef(null);
   const titleButtonRef = useRef(null);
@@ -368,7 +344,7 @@ const FullReferencePanel = ({
       role="presentation"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <section ref={dialogRef} className={`dashboard-table-dialog efr-reference-dialog${(activePanel || lastPanel) === 'quads' ? ' efr-reference-dialog--quads' : ''}${(activePanel || lastPanel) === 'volume' ? ' efr-reference-dialog--volume' : ''}${(activePanel || lastPanel) === 'cftc' ? ' efr-reference-dialog--cftc' : ''}`} role="dialog" aria-modal="true" aria-labelledby="efr-reference-dialog-title">
+      <section ref={dialogRef} className={`dashboard-table-dialog efr-reference-dialog${(activePanel || lastPanel) === 'quads' ? ' efr-reference-dialog--quads' : ''}${(activePanel || lastPanel) === 'cftc' ? ' efr-reference-dialog--cftc' : ''}`} role="dialog" aria-modal="true" aria-labelledby="efr-reference-dialog-title">
         <header className="efr-reference-dialog__header dashboard-table-dialog__header">
           <h2 id="efr-reference-dialog-title">
             <button
@@ -378,7 +354,7 @@ const FullReferencePanel = ({
               onClick={onClose}
               title={`Close ${PANEL_TITLES[activePanel || lastPanel] || 'reference panel'}`}
             >
-              {(activePanel || lastPanel) === 'volume' ? volumeTitle : PANEL_TITLES[activePanel || lastPanel]}
+              {PANEL_TITLES[activePanel || lastPanel]}
             </button>
           </h2>
         </header>
@@ -397,14 +373,8 @@ const FullReferencePanel = ({
           <PersistentSurface active={activePanel === 'quads'}>
             <GlobalQuadsCard resourceState={quadsResource} />
           </PersistentSurface>
-          <PersistentSurface active={activePanel === 'liquidity'}>
-            <DollarLiquidityModels resourceState={liquidityState} />
-          </PersistentSurface>
-          <PersistentSurface active={activePanel === 'volume'}>
-            <MarketVolumeTable showDetails showAsOf={false} />
-          </PersistentSurface>
           <PersistentSurface active={activePanel === 'money-flow'}>
-            <MoneyFlowPanel resourceState={moneyFlowState} />
+            <MoneyFlowPanel resourceState={moneyFlowState} liquidityState={liquidityState} />
           </PersistentSurface>
         </div>
       </section>
@@ -443,14 +413,13 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     active: true,
   });
   const situationResource = useMarketStructureReport({ active: true });
+  // The monthly U.S. stack detail only appears in Money Flow's expanded view.
   const liquidityResource = useDashboardResource('dollar-liquidity', {}, {
     fetcher: loadLiquidity,
     validate: requireReferenceObject,
-    getObservedAt: (payload) => (
-      payload?.models?.us?.latest?.date || payload?.models?.global?.latest?.date || null
-    ),
+    getObservedAt: (payload) => payload?.models?.us?.latest?.date || null,
     pollIntervalMs: ANALYTICS_REFRESH_MS,
-    active: true,
+    active: activePanel === 'money-flow',
   });
   const moneyFlowResource = useDashboardResource('money-flow', {}, {
     fetcher: loadMoneyFlow,
@@ -502,31 +471,17 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
   const marketSituationDate = marketSituationState.data?.date
     || marketSituationState.data?.publishedAt
     || null;
-  const liquidityDate =
-    liquidityState.data?.models?.us?.latest?.date ||
-    liquidityState.data?.models?.global?.latest?.date ||
-    null;
   const cftcAvailable = Array.isArray(cftcState.data?.data) && cftcState.data.data.length > 0;
   const cftcOfficial = cftcState.data?.source === 'cftc-public-reporting-environment';
   const cftcDecisionEligible = cftcState.data?.decisionEligible === true;
   const cftcPartial = cftcOfficial
     && cftcDecisionEligible
     && cftcState.data?.contentComplete !== true;
-  const liquidityAvailable = Boolean(
-    liquidityState.data?.models?.global?.latest || liquidityState.data?.models?.us?.latest
-  );
-  const liquidityGlobalModel = liquidityState.data?.models?.global?.latest;
-  const liquidityUsModel = liquidityState.data?.models?.us?.latest;
   const cftcAgeMs = cftcDate ? Date.now() - new Date(`${String(cftcDate).slice(0, 10)}T23:59:59Z`).getTime() : Infinity;
   const cftcStale = cftcAvailable && (
     !Number.isFinite(cftcAgeMs)
     || cftcAgeMs > 10 * 24 * 60 * 60 * 1000
     || cftcState.data?.cacheState === 'stale'
-  );
-  const liquidityPartial = liquidityAvailable && (
-    liquidityState.data?.models?.global?.status === 'partial' ||
-    liquidityState.data?.models?.us?.status === 'partial' ||
-    liquidityState.data?.models?.us?.components?.some?.((component) => component.provisional)
   );
   const volumeStatus = useMemo(() => {
     if (!volumeMeta.sources.length) return 'loading';
@@ -565,25 +520,27 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
   const situationStatus = marketSituationState.loading
     ? 'loading'
     : marketSituationFreshness.status;
-  const liquidityStatus = liquidityState.loading
-    ? 'loading'
-    : liquidityPartial
-      ? 'delayed'
-      : liquidityAvailable
-        ? 'historical'
-        : 'unavailable';
   const moneyFlowDate = moneyFlowState.data?.layers?.participation?.asOf
     || moneyFlowState.data?.layers?.netLiquidity?.latest?.date
     || null;
   const moneyFlowVerdict = moneyFlowState.data?.verdict || null;
   const moneyFlowStale = moneyFlowState.data?.layers?.netLiquidity?.status === 'stale';
-  const moneyFlowStatus = moneyFlowState.loading
+  const moneyFlowSupplyStatus = moneyFlowState.loading
     ? 'loading'
     : !moneyFlowVerdict || moneyFlowVerdict === 'unavailable'
       ? 'unavailable'
       : moneyFlowStale
         ? 'delayed'
         : 'historical';
+  // The card carries both the verdict and the exchange-volume table, so one
+  // missing half reads as mixed rather than hiding the other.
+  const moneyFlowStatus = moneyFlowSupplyStatus === 'loading'
+    ? 'loading'
+    : moneyFlowSupplyStatus === 'unavailable'
+      ? (['historical', 'mixed'].includes(volumeStatus) ? 'mixed' : 'unavailable')
+      : volumeStatus === 'unavailable' || volumeStatus === 'mixed'
+        ? 'mixed'
+        : moneyFlowSupplyStatus;
   const dashboardCardStatuses = useMemo(() => [
     {
       id: 'cftc-positioning',
@@ -639,36 +596,6 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
       ],
     },
     {
-      id: 'dollar-liquidity',
-      status: liquidityStatus,
-      date: liquidityDate ? formatDate(liquidityDate) : undefined,
-      sourceDate: liquidityDate || undefined,
-      statusLabel: liquidityPartial ? 'PARTIAL' : undefined,
-      detail: liquidityDate ? `${liquidityPartial ? 'AS OF ' : ''}${formatDate(liquidityDate)}` : undefined,
-      diagnostics: [
-        { label: 'Models', value: `${liquidityAvailable ? [liquidityGlobalModel, liquidityUsModel].filter(Boolean).length : 0}/2 available` },
-        { label: 'As of', value: liquidityDate ? formatDate(liquidityDate) : 'Unavailable' },
-      ],
-      issues: [
-        liquidityState.error ? `Liquidity request: ${liquidityState.error}` : null,
-        liquidityPartial ? 'Some liquidity model inputs are provisional or incomplete.' : null,
-      ].filter(Boolean),
-    },
-    {
-      id: 'volume',
-      status: volumeStatus,
-      date: volumeMeta.asOf ? formatDate(volumeMeta.asOf) : undefined,
-      sourceDate: volumeMeta.asOf || undefined,
-      detail: volumeMeta.asOf
-        ? `AS OF ${formatDate(volumeMeta.asOf) || String(volumeMeta.asOf).toUpperCase()}`
-        : undefined,
-      diagnostics: [
-        { label: 'Sources', value: `${volumeMeta.sources.length}` },
-        { label: 'Dataset', value: volumeMeta.datasetStatus || 'Checking' },
-      ],
-      issues: volumeSourceIssues,
-    },
-    {
       id: 'money-flow',
       status: moneyFlowStatus,
       date: moneyFlowDate ? formatDate(moneyFlowDate) : undefined,
@@ -678,11 +605,13 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
       diagnostics: [
         { label: 'Verdict', value: moneyFlowVerdict || 'Checking' },
         { label: 'Net liquidity', value: moneyFlowState.data?.layers?.netLiquidity?.latest?.date || 'Unavailable' },
+        { label: 'Volume', value: volumeMeta.asOf ? formatDate(volumeMeta.asOf) : volumeMeta.datasetStatus || 'Checking' },
       ],
       issues: [
         moneyFlowState.error ? `Money flow request: ${moneyFlowState.error}` : null,
         moneyFlowStale ? 'The latest weekly Fed release is older than expected.' : null,
         ...(moneyFlowVerdict === 'unavailable' ? moneyFlowState.data?.reasons || [] : []),
+        ...volumeSourceIssues,
       ].filter(Boolean),
     },
   ], [
@@ -701,13 +630,6 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     cftcState.data,
     cftcState.error,
     cftcStatus,
-    liquidityAvailable,
-    liquidityDate,
-    liquidityGlobalModel,
-    liquidityPartial,
-    liquidityState.error,
-    liquidityStatus,
-    liquidityUsModel,
     marketSituationDate,
     marketSituationFreshness.detail,
     marketSituationFreshness.label,
@@ -719,7 +641,6 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     situationStatus,
     volumeMeta,
     volumeSourceIssues,
-    volumeStatus,
   ]);
 
   useEffect(() => {
@@ -755,33 +676,27 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
             <QuadsPreview snapshot={quadsResource.data} loading={quadsResource.initialLoading} />
           </PreviewCard>
           <PreviewCard
-            id="liquidity"
-            title="Dollar Liquidity"
-            status={liquidityStatus}
-            onOpen={openPanel}
-          >
-            <LiquidityPreview data={liquidityState.data} />
-            <PreviewCard
-              id="volume"
-              title={volumeTitle}
-              status={volumeStatus}
-              onOpen={openPanel}
-            >
-              <MarketVolumeTable
-                onSourcesChange={handleVolumeSources}
-                onHeaderNoteChange={handleVolumeHeader}
-                onMetadataChange={handleVolumeMetadata}
-                showAsOf={false}
-              />
-            </PreviewCard>
-          </PreviewCard>
-          <PreviewCard
             id="money-flow"
             title="Money Flow"
             status={moneyFlowStatus}
+            headerNote={moneyFlowVerdict && <VerdictPill verdict={moneyFlowVerdict} />}
             onOpen={openPanel}
           >
-            <MoneyFlowPreview data={moneyFlowState.data} loading={moneyFlowState.loading} />
+            <MoneyFlowPreview
+              data={moneyFlowState.data}
+              loading={moneyFlowState.loading}
+              volume={(
+                <section className="money-flow-card__volume" aria-label="Volume" data-status={volumeStatus}>
+                  <h3 className="money-flow-card__subhead">{volumeTitle}</h3>
+                  <MarketVolumeTable
+                    onSourcesChange={handleVolumeSources}
+                    onHeaderNoteChange={handleVolumeHeader}
+                    onMetadataChange={handleVolumeMetadata}
+                    showAsOf={false}
+                  />
+                </section>
+              )}
+            />
           </PreviewCard>
         </div>
       </section>
@@ -794,7 +709,6 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
           liquidityState={liquidityState}
           moneyFlowState={moneyFlowState}
           quadsResource={quadsResource}
-          volumeTitle={volumeTitle}
         />,
         document.body,
       )}

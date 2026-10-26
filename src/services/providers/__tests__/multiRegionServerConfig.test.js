@@ -97,22 +97,23 @@ describe('multi-region server instrument configuration', () => {
     ['VNQ', 'VNQ', 'ETF'],
     ['DOGE', 'DOGE-USD', 'CRYPTO'],
     ['LINK', 'LINK-USD', 'CRYPTO'],
+    ['TRX', 'TRX-USD', 'CRYPTO'],
   ])('keeps the added %s row tied to its own provider identity', (symbol, yahooSymbol, secType) => {
     expect(catalogRow(symbol).provider).toEqual({ provider: 'yahoo', yahooSymbol, secType });
   });
 
-  it('preserves the expanded catalog and gives each overview card eight rows', () => {
-    expect(catalogRows).toHaveLength(62);
-    expect(catalogRows.filter((row) => row.summary)).toHaveLength(48);
-    expect(new Set(catalogRows.map((row) => row.symbol)).size).toBe(62);
+  it('preserves the expanded catalog: eight rows in the top cards, nine in Commodities, Rates and Crypto', () => {
+    expect(catalogRows).toHaveLength(64);
+    expect(catalogRows.filter((row) => row.summary)).toHaveLength(51);
+    expect(new Set(catalogRows.map((row) => row.symbol)).size).toBe(64);
     marketBackdropCatalog.forEach((group) => {
-      expect(group.rows.filter((row) => row.summary)).toHaveLength(8);
+      expect(group.rows.filter((row) => row.summary)).toHaveLength(['commodities', 'rates', 'crypto'].includes(group.id) ? 9 : 8);
     });
-    expect(catalogRows.some((row) => ['UST5Y', 'UST30Y', 'CGB10Y'].includes(row.symbol)))
+    expect(catalogRows.some((row) => ['UST5Y', 'CGB10Y'].includes(row.symbol)))
       .toBe(false);
   });
 
-  it('keeps eight overview instruments per card with related commodities grouped together', () => {
+  it('keeps the overview instruments per card with related commodities grouped together', () => {
     const summarySymbolsByGroup = Object.fromEntries(marketBackdropCatalog.map((group) => [
       group.id,
       group.rows.filter((row) => row.summary).map((row) => row.symbol),
@@ -122,9 +123,9 @@ describe('multi-region server instrument configuration', () => {
       us: ['SPX', 'RSP', 'MID', 'RUT', 'NDX', 'SMH', 'XLF', 'VNQ'],
       europe: ['STOXX600', 'SX5E', 'FTSE', 'DAX', 'CAC', 'FTSEMIB', 'IBEX', 'SMI'],
       asia: ['N225', 'HSI', 'CSI300', 'NIFTY50', 'KOSPI', 'TAIEX', 'AXJO', 'JKSE'],
-      commodities: ['CRB', 'CL', 'BZ', 'NG', 'GC', 'HG', 'ZC', 'ZS'],
-      rates: ['UST2Y', 'UST10Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s', 'IG_OAS', 'HY_OAS'],
-      crypto: ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK'],
+      commodities: ['CRB', 'CL', 'BZ', 'NG', 'GC', 'HG', 'SI', 'ZC', 'ZS'],
+      rates: ['UST2Y', 'UST10Y', 'UST30Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s', 'IG_OAS', 'HY_OAS'],
+      crypto: ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK', 'TRX'],
     });
   });
 });

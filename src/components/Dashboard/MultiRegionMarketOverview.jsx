@@ -127,6 +127,7 @@ const QUOTE_SOURCE_LABELS = Object.freeze({
   yahoo: 'Yahoo',
   fred: 'FRED',
   stooq: 'Stooq',
+  us_treasury: 'U.S. Treasury',
 });
 
 const QUOTE_AVAILABILITY_LABELS = Object.freeze({

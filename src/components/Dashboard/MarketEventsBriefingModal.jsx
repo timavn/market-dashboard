@@ -9,6 +9,7 @@ import { getMarketEventBriefing } from '../../constants/marketEventBriefings';
 import { marketEventDateTime } from '../../utils/marketEventTime';
 import '../Process/ProcessWiki.css';
 import './MarketEventsBriefingModal.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const valueText = (value) => value == null || String(value).trim() === '' ? 'Unavailable' : String(value);
 
@@ -104,7 +105,7 @@ export default function MarketEventsBriefingModal({
         <div className="market-events-briefing-modal__body" ref={bodyRef}>
           {!verified ? (
             <div className="market-events-briefing-modal__empty" role="status">
-              <h3>{state.status === 'loading' ? 'Loading verified calendar…' : 'Calendar unavailable'}</h3>
+              {state.status === 'loading' ? <LoadingIndicator label="Loading verified calendar…" size="sm" announce={false} /> : <h3>Calendar unavailable</h3>}
               <p>{state.reason}</p>
               {state.status !== 'loading' && <button type="button" onClick={onRetry}>Retry</button>}
             </div>

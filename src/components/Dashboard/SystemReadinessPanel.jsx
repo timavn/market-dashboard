@@ -1,5 +1,5 @@
 import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
 import { useTheme } from '../../context/ThemeContext';
 import RefreshButton from '../common/RefreshButton';
@@ -14,6 +14,8 @@ import {
 import './SystemReadinessPanel.css';
 
 const MAX_STATUS_AGE_MS = 30 * 1000;
+const FLYOUT_GAP_PX = 8;
+const FLYOUT_EDGE_PX = 16;
 const MAX_LOGIN_STATUS_AGE_MS = 90 * 1000;
 const LOGIN_POLL_INTERVAL_MS = 60 * 1000;
 const ACTIVE_LOGIN_POLL_INTERVAL_MS = 2 * 1000;
@@ -29,7 +31,7 @@ const LOGIN_SERVICE_DEFINITION = {
 };
 
 const LOGIN_DETAIL_DEFINITIONS = [
-  { id: 'ibkr-gateway', label: 'IBKR Gateway', summary: 'Brokerage + prediction markets', required: true },
+  { id: 'ibkr-gateway', label: 'IBKR Gateway', summary: 'Brokerage + market data', required: true },
   { id: 'gmail-oauth', label: 'Gmail OAuth', summary: 'Hedgeye inbox authorization', required: true },
   { id: 'aws-admin', label: 'AWS Admin', summary: 'Operator SSO session', required: false },
   { id: 'aws-api', label: 'AWS API', summary: 'Dashboard cloud reads', required: true },
@@ -91,12 +93,6 @@ export function getSystemStatusServiceDefinitions() {
     { id: 'dashboard', label: 'Dashboard', summary: 'API + UI' },
     { id: 'market-data', label: 'Market data', summary: 'Quotes + freshness' },
     { id: 'live-portfolio', label: 'Portfolio', summary: 'IBKR session' },
-    {
-      id: 'resolver-sources',
-      label: 'Resolver sources',
-      summary: 'Prediction-market inputs',
-      nonCore: true,
-    },
     { id: 'ai', label: 'AI', summary: 'Analyst + ingestion' },
   ];
 }
@@ -144,41 +140,7 @@ const DETAIL_DEFINITIONS = {
     { id: 'analyst-runtime', label: 'The Analyst', summary: 'On-demand research assistant' },
     { id: 'gmail-ingestion', label: 'Gmail Function', summary: 'Hedgeye email ingestion' },
   ],
-  'resolver-sources': [
-    {
-      id: 'ibkr-dated-futures',
-      label: 'IBKR dated futures',
-      summary: 'GCQ6, ESU6, and NQU6 exact coverage; CLU6 optional proxy',
-      role: 'live_dated_futures',
-    },
-    {
-      id: 'kalshi-resolver',
-      label: 'Kalshi resolver venues',
-      summary: 'Venue books and published final values',
-      role: 'resolver_venue',
-    },
-    {
-      id: 'forecastex-publications',
-      label: 'ForecastEx public publications',
-      summary: 'Official contract publications and execution tape',
-      role: 'official_publication',
-    },
-    {
-      id: 'coinbase-proxy',
-      label: 'Coinbase proxy',
-      summary: 'Non-resolving spot reference only',
-      role: 'proxy_only',
-    },
-    {
-      id: 'bls-cpi-publication',
-      label: 'BLS CPI publication',
-      summary: 'Official release, RSS, and API verification',
-      role: 'official_publication',
-    },
-  ],
 };
-
-const RESOLVER_FUTURE_SYMBOLS = new Set(['CLU6', 'GCQ6', 'ESU6', 'NQU6']);
 
 const HEDGEYE_PRODUCT_DEFINITIONS = [
   { id: 'risk-ranges', label: 'Risk Ranges', summary: 'Daily LRR/HRR levels, Trend signals, and out-of-bucket names.' },
@@ -466,149 +428,7 @@ function reasonBullets(reason) {
     });
 }
 
-function normalizedResolverSourceStatus(value) {
-  const status = String(value || '').trim().toLowerCase();
-  return VALID_SERVICE_STATUSES.has(status) ? status : 'unknown';
-}
-
-function normalizedResolverSourceText(value, maxLength = 64) {
-  return String(value || '')
-    .replace(/[^A-Za-z0-9_.:/ -]/g, '')
-    .trim()
-    .slice(0, maxLength);
-}
-
-function normalizedResolverCount(value) {
-  const count = Number(value);
-  return Number.isInteger(count) && count >= 0 ? count : null;
-}
-
-function normalizeResolverSymbols(value) {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set();
-  return value.flatMap((source) => {
-    const symbol = String(source?.symbol || '').trim().toUpperCase();
-    if (!RESOLVER_FUTURE_SYMBOLS.has(symbol) || seen.has(symbol)) return [];
-    seen.add(symbol);
-    const rawStatus = String(source?.status || '').trim().toLowerCase();
-    return [{
-      symbol,
-      role: symbol === 'CLU6' ? 'proxy' : 'exact',
-      required: symbol !== 'CLU6',
-      status: ['online', 'offline', 'unknown'].includes(rawStatus) ? rawStatus : 'unknown',
-      sourceStatus: normalizedResolverSourceText(source?.sourceStatus),
-      lastQuoteAt: normalizeLoginTimestamp(source?.lastQuoteAt),
-      errorCode: normalizedResolverSourceText(source?.errorCode),
-    }];
-  }).sort((left, right) => (
-    [...RESOLVER_FUTURE_SYMBOLS].indexOf(left.symbol)
-      - [...RESOLVER_FUTURE_SYMBOLS].indexOf(right.symbol)
-  ));
-}
-
-function normalizeResolverSourcesService(service, definition, checkedAt) {
-  const rawStatus = String(service?.status || '').trim().toLowerCase();
-  const status = VALID_SERVICE_STATUSES.has(rawStatus) ? rawStatus : 'unknown';
-  const suppliedDetails = new Map(
-    (Array.isArray(service?.details) ? service.details : [])
-      .filter((detail) => detail && typeof detail === 'object')
-      .map((detail) => [String(detail.id || ''), detail]),
-  );
-  const details = DETAIL_DEFINITIONS[definition.id].map((detailDefinition) => {
-    const source = suppliedDetails.get(detailDefinition.id) || {};
-    const detailStatus = normalizedResolverSourceStatus(source.status);
-    const sourceStatus = normalizedResolverSourceText(source.sourceStatus);
-    const observedAt = normalizeLoginTimestamp(source.observedAt);
-    const lastSuccessAt = normalizeLoginTimestamp(source.lastSuccessAt);
-    const neutral = source.neutral === true;
-    const base = {
-      ...detailDefinition,
-      status: detailStatus,
-      sourceStatus,
-      neutral,
-      observedAt,
-      lastSuccessAt,
-      date: observedAt || lastSuccessAt || checkedAt,
-      reason: detailStatus === 'online' ? '' : missingCheckReason(source, detailDefinition.label),
-      statusLabel: typeof source.statusLabel === 'string' && source.statusLabel.trim()
-        ? source.statusLabel.trim().slice(0, 40)
-        : neutral && detailStatus === 'unknown' && sourceStatus === 'not_started'
-          ? 'Not observed'
-          : null,
-    };
-
-    if (detailDefinition.id === 'ibkr-dated-futures') {
-      const coverage = {
-        requested: normalizedResolverCount(source.coverage?.requested),
-        verified: normalizedResolverCount(source.coverage?.verified),
-        rejected: normalizedResolverCount(source.coverage?.rejected),
-        status: normalizedResolverSourceText(source.coverage?.status),
-      };
-      const optionalCoverage = {
-        requested: normalizedResolverCount(source.optionalCoverage?.requested),
-        verified: normalizedResolverCount(source.optionalCoverage?.verified),
-        rejected: normalizedResolverCount(source.optionalCoverage?.rejected),
-      };
-      const symbols = normalizeResolverSymbols(source.symbols);
-      const hasCoverage = coverage.requested !== null && coverage.verified !== null;
-      const proxyStatus = symbols.find(({ symbol }) => symbol === 'CLU6')?.status;
-      const proxySummary = proxyStatus === 'online'
-        ? 'CLU6 optional proxy live'
-        : proxyStatus === 'offline'
-          ? 'CLU6 optional proxy unavailable'
-          : 'CLU6 optional proxy unverified';
-      return {
-        ...base,
-        coverage,
-        optionalCoverage,
-        symbols,
-        summary: hasCoverage
-          ? `${coverage.verified}/${coverage.requested} exact verified · ${proxySummary}`
-          : detailDefinition.summary,
-      };
-    }
-
-    if (detailDefinition.id === 'bls-cpi-publication') {
-      const releaseAt = normalizeLoginTimestamp(source.releaseAt);
-      const windowOpensAt = normalizeLoginTimestamp(source.windowOpensAt);
-      const due = source.due === true;
-      const released = source.released === true;
-      const scheduled = neutral && !due && sourceStatus === 'pending_release';
-      return {
-        ...base,
-        releaseAt,
-        reportMonth: normalizedResolverSourceText(source.reportMonth),
-        windowOpensAt,
-        due,
-        released,
-        sources: {
-          release: normalizedResolverSourceText(source.sources?.release),
-          rss: normalizedResolverSourceText(source.sources?.rss),
-          api: normalizedResolverSourceText(source.sources?.api),
-        },
-        date: releaseAt || base.date,
-        summary: scheduled
-          ? 'Official CPI release · outside verification window'
-          : detailDefinition.summary,
-        statusLabel: scheduled ? 'Scheduled' : base.statusLabel,
-      };
-    }
-
-    return base;
-  });
-  return {
-    ...definition,
-    status,
-    date: checkedAt,
-    reason: status === 'online' ? '' : missingCheckReason(service, definition.label),
-    details,
-  };
-}
-
 function normalizeService(service, definition, checkedAt) {
-  if (definition.id === 'resolver-sources') {
-    return normalizeResolverSourcesService(service, definition, checkedAt);
-  }
   const rawStatus = String(service?.status || '').trim().toLowerCase();
   const status = VALID_SERVICE_STATUSES.has(rawStatus) ? rawStatus : 'unknown';
   const suppliedDetails = new Map(
@@ -787,7 +607,6 @@ const SystemReadinessPanel = ({
   onClose,
   onStatusChange,
   dashboardCards = {},
-  resolverMarketId = null,
 }) => {
   const { theme } = useTheme();
   const [services, setServices] = useState(() => [
@@ -799,7 +618,6 @@ const SystemReadinessPanel = ({
   const [marketSession, setMarketSession] = useState('open');
   const [refreshing, setRefreshing] = useState(false);
   const [coreCheckedAt, setCoreCheckedAt] = useState(null);
-  const [coreExpired, setCoreExpired] = useState(false);
   const coreCheckedAtRef = useRef(null);
   const [actionFeedback, setActionFeedback] = useState({});
   const [expandedServiceId, setExpandedServiceId] = useState(null);
@@ -897,13 +715,12 @@ const SystemReadinessPanel = ({
       setProducts(checkingProducts);
     }
 
-    const systemRequest = MarketDataService.getSystemStatus({ marketId: resolverMarketId })
+    const systemRequest = MarketDataService.getSystemStatus()
       .then((payload) => {
         if (requestId !== requestIdRef.current) return;
         const normalized = normalizeSystemStatus(payload);
         coreCheckedAtRef.current = normalized.checkedAt;
         setCoreCheckedAt(normalized.checkedAt);
-        setCoreExpired(false);
         commitServices({ core: normalized.services });
       })
       .catch((loadError) => {
@@ -913,7 +730,6 @@ const SystemReadinessPanel = ({
         coreCheckedAtRef.current = null;
         initialLoadCompletedRef.current = false;
         setCoreCheckedAt(null);
-        setCoreExpired(false);
         setCoreCheckError(reason);
         commitServices({ core: unknownServices(reason) });
       });
@@ -950,7 +766,7 @@ const SystemReadinessPanel = ({
         && coreServicesRef.current.every((service) => service.status !== 'unknown');
       setRefreshing(false);
     }
-  }, [commitServices, loadLoginStatus, publishRailStatus, resolverMarketId]);
+  }, [commitServices, loadLoginStatus, publishRailStatus]);
 
   const runLoginRecovery = useCallback(async (detail) => {
     const actionId = detail?.recovery?.actionId;
@@ -1000,10 +816,7 @@ const SystemReadinessPanel = ({
 
   useEffect(() => {
     if (!coreCheckedAt) return undefined;
-    const expire = () => {
-      setCoreExpired(true);
-      publishRailStatus('unknown');
-    };
+    const expire = () => publishRailStatus('unknown');
     const remaining = Date.parse(coreCheckedAt) + MAX_STATUS_AGE_MS - Date.now() + 1;
     if (remaining <= 0) {
       expire();
@@ -1036,9 +849,45 @@ const SystemReadinessPanel = ({
     };
   }, [onClose, open]);
 
+  // Details open beside the window instead of inside it, so the Systems list
+  // keeps its size. The flyout matches the window's width so the columns read
+  // as they did inline. Prefer the right side, flip left when the viewport is too
+  // narrow, and pin to the viewport edge when neither side has room.
+  const positionFlyout = useCallback(() => {
+    const flyout = panelRef.current?.querySelector('.sr-flyout');
+    const anchor = flyout?.parentElement?.querySelector('.sr-service__summary');
+    const frame = flyout?.offsetParent;
+    if (!flyout || !anchor || !frame) return;
+    const frameRect = frame.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const width = Math.min(frameRect.width, viewportWidth - 2 * FLYOUT_EDGE_PX);
+    let left = frameRect.width + FLYOUT_GAP_PX;
+    if (frameRect.right + FLYOUT_GAP_PX + width > viewportWidth - FLYOUT_EDGE_PX) {
+      left = frameRect.left - FLYOUT_GAP_PX - width >= FLYOUT_EDGE_PX
+        ? -(width + FLYOUT_GAP_PX)
+        : viewportWidth - FLYOUT_EDGE_PX - width - frameRect.left;
+    }
+    const maxTop = viewportHeight - FLYOUT_EDGE_PX - flyout.offsetHeight - frameRect.top;
+    const minTop = FLYOUT_EDGE_PX - frameRect.top;
+    const top = Math.max(minTop, Math.min(anchorRect.top - frameRect.top, maxTop));
+    flyout.style.width = `${width}px`;
+    flyout.style.left = `${left}px`;
+    flyout.style.top = `${top}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open || (!expandedServiceId && !productsExpanded)) return undefined;
+    positionFlyout();
+    window.addEventListener('resize', positionFlyout);
+    return () => window.removeEventListener('resize', positionFlyout);
+  }, [expandedDetailKeys, expandedServiceId, open, positionFlyout, products, productsExpanded, services]);
+
   return (
     <section
       ref={panelRef}
+      onScroll={positionFlyout}
       className={`sr-panel ${theme === 'dark' ? 'sr-panel--dark' : ''}`}
       role={open ? 'dialog' : undefined}
       aria-label={open ? 'Systems' : undefined}
@@ -1049,6 +898,11 @@ const SystemReadinessPanel = ({
         <button type="button" className="sr-panel__close" aria-label="Close Systems" onClick={onClose}>
           <span aria-hidden="true">×</span>
         </button>
+        {coreCheckedAt && (
+          <time className="sr-panel__checked" dateTime={coreCheckedAt}>
+            {formatLoginTimestamp(coreCheckedAt)}
+          </time>
+        )}
         <RefreshButton
           label="Refresh systems"
           title="Refresh systems"
@@ -1063,19 +917,9 @@ const SystemReadinessPanel = ({
           Status check failed. {coreCheckError} Use Refresh to retry.
         </p>
       )}
-      {coreCheckedAt && (
-        <p className="sr-check-age" role="status">
-          {coreExpired ? 'Last checked' : 'Checked'} {formatLoginTimestamp(coreCheckedAt)}
-          {coreExpired ? ' · Status expired; refresh to verify current health.' : ''}
-        </p>
-      )}
-      <ul className="sr-services" aria-label={coreExpired ? 'Last checked system status' : 'Current system status'}>
+      <ul className="sr-services" aria-label="System status">
         {services.map((service) => {
-          const meta = service.checking
-            ? STATUS_META.checking
-            : coreExpired && service.id !== LOGIN_SERVICE_DEFINITION.id
-              ? { label: `Last checked · ${STATUS_META[service.status].label}`, glyph: '◷' }
-              : STATUS_META[service.status];
+          const meta = service.checking ? STATUS_META.checking : STATUS_META[service.status];
           const expanded = expandedServiceId === service.id;
           const checklistId = `sr-details-${service.id}`;
           const loginCategory = service.id === LOGIN_SERVICE_DEFINITION.id;
@@ -1085,9 +929,16 @@ const SystemReadinessPanel = ({
               data-status={service.status}
               key={service.id}
             >
+              {/* The whole row toggles; clicks on the button bubble here, so the
+                  button stays the keyboard and screen-reader control. */}
               <div
                 className={`sr-service__summary${expanded ? ' sr-service__summary--expanded' : ''}`}
                 data-testid={`system-service-summary-${service.id}`}
+                onClick={() => {
+                  setExpandedServiceId(expanded ? null : service.id);
+                  setExpandedDetailKeys(new Set());
+                  setProductsExpanded(false);
+                }}
               >
                 <button
                   type="button"
@@ -1095,13 +946,7 @@ const SystemReadinessPanel = ({
                   aria-expanded={expanded}
                   aria-controls={checklistId}
                   aria-label={`${expanded ? 'Collapse' : 'Expand'} ${service.label} checklist`}
-                  onClick={() => {
-                    setExpandedServiceId(expanded ? null : service.id);
-                    setExpandedDetailKeys(new Set());
-                    setProductsExpanded(false);
-                  }}
                 >
-                  <span className="sr-chevron" aria-hidden="true" />
                   <strong>{service.label}</strong>
                 </button>
                 <span className="sr-service__date" title={formatLoginTimestamp(service.date)}>{formatStatusDate(service.date)}</span>
@@ -1118,7 +963,7 @@ const SystemReadinessPanel = ({
                 </span>
               </div>
               {expanded ? (
-                <>
+                <div className="sr-flyout">
                   <ul
                     className="sr-service__details"
                     id={checklistId}
@@ -1287,7 +1132,7 @@ const SystemReadinessPanel = ({
                       );
                     }) : null}
                   </ul>
-                </>
+                </div>
               ) : null}
             </li>
           );
@@ -1296,6 +1141,11 @@ const SystemReadinessPanel = ({
           <div
             className={`sr-service__summary${productsExpanded ? ' sr-service__summary--expanded' : ''}`}
             data-testid="system-service-summary-products"
+            onClick={() => {
+              setProductsExpanded(!productsExpanded);
+              setExpandedServiceId(null);
+              setExpandedDetailKeys(new Set());
+            }}
           >
             <button
               type="button"
@@ -1303,13 +1153,7 @@ const SystemReadinessPanel = ({
               aria-expanded={productsExpanded}
               aria-controls="sr-products-list"
               aria-label={`${productsExpanded ? 'Collapse' : 'Expand'} Products`}
-              onClick={() => {
-                setProductsExpanded(!productsExpanded);
-                setExpandedServiceId(null);
-                setExpandedDetailKeys(new Set());
-              }}
             >
-              <span className="sr-chevron" aria-hidden="true" />
               <strong>Products</strong>
             </button>
             <span className="sr-service__date">{formatStatusDate(products[0]?.checkedAt)}</span>
@@ -1326,6 +1170,7 @@ const SystemReadinessPanel = ({
             </span>
           </div>
           {productsExpanded ? (
+            <div className="sr-flyout">
             <ul
               className="sr-product__details"
               id="sr-products-list"
@@ -1387,6 +1232,7 @@ const SystemReadinessPanel = ({
                 );
               })}
             </ul>
+            </div>
           ) : null}
         </li>
       </ul>

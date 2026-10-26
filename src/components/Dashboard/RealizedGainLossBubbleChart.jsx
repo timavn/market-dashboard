@@ -15,6 +15,7 @@ import {
   Cell
 } from 'recharts';
 import { filterLotsBySearch, computeKPIs, aggregateDailyPnL } from '../../utils/realizedGainLossUtils';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 function closedDateToUtcNoonMs(isoDate) {
   if (!isoDate || typeof isoDate !== 'string') return NaN;
@@ -187,7 +188,7 @@ const RealizedGainLossDashboard = ({ lots = [], searchQuery = '', loading = fals
       .slice(0, 15);
   }, [dateFilteredLots]);
 
-  if (loading) return <div className="p-4 text-center text-gray-500">Loading Realized Gain/Loss data...</div>;
+  if (loading) return <div className="p-4 text-center"><LoadingIndicator label="Loading Realized Gain/Loss data…" /></div>;
   if (error) return <div className="p-4 text-center text-red-500 bg-red-50 rounded-lg">{error}</div>;
 
   return (

@@ -148,28 +148,14 @@ const {
   createMarketEventsHandler,
 } = require('./src/routes/referenceHandlers.cjs');
 const {
-  isPredictionMarketContract,
-  normalizeIbkrPosition,
-} = require('./src/services/providers/normalize/normalizePosition');
-const {
-  aggregatePositionSnapshotStatus,
-  classifyPredictionMarketPosition,
-  hasVerifiedAccountCoverage,
-  verifyLivePositionSnapshot,
-} = require('./src/utils/predictionMarketPositions.cjs');
-const {
   buildLiquidityModels,
 } = require('./src/utils/liquidityModel.cjs');
 const {
   createUsdCorrelationService,
 } = require('./src/services/usdCorrelationService.cjs');
-const { fetchTreasuryParYieldSeries } = require('./src/services/treasuryParYields.cjs');
-const {
-  createGoldCorrelationService,
-} = require('./src/services/goldCorrelationService.cjs');
+const { TREASURY_PAR_YIELD_URL, fetchTreasuryParYieldSeries } = require('./src/services/treasuryParYields.cjs');
 const {
   createUsdCorrelationHandler,
-  createGoldCorrelationHandler,
 } = require('./src/routes/correlationHandlers.cjs');
 const {
   createFxvlSnapshotService,
@@ -182,7 +168,6 @@ const {
   getConfig: getFlexConfig,
   getReconciliation: getFlexReconciliation,
   publicConfigStatus: getFlexPublicConfigStatus,
-  readFlexActivityTrades,
   startFlexActivitySync,
   stopFlexActivitySync,
 } = require('./src/services/ibkrFlexService.cjs');
@@ -261,6 +246,7 @@ const {
   normalizeAdjustedPriceBars,
 } = require('./src/utils/securityRiskMetrics.cjs');
 const { fetchYahooAdjustedHistoryData } = require('./src/services/providers/yahooAdjustedHistory.cjs');
+const { horizonStats } = require('./src/utils/securityHorizonStats.cjs');
 const { createCompletedSessionVolatilityHandler } = require('./src/services/completedSessionVolatility.cjs');
 const { closeWorkbookReaders } = require('./src/services/workbookReaderWorkerService.cjs');
 const {
@@ -464,6 +450,24 @@ const analystRoutes = createAnalystRoutes({
   },
 });
 app.use('/internal/analyst', analystRoutes.internalRouter);
+// Completed-session price, volatility and volume windows beside Inbox alerts.
+// Historical research only; the 2y sizing history is shared with the sizing cache.
+app.get('/api/analyst/horizon-stats', async (req, res) => {
+  const symbols = Array.from(new Set(String(req.query.symbols || '').split(',')
+    .map((symbol) => symbol.trim().toUpperCase()).filter(validSecurityRiskMetricsSymbol))).slice(0, 25);
+  res.set('Cache-Control', 'no-store');
+  const entries = await mapWithConcurrency(symbols, 6, async (symbol) => {
+    try {
+      const history = await fetchYahooAdjustedHistory(symbol, {
+        cacheScope: 'sizing-2y', period1: String(Math.floor(Date.now() / 1000) - 2 * 366 * 86400),
+      });
+      return [symbol, horizonStats(history.bars)];
+    } catch (error) {
+      return [symbol, null];
+    }
+  });
+  res.json({ rows: Object.fromEntries(entries.filter(([, stats]) => stats)), historicalOnly: true, executable: false });
+});
 app.use('/api/analyst', analystRoutes.router);
 const analystStagingCleanupTimer = setInterval(() => {
   analystRoutes.cleanupStaging().catch((error) => {
@@ -1234,42 +1238,7 @@ async function getHermesInboxStatus() {
 const performanceRoutes = require('./src/routes/performance');
 app.use('/api/performance', performanceRoutes);
 
-// Prediction markets venue ingestion (aggregated events, IBKR refresh)
-const predictionMarketsIngestRoutes = require('./src/routes/predictionMarketsIngest');
-const {
-  startCpiCatalogReconciler,
-  stopCpiCatalogReconciler,
-} = require('./src/services/predictionMarketsIngest/reconciliationService');
-app.use('/api/prediction-markets', predictionMarketsIngestRoutes);
-
-// Resolver monitor: fresh live dated-futures marks come from the existing IBKR
-// sidecar; official venue/BLS publications remain the only settlement sources.
-const { createPredictionMarketTestRouter } = require('./src/routes/predictionMarketTest.cjs');
-const { MARKET_CONFIGS: PREDICTION_MONITOR_MARKETS } = require('./src/services/predictionMarketTest/marketMonitorService.cjs');
-const { createForecastExMonitorProvider } = require('./src/services/predictionMarketTest/forecastExMonitorProvider.cjs');
-const {
-  GOLD_SPOT_PROXY_INSTRUMENT,
-  createMarketReferenceProvider,
-} = require('./src/services/predictionMarketTest/marketReferenceProvider.cjs');
-const forecastExMonitorProvider = createForecastExMonitorProvider();
-const loadMonitorCryptoTracker = ({ limit = 2, dates = [] } = {}) => {
-  const exactDates = [...new Set(dates.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date))))];
-  if (!exactDates.length) return queryLatestSnapshotsByType('bitcoin-trend-tracker', { limit });
-  if (exactDates.length > 200) throw new RangeError('Crypto tracker requests are limited to 200 exact publication dates.');
-  const chunks = [exactDates.slice(0, 100), exactDates.slice(100)].filter((chunk) => chunk.length);
-  return Promise.all(chunks.map((chunk) => dynamodb.batchGet({
-    RequestItems: { HedgeyeDailySnapshot: {
-      Keys: chunk.map((date) => ({ date, snapshotType: 'bitcoin-trend-tracker' })),
-      ConsistentRead: true,
-    } },
-  }).promise().then((result) => {
-    if (result.UnprocessedKeys?.HedgeyeDailySnapshot?.Keys?.length) {
-      throw new Error('Crypto tracker publication read was incomplete.');
-    }
-    return result.Responses?.HedgeyeDailySnapshot || [];
-  }))).then((rows) => rows.flat());
-};
-const marketReferenceProvider = createMarketReferenceProvider({ loadCryptoTracker: loadMonitorCryptoTracker });
+// HedgAI research worker.
 const { loadReviewedBaseline } = require('./src/services/hedgaiResearch.cjs');
 const { createHedgaiResearchHandlers } = require('./src/routes/hedgaiResearch.cjs');
 const { createHedgaiResearchWorkerService } = require('./src/services/hedgaiResearchWorkerService.cjs');
@@ -1279,29 +1248,12 @@ const hedgaiResearchWorker = createHedgaiResearchWorkerService({
     || AWS_RESOURCE_DEFAULTS.researchEventLedgerTable || 'ResearchEventLedgerV2',
 });
 const loadHedgaiResearch = options => hedgaiResearchWorker.loadResearch(options);
-const predictionMarketTest = createPredictionMarketTestRouter({
-  loadHedgaiResearch: ({ now, ...options }) => loadHedgaiResearch({ ...options, asOf: now.toISOString() }),
-  loadRiskRanges: ({ now }) => loadRiskRangePublicationEnvelope({ now }),
-  loadInflationNowcasts: ({ limit }) => queryLatestSnapshotsByType('inflation-nowcast', { limit }),
-  loadCryptoTracker: loadMonitorCryptoTracker,
-  loadTradeSnapshots: ({ now }) => loadCanonicalSecurityIntelligence({
-    symbols: [...new Set(Object.values(PREDICTION_MONITOR_MARKETS).map((market) => market.trade?.ticker).filter(Boolean))],
-    now, historyDays: SECURITY_INTELLIGENCE_MAX_HISTORY_DAYS,
-  }),
-  loadCftcSnapshots: ({ limit }) => queryLatestSnapshotsByType('cftc-positioning', { limit }),
-  loadMarketStructureSnapshots: ({ limit }) => queryLatestSnapshotsByType('market-structure', { limit }),
-  loadUsdSnapshot: () => usdCorrelationService.getSnapshot(),
-  loadVolatilitySnapshot: () => volatilitySnapshotService.fetchSnapshot(),
-  loadForecastExLive: (context) => forecastExMonitorProvider.getSnapshot(context),
-  loadMarketReference: (context) => marketReferenceProvider.getSnapshot(context),
-  loadMarketReferenceHealth: () => marketReferenceProvider.getHealth(),
-});
-app.use('/api/prediction-market-test', predictionMarketTest.router);
 
 // Predictive Markets Review setup board: Hedgeye Tick/Trade/Trend, price and
 // Risk Range position for every tracked Kalshi market.
 const { createSetupBoardLoader, emailPublishedAt, extraCboeSeries } = require('./src/services/predictionSetupBoard.cjs');
 const PREDICTION_EXTRA_CBOE_SERIES = extraCboeSeries();
+const predictionRangeHistoryCache = new Map();
 const loadPredictionSetupBoard = createSetupBoardLoader({
   loadRiskRanges: async ({ now }) => {
     const envelope = await loadRiskRangePublicationEnvelope({ now });
@@ -1325,314 +1277,73 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
     ...await volatilitySnapshotService.fetchCboeRows(PREDICTION_EXTRA_CBOE_SERIES).catch(() => ({})) }),
   loadUsdCorrelations: () => usdCorrelationService.getSnapshot(),
   loadPeriodReturns: (symbol) => getPeriodReturnsCached(symbol),
-  loadKalshiEvents: (series) => require('./src/services/predictionMarketsIngest/providers/kalshiClient')
+  loadKalshiEvents: (series) => require('./src/services/kalshiClient')
     .kalshiFetch('/events', { series_ticker: series, status: 'open', limit: 200 }).then((body) => body?.events || []),
   // The market date's Hedgeye products, read for Alpha Codes, levels, signals and positions.
   // A product not yet published that morning is simply absent.
-  loadMorningProducts: async ({ marketDate, products }) => Object.fromEntries((await Promise.all(products.map((snapshotType) =>
-    dynamodb.get({ TableName: 'HedgeyeDailySnapshot', Key: { date: marketDate, snapshotType } }).promise()
-      .then((result) => (result.Item ? [snapshotType, result.Item] : null))))).filter(Boolean)),
+  // Crypto Quant is stored as the Bitcoin Trend Tracker; it is only asked for when reading an earlier day.
+  loadMorningProducts: async ({ marketDate, products }) => Object.fromEntries((await Promise.all(products.map((product) =>
+    dynamodb.get({ TableName: 'HedgeyeDailySnapshot', Key: { date: marketDate,
+      snapshotType: product === 'crypto-quant' ? 'bitcoin-trend-tracker' : product } }).promise()
+      .then((result) => (result.Item ? [product, result.Item] : null))))).filter(Boolean)),
+  // Earlier primary Risk Ranges publications, for higher highs and higher lows. Weekdays are
+  // probed back from the board's publication; holidays simply have none.
+  loadRiskRangeHistory: async ({ before, sessions }) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(before || ''))) return [];
+    const dates = [];
+    for (let day = new Date(`${before}T12:00:00Z`); dates.length < sessions * 2 + 2;) {
+      day.setUTCDate(day.getUTCDate() - 1);
+      if (day.getUTCDay() % 6 !== 0) dates.push(day.toISOString().slice(0, 10));
+    }
+    const publications = await Promise.all(dates.map(async (date) => {
+      if (!predictionRangeHistoryCache.has(date)) {
+        const envelope = await loadRiskRangePublicationEnvelope({ requestedDate: date });
+        // A past publication never changes; only a complete one is kept.
+        if (envelope?.available) predictionRangeHistoryCache.set(date, { date, ranges: envelope.ranges });
+        else return null;
+      }
+      return predictionRangeHistoryCache.get(date);
+    }));
+    return publications.filter(Boolean).reverse().slice(-sessions);
+  },
+  loadCryptoQuantHistory: ({ sessions }) => queryLatestSnapshotsByType('bitcoin-trend-tracker', { limit: sessions })
+    .then((rows) => [...rows].reverse()),
+  // Highest completed daily high on record for each instrument a range is drawn against.
+  loadAllTimeHighs: async (symbols) => Object.fromEntries((await Promise.all(symbols.map(async (symbol) => {
+    const record = getTickerMapping(symbol).source === 'fred'
+      ? await fetchFredHistoricalData(getTickerMapping(symbol).ticker, 600).then((rows) => (rows || [])
+        .reduce((best, row) => (Number.isFinite(row.value) && (!best || row.value > best.value) ? { value: row.value, date: row.date } : best), null))
+      // History takes the dashboard alias for an index (SPX for ^GSPC); caret symbols are not accepted there.
+      : await fetchYahooMaximumAdjustedHistory(symbol.startsWith('^')
+        ? Object.keys(YAHOO_TICKER_MAP).find((key) => YAHOO_TICKER_MAP[key] === symbol) || symbol : symbol).then(({ bars }) => bars
+        .reduce((best, bar) => (Number.isFinite(bar.rawHigh) && (!best || bar.rawHigh > best.value) ? { value: bar.rawHigh, date: bar.date } : best), null),
+      () => null);
+    return record ? [symbol, { ...record, symbol }] : null;
+  }))).filter(Boolean)),
+  // Daily ETF volume over the last ~200 calendar days, enough for a 90-day average before the latest session.
+  loadVolumeHistory: async (symbols) => Object.fromEntries((await Promise.all(symbols.map((symbol) => fetchYahooAdjustedHistory(symbol, {
+    cacheScope: 'prediction-volume', period1: String(Math.floor(Date.now() / 1000) - 200 * 86400),
+  }).then(({ bars }) => [symbol, bars], () => null)))).filter(Boolean)),
   marketDateFor: (now) => defaultResearchMarketDate(now),
 });
-app.get('/api/prediction-markets/setup-board', async (_req, res) => {
+// ?date=YYYY-MM-DD reads an earlier market day's morning research for the report's date picker.
+const predictionResearchBoards = new Map();
+app.get('/api/prediction-markets/setup-board', async (req, res) => {
   try {
-    res.json(await loadPredictionSetupBoard({ now: new Date() }));
+    const researchDate = String(req.query.date || '');
+    if (!researchDate) return res.json(await loadPredictionSetupBoard({ now: new Date() }));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(researchDate)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    const cached = predictionResearchBoards.get(researchDate);
+    if (cached && Date.now() - cached.at < 10 * 60_000) return res.json(cached.board);
+    const board = await loadPredictionSetupBoard({ now: new Date(), researchDate });
+    predictionResearchBoards.set(researchDate, { at: Date.now(), board });
+    if (predictionResearchBoards.size > 20) predictionResearchBoards.delete(predictionResearchBoards.keys().next().value);
+    return res.json(board);
   } catch (error) {
     console.error('[prediction-setup-board]', error.message);
     res.status(503).json({ error: 'Setup board unavailable' });
   }
 });
-
-// Prediction-market performance ledger. The reconciler is server-owned so
-// historical capture continues when the Balance panel is closed. It accepts
-// only fresh sidecar evidence and keeps unavailable broker reads fail-closed.
-const {
-  buildSettlementProviders,
-  createPredictionMarketPerformanceRoutes,
-} = require('./src/routes/predictionMarketPerformance');
-const { createContractPnlHistoryStore, ledgerSourceScope } = require('./src/services/contractPnlHistoryStore.cjs');
-const { getRecentSettledWtiSessions, getRecentSettledSpxCloseSessions } = require('./src/services/predictionMarketsIngest/watchlistProvider');
-const { kalshiFetch } = require('./src/services/predictionMarketsIngest/providers/kalshiClient');
-const { loadOfficialCpiFinals } = require('./src/services/predictionMarketsIngest/cpiOfficial');
-const { loadOfficialForecastExPrices } = require('./src/services/forecastExOfficialPrices.cjs');
-const { loadOfficialForecastExContractSchedule } = require('./src/services/forecastExContractSchedule.cjs');
-const { createCmeDailyBulletinLoader } = require('./src/services/cmeDailyBulletinSettlements.cjs');
-const { buildPredictionMarketScheduleProvider } = require('./src/services/predictionMarketContractSchedules.cjs');
-const { forecastExThresholdIdentity } = require('./src/services/predictionMarketPerformanceLedger.cjs');
-const { buildPredictionMarketMarkProviders } = require('./src/services/predictionMarketPerformanceMarks.cjs');
-const { applyHistoricalImportBundle } = require('./src/services/predictionMarketHistoricalImport.cjs');
-const predictionPerformanceIbkrProvider = require('./src/services/providers/ibkr/ibkrMarketDataProvider');
-const { buildExactEsFutureInstrument } = require('./src/services/forecastExFesIdentity.cjs');
-const bundledCpiHistory = require('./data/prediction-market-performance/historical-cpi-2026.json');
-const loadCmeDailyBulletinSettlement = createCmeDailyBulletinLoader();
-const loadPredictionMarketContractSchedule = buildPredictionMarketScheduleProvider({
-  loadOfficialForecastExContractSchedule,
-  kalshiFetch,
-});
-
-function exactEsResolverInstrument(settlementSymbol) {
-  const match = String(settlementSymbol || '').trim().toUpperCase().match(/^ES([HMUZ])(\d{2})$/);
-  const monthByCode = { H: '03', M: '06', U: '09', Z: '12' };
-  if (!match) return null;
-  return buildExactEsFutureInstrument({
-    resolverSymbol: `ES${match[1]}${match[2]}`,
-    underlyingContractMonth: `20${match[2]}${monthByCode[match[1]]}`,
-  });
-}
-
-const fesPreliminaryCutoffCache = new Map();
-const fesPreliminaryCutoffInFlight = new Map();
-
-async function loadVerifiedFesCutoffBar(request) {
-  if (fesPreliminaryCutoffCache.has(request.key)) return fesPreliminaryCutoffCache.get(request.key);
-  if (fesPreliminaryCutoffInFlight.has(request.key)) return fesPreliminaryCutoffInFlight.get(request.key);
-  const pending = (async () => {
-    const result = await predictionPerformanceIbkrProvider.getHistoricalBars(request.instrument, '5d', '1m');
-    if (result?.source !== 'ibkr' || !Array.isArray(result.bars) || !Number.isFinite(Date.parse(result.asOf || ''))) return null;
-    const targetBarStart = request.cutoffAt - 60_000;
-    const matches = result.bars.filter((bar) => {
-      const parsed = Date.parse(String(bar?.date || '').replace(' ', 'T'));
-      return Number.isFinite(parsed) && parsed === targetBarStart;
-    });
-    if (matches.length !== 1) return null;
-    const values = [matches[0].open, matches[0].high, matches[0].low, matches[0].close].map(Number);
-    if (!values.every(Number.isFinite)
-      || values[1] < values[2]
-      || values[0] < values[2]
-      || values[0] > values[1]
-      || values[3] < values[2]
-      || values[3] > values[1]) return null;
-    return {
-      value: values[3],
-      windowOpen: values[0],
-      windowHigh: values[1],
-      windowLow: values[2],
-      windowClose: values[3],
-      barStartAt: new Date(targetBarStart).toISOString(),
-      cutoffAt: new Date(request.cutoffAt).toISOString(),
-      asOf: new Date(Date.parse(result.asOf)).toISOString(),
-    };
-  })();
-  fesPreliminaryCutoffInFlight.set(request.key, pending);
-  try {
-    const reference = await pending;
-    // A completed historical bar is immutable. Reuse only the exact verified
-    // IBKR observation and retain its original provenance/as-of timestamp.
-    if (reference) fesPreliminaryCutoffCache.set(request.key, reference);
-    return reference;
-  } finally {
-    if (fesPreliminaryCutoffInFlight.get(request.key) === pending) {
-      fesPreliminaryCutoffInFlight.delete(request.key);
-    }
-  }
-}
-
-async function loadFesPreliminaryCutoffReferences(records = []) {
-  const references = [];
-  const requests = new Map();
-  for (const record of records) {
-    const identity = forecastExThresholdIdentity(record);
-    const settlementSymbol = String(record?.settlementSymbol || '').trim().toUpperCase();
-    const cutoffAt = Date.parse(record?.lastTradeAt || '');
-    const status = String(record?.status || '').trim().toLowerCase();
-    const unresolved = status === 'open'
-      || status === 'awaiting_resolution'
-      || (status === 'review' && Number(record?.netQuantity || record?.remainingQuantity || 0) > 0);
-    if (identity?.productCode !== 'FES'
-      || !unresolved
-      || !settlementSymbol
-      || !Number.isFinite(cutoffAt)
-      || Date.now() < cutoffAt) continue;
-    const instrument = exactEsResolverInstrument(settlementSymbol);
-    if (!instrument) continue;
-    const key = `${identity.eventDate}:${settlementSymbol}:${record.lastTradeAt}`;
-    if (!requests.has(key)) requests.set(key, {
-      key,
-      settlementSymbol,
-      cutoffAt,
-      instrument,
-      contracts: new Map(),
-    });
-    requests.get(key).contracts.set(identity.eventContract, identity);
-  }
-  const results = await Promise.allSettled([...requests.values()].map(async (request) => {
-    const cutoffBar = await loadVerifiedFesCutoffBar(request);
-    if (!cutoffBar) return [];
-    return [...request.contracts.values()].map((contract) => ({
-      role: 'resolver_reference',
-      availability: 'preliminary_reference',
-      final: false,
-      complete: true,
-      source: 'ibkr_exact_cutoff_bar',
-      provider: 'ibkr',
-      provenance: 'verified_ibkr_historical_trade_bar',
-      productCode: 'FES',
-      market: 'sp500',
-      eventContract: contract.eventContract,
-      tradingDate: contract.eventDate,
-      symbol: request.settlementSymbol,
-      ...cutoffBar,
-    }));
-  }));
-  for (const result of results) {
-    if (result.status === 'fulfilled' && Array.isArray(result.value)) references.push(...result.value);
-  }
-  return references;
-}
-
-const getPredictionMarketResolverSettlements = async ({ records = [], maxWaitMs = null } = {}) => {
-  const observations = [...predictionMarketTest.service.getResolverSettlements()];
-  const requests = new Map();
-  for (const record of records) {
-    const identity = forecastExThresholdIdentity(record);
-    const settlementSymbol = String(record?.settlementSymbol || '').trim().toUpperCase();
-    if (!identity || !['METLG', 'FES'].includes(identity.productCode) || !settlementSymbol) continue;
-    const eventDate = identity.eventDate || identity.resolutionDate;
-    const key = `${identity.productCode}:${eventDate}:${settlementSymbol}`;
-    const alreadyFinal = observations.some((observation) => (
-      observation?.availability === 'official_final'
-      && observation?.final === true
-      && (identity.productCode !== 'FES' || observation?.source === 'cme_daily_bulletin_final')
-      && String(observation?.productCode || '').toUpperCase() === identity.productCode
-      && String(observation?.tradingDate || observation?.eventDate || '').slice(0, 10) === eventDate
-      && String(observation?.symbol || '').trim().toUpperCase() === settlementSymbol
-    ));
-    if (!alreadyFinal) requests.set(key, { settlementSymbol, tradingDate: eventDate });
-  }
-  const completedOfficial = [];
-  const completedPreliminary = [];
-  const officialTasks = [...requests.values()].map(async (request) => {
-    try {
-      completedOfficial.push(await loadCmeDailyBulletinSettlement(request));
-    } catch (_error) {
-      // CME commonly publishes the FINAL bulletin on the following business
-      // day. Wrong-date, preliminary, missing, and ambiguous documents remain
-      // unavailable instead of becoming a proxy settlement.
-    }
-  });
-  const preliminaryTask = (async () => {
-    try {
-      completedPreliminary.push(...await loadFesPreliminaryCutoffReferences(records));
-    } catch (_error) {
-      // A preliminary reference is optional. Exact official settlement remains
-      // pending when the broker bar cannot be verified.
-    }
-  })();
-  const allTasks = Promise.allSettled([...officialTasks, preliminaryTask]);
-  const boundedWaitMs = Number(maxWaitMs);
-  if (Number.isFinite(boundedWaitMs) && boundedWaitMs > 0) {
-    let timer;
-    await Promise.race([
-      preliminaryTask,
-      new Promise((resolve) => {
-        timer = setTimeout(resolve, boundedWaitMs);
-        timer.unref?.();
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
-  } else {
-    await allTasks;
-  }
-  const available = [...observations, ...completedOfficial];
-  for (const reference of completedPreliminary) {
-    const officialExists = available.some((observation) => (
-      observation?.availability === 'official_final'
-      && observation?.final === true
-      && String(observation?.productCode || '').toUpperCase() === 'FES'
-      && String(observation?.tradingDate || '').slice(0, 10) === reference.tradingDate
-      && String(observation?.symbol || '').trim().toUpperCase() === reference.symbol
-    ));
-    if (!officialExists) available.push(reference);
-  }
-  return available;
-};
-const predictionMarketPerformance = createPredictionMarketPerformanceRoutes({
-  dynamodb,
-  historyStore: createContractPnlHistoryStore({
-    sourceScope: ledgerSourceScope({ tableName: process.env.PREDICTION_MARKET_PERFORMANCE_LEDGER_TABLE || 'PredictionMarketPerformanceLedger' }),
-  }),
-  sidecarRequest,
-  tableName: process.env.PREDICTION_MARKET_PERFORMANCE_LEDGER_TABLE || 'PredictionMarketPerformanceLedger',
-  settlementProviders: buildSettlementProviders({
-    getRecentSettledWtiSessions,
-    getRecentSettledSpxCloseSessions,
-    loadOfficialCpiFinals,
-    loadOfficialForecastExPrices,
-    getResolverSettlements: getPredictionMarketResolverSettlements,
-    kalshiFetch,
-  }),
-  loadContractSchedule: loadPredictionMarketContractSchedule,
-  markProviders: buildPredictionMarketMarkProviders({
-    kalshiFetch,
-    loadOfficialForecastExPrices,
-  }),
-  getResolverSettlements: getPredictionMarketResolverSettlements,
-  marketMonitorCoordinator: predictionMarketTest.marketMonitorCoordinator,
-  loadOfficialForecastExPrices,
-  getManagedAccounts: managedPredictionMarketAccounts,
-  getKnownAccounts: knownPredictionMarketAccounts,
-  getExpectedAccounts: expectedPredictionMarketAccounts,
-  readHistoricalExecutions: (accountId) => readFlexActivityTrades({ accountId }),
-  logger: console,
-});
-app.use('/api/prediction-markets/performance', predictionMarketPerformance.router);
-
-async function importBundledPredictionMarketHistory() {
-  const result = await applyHistoricalImportBundle({
-    store: predictionMarketPerformance.store,
-    bundle: bundledCpiHistory,
-  });
-  for (const account of bundledCpiHistory.accounts || []) {
-    const records = await predictionMarketPerformance.store.queryAccountPrefix(account.accountId, 'lifecycle#');
-    await predictionMarketPerformance.resolveSettlements({
-      accountId: account.accountId,
-      records,
-    });
-  }
-  return result;
-}
-
-async function managedPredictionMarketAccounts() {
-  const response = await sidecarRequest('/accounts', { timeoutMs: 3000 });
-  if (response?.ok !== true || !Array.isArray(response.accounts)) {
-    const error = new Error(response?.message || 'Managed IBKR accounts are unavailable.');
-    error.code = response?.status || 'IBKR_ACCOUNTS_UNAVAILABLE';
-    throw error;
-  }
-  return response.accounts;
-}
-
-function expectedPredictionMarketAccounts() {
-  return expectedIbkrAccountIds();
-}
-
-async function knownPredictionMarketAccounts() {
-  const bundledAccounts = (bundledCpiHistory.accounts || []).map((account) => account.accountId);
-  const flex = readFlexActivityTrades();
-  const flexAccounts = [
-    ...(flex.trades || []).map((trade) => trade.accountId),
-    ...(flex.controls?.accounts || []).map((account) => account.accountId),
-  ];
-  return [...new Set([
-    ...expectedPredictionMarketAccounts(),
-    ...bundledAccounts,
-    ...flexAccounts,
-  ].filter(Boolean))];
-}
-
-async function trackedPredictionMarketAccounts() {
-  const expectedAccounts = expectedPredictionMarketAccounts();
-  if (expectedAccounts.length) return expectedAccounts;
-  const knownAccounts = await knownPredictionMarketAccounts();
-  try {
-    return [...new Set([
-      ...knownAccounts,
-      ...await managedPredictionMarketAccounts(),
-    ].filter(Boolean))];
-  } catch (_error) {
-    return knownAccounts;
-  }
-}
 
 // Market / portfolio data providers (IBKR-first, Yahoo fallback)
 const compositeMarketDataProvider = require('./src/services/providers/compositeMarketDataProvider');
@@ -2028,10 +1739,171 @@ const FRED_SERIES = {
   'HY_OAS': 'BAMLH0A0HYM2',   // US HY Corporate OAS
 };
 
-// Monthly reference fallback for international sovereign 10Y yields when no
-// verified daily source is available. FRED's OECD-sourced IRLTLT01 series are
-// harmonized monthly long-term rates, percent per annum. They may publish with
-// substantial lag and never supply day or 15-day changes.
+// Treasury par yield curve tenors. Treasury publishes these the same afternoon;
+// FRED's copy (DGS2) trails by a day or more, so FRED is only the fallback.
+const TREASURY_PAR_TENORS = {
+  'UST2Y': '2 Yr',
+};
+const TREASURY_PAR_CACHE_TTL = 15 * 60 * 1000;
+const treasuryParClosesCache = new Map();
+
+async function fetchTreasuryParDailyCloses(upperSym) {
+  const tenor = TREASURY_PAR_TENORS[upperSym];
+  if (!tenor) return null;
+  const hit = treasuryParClosesCache.get(tenor);
+  if (hit && Date.now() - hit.ts < TREASURY_PAR_CACHE_TTL) return hit.data;
+  try {
+    const rows = await fetchTreasuryParYieldSeries(tenor, { httpGet: axios.get, years: 2 });
+    const closes = rows
+      ? rows.map((row) => ({ t: Date.parse(`${row.date}T00:00:00Z`), close: row.close }))
+      : null;
+    if (closes) treasuryParClosesCache.set(tenor, { data: closes, ts: Date.now() });
+    return closes;
+  } catch (error) {
+    console.warn(`[Treasury] par yield fetch failed for ${tenor}:`, error.message);
+    return null;
+  }
+}
+
+async function fetchTreasuryParQuote(upperSym) {
+  const closes = await fetchTreasuryParDailyCloses(upperSym);
+  if (!closes) return null;
+  const latest = closes[closes.length - 1];
+  const previous = closes[closes.length - 2];
+  const change = latest.close - previous.close;
+  return {
+    receivedAt: new Date().toISOString(),
+    price: latest.close.toFixed(2),
+    change: change.toFixed(2),
+    changePercent: previous.close > 0 ? ((change / previous.close) * 100).toFixed(2) : '0.00',
+    timestamp: new Date(latest.t).toISOString(),
+    source: 'us_treasury',
+    sourceUrl: TREASURY_PAR_YIELD_URL,
+    sourceInstrument: `Daily Treasury par yield curve rate, ${TREASURY_PAR_TENORS[upperSym]}`,
+    sourceSeriesId: TREASURY_PAR_TENORS[upperSym],
+    observationFrequency: 'daily',
+    dataType: 'historical',
+    displayOnly: true,
+    executable: false,
+    warning: 'official_daily_observation',
+  };
+}
+
+// Yahoo has no 2-year yield index and the Treasury par curve only publishes
+// after the close, so the session's 2Y reading comes from CNBC's Tradeweb feed.
+const CNBC_TREASURY_SYMBOLS = {
+  'UST2Y': 'US2Y',
+};
+// International 10Y yields read the same CNBC benchmark feed, so every
+// sovereign row shares one methodology and same-day timing.
+const CNBC_SOVEREIGN_SYMBOLS = {
+  'BUND10Y': 'DE10Y-DE',
+  'GILT10Y': 'GB10Y-GB',
+  'OAT10Y': 'FR10Y-FR',
+  'BTP10Y': 'IT10Y-IT',
+  'JGB10Y': 'JP10Y-JP',
+  'ACGB10Y': 'AU10Y-AU',
+  'KTB10Y': 'KR10Y-KR',
+  'CAN10Y': 'CA10Y-CA',
+};
+const cnbcYieldSymbol = (upperSym) => CNBC_TREASURY_SYMBOLS[upperSym] || CNBC_SOVEREIGN_SYMBOLS[upperSym];
+const CNBC_QUOTE_URL = 'https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol';
+const CNBC_QUOTE_CACHE_TTL = 60 * 1000;
+const cnbcTreasuryQuoteCache = new Map();
+
+async function fetchCnbcTreasuryQuote(upperSym) {
+  const cnbcSymbol = cnbcYieldSymbol(upperSym);
+  if (!cnbcSymbol) return null;
+  const hit = cnbcTreasuryQuoteCache.get(cnbcSymbol);
+  if (hit && Date.now() - hit.ts < CNBC_QUOTE_CACHE_TTL) return hit.data;
+  try {
+    const response = await axios.get(CNBC_QUOTE_URL, {
+      params: { symbols: cnbcSymbol, requestMethod: 'itv', noform: 1, partnerId: 2, fund: 1, exthrs: 1, output: 'json' },
+      timeout: 5000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    const row = response.data?.FormattedQuoteResult?.FormattedQuote?.[0];
+    const last = parseFloat(String(row?.last || '').replace('%', ''));
+    const previous = parseFloat(String(row?.previous_day_closing || '').replace('%', ''));
+    const observedAt = Date.parse(String(row?.last_time || ''));
+    if (row?.symbol !== cnbcSymbol || !Number.isFinite(last) || !Number.isFinite(observedAt)) return null;
+    const change = Number.isFinite(previous) ? last - previous : null;
+    const data = {
+      receivedAt: new Date().toISOString(),
+      price: last.toFixed(3),
+      change: change == null ? null : change.toFixed(3),
+      changePercent: change != null && previous > 0 ? ((change / previous) * 100).toFixed(2) : null,
+      timestamp: new Date(observedAt).toISOString(),
+      // CNBC stamps last_time in the exchange's local time; its date is the trading session.
+      sessionDate: String(row.last_time).slice(0, 10),
+      source: 'cnbc',
+      sourceInstrument: `${row.name || cnbcSymbol} (${row.exchange || 'CNBC'})`,
+      sourceSeriesId: cnbcSymbol,
+      observationFrequency: 'intraday',
+      dataType: 'delayed',
+      displayOnly: true,
+      executable: false,
+      warning: 'delayed_data',
+    };
+    cnbcTreasuryQuoteCache.set(cnbcSymbol, { data, ts: Date.now() });
+    return data;
+  } catch (error) {
+    console.warn(`[CNBC] Treasury quote fetch failed for ${cnbcSymbol}:`, error.message);
+    return null;
+  }
+}
+
+const CNBC_CHART_URL = 'https://ts-api.cnbc.com/harmony/app/charts/1Y.json';
+const CNBC_CLOSES_CACHE_TTL = 15 * 60 * 1000;
+const cnbcTreasuryClosesCache = new Map();
+
+// CNBC's 1Y chart carries about two years of daily closes for the same series
+// as its quote, so period deltas never mix it with the Treasury par curve.
+async function fetchCnbcTreasuryDailyCloses(upperSym) {
+  const cnbcSymbol = cnbcYieldSymbol(upperSym);
+  if (!cnbcSymbol) return null;
+  const hit = cnbcTreasuryClosesCache.get(cnbcSymbol);
+  if (hit && Date.now() - hit.ts < CNBC_CLOSES_CACHE_TTL) return hit.data;
+  try {
+    const response = await axios.get(CNBC_CHART_URL, {
+      params: { symbol: cnbcSymbol },
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    const bars = response.data?.barData?.priceBars;
+    const closes = (Array.isArray(bars) ? bars : [])
+      .map((bar) => {
+        const day = String(bar?.tradeTime || '');
+        return {
+          t: Date.UTC(Number(day.slice(0, 4)), Number(day.slice(4, 6)) - 1, Number(day.slice(6, 8))),
+          close: parseFloat(bar?.close),
+        };
+      })
+      .filter((row) => Number.isFinite(row.t) && Number.isFinite(row.close))
+      .sort((left, right) => left.t - right.t);
+    if (closes.length < 2) return null;
+    cnbcTreasuryClosesCache.set(cnbcSymbol, { data: closes, ts: Date.now() });
+    return closes;
+  } catch (error) {
+    console.warn(`[CNBC] Treasury history fetch failed for ${cnbcSymbol}:`, error.message);
+    return null;
+  }
+}
+
+// CNBC's daily closes stop at the prior session. Extend them with the live
+// reading so period and curve deltas end on today, like ^TNX/^TYX.
+function withLiveTreasuryClose(closes, liveQuote) {
+  if (!Array.isArray(closes) || closes.length === 0 || liveQuote?.source !== 'cnbc') return closes;
+  const sessionDay = Date.parse(`${liveQuote.sessionDate}T00:00:00Z`);
+  const close = Number(liveQuote.price);
+  if (!Number.isFinite(sessionDay) || !Number.isFinite(close) || sessionDay <= closes[closes.length - 1].t) return closes;
+  return [...closes, { t: sessionDay, close }];
+}
+
+// Registry of international sovereign 10Y symbols. The FRED IDs (OECD monthly
+// averages) only identify the symbol for chart and mapping routes; quotes and
+// period returns never use them, because a monthly average one to two months
+// old reads as a stale daily yield.
 const INTL_BOND_FRED_FALLBACK = {
   'BUND10Y': 'IRLTLT01DEM156N',   // Germany
   'GILT10Y': 'IRLTLT01GBM156N',   // UK
@@ -2265,6 +2137,8 @@ const YAHOO_TICKER_MAP = {
   'XRP': 'XRP-USD',
   'DOGE': 'DOGE-USD',
   'LINK': 'LINK-USD',
+  'TRX': 'TRX-USD',
+  'TRON': 'TRX-USD',
 };
 
 const getBackdropCatalogGroup = (groupId) => (
@@ -2804,11 +2678,13 @@ async function fetchStooqBondQuote(stooqSymbol) {
   }
 }
 
-// Prefer dated official daily histories for international sovereign yields.
-// Their quote and period comparisons use the same published benchmark series.
-// `symbol` is an internal symbol like BUND10Y / JGB10Y.
+// International sovereign 10Y yields: CNBC's same-day benchmark feed first,
+// then a dated official daily history. Quote and period comparisons always
+// use the same series. `symbol` is an internal symbol like BUND10Y / JGB10Y.
 async function fetchIntlBondQuote(symbol) {
   const upper = symbol.toUpperCase();
+  const cnbcQuote = await fetchCnbcTreasuryQuote(upper);
+  if (cnbcQuote) return cnbcQuote;
   const official = await fetchOfficialSovereignSeries(upper);
   if (official?.closes?.length) {
     const latest = official.closes[official.closes.length - 1];
@@ -2840,11 +2716,7 @@ async function fetchIntlBondQuote(symbol) {
     const stooqQuote = await fetchStooqBondQuote(stooqSym);
     if (stooqQuote) return { ...stooqQuote, source: 'stooq', observationFrequency: 'daily' };
   }
-  const fredSeries = INTL_BOND_FRED_FALLBACK[upper];
-  if (fredSeries) {
-    const fredQuote = await fetchFredQuote(fredSeries);
-    if (fredQuote) return { ...fredQuote, source: 'fred', sourceSeriesId: fredSeries, observationFrequency: 'monthly' };
-  }
+  // No daily source: the overview's retention layer keeps the last dated value.
   return null;
 }
 
@@ -2858,6 +2730,10 @@ compositeMarketDataProvider.setSpecialQuoteFetcher(async (symbol) => {
   let quoteData = null;
   if (isIntlBond) {
     quoteData = await fetchIntlBondQuote(upperSym);
+  } else if (TREASURY_PAR_TENORS[upperSym]) {
+    quoteData = await fetchCnbcTreasuryQuote(upperSym)
+      || await fetchTreasuryParQuote(upperSym)
+      || await fetchFredQuote(mapping.ticker);
   } else if (mapping.source === 'fred') {
     quoteData = await fetchFredQuote(mapping.ticker);
   }
@@ -3585,36 +3461,6 @@ async function fetchFredDailyClosesSeries(seriesId) {
   return out.length >= 2 ? out : null;
 }
 
-async function fetchGoldCorrelationFredSeries(seriesId) {
-  const keyed = await fetchFredDailyClosesSeries(seriesId);
-  if (keyed) return keyed;
-
-  const endDate = new Date();
-  const startDate = new Date(endDate.getTime() - 800 * 24 * 60 * 60_000);
-  const response = await axios.get('https://fred.stlouisfed.org/graph/fredgraph.csv', {
-    params: {
-      id: seriesId,
-      cosd: startDate.toISOString().slice(0, 10),
-      coed: endDate.toISOString().slice(0, 10),
-    },
-    timeout: 12_000,
-    responseType: 'text',
-  });
-  const lines = String(response?.data || '').trim().split(/\r?\n/);
-  if (lines.length < 3) return null;
-  const values = lines.slice(1).map((line) => {
-    const [date, rawValue] = line.split(',');
-    const close = Number(rawValue);
-    return {
-      t: /^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))
-        ? Date.parse(`${date}T00:00:00.000Z`)
-        : NaN,
-      close,
-    };
-  }).filter((row) => Number.isFinite(row.t) && Number.isFinite(row.close));
-  return values.length >= 2 ? values : null;
-}
-
 function parseHistoricalBarTimestamp(value) {
   const raw = String(value || '').trim();
   if (/^\d{8}$/.test(raw)) {
@@ -3625,57 +3471,6 @@ function parseHistoricalBarTimestamp(value) {
   }
   const parsed = Date.parse(raw);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-async function fetchGoldCorrelationBasisSeries() {
-  const response = await predictionPerformanceIbkrProvider.getHistoricalBars(
-    GOLD_SPOT_PROXY_INSTRUMENT,
-    '2y',
-    '1d',
-    { useRth: false },
-  );
-  const provenance = [
-    response?.error,
-    response?.warning,
-    response?.provenance,
-    response?.cacheStatus,
-    response?.cacheState,
-    response?.fromCache ? 'cached' : null,
-    response?.cached ? 'cached' : null,
-    response?.mock ? 'mock' : null,
-    response?.seeded ? 'seed' : null,
-  ].filter(Boolean).join(' ');
-  if (
-    String(response?.source || '').toLowerCase() !== 'ibkr'
-    || !Array.isArray(response?.bars)
-    || response.bars.length < 2
-    || /delayed|frozen|stale|cache|mock|seed|fallback|offline|disconnected|synthetic|inferred|derived/i.test(provenance)
-  ) {
-    const error = new Error('IBKR did not return verified native XAUUSD daily history.');
-    error.code = 'GOLD_CORRELATION_BASIS_UNAVAILABLE';
-    throw error;
-  }
-  const values = response.bars.map((bar) => ({
-    t: parseHistoricalBarTimestamp(bar?.date || bar?.timestamp || bar?.time),
-    close: Number(bar?.close),
-  })).filter((row) => Number.isFinite(row.t) && Number.isFinite(row.close) && row.close > 0)
-    .sort((left, right) => left.t - right.t);
-  if (values.length < 2) {
-    const error = new Error('IBKR XAUUSD daily history contains insufficient verified closes.');
-    error.code = 'GOLD_CORRELATION_BASIS_UNAVAILABLE';
-    throw error;
-  }
-  return values;
-}
-
-async function fetchGoldCorrelationComparatorSeries(definition) {
-  const history = definition.transform === 'yield_change_bps'
-    ? await fetchGoldCorrelationFredSeries(definition.symbol)
-    : await fetchYahooDailyClosesSeries(definition.symbol, '2y');
-  if (!Array.isArray(history) || history.length < 2) {
-    throw new Error(`${definition.source} returned no usable completed daily observations.`);
-  }
-  return history;
 }
 
 async function fetchIbkrDailyClosesSeries(instrument, range = '1y') {
@@ -3702,7 +3497,14 @@ async function computePeriodReturnsForSymbol(symbol, instrument = null, referenc
   let periodSourceInstrument = null;
   let periodSourceUrl = null;
   if (INTL_BOND_FRED_FALLBACK[upperSym]) {
-    if (referenceQuote?.source !== 'fred') {
+    const cnbcCloses = referenceQuote?.source === 'cnbc' ? await fetchCnbcTreasuryDailyCloses(upperSym) : null;
+    if (referenceQuote?.source === 'cnbc') {
+      if (!cnbcCloses) return null;
+      closes = withLiveTreasuryClose(cnbcCloses, referenceQuote);
+      periodReturnsSource = 'cnbc';
+      periodSourceSeriesId = referenceQuote.sourceSeriesId;
+      periodSourceInstrument = referenceQuote.sourceInstrument;
+    } else {
       const official = await fetchOfficialSovereignSeries(upperSym);
       if (official && (!referenceQuote || (
         referenceQuote.source === official.source && referenceQuote.sourceSeriesId === official.seriesId
@@ -3718,22 +3520,33 @@ async function computePeriodReturnsForSymbol(symbol, instrument = null, referenc
         periodSourceSeriesId = official.seriesId;
         periodSourceInstrument = official.sourceInstrument;
         periodSourceUrl = official.sourceUrl;
-      } else if (referenceQuote) {
-        // A quote from another benchmark cannot borrow FRED monthly history
-        // to fill its period columns.
-        return null;
       }
     }
-    if (!closes) {
-      closes = await fetchFredDailyClosesSeries(mapping.ticker);
-      observationFrequency = 'monthly';
-    }
+    // A quote from another benchmark cannot borrow a different history, and
+    // monthly averages never fill daily period columns.
+    if (!closes) return null;
   } else if (instrument?.provider === 'ibkr') {
     closes = await fetchIbkrDailyClosesSeries(instrument);
     periodReturnsSource = 'ibkr';
     periodSourceSeriesId = upperSym;
   } else if (mapping.source === 'fred' && !isRateProxy) {
-    closes = await fetchFredDailyClosesSeries(mapping.ticker);
+    // Period columns follow the quote's own series so the endpoint matches.
+    const cnbcCloses = referenceQuote?.source === 'cnbc' ? await fetchCnbcTreasuryDailyCloses(upperSym) : null;
+    const treasuryCloses = referenceQuote?.source === 'fred' || referenceQuote?.source === 'cnbc'
+      ? null : await fetchTreasuryParDailyCloses(upperSym);
+    if (cnbcCloses) {
+      closes = withLiveTreasuryClose(cnbcCloses, referenceQuote);
+      periodReturnsSource = 'cnbc';
+      periodSourceSeriesId = referenceQuote.sourceSeriesId;
+      periodSourceInstrument = referenceQuote.sourceInstrument;
+    } else if (treasuryCloses) {
+      closes = treasuryCloses;
+      periodReturnsSource = 'us_treasury';
+      periodSourceSeriesId = TREASURY_PAR_TENORS[upperSym];
+      periodSourceUrl = TREASURY_PAR_YIELD_URL;
+    } else {
+      closes = await fetchFredDailyClosesSeries(mapping.ticker);
+    }
   } else {
     closes = await fetchYahooDailyClosesSeries(symbol);
   }
@@ -3802,6 +3615,19 @@ async function mapWithConcurrency(items, concurrency, processor) {
 }
 
 async function getDailyClosesCached(symbol) {
+  const upperSym = symbol.toUpperCase();
+  if (CNBC_TREASURY_SYMBOLS[upperSym]) {
+    // The curve leg follows the same CNBC series the quote row shows.
+    const [cnbcCloses, liveQuote] = await Promise.all([
+      fetchCnbcTreasuryDailyCloses(upperSym),
+      fetchCnbcTreasuryQuote(upperSym),
+    ]);
+    if (cnbcCloses) return withLiveTreasuryClose(cnbcCloses, liveQuote);
+  }
+  return getPublishedDailyClosesCached(symbol);
+}
+
+async function getPublishedDailyClosesCached(symbol) {
   const key = symbol.toUpperCase();
   const now = Date.now();
   const hit = dailyClosesCache.get(key);
@@ -3814,7 +3640,7 @@ async function getDailyClosesCached(symbol) {
   let closes = null;
   try {
     if (mapping.source === 'fred' && !isRateProxy) {
-      closes = await fetchFredDailyClosesSeries(mapping.ticker);
+      closes = await fetchTreasuryParDailyCloses(upperSym) || await fetchFredDailyClosesSeries(mapping.ticker);
     } else {
       closes = await fetchYahooDailyClosesSeries(symbol);
     }
@@ -7033,7 +6859,8 @@ async function buildQuoteRow(index, { includeSparklines, wantPeriodReturns }) {
     if (!isQuoteUsableNow(quote, quoteInstrument)) quoteMetadata = { ...quoteMetadata, usable: false, availability: 'unavailable', quoteAsOf: null };
     const periodMetadata = buildPeriodReturnsMetadata(periods);
     const usesBasisPointChanges = index.changeUnit === 'bps';
-    const hasTrueDailyRateChange = !isIntl || quote?.observationFrequency === 'daily';
+    // Intraday CNBC and daily official yields carry a real day change; monthly averages do not.
+    const hasTrueDailyRateChange = !isIntl || ['daily', 'intraday'].includes(quote?.observationFrequency);
     const dayChangeBps = usesBasisPointChanges && hasTrueDailyRateChange
       ? rateValueToBps(quote?.change)
       : null;
@@ -7789,173 +7616,6 @@ app.get('/api/portfolio', async (req, res) => {
   }
 });
 
-app.get('/api/portfolio/prediction-market-positions', async (req, res) => {
-  const startTime = Date.now();
-  res.set('Cache-Control', 'no-store');
-  try {
-    let gatewayStatus = null;
-    try {
-      gatewayStatus = await sidecarRequest('/status', { timeoutMs: 3000 });
-    } catch (error) {
-      gatewayStatus = {
-        connected: false,
-        status: error.reason || 'sidecar_unavailable',
-        message: error.message,
-      };
-    }
-
-    if (!gatewayStatus?.connected || gatewayStatus.status !== 'connected') {
-      const totalTime = Date.now() - startTime;
-      return res.json({
-        accounts: [],
-        positions: [],
-        meta: {
-          source: 'ibkr_live_unavailable',
-          status: 'unavailable',
-          durationMs: totalTime,
-          managedAccounts: [],
-          gateway: gatewayStatus,
-          fetchedAt: null,
-          message: 'IB Gateway/TWS is not connected; prediction market positions require live data.',
-        },
-      });
-    }
-
-    let managedAccounts = [];
-    let accountLookupSucceeded = false;
-    try {
-      const accountsRes = await sidecarRequest('/accounts', { timeoutMs: 3000 });
-      accountLookupSucceeded = hasVerifiedAccountCoverage(accountsRes);
-      managedAccounts = accountLookupSucceeded ? accountsRes.accounts : [];
-      if (!accountLookupSucceeded) {
-        console.warn(
-          '[API] Prediction market account lookup did not return verified coverage:',
-          accountsRes?.message || accountsRes?.status || 'account discovery unavailable',
-        );
-      }
-    } catch (error) {
-      console.warn('[API] Prediction market account lookup failed:', error.message);
-    }
-
-    const gatewayAccountLookupSucceeded = hasVerifiedAccountCoverage(gatewayStatus);
-    const gatewayAccounts = gatewayAccountLookupSucceeded ? gatewayStatus.accounts : [];
-    const discoveredAccounts = [...new Set([...managedAccounts, ...gatewayAccounts].filter(Boolean))];
-    const accountCoverageKnown = accountLookupSucceeded || gatewayAccountLookupSucceeded;
-
-    const preferredAccounts = [
-      req.query.primaryAccount,
-      process.env.IBKR_ACCOUNT_ID,
-      ...discoveredAccounts,
-    ].filter(Boolean);
-    const accountsToCheck = [...new Set(preferredAccounts)];
-
-    const snapshots = await Promise.all(
-      accountsToCheck.map(async (accountId) => {
-        try {
-          let snapshot = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(accountId)}`, {
-            timeoutMs: 12000,
-          });
-          let verification = verifyLivePositionSnapshot(snapshot);
-          if (!verification.live) {
-            const firstFailure = verification.reason;
-            snapshot = await sidecarRequest(`/portfolio/positions?account=${encodeURIComponent(accountId)}&direct=true`, {
-              timeoutMs: 12000,
-            });
-            verification = verifyLivePositionSnapshot(snapshot);
-            if (!verification.live && firstFailure && !verification.reason) {
-              verification.reason = firstFailure;
-            }
-          }
-          if (!verification.live) {
-            return {
-              accountId,
-              positions: [],
-              fetchedAt: verification.fetchedAt,
-              source: verification.source,
-              status: 'unavailable',
-              message: verification.reason,
-            };
-          }
-          const rawPositions = Array.isArray(snapshot.positions) ? snapshot.positions : [];
-          const positions = rawPositions
-            .filter((position) => Number(position.position || 0) !== 0 && isPredictionMarketContract(position))
-            .map((position) => {
-              const normalized = normalizeIbkrPosition({
-                ...position,
-                fetched_at: position.fetched_at || verification.fetchedAt,
-              });
-              return {
-                ...normalized,
-                ...classifyPredictionMarketPosition(position),
-                accountId: position.account || accountId,
-                positionSource: verification.source,
-              };
-            });
-          return {
-            accountId,
-            positions,
-            fetchedAt: verification.fetchedAt,
-            source: verification.source,
-            status: 'live',
-          };
-        } catch (error) {
-          return {
-            accountId,
-            positions: [],
-            message: error.message,
-            source: 'ibkr_positions',
-            status: 'unavailable',
-          };
-        }
-      }),
-    );
-
-    const snapshotStatus = aggregatePositionSnapshotStatus(snapshots);
-    const status = snapshotStatus === 'live' && !accountCoverageKnown ? 'partial' : snapshotStatus;
-    const positions = snapshots
-      .filter((snapshot) => snapshot.status === 'live')
-      .flatMap((snapshot) => snapshot.positions || []);
-    const totalTime = Date.now() - startTime;
-    console.log(
-      `[API] /api/portfolio/prediction-market-positions completed in ${totalTime}ms accounts=${snapshots.length} positions=${positions.length}`,
-    );
-    res.json({
-      accounts: snapshots,
-      positions,
-      meta: {
-        source: status === 'live'
-          ? 'ibkr_live'
-          : status === 'partial'
-            ? 'ibkr_live_partial'
-            : 'ibkr_live_unavailable',
-        status,
-        durationMs: totalTime,
-        managedAccounts: discoveredAccounts,
-        gateway: gatewayStatus,
-        fetchedAt: snapshots
-          .map((snapshot) => snapshot.fetchedAt)
-          .filter(Boolean)
-          .sort()
-          .at(-1) || null,
-        message: status === 'partial'
-          ? (accountCoverageKnown
-            ? 'Some IBKR accounts are unavailable; only verified live accounts are shown.'
-            : 'The managed-account list could not be verified; only explicitly requested live accounts are shown.')
-          : status === 'unavailable'
-            ? 'Verified live IBKR prediction-market positions are unavailable.'
-            : null,
-      },
-    });
-  } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`[API] Error in /api/portfolio/prediction-market-positions after ${totalTime}ms:`, error);
-    res.status(500).json({
-      error: 'Failed to fetch prediction market positions',
-      details: error.message,
-    });
-  }
-});
-
 app.get('/api/portfolio/accounts', async (req, res) => {
   const startTime = Date.now();
   try {
@@ -8314,30 +7974,8 @@ const usdCorrelationService = createUsdCorrelationService({
     : fetchYahooDailyClosesSeries(YAHOO_TICKER_MAP[symbol] || symbol, '2y')),
   fetchFxvlSnapshot: () => fxvlSnapshotService.getSnapshot(),
 });
-const goldCorrelationService = createGoldCorrelationService({
-  fetchBasisHistory: fetchGoldCorrelationBasisSeries,
-  fetchComparatorHistory: fetchGoldCorrelationComparatorSeries,
-  verifyBasisAvailability: async () => {
-    try {
-      const status = await predictionPerformanceIbkrProvider.getProviderStatus();
-      if (status?.connected === true || String(status?.status || '').toLowerCase() === 'connected') {
-        return true;
-      }
-      const token = String(status?.status || '').toLowerCase();
-      if (['disconnected', 'offline', 'not_connected'].includes(token)) return false;
-      return null;
-    } catch (_error) {
-      return null;
-    }
-  },
-});
-
 // Get USD correlations from current daily market history.
 app.get('/api/usd/correlations', createUsdCorrelationHandler({ usdCorrelationService }));
-
-// Gold correlations use verified IBKR XAUUSD completed sessions as the fixed
-// basis. Comparator rows fail independently; a missing basis fails the matrix.
-app.get('/api/gold/correlations', createGoldCorrelationHandler({ goldCorrelationService }));
 
 // Helper function to normalize currency pair symbols
 function normalizeCurrencySymbol(symbol) {
@@ -8572,7 +8210,7 @@ app.get('/api/usd/historical', async (req, res) => {
 
 const systemReadinessService = createSystemReadinessService({
   sidecarRequest,
-  expectedIbkrAccounts: expectedPredictionMarketAccounts(),
+  expectedIbkrAccounts: expectedIbkrAccountIds(),
   getDirectorSnapshot,
   buildWorkflowStatusSnapshot: async () => {
     const cache = await researchResponseCache.get('workflow-snapshot:readiness', buildWorkflowStatusSnapshot);
@@ -8704,72 +8342,6 @@ async function readAiStatusEvidence() {
   return { analyst, gmail };
 }
 
-const PREDICTION_MONITOR_HEALTH_MARKETS = new Set(['silver', 'gold', 'wti', 'brent', 'bitcoin', 'ethereum', 'sp500']);
-
-function latestHealthTimestamp(rows, keys) {
-  return rows.flatMap((row) => keys.map((key) => row?.[key]))
-    .filter((value) => Number.isFinite(Date.parse(String(value || ''))))
-    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] || null;
-}
-
-function monitorProviderEvidence(rows, ids, { applicable = true, label = 'Source' } = {}) {
-  if (!applicable) return { status: 'not_applicable', lastSuccessAt: null, error: null };
-  const selected = rows.filter((row) => ids.includes(row?.id) && row?.applicable !== false);
-  if (!selected.length) return { status: 'not_started', lastSuccessAt: null, error: null };
-  const statuses = selected.map((row) => String(row?.status || 'unavailable').toLowerCase());
-  const healthy = statuses.filter((status) => status === 'live').length;
-  const partlyHealthy = statuses.filter((status) => status === 'partial').length;
-  const pending = statuses.filter((status) => status === 'refreshing').length;
-  const failure = selected.find((row) => [
-    'unavailable', 'auth_required', 'entitlement_required', 'refresh_failed',
-  ].includes(String(row?.status || '').toLowerCase()));
-  const status = healthy === selected.length
-    ? 'available'
-    : healthy || partlyHealthy || pending ? 'partial'
-      : failure ? 'unavailable' : 'not_started';
-  const reason = failure?.reason
-    || (pending ? `${label} refresh is in progress.` : partlyHealthy ? `${label} is only partially available.` : null);
-  return {
-    status,
-    lastSuccessAt: latestHealthTimestamp(selected.filter((row) => ['live', 'partial'].includes(row.status)), ['lastSuccessAt', 'asOf']),
-    lastAttemptAt: latestHealthTimestamp(selected, ['lastAttemptAt', 'asOf']),
-    error: reason ? { code: failure?.errorCode || (pending ? 'PM_SOURCE_REFRESHING' : 'PM_SOURCE_PARTIAL'), message: reason } : null,
-  };
-}
-
-function resolverSourcesEvidenceForMonitor({ marketId } = {}) {
-  const base = predictionMarketTest.service.getHealth();
-  const monitors = predictionMarketTest.marketMonitorCoordinator.getHealth();
-  const selectedMarketId = PREDICTION_MONITOR_HEALTH_MARKETS.has(String(marketId || '').toLowerCase())
-    ? String(marketId).toLowerCase()
-    : null;
-  const selectedMonitor = selectedMarketId ? monitors[selectedMarketId] : null;
-  const rows = Array.isArray(selectedMonitor?.sourceHealth) ? selectedMonitor.sourceHealth : [];
-  const hasSelectedMonitor = Boolean(selectedMarketId && selectedMonitor);
-  return {
-    ...base,
-    selectedMarketId,
-    monitor: selectedMonitor || null,
-    monitors,
-    lastSnapshotAt: selectedMonitor?.completedAt || base.lastSnapshotAt || null,
-    providers: {
-      ...(base.providers || {}),
-      kalshi: monitorProviderEvidence(rows, ['kalshi_catalog', 'kalshi_book'], {
-        applicable: hasSelectedMonitor && (!rows.length || rows.some((row) => row.id === 'kalshi_catalog' && row.applicable !== false)),
-        label: 'Kalshi catalog and native book',
-      }),
-      forecastex: monitorProviderEvidence(rows, ['forecastex_catalog', 'forecastex_activity'], {
-        applicable: hasSelectedMonitor && (!rows.length || rows.some((row) => row.id === 'forecastex_catalog' && row.applicable !== false)),
-        label: 'ForecastEx official publication',
-      }),
-      coinbase: monitorProviderEvidence(rows.filter((row) => /coinbase/i.test(String(row.source || row.reason || ''))), ['resolver_spot', 'resolver_chart'], {
-        applicable: ['bitcoin', 'ethereum'].includes(selectedMarketId),
-        label: 'Coinbase proxy',
-      }),
-    },
-  };
-}
-
 const systemStatusService = createSystemStatusService({
   readDashboardEvidence: readDashboardStatusEvidence,
   readMarketDataEvidence: readMarketDataStatusEvidence,
@@ -8777,9 +8349,6 @@ const systemStatusService = createSystemStatusService({
   // portfolio status probe is intentionally lightweight and only reports
   // "ready" after /portfolio/live-positions has verified a fresh snapshot.
   readLivePortfolioEvidence: () => sidecarRequest('/portfolio/status', { timeoutMs: 600 }),
-  // Resolver source status is process-local observation only. Systems must not
-  // trigger a resolver snapshot or contact any provider just to render health.
-  readResolverSourcesEvidence: (context) => resolverSourcesEvidenceForMonitor(context),
   // The Analyst runtime check proves only assistant availability. Portfolio and
   // market-data services remain the authority for verified live trading data.
   readAiEvidence: readAiStatusEvidence,
@@ -8825,10 +8394,7 @@ const systemReadinessRepairService = createSystemReadinessRepairService({
 app.get('/api/system-status', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    const marketId = PREDICTION_MONITOR_HEALTH_MARKETS.has(String(req.query?.marketId || '').toLowerCase())
-      ? String(req.query.marketId).toLowerCase()
-      : null;
-    return res.json(await systemStatusService.collect({ marketId }));
+    return res.json(await systemStatusService.collect());
   } catch (error) {
     console.warn('[API] Lightweight system status failed:', error.message);
     return res.json(createUnavailableSystemStatus());
@@ -9188,255 +8754,6 @@ app.post('/api/presigned-url', async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Prediction Markets API Routes
-// ---------------------------------------------------------------------------
-
-const PM_TABLE = 'PredictionMarkets';
-const PM_SETTINGS_TABLE = 'PredictionMarketSettings';
-const PM_SETTINGS_KEY = 'global';
-
-// GET /api/prediction-markets/contracts — list all (optional ?status=open&assetClass=equities)
-app.get('/api/prediction-markets/contracts', async (req, res) => {
-  try {
-    const { status, assetClass } = req.query;
-    let params;
-
-    if (status) {
-      params = {
-        TableName: PM_TABLE,
-        IndexName: 'status-index',
-        KeyConditionExpression: '#s = :s',
-        ExpressionAttributeNames: { '#s': 'status' },
-        ExpressionAttributeValues: { ':s': status },
-      };
-    } else if (assetClass) {
-      params = {
-        TableName: PM_TABLE,
-        IndexName: 'assetClass-index',
-        KeyConditionExpression: 'assetClass = :ac',
-        ExpressionAttributeValues: { ':ac': assetClass },
-      };
-    } else {
-      params = { TableName: PM_TABLE };
-    }
-
-    const result = await readAllDynamoItems(dynamodb, status || assetClass ? 'query' : 'scan', params);
-    res.json({ contracts: result.Items || [] });
-  } catch (err) {
-    console.error('[PM] GET contracts error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/prediction-markets/contracts — create
-app.post('/api/prediction-markets/contracts', async (req, res) => {
-  try {
-    const now = new Date().toISOString();
-    const contract = {
-      ...req.body,
-      contractId: req.body.contractId || require('crypto').randomUUID(),
-      createdAt: now,
-      updatedAt: now,
-      status: req.body.status || 'watchlist',
-    };
-    await dynamodb.put({ TableName: PM_TABLE, Item: contract }).promise();
-    res.json({ contract });
-  } catch (err) {
-    console.error('[PM] POST contract error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PUT /api/prediction-markets/contracts/:id — update
-app.put('/api/prediction-markets/contracts/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    // Fetch existing to get createdAt (needed for composite key)
-    const existing = await dynamodb.query({
-      TableName: PM_TABLE,
-      KeyConditionExpression: 'contractId = :id',
-      ExpressionAttributeValues: { ':id': id },
-      Limit: 1,
-    }).promise();
-    if (!existing.Items || !existing.Items.length) {
-      return res.status(404).json({ error: 'Contract not found' });
-    }
-    const updated = {
-      ...existing.Items[0],
-      ...req.body,
-      contractId: id,
-      createdAt: existing.Items[0].createdAt,
-      updatedAt: new Date().toISOString(),
-    };
-    await dynamodb.put({ TableName: PM_TABLE, Item: updated }).promise();
-    res.json({ contract: updated });
-  } catch (err) {
-    console.error('[PM] PUT contract error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE /api/prediction-markets/contracts/:id
-app.delete('/api/prediction-markets/contracts/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const existing = await dynamodb.query({
-      TableName: PM_TABLE,
-      KeyConditionExpression: 'contractId = :id',
-      ExpressionAttributeValues: { ':id': id },
-      Limit: 1,
-    }).promise();
-    if (!existing.Items || !existing.Items.length) {
-      return res.status(404).json({ error: 'Contract not found' });
-    }
-    await dynamodb.delete({
-      TableName: PM_TABLE,
-      Key: { contractId: id, createdAt: existing.Items[0].createdAt },
-    }).promise();
-    res.json({ success: true });
-  } catch (err) {
-    console.error('[PM] DELETE contract error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/prediction-markets/settings
-app.get('/api/prediction-markets/settings', async (req, res) => {
-  try {
-    const result = await dynamodb.get({
-      TableName: PM_SETTINGS_TABLE,
-      Key: { settingKey: PM_SETTINGS_KEY },
-    }).promise();
-    const defaults = {
-      settingKey: PM_SETTINGS_KEY,
-      portfolioEquity: null,
-      minNetEdge: 0.02,
-      defaultFeePerContract: 0.02,
-      defaultSlippageBuffer: 0.005,
-      modelErrorBuffer: 0.01,
-      maxRiskPerBet: 500,
-      maxRiskPerDay: 2000,
-      maxPmRiskPct: 0.05,
-      maxRiskByAssetClass: { equities: 5000, rates: 3000, fx: 3000, commodities: 2000, crypto: 2000 },
-      maxRiskByCategory: {},
-      kellyMultiplier: 0.25,
-      defaultConfidenceHaircut: 0.8,
-      stalePriceThresholdHours: 4,
-      minSettlementDays: 0,
-      maxSettlementDays: 90,
-      maxOpenRisk: 10000,
-      maxCorrelatedExposure: 3000,
-      sizingMode: 'fractional_kelly',
-      minConfidence: 0.5,
-    };
-    res.json({ settings: result.Item || defaults });
-  } catch (err) {
-    console.error('[PM] GET settings error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PUT /api/prediction-markets/settings
-app.put('/api/prediction-markets/settings', async (req, res) => {
-  try {
-    const settings = { ...req.body, settingKey: PM_SETTINGS_KEY, updatedAt: new Date().toISOString() };
-    await dynamodb.put({ TableName: PM_SETTINGS_TABLE, Item: settings }).promise();
-    res.json({ settings });
-  } catch (err) {
-    console.error('[PM] PUT settings error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/prediction-markets/analytics — aggregate P&L, win rate, Brier score
-app.get('/api/prediction-markets/analytics', async (req, res) => {
-  try {
-    const result = await readAllDynamoItems(dynamodb, 'scan', { TableName: PM_TABLE });
-    const all = result.Items || [];
-    const closed = all.filter(c => c.status === 'settled' || c.status === 'closed');
-
-    let totalPnl = 0, wins = 0, totalBrierSum = 0, totalEVAtEntry = 0;
-    closed.forEach(c => {
-      const pnl = c.realizedProfit ?? 0;
-      totalPnl += pnl;
-      if (pnl > 0) wins++;
-      const p = c.adjustedProbability ?? c.myProbability ?? 0.5;
-      const outcome = c.settlementValue >= 0.99 ? 1 : 0;
-      totalBrierSum += Math.pow(p - outcome, 2);
-      const contractPrice = c.entryPrice ?? (c.contractSide === 'Yes' ? c.yesPrice : c.noPrice) ?? 0;
-      const ev = c.contractSide === 'Yes'
-        ? p * (1 - contractPrice) - (1 - p) * contractPrice
-        : (1 - p) * (1 - contractPrice) - p * contractPrice;
-      totalEVAtEntry += ev * (c.numContracts ?? 0) - (c.totalFees ?? 0);
-    });
-
-    const openContracts = all.filter(c => c.status === 'open');
-    let totalOpenRisk = 0;
-    openContracts.forEach(c => {
-      const price = c.entryPrice ?? (c.contractSide === 'Yes' ? c.yesPrice : c.noPrice) ?? 0;
-      totalOpenRisk += price * (c.numContracts ?? 0);
-    });
-
-    res.json({
-      totalContracts: all.length,
-      openCount: openContracts.length,
-      closedCount: closed.length,
-      totalPnl,
-      winRate: closed.length ? wins / closed.length : null,
-      brierScore: closed.length ? totalBrierSum / closed.length : null,
-      totalEVAtEntry,
-      totalOpenRisk,
-      evResidual: totalPnl - totalEVAtEntry,
-    });
-  } catch (err) {
-    console.error('[PM] GET analytics error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/prediction-markets/risk — open risk breakdown by asset class / category
-app.get('/api/prediction-markets/risk', async (req, res) => {
-  try {
-    const result = await readAllDynamoItems(dynamodb, 'query', {
-      TableName: PM_TABLE,
-      IndexName: 'status-index',
-      KeyConditionExpression: '#s = :s',
-      ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: { ':s': 'open' },
-    });
-    const open = result.Items || [];
-    const byAssetClass = {}, byCategory = {}, bySettlementDate = {}, byCorrelationGroup = {};
-    let totalMaxLoss = 0, totalMaxProfit = 0;
-
-    open.forEach(c => {
-      const price = c.entryPrice ?? (c.contractSide === 'Yes' ? c.yesPrice : c.noPrice) ?? 0;
-      const n = c.numContracts ?? 0;
-      const ml = price * n;
-      const mp = (1 - price) * n;
-      totalMaxLoss += ml;
-      totalMaxProfit += mp;
-
-      const ac = c.assetClass ?? 'unknown';
-      byAssetClass[ac] = (byAssetClass[ac] ?? 0) + ml;
-
-      const cat = c.eventCategory ?? 'unknown';
-      byCategory[cat] = (byCategory[cat] ?? 0) + ml;
-
-      const sd = c.settlementDate ?? 'unknown';
-      bySettlementDate[sd] = (bySettlementDate[sd] ?? 0) + ml;
-
-      const cg = c.correlationGroup ?? 'none';
-      byCorrelationGroup[cg] = (byCorrelationGroup[cg] ?? 0) + ml;
-    });
-
-    res.json({ totalMaxLoss, totalMaxProfit, byAssetClass, byCategory, bySettlementDate, byCorrelationGroup, openCount: open.length });
-  } catch (err) {
-    console.error('[PM] GET risk error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Serve static files only in production
 // In development, React dev server handles frontend (run separately on port 3000)
 if (process.env.NODE_ENV === 'production') {
@@ -9476,7 +8793,6 @@ const server = app.listen(PORT, HOST, async () => {
     });
   }
 
-  predictionMarketTest.start();
   if (process.env.NODE_ENV !== 'test') pcaRiskService.start();
 
   loginStatusService.start().catch((error) => {
@@ -9489,24 +8805,6 @@ const server = app.listen(PORT, HOST, async () => {
   }
 
   if (process.env.NODE_ENV !== 'test') {
-    predictionMarketPerformance.historyService.warm({ rebuild: false }).catch((error) => {
-      console.warn('[Prediction P&L] historical projection warm-up paused:', error.message);
-    });
-    try {
-      const historicalImport = await importBundledPredictionMarketHistory();
-      const accountSummary = Object.entries(historicalImport.accounts || {})
-        .map(([accountId, outcome]) => `${accountId}:${outcome.status}:${outcome.count}`)
-        .join(', ');
-      console.log(`[Prediction P&L] historical CPI import ${historicalImport.status} (${accountSummary})`);
-    } catch (error) {
-      console.warn('[Prediction P&L] historical CPI import paused:', error.message);
-    }
-    startCpiCatalogReconciler().then((outcome) => {
-      const release = outcome.releaseKey ? ` ${outcome.releaseKey}` : '';
-      console.log(`[PM Reconciler] startup ${outcome.status}${release} (${outcome.code})`);
-    }).catch((err) => {
-      console.warn('[PM Reconciler] startup failed:', err.message);
-    });
     startIbkrInterestValidation().then((status) => {
       console.log(
         `[IBKR Interest Validation] startup ${status.status}`
@@ -9515,14 +8813,7 @@ const server = app.listen(PORT, HOST, async () => {
     }).catch((err) => {
       console.warn('[IBKR Interest Validation] startup failed:', err.message);
     });
-    predictionMarketPerformance.researchService.start();
-    predictionMarketPerformance.reconciler.start(trackedPredictionMarketAccounts);
-    startFlexActivitySync({
-      onSnapshot: async () => predictionMarketPerformance.reconciler.runOnce(trackedPredictionMarketAccounts),
-      logger: console,
-    });
-    console.log('[Prediction P&L] background ledger reconciler started');
-    console.log('[FES Research] prospective SP500 collector started');
+    startFlexActivitySync({ logger: console });
   }
 
   // Validate AWS credentials after server starts
@@ -9780,8 +9071,6 @@ const shutdown = (signal) => {
   console.log(`\n[shutdown] Received ${signal}, closing server...`);
   const done = () => process.exit(0);
   try {
-    stopCpiCatalogReconciler();
-    predictionMarketTest.stop();
     publishedTradeArchive.dispose();
     securityIntelligenceProjection.close();
     void closeWorkbookReaders();
@@ -9794,8 +9083,6 @@ const shutdown = (signal) => {
     clearInterval(analystStagingCleanupTimer);
     analystGatewayProxy?.close?.();
     server.off('upgrade', handleMarketWebSocketUpgrade);
-    predictionMarketPerformance.reconciler.stop();
-    predictionMarketPerformance.researchService.stop();
     loginStatusService.stop();
     ibkrStreamBridge.stopIbkrStreamBridge();
     wss.clients.forEach((c) => { try { c.terminate(); } catch (_) {} });

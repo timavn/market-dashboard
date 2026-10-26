@@ -10,8 +10,6 @@
     .quad-research-backdrop,
     .pcv2-verification-backdrop,
     .pcv2-leveraged-product-backdrop,
-    .pm-gdp-modal-backdrop,
-    .pmv2-modal-overlay,
     .dashboard-security-detail-host
   ) {
     background: var(--dashboard-window-backdrop);
@@ -29,8 +27,6 @@
     .quad-research-dialog,
     .pcv2-verification-dialog,
     .pcv2-leveraged-product-dialog,
-    .pm-gdp-card.pm-gdp-modal,
-    .pmv2-modal,
     .dashboard-security-detail-dialog
   ) {
     border: 1px solid var(--dashboard-window-border);

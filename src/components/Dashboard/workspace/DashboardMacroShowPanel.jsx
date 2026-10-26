@@ -3,7 +3,6 @@ import DashboardWorkspaceWindow from './DashboardWorkspaceWindow';
 
 export default function DashboardMacroShowPanel({
   showMacroShow,
-  showContractPnl,
   getSidebarPanelZIndex,
   children
 }) {
@@ -13,8 +12,6 @@ export default function DashboardMacroShowPanel({
         aria-label="Macro Show"
         manageFocus
         active={showMacroShow}
-        occluded={showContractPnl}
-        data-contract-pnl-coverable="true"
         style={{
           zIndex: getSidebarPanelZIndex('macroShow', showMacroShow),
         }}

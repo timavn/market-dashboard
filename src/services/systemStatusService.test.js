@@ -8,7 +8,6 @@ const {
   evaluateGmailHeartbeatEvidence,
   evaluateLivePortfolioEvidence,
   evaluateMarketDataEvidence,
-  evaluateResolverSourcesEvidence,
 } = require('./systemStatusService.cjs');
 
 const NOW = new Date('2026-07-29T15:00:00.000Z');
@@ -71,68 +70,6 @@ function freshAiEvidence(overrides = {}) {
   };
 }
 
-function freshResolverSourcesEvidence(overrides = {}) {
-  const observedAt = new Date(NOW.getTime() - 5_000).toISOString();
-  const symbols = Object.fromEntries(['GCQ6', 'ESU6', 'NQU6'].map((symbol) => [symbol, {
-    status: 'live',
-    definition: { valid: true, code: 'VERIFIED_IBKR_LIVE_DATED_FUTURE' },
-    lastQuoteAt: observedAt,
-    error: null,
-  }]));
-  symbols.CLU6 = {
-    status: 'unavailable',
-    definition: { valid: false, code: 'LIVE_MARKET_MARK_REQUIRED' },
-    lastQuoteAt: null,
-    error: { code: 'LIVE_MARKET_MARK_REQUIRED' },
-  };
-  return {
-    ok: true,
-    generatedAt: NOW.toISOString(),
-    lastSnapshotAt: observedAt,
-    status: 'live',
-    providers: {
-      ibkrFutures: {
-        provider: 'ibkr',
-        connected: true,
-        status: 'live',
-        lastMessageAt: observedAt,
-        requestedSymbolCount: 3,
-        verifiedSymbolCount: 3,
-        rejectedSymbolCount: 0,
-        coverageStatus: 'complete',
-        optionalSymbolCount: 1,
-        verifiedOptionalSymbolCount: 0,
-        rejectedOptionalSymbolCount: 1,
-        optionalCoverageStatus: 'none',
-        dataType: 'live_only',
-        cachePolicy: 'no_fallback',
-        symbols,
-      },
-      kalshi: { status: 'available', lastSuccessAt: observedAt, error: null },
-      forecastex: { status: 'available', lastSuccessAt: observedAt, error: null },
-      coinbase: { status: 'available', lastSuccessAt: observedAt, error: null },
-      blsRelease: { status: 'not_started', lastSuccessAt: null, error: null },
-      blsRss: { status: 'not_started', lastSuccessAt: null, error: null },
-      blsApi: { status: 'not_started', lastSuccessAt: null, error: null },
-      // Resolver health includes these loader observations, but Systems already
-      // owns their authoritative freshness under Products and must ignore them.
-      hedgeyeRiskRanges: { status: 'unavailable', lastSuccessAt: null },
-      hedgeyeInflationNowcast: { status: 'unavailable', lastSuccessAt: null },
-      hedgeyeCryptoTracker: { status: 'unavailable', lastSuccessAt: null },
-    },
-    schedule: {
-      blsCpi: {
-        releaseAt: '2026-08-12T12:30:00.000Z',
-        reportMonth: '2026-07',
-        windowOpensAt: '2026-08-12T12:15:00.000Z',
-        due: false,
-        released: false,
-      },
-    },
-    ...overrides,
-  };
-}
-
 function createOnlineService(overrides = {}) {
   return createSystemStatusService({
     readDashboardEvidence: async () => ({
@@ -152,7 +89,6 @@ function createOnlineService(overrides = {}) {
       accounts: ['U123'],
       time: new Date(NOW.getTime() - 1_000).toISOString(),
     }),
-    readResolverSourcesEvidence: async () => freshResolverSourcesEvidence(),
     readAiEvidence: async () => freshAiEvidence(),
     now: () => NOW,
     ...overrides,
@@ -170,7 +106,6 @@ describe('lightweight system status service', () => {
       { id: 'dashboard', label: 'Dashboard', status: 'online' },
       { id: 'market-data', label: 'Market data', status: 'online' },
       { id: 'live-portfolio', label: 'Portfolio', status: 'online' },
-      { id: 'resolver-sources', label: 'Resolver sources', status: 'online' },
       { id: 'ai', label: 'AI', status: 'online' },
     ]);
     expect(report.services.map((service) => ({
@@ -182,16 +117,6 @@ describe('lightweight system status service', () => {
       {
         id: 'live-portfolio',
         details: ['ibkr-sidecar', 'gateway-session', 'managed-account', 'fresh-session'],
-      },
-      {
-        id: 'resolver-sources',
-        details: [
-          'ibkr-dated-futures',
-          'kalshi-resolver',
-          'forecastex-publications',
-          'coinbase-proxy',
-          'bls-cpi-publication',
-        ],
       },
       {
         id: 'ai',
@@ -219,9 +144,6 @@ describe('lightweight system status service', () => {
       'analyst-runtime',
       'gmail-ingestion',
     ]);
-    expect(report.services).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'resolver-sources', nonCore: true }),
-    ]));
     expect(JSON.stringify(report)).not.toMatch(
       /hermes-gmail|quant-analyst|quant-developer|hermes-security|research-ingestion/i,
     );
@@ -252,7 +174,6 @@ describe('lightweight system status service', () => {
         reason: 'Market-data check timed out.',
       },
       { id: 'live-portfolio', label: 'Portfolio', status: 'online' },
-      { id: 'resolver-sources', label: 'Resolver sources', status: 'online' },
       { id: 'ai', label: 'AI', status: 'online' },
     ]);
     expect(report.services[1].details.every((detail) => detail.status === 'unknown')).toBe(true);
@@ -316,7 +237,6 @@ describe('lightweight system status service', () => {
       },
       { id: 'market-data', label: 'Market data', status: 'online' },
       { id: 'live-portfolio', label: 'Portfolio', status: 'online' },
-      { id: 'resolver-sources', label: 'Resolver sources', status: 'online' },
       { id: 'ai', label: 'AI', status: 'online' },
     ]);
     expect(report.services[0].details.every((detail) => detail.status === 'unknown')).toBe(true);
@@ -326,188 +246,12 @@ describe('lightweight system status service', () => {
     const report = createUnavailableSystemStatus({ now: NOW });
 
     expect(report.overall).toBe('unknown');
-    expect(report.services).toHaveLength(5);
+    expect(report.services).toHaveLength(4);
     expect(report.services.every((service) => service.status === 'unknown')).toBe(true);
     expect(report.services.every((service) => (
       service.details.length > 0
       && service.details.every((detail) => detail.status === 'unknown')
     ))).toBe(true);
-  });
-
-  test('exposes one compact resolver service without duplicating Hedgeye products', () => {
-    const result = evaluateResolverSourcesEvidence(freshResolverSourcesEvidence(), { now: NOW });
-
-    expect(result).toMatchObject({ status: 'online', nonCore: true });
-    expect(result.details.map((detail) => detail.id)).toEqual([
-      'ibkr-dated-futures',
-      'kalshi-resolver',
-      'forecastex-publications',
-      'coinbase-proxy',
-      'bls-cpi-publication',
-    ]);
-    expect(result.details[0]).toMatchObject({
-      status: 'online',
-      sourceStatus: 'live',
-      role: 'live_dated_futures',
-      coverage: { requested: 3, verified: 3, rejected: 0, status: 'complete' },
-      optionalCoverage: { requested: 1, verified: 0, rejected: 1 },
-      symbols: expect.arrayContaining([
-        expect.objectContaining({ symbol: 'CLU6', role: 'proxy', required: false, status: 'offline' }),
-        expect.objectContaining({ symbol: 'GCQ6', status: 'online', sourceStatus: 'live' }),
-        expect.objectContaining({ symbol: 'ESU6', status: 'online', sourceStatus: 'live' }),
-        expect.objectContaining({ symbol: 'NQU6', status: 'online', sourceStatus: 'live' }),
-      ]),
-    });
-    expect(result.details[3]).toMatchObject({
-      status: 'online',
-      role: 'proxy_only',
-    });
-    expect(result.details[4]).toMatchObject({
-      status: 'online',
-      sourceStatus: 'pending_release',
-      statusLabel: 'Scheduled',
-      neutral: true,
-      due: false,
-      released: false,
-    });
-    expect(JSON.stringify(result)).not.toMatch(/hedgeye/i);
-  });
-
-  test('fails stale public success closed and reports a current provider failure', () => {
-    const stale = freshResolverSourcesEvidence();
-    stale.providers.kalshi.lastSuccessAt = new Date(NOW.getTime() - 60_000).toISOString();
-    const staleResult = evaluateResolverSourcesEvidence(stale, { now: NOW });
-    expect(staleResult).toMatchObject({ status: 'attention', nonCore: true });
-    expect(staleResult.details[1]).toMatchObject({
-      id: 'kalshi-resolver',
-      status: 'unknown',
-      sourceStatus: 'available',
-      neutral: false,
-      reason: 'Kalshi resolver venue last successful observation is stale.',
-    });
-
-    const unavailable = freshResolverSourcesEvidence();
-    unavailable.providers.kalshi = {
-      status: 'unavailable',
-      lastSuccessAt: null,
-      error: { code: 'PM_TEST_HTTP_503', message: 'Kalshi returned HTTP 503.' },
-    };
-    const unavailableResult = evaluateResolverSourcesEvidence(unavailable, { now: NOW });
-    expect(unavailableResult).toMatchObject({ status: 'attention', nonCore: true });
-    expect(unavailableResult.details[1]).toMatchObject({
-      id: 'kalshi-resolver',
-      status: 'offline',
-      sourceStatus: 'unavailable',
-      reason: 'Kalshi returned HTTP 503.',
-    });
-  });
-
-  test('keeps never-observed public sources neutral and resolver failures out of overall', async () => {
-    const neverObserved = freshResolverSourcesEvidence();
-    ['kalshi', 'forecastex', 'coinbase'].forEach((provider) => {
-      neverObserved.providers[provider] = {
-        status: 'not_started',
-        lastSuccessAt: null,
-        error: null,
-      };
-    });
-    const neutral = evaluateResolverSourcesEvidence(neverObserved, { now: NOW });
-    expect(neutral.status).toBe('online');
-    expect(neutral.details.slice(1, 4).every((detail) => (
-      detail.status === 'unknown' && detail.neutral === true
-    ))).toBe(true);
-
-    const never = new Promise(() => {});
-    const report = await createOnlineService({
-      readResolverSourcesEvidence: () => never,
-      probeTimeoutMs: 20,
-    }).collect();
-    const resolver = report.services.find((service) => service.id === 'resolver-sources');
-    expect(resolver).toMatchObject({
-      status: 'unknown',
-      nonCore: true,
-      reason: 'Resolver-source check timed out.',
-    });
-    expect(report.overall).toBe('online');
-  });
-
-  test('requires fresh per-symbol IBKR evidence and evaluates the BLS due window', () => {
-    const staleFutures = freshResolverSourcesEvidence();
-    Object.values(staleFutures.providers.ibkrFutures.symbols).forEach((symbol) => {
-      symbol.lastQuoteAt = new Date(NOW.getTime() - 60_000).toISOString();
-    });
-    const staleResult = evaluateResolverSourcesEvidence(staleFutures, { now: NOW });
-    expect(staleResult.details[0]).toMatchObject({
-      id: 'ibkr-dated-futures',
-      status: 'unknown',
-      coverage: { requested: 3, verified: 0, rejected: 3, status: 'none' },
-    });
-
-    const rogue = freshResolverSourcesEvidence();
-    delete rogue.providers.ibkrFutures.symbols.CLU6;
-    rogue.providers.ibkrFutures.symbols.ROGUE = {
-      status: 'live',
-      lastQuoteAt: new Date(NOW.getTime() - 1_000).toISOString(),
-    };
-    rogue.providers.ibkrFutures.symbols.NQU6.definition = {
-      valid: false,
-      code: 'INVALID_IBKR_CONTRACT',
-    };
-    const rogueResult = evaluateResolverSourcesEvidence(rogue, { now: NOW });
-    expect(rogueResult.details[0]).toMatchObject({
-      status: 'attention',
-      coverage: { requested: 3, verified: 2, rejected: 1, status: 'partial' },
-      optionalCoverage: { requested: 1, verified: 0, rejected: 1 },
-    });
-    expect(rogueResult.details[0].symbols.map((symbol) => symbol.symbol)).toEqual([
-      'CLU6', 'GCQ6', 'ESU6', 'NQU6',
-    ]);
-    expect(rogueResult.details[0].symbols[3]).toMatchObject({
-      symbol: 'NQU6',
-      status: 'offline',
-      errorCode: 'INVALID_IBKR_CONTRACT',
-    });
-
-    const dueNow = new Date('2026-08-12T12:20:00.000Z');
-    const dueObservedAt = new Date(dueNow.getTime() - 1_000).toISOString();
-    const due = freshResolverSourcesEvidence({
-      lastSnapshotAt: dueObservedAt,
-    });
-    Object.values(due.providers.ibkrFutures.symbols).forEach((symbol) => {
-      symbol.lastQuoteAt = dueObservedAt;
-    });
-    due.providers.ibkrFutures.lastMessageAt = dueObservedAt;
-    ['kalshi', 'forecastex', 'coinbase'].forEach((provider) => {
-      due.providers[provider].lastSuccessAt = dueObservedAt;
-    });
-    due.providers.blsRelease = { status: 'available', lastSuccessAt: dueObservedAt };
-    due.providers.blsRss = { status: 'available', lastSuccessAt: dueObservedAt };
-    let result = evaluateResolverSourcesEvidence(due, { now: dueNow });
-    expect(result.details[4]).toMatchObject({
-      status: 'online',
-      sourceStatus: 'available',
-      neutral: false,
-      due: true,
-      released: false,
-    });
-
-    const releasedNow = new Date('2026-08-12T12:31:00.000Z');
-    const releasedObservedAt = new Date(releasedNow.getTime() - 1_000).toISOString();
-    due.lastSnapshotAt = releasedObservedAt;
-    due.providers.blsRelease.lastSuccessAt = releasedObservedAt;
-    due.providers.blsRss.lastSuccessAt = releasedObservedAt;
-    due.providers.blsApi = {
-      status: 'unavailable',
-      lastSuccessAt: null,
-      error: { code: 'PM_TEST_BLS_API_UNAVAILABLE' },
-    };
-    result = evaluateResolverSourcesEvidence(due, { now: releasedNow });
-    expect(result.details[4]).toMatchObject({
-      status: 'offline',
-      sourceStatus: 'unavailable',
-      due: true,
-      released: true,
-    });
   });
 
   test('maps AWS heartbeat access failures to precise unknown reasons', async () => {

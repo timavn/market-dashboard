@@ -1,7 +1,7 @@
 import React from 'react';
-import { RefreshCw } from 'lucide-react';
 import { formatResearchSourceDate, formatResearchTime } from '../../../utils/researchDateFormat';
 import { safeResearchUrl } from '../../../utils/researchSourceUrl';
+import LoadingIndicator from '../../common/LoadingIndicator';
 
 // Rows are the parent's validated research projection, never executable data.
 // Expansion stays with the position owner so collapse/reopen preserves context.
@@ -141,8 +141,7 @@ export default function PortfolioResearchProducts({ rowId, symbol, rows, loading
       {loading ? (
         <div className="pcv2-intel-grid pcv2-intel-reference-row pcv2-intel-loading-row" role="status">
           <div className="pcv2-intel-cell pcv2-intel-span-20">
-            <RefreshCw size={13} strokeWidth={2} aria-hidden="true" />
-            <span>Loading verified research…</span>
+            <LoadingIndicator label="Loading verified research…" size="sm" announce={false} />
           </div>
         </div>
       ) : rows.map((row) => renderCurrentResearchProductRow(row))}

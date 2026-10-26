@@ -4,6 +4,7 @@ import { useDashboardResource } from '../../hooks/useDashboardResource';
 import { isFreshForToday } from '../../utils/dateFreshness';
 import { useSurfaceActivity } from '../common/PersistentSurface';
 import ResourceDataStatusChip from './ResourceDataStatusChip';
+import LoadingIndicator from '../common/LoadingIndicator';
 import './EtfProCard.css';
 
 function formatSignedPercent(value, digits = 2) {
@@ -310,7 +311,7 @@ const EtfProCard = ({ onFreshness }) => {
       {error && <div className="etfpro-error">{error}</div>}
 
       {loading ? (
-        <div className="etfpro-empty">Loading ETF Pro…</div>
+        <div className="etfpro-empty"><LoadingIndicator label="Loading ETF Pro…" size="sm" /></div>
       ) : rows.length === 0 ? (
         <div className="etfpro-empty">
           No ETF Pro data yet. Run <span className="mono">npm run collect:etfpro</span> to pull the

@@ -19,28 +19,6 @@ describe('dashboardResourceWarmup', () => {
     await expect(Promise.all([first, second])).resolves.toHaveLength(2);
   });
 
-  test('deduplicates Gold auto and Kalshi warmups through the canonical monitor identity', async () => {
-    let resolveRequest;
-    const fetcher = jest.fn(() => new Promise((resolve) => { resolveRequest = resolve; }));
-    const first = warmDashboardResource('prediction-monitor', {
-      marketId: 'gold', venue: 'auto', generationId: null,
-    }, { fetcher });
-    const second = warmDashboardResource('prediction-monitor', {
-      marketId: 'gold', venue: 'kalshi', generationId: null,
-    }, { fetcher });
-
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    resolveRequest({
-      schemaVersion: 2,
-      marketId: 'gold',
-      generatedAt: new Date().toISOString(),
-      venues: {},
-      contracts: { status: 'unavailable', lines: [] },
-      chart: null,
-    });
-    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
-  });
-
   test('rejects executable, forced, and provider-starting work', () => {
     expect(() => resolveDashboardWarmupConfig('portfolio', { accountId: 'U1' }, {
       fetcher: jest.fn(),

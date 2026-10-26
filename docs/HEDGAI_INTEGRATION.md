@@ -107,7 +107,7 @@ changes without obtaining the current cloud artifact and a new RevisionId lock.
 Tick (`Ti`) precedes Trade (`Ta`) and Trend (`Te`) in the existing research
 labels. The shared Tick projection covers all 47 reviewed source-listed
 instruments without applying the historical 60% strategy filter. Portfolio,
-security details, Securities, prediction summaries, and Top 10 + MOMO use that
+security details, Securities, and Top 10 + MOMO use that
 same projection. Analyst holdings and prediction narratives likewise display
 the explicit captured position independently of historical strategy eligibility;
 saved reviews use only their own captured evidence. Explicit Wait is gray;

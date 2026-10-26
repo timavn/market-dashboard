@@ -22,10 +22,10 @@ function quotePolicy(quote) {
   if (source === 'ibkr' && ['live', 'delayed'].includes(type)) {
     return { classification: type === 'live' ? 'live_quote' : 'delayed_reference', maxAgeMs: MAX_AGE_MS };
   }
-  if (['yahoo', 'trading_economics'].includes(source) && type === 'delayed') {
+  if (['yahoo', 'trading_economics', 'cnbc'].includes(source) && type === 'delayed') {
     return { classification: 'delayed_reference', maxAgeMs: CRYPTO_SYMBOLS.has(token(quote.symbol)) ? 2 * 60 * 60_000 : 4 * DAY_MS };
   }
-  if (['fred', 'stooq', 'bundesbank', 'japan_mof', 'bank_of_england'].includes(source) && type === 'historical') {
+  if (['fred', 'stooq', 'bundesbank', 'japan_mof', 'bank_of_england', 'us_treasury'].includes(source) && type === 'historical') {
     // Dated observations have no live-use lifetime. They never become executable.
     return { classification: 'historical_reference', maxAgeMs: null };
   }

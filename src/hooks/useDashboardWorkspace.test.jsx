@@ -1,7 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { useDashboardWorkspaceState } from './useDashboardWorkspaceState';
 import { useDashboardPanelResize } from './useDashboardPanelResize';
-import useContractPnlOverlay from './useContractPnlOverlay';
 import { DASHBOARD_PANEL_STATE_KEY } from '../constants/dashboardWorkspace';
 
 jest.mock('react-dom/test-utils', () => ({
@@ -18,16 +17,6 @@ const useWorkspaceWithResize = ({ isProcessOpen = false } = {}) => {
       analystPanelPosition: workspace.analystPanelPosition,
       analystPanelResizeEdge: workspace.analystPanelResizeEdge,
       setAnalystPanelWidth: workspace.setAnalystPanelWidth,
-    },
-    contractPnl: {
-      contractPnlPanelWidth: workspace.contractPnlPanelWidth,
-      contractPnlPanelRightExtension: workspace.contractPnlPanelRightExtension,
-      contractPnlPanelDisplayedWidth: workspace.contractPnlPanelDisplayedWidth,
-      setContractPnlPanelWidth: workspace.setContractPnlPanelWidth,
-      setContractPnlPanelRightExtension: workspace.setContractPnlPanelRightExtension,
-      setContractPnlSizeCustomized: workspace.setContractPnlSizeCustomized,
-      showContractPnl: workspace.showContractPnl,
-      contractPnlOverlay: { defaultWidth: 840 },
     },
   });
   return { workspace, resize };
@@ -53,40 +42,35 @@ beforeEach(() => {
 });
 afterEach(() => {
   window.innerWidth = originalViewportWidth;
-  document.body.classList.remove('dashboard-is-resizing-analyst', 'dashboard-is-resizing-contract-pnl');
+  document.body.classList.remove('dashboard-is-resizing-analyst');
 });
 
 describe('dashboard workspace state owner', () => {
-  it.each(['bitcoin', 'ethereum'])('restores the %s perpetual card after reload', (marketId) => {
+  it('drops retired prediction-monitor and Contract P&L panel state while keeping live panels', () => {
     localStorage.setItem(DASHBOARD_PANEL_STATE_KEY, JSON.stringify({
-      showPredictionMonitor: true,
-      activePredictionMonitorMarket: marketId,
-      sidebarPanelStack: ['predictionMonitor'],
-    }));
-    const { result, unmount } = renderHook(() => useDashboardWorkspaceState({ isProcessOpen: false }));
-    expect(result.current.showPredictionMonitor).toBe(true);
-    expect(result.current.activePredictionMonitorMarket).toBe(marketId);
-    expect(result.current.sidebarPanelStack).toEqual(['predictionMonitor']);
-    expect(saved().activePredictionMonitorMarket).toBe(marketId);
-    unmount();
-  });
-
-  it('migrates the legacy monitor, filters retired panels, and preserves the initial saved snapshot', () => {
-    localStorage.setItem(DASHBOARD_PANEL_STATE_KEY, JSON.stringify({
-      showResolverTest: true, showSystemReadiness: true,
-      sidebarPanelStack: ['system', 'predictionMarkets', 'resolverTest', 'system'],
-      analystPanelWidth: 520, activePredictionMonitorMarket: 'cpi',
+      showResolverTest: true, showPredictionMonitor: true, showSystemReadiness: true,
+      activePredictionMonitorMarket: 'cpi',
+      sidebarPanelStack: ['system', 'predictionMarkets', 'resolverTest', 'predictionMonitor', 'cpi', 'system'],
+      analystPanelWidth: 520,
+      contractPnlPanelWidth: 810, contractPnlPanelRightExtension: 40,
+      contractPnlSizeCustomized: true, contractPnlGeometryVersion: 3,
     }));
     const { result, unmount } = renderHook(() => useDashboardWorkspaceState({ isProcessOpen: false }));
     const initial = result.current.persistedPanelState;
-    expect(result.current.showPredictionMonitor).toBe(true);
-    expect(result.current.activePredictionMonitorMarket).toBe('sp500');
-    expect(result.current.sidebarPanelStack).toEqual(['system', 'predictionMonitor']);
+    expect(result.current).not.toHaveProperty('showPredictionMonitor');
+    expect(result.current).not.toHaveProperty('showContractPnl');
+    expect(result.current.showSystemReadiness).toBe(true);
+    expect(result.current.sidebarPanelStack).toEqual(['system']);
     expect(result.current.analystPanelWidth).toBe(520);
-    act(() => { result.current.setActivePredictionMonitorMarket('cpi'); });
+    expect(initial).not.toHaveProperty('showPredictionMonitor');
+    expect(initial).not.toHaveProperty('contractPnlPanelWidth');
+    act(() => { result.current.bringSidebarPanelToFront('portfolio'); });
     expect(result.current.persistedPanelState).toBe(initial);
-    expect(saved().activePredictionMonitorMarket).toBe('cpi');
-    expect(saved()).not.toHaveProperty('showResolverTest');
+    const stored = saved();
+    expect(stored.sidebarPanelStack).toEqual(['system', 'portfolio']);
+    ['showResolverTest', 'showPredictionMonitor', 'activePredictionMonitorMarket',
+      'contractPnlPanelWidth', 'contractPnlPanelRightExtension', 'contractPnlSizeCustomized',
+      'contractPnlGeometryVersion'].forEach((key) => expect(stored).not.toHaveProperty(key));
     unmount();
   });
 
@@ -106,21 +90,16 @@ describe('dashboard workspace state owner', () => {
   });
 
   it('centers legacy Analyst positions and persists the current width geometry', () => {
-    localStorage.setItem(DASHBOARD_PANEL_STATE_KEY, JSON.stringify({ contractPnlPanelWidth: 295 }));
     const { result, unmount } = renderHook(() => useDashboardWorkspaceState({ isProcessOpen: false }));
-    expect(result.current.contractPnlPanelWidth).toBe(720);
     expect(result.current.analystPanelPosition).toBe('center');
     expect(saved()).not.toHaveProperty('analystPanelPosition');
     act(() => {
       result.current.setAnalystPanelPosition('left');
-      result.current.setContractPnlPanelWidth(810);
-      result.current.setContractPnlSizeCustomized(true);
-      result.current.setShowContractPnl(true);
+      result.current.setAnalystPanelWidth(610);
     });
     expect(result.current.analystPanelPosition).toBe('center');
     expect(saved()).not.toHaveProperty('analystPanelPosition');
-    expect(saved()).toMatchObject({ contractPnlPanelWidth: 810, contractPnlPanelRightExtension: 0, contractPnlSizeCustomized: true, contractPnlGeometryVersion: 3 });
-    expect(saved()).not.toHaveProperty('showContractPnl');
+    expect(saved()).toMatchObject({ analystPanelWidth: 610 });
     unmount();
   });
 
@@ -137,33 +116,14 @@ describe('dashboard workspace state owner', () => {
     expect(result.current.sidebarPanelStack).toEqual(['portfolio', 'analyst']);
   });
 
-  it('migrates a customized P&L extension into total width and preserves it on another reload', () => {
-    localStorage.setItem(DASHBOARD_PANEL_STATE_KEY, JSON.stringify({
-      contractPnlGeometryVersion: 2, contractPnlPanelWidth: 810,
-      contractPnlPanelRightExtension: 40, contractPnlSizeCustomized: true,
-    }));
-    const { result, unmount } = renderHook(() => useDashboardWorkspaceState({ isProcessOpen: false }));
-    expect(result.current.contractPnlPanelDisplayedWidth).toBe(850);
-    expect(saved()).toMatchObject({
-      contractPnlGeometryVersion: 3, contractPnlPanelWidth: 850,
-      contractPnlPanelRightExtension: 0, contractPnlSizeCustomized: true,
-    });
-    unmount();
-    const { result: restored } = renderHook(() => useDashboardWorkspaceState({ isProcessOpen: false }));
-    expect(restored.current.contractPnlPanelDisplayedWidth).toBe(850);
-    expect(restored.current.contractPnlSizeCustomized).toBe(true);
-  });
-
   it('keeps setters and resize callbacks stable across unrelated workspace changes', () => {
     const { result, rerender, unmount } = renderHook(useWorkspaceWithResize, { initialProps: { isProcessOpen: false } });
     const setWidth = result.current.workspace.setAnalystPanelWidth;
     const resize = result.current.resize.beginAnalystPanelResize;
-    const closeResize = result.current.resize.resetContractPnlPanelSize;
     act(() => { result.current.workspace.setShowSystemReadiness(true); });
     rerender({ isProcessOpen: true });
     expect(result.current.workspace.setAnalystPanelWidth).toBe(setWidth);
     expect(result.current.resize.beginAnalystPanelResize).toBe(resize);
-    expect(result.current.resize.resetContractPnlPanelSize).toBe(closeResize);
     expect(result.current.workspace.showSystemReadiness).toBe(true);
     unmount();
   });
@@ -236,40 +196,13 @@ describe('dashboard resize owner', () => {
     expect(saved().analystPanelWidth).toBe(280);
   });
 
-  it('resizes centered Contract P&L from either edge and cleans an active drag on close', () => {
-    const { result, unmount } = renderHook(useWorkspaceWithResize);
-    act(() => { result.current.workspace.setShowContractPnl(true); });
-    act(() => { result.current.resize.beginContractPnlPanelResize(pointer(600), 'left'); });
-    act(() => { window.dispatchEvent(new MouseEvent('pointermove', { clientX: 500 })); });
-    expect(result.current.workspace.contractPnlPanelWidth).toBe(920);
-    act(() => { window.dispatchEvent(new MouseEvent('pointerup')); });
-    act(() => { result.current.resize.beginContractPnlPanelResize(pointer(900), 'right'); });
-    act(() => { window.dispatchEvent(new MouseEvent('pointermove', { clientX: 950 })); });
-    expect(result.current.workspace.contractPnlPanelWidth).toBe(1020);
-    expect(result.current.workspace.contractPnlPanelRightExtension).toBe(0);
-    expect(result.current.workspace.contractPnlPanelDisplayedWidth).toBe(1020);
-    expect(saved().contractPnlPanelWidth).toBe(1020);
-    act(() => { result.current.workspace.setShowContractPnl(false); });
-    expect(result.current.resize.contractPnlPanelResizing).toBe(false);
-    expect(document.body.classList.contains('dashboard-is-resizing-contract-pnl')).toBe(false);
-    act(() => { window.dispatchEvent(new MouseEvent('pointermove', { clientX: 1000 })); });
-    expect(result.current.workspace.contractPnlPanelDisplayedWidth).toBe(1020);
-    act(() => { result.current.resize.resetContractPnlPanelSize(); });
-    expect(result.current.workspace.contractPnlPanelDisplayedWidth).toBe(840);
-    expect(result.current.workspace.contractPnlSizeCustomized).toBe(false);
-    unmount();
-  });
-
-  it.each([1280, 250])('keeps both resize controls inside a %spx viewport', (viewportWidth) => {
+  it.each([1280, 250])('keeps the Analyst resize control inside a %spx viewport', (viewportWidth) => {
     window.innerWidth = viewportWidth;
     const { result } = renderHook(useWorkspaceWithResize);
     act(() => { result.current.resize.handleAnalystPanelResizeKeyDown(key('End')); });
-    act(() => { result.current.resize.handleContractPnlPanelResizeKeyDown(key('End'), 'right'); });
     expect(result.current.workspace.analystPanelWidth).toBe(viewportWidth - 32);
-    expect(result.current.workspace.contractPnlPanelDisplayedWidth).toBe(viewportWidth - 32);
-    act(() => { result.current.resize.handleContractPnlPanelResizeKeyDown(key('Home'), 'left'); });
-    expect(result.current.workspace.contractPnlPanelDisplayedWidth).toBe(Math.min(295, viewportWidth - 32));
   });
+
 
   it('rejects non-primary drags and releases active Analyst listeners on unmount', () => {
     const removeListener = jest.spyOn(window, 'removeEventListener');
@@ -285,18 +218,4 @@ describe('dashboard resize owner', () => {
     expect(removeListener).toHaveBeenCalledWith('pointerup', expect.any(Function));
     expect(removeListener).toHaveBeenCalledWith('pointercancel', expect.any(Function));
   });
-});
-
-it('opens Contract P&L without inheriting a covered window or legacy rail geometry', () => {
-  const query = jest.spyOn(document, 'querySelectorAll');
-  const { result, rerender } = renderHook(({ active }) => useContractPnlOverlay(active), {
-    initialProps: { active: false },
-  });
-  const overlay = result.current;
-  expect(overlay.prepare()).toBe(720);
-  rerender({ active: true });
-  expect(result.current).toBe(overlay);
-  expect(result.current.style).toEqual({});
-  expect(query).not.toHaveBeenCalled();
-  query.mockRestore();
 });

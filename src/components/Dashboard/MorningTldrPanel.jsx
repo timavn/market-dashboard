@@ -28,6 +28,7 @@ import {
 } from '../../utils/riskRangePercents';
 import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
 import './MorningTldrPanel.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const PRODUCT_IDS = TLDR_PRODUCT_DEFINITIONS.map((product) => product.id);
 const COMPARABLE_PRODUCT_IDS = PRODUCT_IDS.filter((id) => id !== 'market-structure');
@@ -1599,9 +1600,9 @@ const MorningTldrPanel = () => {
   const selectedEditionLoading = dayLoading
     || Boolean(selectedDate && marketStructureReport.loading && !marketStructureReport.data);
   const saveStatus = archiveLoading
-    ? 'Loading saved editions…'
+    ? <LoadingIndicator label="Loading saved editions…" size="sm" />
     : selectedEditionLoading
-      ? `Loading ${formatDateLong(selectedDate)}…`
+      ? <LoadingIndicator label={`Loading ${formatDateLong(selectedDate)}…`} size="sm" />
       : selectedDate
         ? `${formatDateLong(selectedDate)} · ${currentCount} of ${PRODUCT_IDS.length} publications saved · ${totalChanges} changes`
         : 'No saved TL;DR editions available';
@@ -1731,7 +1732,7 @@ const MorningTldrPanel = () => {
 
           <article className="process-wiki__article wp-paper tldr-wiki-article">
             {error && <EmptyState title="No saved TL;DR edition is available" body="No verified market publication is available for the selected date." />}
-            {archiveLoading && <EmptyState title="Loading saved TL;DR dates…" body="Checking the dated Hedgeye source archive." tone="neutral" />}
+            {archiveLoading && <LoadingIndicator label="Loading saved TL;DR dates…" size="sm" centered />}
             {!archiveLoading && !canRenderSections && !error && <EmptyState title="No saved TL;DR edition is available" body="No verified market publication is available for the selected date." />}
             {!archiveLoading && canRenderSections && (
               <>

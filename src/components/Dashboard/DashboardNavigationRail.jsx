@@ -44,48 +44,9 @@ const DashboardNavigationRail = ({
   );
   const getGroupItems = (groupId) => primaryItems.filter((item) => item.group === groupId);
 
-  const renderGroupItems = (groupItems) => {
-    const unsectioned = groupItems.filter((item) => !item.sectionLabel);
-    const sectionLabels = [...new Set(groupItems.map((item) => item.sectionLabel).filter(Boolean))];
-    return (
-      <>
-        {unsectioned.length > 0 && (
-          <div className="dashboard-navigation-rail__card-grid">
-            {unsectioned.map(renderCard)}
-          </div>
-        )}
-        {sectionLabels.map((sectionLabel) => (
-          <section
-            key={sectionLabel}
-            className="dashboard-navigation-rail__tier"
-            aria-label={`${sectionLabel} prediction markets`}
-            data-navigation-tier={sectionLabel}
-          >
-            <h2 className="dashboard-navigation-rail__tier-label">{sectionLabel}</h2>
-            <div className="dashboard-navigation-rail__card-grid">
-              {groupItems.filter((item) => item.sectionLabel === sectionLabel).map(renderCard)}
-            </div>
-          </section>
-        ))}
-      </>
-    );
-  };
-
   const renderCard = (item) => {
     const isActive = activeIds.has(item.id);
     const hasSystemStatus = item.id === 'system';
-    const indicatorTone = ['bullish', 'bearish'].includes(item.indicatorTone)
-      ? item.indicatorTone
-      : null;
-    const indicatorDescription = indicatorTone && typeof item.indicatorDescription === 'string'
-      ? item.indicatorDescription.trim()
-      : '';
-    const indicatorDescriptionId = indicatorDescription
-      ? `dashboard-navigation-indicator-${String(item.id).replace(/[^a-z0-9_-]/gi, '-')}`
-      : undefined;
-    const cardTitle = indicatorDescription
-      ? `${item.title || item.label}. ${indicatorDescription}`
-      : item.title || item.label;
     const hasAnalystDockControls = item.id === 'analyst'
       && typeof item.onAnalystPanelPositionChange === 'function';
     const cardClassName = [
@@ -156,9 +117,8 @@ const DashboardNavigationRail = ({
         key={item.id}
         ref={item.buttonRef}
         type="button"
-        title={cardTitle}
+        title={item.title || item.label}
         aria-label={item.label}
-        aria-describedby={indicatorDescriptionId}
         onPointerEnter={() => onItemIntent?.(item.id)}
         onFocus={() => onItemIntent?.(item.id)}
         onClick={item.onSelect}
@@ -168,16 +128,12 @@ const DashboardNavigationRail = ({
         data-navigation-item-id={item.id}
         data-process-toggle={item.isProcessToggle ? 'true' : undefined}
         data-readiness-status={hasSystemStatus ? systemReadinessStatus : undefined}
-        data-indicator-tone={indicatorTone || undefined}
       >
         <span className="dashboard-navigation-rail__card-copy">
           <span className="dashboard-navigation-rail__card-title">{item.label}{item.id === 'analyst' && analystUnread > 0 && <span className="analyst-unread-badge" aria-label={`${analystUnread} unread portfolio alerts`}>{analystUnread}</span>}</span>
         </span>
         {hasSystemStatus && (
           <span className="sr-only">System status: {systemReadinessStatus}</span>
-        )}
-        {indicatorDescription && (
-          <span id={indicatorDescriptionId} className="sr-only">{indicatorDescription}</span>
         )}
       </button>
     );
@@ -201,7 +157,9 @@ const DashboardNavigationRail = ({
               data-navigation-group={group.id}
               data-navigation-placement={group.placement}
             >
-              {renderGroupItems(groupItems)}
+              <div className="dashboard-navigation-rail__card-grid">
+                {groupItems.map(renderCard)}
+              </div>
             </section>
           );
         }) : (

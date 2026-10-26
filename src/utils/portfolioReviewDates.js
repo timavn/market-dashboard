@@ -34,7 +34,7 @@ export const capturedSectionSources = (section, blocks, sources) => [...new Set(
 
 export function publicationDatelineParts(sources, { comparison = false, label = 'Published' } = {}) {
   const dates = array(sources).filter(Boolean).map(source => dated(source.publishedAt, source.publicationDate, true) || dated(source.publicationDate)).filter(Boolean);
-  if (!dates.length) return label === 'Period' ? { text: '', period: 'Period: —' } : { text: `${label}: —` };
+  if (!dates.length) return label === 'Period' ? { text: '', period: '' } : { text: `${label}: —` };
   const days = [...new Set(dates.map(date => date.day))].sort();
   const latest = dates.filter(date => date.day === days.at(-1)).sort((a, b) => Number(b.timed) - Number(a.timed) || b.time - a.time)[0];
   if (days.length === 1) return label === 'Period'

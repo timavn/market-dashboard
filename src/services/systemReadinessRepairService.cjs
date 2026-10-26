@@ -271,7 +271,6 @@ function createSystemReadinessRepairService({
   repoRoot = REPO_ROOT,
   spawnProcess = spawn,
   lambdaClient = null,
-  reconcilePredictionCatalog = null,
   collectReadiness = null,
   now = () => Date.now(),
   cooldownMs = DEFAULT_COOLDOWN_MS,
@@ -317,13 +316,6 @@ function createSystemReadinessRepairService({
         '--window-days=90',
         '--json',
       ],
-    }],
-    ['prediction-catalog-reconcile', {
-      kind: 'handler',
-      run: reconcilePredictionCatalog || (async () => {
-        const { reconcileCurrentCpiCatalog } = require('./predictionMarketsIngest/reconciliationService');
-        return reconcileCurrentCpiCatalog({ trigger: 'manual' });
-      }),
     }],
   ]);
 
@@ -434,16 +426,6 @@ function createSystemReadinessRepairService({
           InvocationType: 'Event',
           Payload: JSON.stringify(executor.payload),
         }).promise();
-      } else if (executor.kind === 'handler') {
-        const result = await executor.run();
-        const outcome = result?.outcome || result;
-        if (outcome?.status !== 'succeeded') {
-          throw repairError(
-            outcome?.message || 'Current CPI catalog reconciliation did not succeed.',
-            503,
-            outcome?.code || 'PREDICTION_CATALOG_RECONCILE_FAILED',
-          );
-        }
       } else if (executor.kind === 'verified-process') {
         const execution = await runVerifiedProcess(spawnProcess, executor, {
           repoRoot,

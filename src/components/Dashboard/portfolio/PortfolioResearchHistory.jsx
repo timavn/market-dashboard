@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw } from 'lucide-react';
+import LoadingIndicator from '../../common/LoadingIndicator';
 
 // The parent supplies dated, validated display rows, never executable data.
 // Keep native disclosure state so updates preserve open/closed state and a
@@ -14,8 +14,7 @@ export default function PortfolioResearchHistory({ rowId, rows, historyDays, loa
         {loading ? (
           <div className="pcv2-intel-grid pcv2-intel-reference-row pcv2-intel-loading-row" role="status">
             <div className="pcv2-intel-cell pcv2-intel-span-20">
-              <RefreshCw size={13} strokeWidth={2} aria-hidden="true" />
-              <span>Loading verified historical references…</span>
+              <LoadingIndicator label="Loading verified historical references…" size="sm" announce={false} />
             </div>
           </div>
         ) : rows.length > 0

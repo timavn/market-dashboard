@@ -4,6 +4,7 @@ import { getQuadResearchCell, normalizeQuadResearch } from '../../hooks/useQuadR
 import QuadResearchExplanation from './QuadResearchExplanation';
 import { useSurfaceActivity } from '../common/PersistentSurface';
 import './PortfolioFactorQuadMatrix.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const QUADS = [1, 2, 3, 4];
 const pct = value => `${Math.abs(value) < 0.05 ? '0.0' : value.toFixed(1)}%`;
@@ -25,7 +26,7 @@ export default function PortfolioFactorQuadMatrix({
   const closeLabel = closeDate && new Date(`${closeDate}T12:00:00Z`).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', timeZone: 'UTC',
   });
-  const valuationLabel = !available ? loading ? 'Loading…' : 'Unavailable' : null;
+  const valuationLabel = !available ? loading ? <LoadingIndicator label="Loading…" size="sm" announce={false} /> : 'Unavailable' : null;
   const valuationTitle = [
     'Net = long minus short, as a percent of current verified broker NAV. Factors across categories overlap; do not add the rows together.',
     closeDate ? `Current broker quantities valued consistently at verified ${closeDate} closing prices, divided by current broker NAV. Reference only; not a live quote or trade size.` : '',

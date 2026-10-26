@@ -11,6 +11,7 @@ import {
   SUPPORTED_COUNTRY_CODES,
   countryName,
 } from '../../constants/exposureLabGeography.cjs';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const TABS = [
   ['exposures', 'Exposure Matrix'],
@@ -1177,7 +1178,7 @@ export default function ExposureLab({
         </div>
         <div className="exposure-lab__header-actions">
           <button type="button" onClick={handleRefresh} disabled={loading || isLoading || isRefreshing}>
-            {loading || isRefreshing ? 'Refreshing…' : 'Refresh'}
+            {loading || isRefreshing ? <LoadingIndicator label="Refreshing…" size="sm" /> : 'Refresh'}
           </button>
           {onClose && <button type="button" onClick={onClose}>Close</button>}
         </div>

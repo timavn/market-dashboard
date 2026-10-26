@@ -35,9 +35,7 @@ only `app`; its route registry does not expose these function bindings.
 
 Important name collision: `fetchYahooQuote` in
 `src/services/providers/yahoo/yahooMarketDataProvider.js` is called and exported;
-the separate implementation in
-`src/services/predictionMarketsIngest/providers/referenceProvider.js` is called
-by its reference fetcher. Neither is a removal candidate. The documentation
+it is not a removal candidate. The documentation
 comment in `normalize/normalizeQuote.js` mentioning the server's old function is
 not an executable consumer.
 
@@ -61,24 +59,10 @@ newly unused dependencies opportunistically in that patch.
 bindings in the server, but their modules are used elsewhere. They are inventory
 entries, not permission to remove entire require statements or module startup.
 
-## Isolated orphan component — retain pending separate cleanup
-
-`src/components/Dashboard/PredictionMarketsLogo.jsx` has no direct import,
-re-export, test consumer, or dynamic loader consumer anywhere found in the
-repository. It is a separate 20-line component, not the public named
-`PredictionMarketsLogo` export inside `PredictionMarkets.jsx`.
-
-The shared `/images/icons/prediction-markets.png` asset is still referenced by
-the latter component. If the isolated file is removed in a later checkpoint,
-preserve the asset, the named export, and `PalantirOrbIcon` compatibility wrapper.
-
 ## Unmounted or legacy does not mean unused — preserve
 
 | Path/group | Concrete consumers or remaining behavior | Decision |
 | --- | --- | --- |
-| `PredictionMarkets.jsx` | `PredictionMarketsHub.jsx:28` lazy-loads it; `PredictionMarkets.cpiWorkbench.test.jsx` directly imports the module; named compatibility exports remain. | Keep file, CSS, exports, and tests. |
-| `PredictionMarketsSandbox.jsx` | Hub lazy import at line 29; direct Sandbox component/helper tests. | Keep. |
-| `PredictionMarketsHub.jsx` | Direct component and normalization tests; old persisted navigation flags have migration regression tests. Current shell instead lazy-loads `PredictionMarketResolverTest`. | Keep; an unmounted shell is insufficient proof. |
 | `PortfolioBreakdown.jsx` literal `false &&` JSX (2356–2634) | The JSX itself is unreachable, but old column/search/sort state, memoized sorting, and a resize effect still run. `positions.legacySizing` shares active target/edit maps and calculators. | No broad branch/support-code deletion in this milestone. |
 | `usePortfolioPositions.js` `legacySizing` | Parent still consumes it; direct hook tests use its exposed maps/calculators. Shared bindings also support active position inputs. | Keep until a dedicated legacy-support boundary is proven. |
 | `PortfolioBreakdown.incrementor.test.js` / `.buySell.test.js` | Jest discovers them. They copy algorithms rather than importing the active component; the old increment tests assert 0.10 while active integration asserts 0.01. | Record test-quality debt, not unused production. Do not silently replace active semantics. |

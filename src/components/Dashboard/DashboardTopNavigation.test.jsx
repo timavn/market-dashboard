@@ -41,7 +41,7 @@ const settleInboxRequest = async () => {
 };
 
 test('preserves every destination in bottom dock groups', () => {
-  const destinations = [['x', 'X.com'], ['tldr', 'TL;DR'], ['process', 'Process'], ['dashboardGuide', 'Dashboard Guide'], ['exposureGuide', 'Exposure Guide'], ['portfolio', 'Portfolio'], ['exposureLab', 'Exposure Lab'], ['balance', 'Balance']];
+  const destinations = [['tldr', 'TL;DR'], ['process', 'Process'], ['dashboardGuide', 'Dashboard Guide'], ['exposureGuide', 'Exposure Guide'], ['portfolio', 'Portfolio'], ['exposureLab', 'Exposure Lab'], ['balance', 'Balance']];
   const items = [
     ...destinations.map(([id, label]) => ({ id, label, group: 'primary', onSelect: jest.fn() })),
     { id: 'system', label: 'Systems', group: 'utility', onSelect: jest.fn() },
@@ -51,16 +51,17 @@ test('preserves every destination in bottom dock groups', () => {
 
   const navigation = screen.getByRole('navigation', { name: 'Workspace navigation' });
   expect(within(navigation).getAllByRole('button').map((button) => button.getAttribute('aria-label') || button.textContent))
-    .toEqual(['Portfolio', 'Market Events', 'Research', 'The Analyst', 'Systems']);
+    .toEqual(['Portfolio', 'Market Events', 'The Analyst', 'Systems', 'Playbook']);
   expect(screen.queryByRole('button', { name: 'Market Dashboard' })).not.toBeInTheDocument();
   expect(within(navigation).queryByRole('button', { name: 'Dashboard', exact: true })).not.toBeInTheDocument();
   expect(within(navigation).queryByRole('button', { name: 'Prediction Markets' })).not.toBeInTheDocument();
   expect(within(navigation).queryByRole('button', { name: 'Perpetual Futures' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'X.com' })).not.toBeInTheDocument();
   expect(within(navigation).getByRole('button', { name: 'Market Events' })).toHaveAttribute('data-compact', 'true');
   for (const [id, label] of destinations) {
-    const group = ['portfolio', 'exposureLab', 'balance'].includes(id) ? 'Portfolio' : 'Research';
+    const group = ['portfolio', 'exposureLab', 'balance'].includes(id) ? 'Portfolio' : 'Playbook';
     fireEvent.click(within(navigation).getByRole('button', { name: group, exact: true }));
-    fireEvent.click(within(screen.getByRole('menu', { name: group })).getByRole(group === 'Research' ? 'menuitem' : 'menuitemcheckbox', { name: label }));
+    fireEvent.click(within(screen.getByRole('menu', { name: group })).getByRole(group === 'Playbook' ? 'menuitem' : 'menuitemcheckbox', { name: label }));
     expect(items.find((item) => item.label === label).onSelect).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: group, exact: true })).toHaveFocus();
@@ -75,6 +76,7 @@ test('keeps multiple panel states, focus refs, warm intent and system readiness 
   render(<DashboardTopNavigation
     items={[
       { id: 'process', label: 'Process', group: 'primary', buttonRef: processRef, isProcessToggle: true },
+      { id: 'tldr', label: 'TL;DR', group: 'primary' },
       { id: 'system', label: 'Systems', group: 'utility' },
       ...portfolioWindows(),
     ]}
@@ -83,7 +85,7 @@ test('keeps multiple panel states, focus refs, warm intent and system readiness 
     onItemIntent={onItemIntent}
     systemReadinessStatus="offline"
   />);
-  fireEvent.click(screen.getByRole('button', { name: 'Research' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Playbook' }));
   const process = screen.getByRole('menuitem', { name: 'Process' });
   expect(processRef.current).toBe(process);
   expect(process).toHaveAttribute('data-process-toggle', 'true');
@@ -149,11 +151,11 @@ test.each(['Enter', ' '])('keyboard selection with %s passes through workspace c
     <div onClickCapture={(event) => {
       if (event.target.closest('button')?.dataset.navigationItemId === balance.id) navigationEvents.push('close-process');
     }}>
-      <DashboardTopNavigation items={[balance]} />
+      <DashboardTopNavigation items={[{ id: 'portfolio', label: 'Portfolio', group: 'primary' }, balance]} />
     </div>,
   );
   const trigger = screen.getByRole('button', { name: 'Portfolio' });
-  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  fireEvent.keyDown(trigger, { key: 'ArrowUp' });
   fireEvent.keyDown(screen.getByRole('menuitemcheckbox', { name: 'Balance' }), { key });
   expect(navigationEvents).toEqual(['close-process', 'select-balance']);
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
@@ -376,9 +378,10 @@ test('does not let an older poll revive a notification after a newer inbox updat
 test('anchors each menu above its dock trigger and keeps it within the viewport', () => {
   render(<DashboardTopNavigation items={[
     { id: 'process', label: 'Process', group: 'primary' },
+    { id: 'tldr', label: 'TL;DR', group: 'primary' },
     ...portfolioWindows(),
   ]} />);
-  for (const name of ['Research', 'Portfolio']) {
+  for (const name of ['Playbook', 'Portfolio']) {
     const trigger = screen.getByRole('button', { name, exact: true });
     jest.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
       top: window.innerHeight - 60, bottom: window.innerHeight - 16,
@@ -398,8 +401,9 @@ test('returns external focus refs to the group trigger after a menu selection', 
   const processRef = createRef();
   render(<DashboardTopNavigation items={[
     { id: 'process', label: 'Process', group: 'primary', buttonRef: processRef, onSelect: jest.fn() },
+    { id: 'tldr', label: 'TL;DR', group: 'primary', onSelect: jest.fn() },
   ]} />);
-  const trigger = screen.getByRole('button', { name: 'Research' });
+  const trigger = screen.getByRole('button', { name: 'Playbook' });
   expect(processRef.current).toBe(trigger);
   fireEvent.click(trigger);
   fireEvent.click(screen.getByRole('menuitem', { name: 'Process' }));
@@ -429,7 +433,7 @@ test('uses one labeled menu button per group without selecting or preloading def
   const onItemIntent = jest.fn();
   const { rerender } = render(<DashboardTopNavigation items={items} onItemIntent={onItemIntent} />);
   const navigation = screen.getByRole('navigation', { name: 'Workspace navigation' });
-  const groups = ['Research', 'Portfolio'];
+  const groups = ['Playbook', 'Portfolio'];
   expect(within(navigation).getAllByRole('button')).toHaveLength(5);
   expect(within(navigation).queryByRole('button', { name: / menu$/ })).not.toBeInTheDocument();
 
@@ -466,25 +470,23 @@ test('uses one labeled menu button per group without selecting or preloading def
 });
 
 test.each([
-  ['Research', { id: 'tldr', label: 'TL;DR', group: 'primary' }, 'menuitem'],
-  ['Portfolio', { id: 'portfolio', label: 'Portfolio', group: 'primary' }, 'menuitemcheckbox'],
-])('keeps a single-option %s group as a menu and requires explicit option selection', (name, definition, optionRole) => {
+  ['Playbook', { id: 'tldr', label: 'TL;DR', group: 'primary' }],
+  ['Portfolio', { id: 'portfolio', label: 'Portfolio', group: 'primary' }],
+])('a single-option %s group opens its destination from the dock without a menu', (_group, definition) => {
   const onSelect = jest.fn();
   const onItemIntent = jest.fn();
-  const item = { ...definition, onSelect };
-  render(<DashboardTopNavigation items={[item]} onItemIntent={onItemIntent} />);
-  const trigger = screen.getByRole('button', { name, exact: true });
-  fireEvent.click(trigger);
-  expect(screen.getByRole('menu', { name })).toBeInTheDocument();
-  expect(onSelect).not.toHaveBeenCalled();
-  expect(onItemIntent).not.toHaveBeenCalled();
-  const option = screen.getByRole(optionRole, { name: item.label });
-  fireEvent.pointerEnter(option);
+  const item = { ...definition, onSelect, buttonRef: createRef() };
+  render(<DashboardTopNavigation items={[item]} activeItemIds={[item.id]} onItemIntent={onItemIntent} />);
+  const tab = screen.getByRole('button', { name: item.label, exact: true });
+  expect(item.buttonRef.current).toBe(tab);
+  expect(tab).not.toHaveAttribute('aria-haspopup');
+  expect(tab).toHaveAttribute('aria-pressed', 'true');
+  expect(tab).toHaveAttribute('data-navigation-item-id', item.id);
+  fireEvent.pointerEnter(tab);
   expect(onItemIntent).toHaveBeenCalledWith(item.id);
-  fireEvent.click(option);
+  fireEvent.click(tab);
   expect(onSelect).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-  expect(trigger).toHaveFocus();
 });
 
 test('leaves the current workspace route open while browsing a group and closes it only on option selection', () => {
@@ -494,7 +496,7 @@ test('leaves the current workspace route open while browsing a group and closes 
     <div onClickCapture={(event) => {
       if (event.target.closest('button')?.dataset.navigationItemId) navigationEvents.push('close-process');
     }}>
-      <DashboardTopNavigation items={[balance]} />
+      <DashboardTopNavigation items={[{ id: 'portfolio', label: 'Portfolio', group: 'primary' }, balance]} />
     </div>,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Portfolio', exact: true }));
@@ -513,7 +515,7 @@ test('keeps group labels and active state scoped while opening menus without tog
   balance.buttonRef = createRef();
   const { rerender } = render(<DashboardTopNavigation items={items} activeItemId="balance" activeItemIds={['balance']} />);
   const portfolio = screen.getByRole('button', { name: 'Portfolio', exact: true });
-  const research = screen.getByRole('button', { name: 'Research', exact: true });
+  const research = screen.getByRole('button', { name: 'Playbook', exact: true });
   expect(balance.buttonRef.current).toBe(portfolio);
   expect(portfolio).toHaveTextContent(/^Portfolio$/);
   expect(portfolio).toHaveAttribute('aria-pressed', 'true');
@@ -528,12 +530,12 @@ test('keeps group labels and active state scoped while opening menus without tog
   rerender(<DashboardTopNavigation items={items} activeItemId="tldr" activeItemIds={['tldr']} />);
   expect(portfolio).toHaveAttribute('aria-pressed', 'false');
   expect(research).toHaveAttribute('aria-pressed', 'true');
-  expect(research).toHaveTextContent(/^Research$/);
+  expect(research).toHaveTextContent(/^Playbook$/);
   fireEvent.click(research);
   expect(screen.getByRole('menuitem', { name: 'TL;DR' })).toHaveAttribute('aria-current', 'page');
   expect(screen.getByRole('menuitem', { name: 'TL;DR' })).toHaveFocus();
   fireEvent.click(portfolio);
-  expect(screen.queryByRole('menu', { name: 'Research' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('menu', { name: 'Playbook' })).not.toBeInTheDocument();
   expect(screen.getByRole('menu', { name: 'Portfolio' })).toBeInTheDocument();
   for (const item of items) expect(item.onSelect).not.toHaveBeenCalled();
 });
@@ -553,4 +555,18 @@ test('an action-required finding turns the analyst red and opening it does not c
   expect(analyst).toHaveClass('has-action-required');
   announceAnalystInbox({ findings: [{ ...urgent, unread: 0 }], unread: 0 });
   expect(analyst).not.toHaveClass('has-action-required');
+});
+
+test('centers a menu over its dock trigger', () => {
+  render(<DashboardTopNavigation items={[
+    { id: 'process', label: 'Process', group: 'primary' },
+    { id: 'tldr', label: 'TL;DR', group: 'primary' },
+  ]} />);
+  const trigger = screen.getByRole('button', { name: 'Playbook', exact: true });
+  jest.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
+    top: window.innerHeight - 60, bottom: window.innerHeight - 16, left: 300, right: 380, width: 80, height: 44,
+  });
+  fireEvent.click(trigger);
+  // Trigger center 340 minus half the 224px menu.
+  expect(screen.getByRole('menu', { name: 'Playbook' })).toHaveStyle({ left: '228px', width: '224px' });
 });

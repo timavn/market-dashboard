@@ -13,6 +13,7 @@ import {
 } from '../../utils/exchangeVolume.cjs';
 import { EX_US_VOLUME_PROXY } from '../../constants/volumeMarkets.cjs';
 import { useSurfaceActivity } from '../common/PersistentSurface';
+import LoadingIndicator from '../common/LoadingIndicator';
 import './MarketVolumeTable.css';
 
 export { calculateVolumeMetrics, getVolumeCardHeaderDate };
@@ -104,7 +105,7 @@ const MarketVolumeTable = ({
   }, [rows, loading, date, asOf, available, availableCount]);
 
   if (loading) {
-    return <div className="text-xs text-center p-4 text-gray-500">Loading Volume...</div>;
+    return <div className="text-xs text-center p-4"><LoadingIndicator label="Loading Volume…" size="sm" /></div>;
   }
 
   return (

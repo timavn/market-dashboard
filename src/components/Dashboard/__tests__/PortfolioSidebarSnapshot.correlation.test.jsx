@@ -98,15 +98,6 @@ function sidebarElement(componentProps = {}) {
       hedgeyeChangelogLastSuccessAt="2026-06-18T13:00:00Z"
       accounts={['U25779973']}
       connection={{ connected: true }}
-      predictionMarketProviderStatus={{
-        providers: {
-          ibkr: {
-            status: 'connected',
-            gateway: { ok: true },
-            contracts_total: 7,
-          },
-        },
-      }}
       selectedAccount="U25779973"
       onAccountChange={jest.fn()}
       onRefresh={jest.fn()}
@@ -184,7 +175,7 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
     });
 
     expect(screen.getByTestId('portfolio-refresh-state'))
-      .toHaveTextContent(/Refreshing · last verified as of/);
+      .toHaveTextContent(/Last verified as of/);
     expect(screen.getByText('Gross Exposure')).toBeInTheDocument();
 
     view.rerenderSidebar({
@@ -606,15 +597,6 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
         rows: makeEtfProRows(20, 14),
         dataQuality: { status: 'ok', warnings: [] },
       },
-      predictionMarketProviderStatus: {
-        providers: {
-          ibkr: {
-            status: 'connected_positions_only',
-            message: 'IBKR connected; CPI positions loaded from portfolio, contract catalog missing',
-            gateway: { ok: true },
-          },
-        },
-      },
     });
 
     expect(screen.queryByLabelText(/show status details for ibkr/i)).not.toBeInTheDocument();
@@ -641,15 +623,6 @@ describe('PortfolioSidebarSnapshot correlation / exposure cleanup', () => {
         meta: { snapshotDate: today },
         rows: makeEtfProRows(2, 1),
         dataQuality: { status: 'ok', warnings: [] },
-      },
-      predictionMarketProviderStatus: {
-        providers: {
-          ibkr: {
-            status: 'connected',
-            gateway: { ok: true },
-            contracts_total: 7,
-          },
-        },
       },
     });
 

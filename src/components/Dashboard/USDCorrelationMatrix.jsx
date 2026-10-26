@@ -16,6 +16,7 @@ import {
 } from '../../utils/fxVolatilityReference';
 import './MultiRegionMarketOverview.css';
 import './USDCorrelationMatrix.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const toDateValue = (value) => {
   if (!value) return null;
@@ -337,7 +338,7 @@ const USDCorrelationMatrix = (props) => {
         <div className="region-mw-body usd-corr-body">
           <div className="region-mw-table-wrap usd-corr-table-wrap">
             {loading && !hasData ? (
-              <div className="usd-correlation-state loading">Loading correlation data...</div>
+              <div className="usd-correlation-state loading"><LoadingIndicator label="Loading correlation data..." size="sm" /></div>
             ) : null}
             {!hasData && !loading && error ? (
               <div className="usd-correlation-state error" role="alert">

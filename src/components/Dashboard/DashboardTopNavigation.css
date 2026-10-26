@@ -114,15 +114,18 @@
 
 .dashboard-top-navigation__menu .dashboard-top-navigation__menu-item {
   font-size: 12px;
-  justify-content: space-between;
+  justify-content: center;
   min-height: 28px;
-  padding: 6px 12px;
+  padding: 6px 24px;
   border-bottom: 1px solid var(--navigation-rule);
-  text-align: left;
+  text-align: center;
   width: 100%;
 }
 
+/* Pinned right so the check mark never shifts the centered label. */
 .dashboard-top-navigation__selection {
+  position: absolute;
+  right: 12px;
   min-width: 10px;
 }
 

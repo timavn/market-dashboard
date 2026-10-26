@@ -1,4 +1,4 @@
-import { DASHBOARD_PANEL_STATE_KEY, CONTRACT_PNL_PANEL_DEFAULT_WIDTH, CONTRACT_PNL_PANEL_MIN_WIDTH, CONTRACT_PNL_PANEL_MAX_WIDTH, ANALYST_PANEL_DEFAULT_WIDTH, ANALYST_PANEL_MIN_WIDTH, ANALYST_PANEL_MAX_WIDTH, ANALYST_PANEL_POSITIONS, ANALYST_PANEL_DEFAULT_POSITION, PERSISTED_SIDEBAR_PANELS, PREDICTION_MONITOR_MARKETS } from '../constants/dashboardWorkspace';
+import { DASHBOARD_PANEL_STATE_KEY, ANALYST_PANEL_DEFAULT_WIDTH, ANALYST_PANEL_MIN_WIDTH, ANALYST_PANEL_MAX_WIDTH, ANALYST_PANEL_POSITIONS, ANALYST_PANEL_DEFAULT_POSITION, PERSISTED_SIDEBAR_PANELS } from '../constants/dashboardWorkspace';
 
 export const readDashboardPanelState = () => {
   if (typeof window === 'undefined') return {};
@@ -33,58 +33,29 @@ export const clampAnalystPanelWidth = (
   return Math.round(Math.min(maximum, Math.max(minimum, width)));
 };
 
-export const clampContractPnlPanelWidth = (
-  value,
-  minWidth = CONTRACT_PNL_PANEL_MIN_WIDTH,
-  maxWidth = CONTRACT_PNL_PANEL_MAX_WIDTH,
-) => {
-  const minimum = Math.min(minWidth, maxWidth);
-  const maximum = Math.max(minWidth, maxWidth);
-  const parsed = Number(value);
-  const width = Number.isFinite(parsed) ? parsed : CONTRACT_PNL_PANEL_DEFAULT_WIDTH;
-  return Math.round(Math.min(maximum, Math.max(minimum, width)));
-};
-
 export const normalizeAnalystPanelPosition = (value) => (
   ANALYST_PANEL_POSITIONS.has(value) ? value : ANALYST_PANEL_DEFAULT_POSITION
 );
 
-export const migratePredictionMarketsPanelState = (state = {}) => {
-  const stack = Array.isArray(state?.sidebarPanelStack) ? state.sidebarPanelStack : [];
-  const legacyMonitorVisible = state?.showResolverTest === true;
-  const currentMonitorVisible = state?.showPredictionMonitor === true;
-  const monitorVisible = currentMonitorVisible || legacyMonitorVisible;
+// Panel state saved before the prediction monitor and Contract P&L windows were
+// removed can still name them; drop those keys so restore only sees live panels.
+const RETIRED_PANEL_STATE_KEYS = Object.freeze([
+  'showPredictionMonitor',
+  'activePredictionMonitorMarket',
+  'showResolverTest',
+  'contractPnlPanelWidth',
+  'contractPnlPanelRightExtension',
+  'contractPnlSizeCustomized',
+  'contractPnlGeometryVersion',
+]);
 
-  const migratedStack = [];
-  const pushLast = (key) => {
-    const withoutKey = migratedStack.filter((entry) => entry !== key);
-    migratedStack.splice(0, migratedStack.length, ...withoutKey, key);
-  };
-
-  stack.forEach((key) => {
-    if (key === 'resolverTest') {
-      if (legacyMonitorVisible) pushLast('predictionMonitor');
-      return;
-    }
-    if (key === 'predictionMonitor') {
-      if (monitorVisible) pushLast('predictionMonitor');
-      return;
-    }
-    if (key === 'cpi' || key === 'predMkts' || key === 'predictionMarkets') return;
-    if (PERSISTED_SIDEBAR_PANELS.has(key) && !migratedStack.includes(key)) migratedStack.push(key);
-  });
-
-  if (monitorVisible && !migratedStack.includes('predictionMonitor')) migratedStack.push('predictionMonitor');
-
-  return {
-    ...state,
-    showPredictionMonitor: monitorVisible,
-    activePredictionMonitorMarket: currentMonitorVisible
-      && PREDICTION_MONITOR_MARKETS.has(state?.activePredictionMonitorMarket)
-      ? state.activePredictionMonitorMarket
-      : 'sp500',
-    sidebarPanelStack: migratedStack,
-  };
+export const migrateLegacyPanelState = (state = {}) => {
+  const source = state && typeof state === 'object' ? state : {};
+  const migrated = { ...source };
+  RETIRED_PANEL_STATE_KEYS.forEach((key) => { delete migrated[key]; });
+  const stack = Array.isArray(source.sidebarPanelStack) ? source.sidebarPanelStack : [];
+  migrated.sidebarPanelStack = [...new Set(stack.filter((key) => PERSISTED_SIDEBAR_PANELS.has(key)))];
+  return migrated;
 };
 
 export const readPersistedSidebarStack = (state) => (

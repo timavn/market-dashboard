@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import './MarketSituationReportCard.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const STALE_AFTER_MS = 8 * 24 * 60 * 60 * 1000;
 
@@ -179,11 +180,11 @@ const MarketSituationReportCard = ({
   if (loading && !snapshot) {
     return embedded ? (
       <div className={readerClassName} data-testid="market-structure-reader">
-        <p className="market-structure-reader__state" role="status">Loading dated market research…</p>
+        <p className="market-structure-reader__state"><LoadingIndicator label="Loading dated market research…" size="sm" /></p>
       </div>
     ) : (
       <main className={readerClassName} data-testid="market-structure-reader">
-        <p className="market-structure-reader__state" role="status">Loading dated market research…</p>
+        <p className="market-structure-reader__state"><LoadingIndicator label="Loading dated market research…" size="sm" /></p>
       </main>
     );
   }
@@ -218,7 +219,7 @@ const MarketSituationReportCard = ({
         <p className="market-structure-reader__refresh-warning" role="status">
           {error
             ? `Refresh delayed. Showing the last complete report. ${error}`
-            : 'Checking the dated text edition…'}
+            : <LoadingIndicator label="Checking the dated text edition…" size="sm" announce={false} />}
         </p>
       )}
 

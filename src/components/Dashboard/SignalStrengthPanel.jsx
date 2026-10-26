@@ -8,6 +8,7 @@ import { SECURITIES_LIST, ASSET_CLASS_NAMES } from '../../constants/securitiesLi
 import ReferencePanelShell from './ReferencePanelShell';
 import ResourceDataStatusChip from './ResourceDataStatusChip';
 import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const QUOTE_POLL_MS = 30000;
 const RISK_RANGE_POLL_MS = 5 * 60 * 1000;
@@ -536,7 +537,7 @@ const SignalStrengthPanel = ({
                   <td className="reference-table__number">{Number.isFinite(row.rangePosition) ? `${row.rangePosition.toFixed(0)}%` : SECURITY_INTELLIGENCE_V2_ENABLED ? row.researchStatus === 'unavailable' ? 'UNAVAILABLE' : 'N/A' : '—'}</td>
                 </tr>
               ))}
-              {!visibleRows.length && <tr><td colSpan="10" className="reference-table__empty">{metadataLoading || changelogLoading ? 'Loading Signal Strength…' : 'No securities match these filters.'}</td></tr>}
+              {!visibleRows.length && <tr><td colSpan="10" className="reference-table__empty">{metadataLoading || changelogLoading ? <LoadingIndicator label="Loading Signal Strength…" size="sm" /> : 'No securities match these filters.'}</td></tr>}
             </tbody>
           </table>
         </div>

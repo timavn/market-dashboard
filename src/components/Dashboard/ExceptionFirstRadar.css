@@ -1890,6 +1890,10 @@
   border-right: 0;
 }
 
+.efr-reference-card--money-flow {
+  grid-column: span 2;
+}
+
 .efr-reference-card__header {
   min-height: 18px;
   display: flex;
@@ -1957,47 +1961,47 @@
   line-height: 1;
 }
 
-.efr-reference-card--volume .market-volume-table--mw {
+.money-flow-card__volume .market-volume-table--mw {
   height: auto;
 }
 
-.efr-reference-card--volume .region-mw-table-wrap {
+.money-flow-card__volume .region-mw-table-wrap {
   overflow: hidden;
 }
 
-.efr-reference-card--volume .region-mw-quotes-table {
+.money-flow-card__volume .region-mw-quotes-table {
   width: 100%;
   min-width: 0;
   table-layout: fixed;
 }
 
-.efr-reference-card--volume .region-mw-th,
-.efr-reference-card--volume .region-mw-td {
+.money-flow-card__volume .region-mw-th,
+.money-flow-card__volume .region-mw-td {
   height: 13px;
   padding: 1px 2px;
   font-size: 7px;
   line-height: 1.1;
 }
 
-.efr-reference-card--volume .market-volume-table--mw .region-mw-quotes-table .region-mw-th {
+.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table .region-mw-th {
   font-size: 6px;
   letter-spacing: 0;
 }
 
-.efr-reference-card--volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-th-name,
-.efr-reference-card--volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-td-name {
+.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-th-name,
+.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-td-name {
   width: 34%;
   padding-right: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.efr-reference-card--volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-th-metric,
-.efr-reference-card--volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-td.region-mw-td-heat {
+.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-th-metric,
+.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-td.region-mw-td-heat {
   width: 15%;
 }
 
-.efr-reference-card--volume .volume-footnotes {
+.money-flow-card__volume .volume-footnotes {
   display: none;
 }
 
@@ -2439,6 +2443,14 @@
 
   .efr-backdrop__body,
   .efr-reference__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .efr-reference-card--money-flow {
+    grid-column: auto;
+  }
+
+  .money-flow-card {
     grid-template-columns: minmax(0, 1fr);
   }
 

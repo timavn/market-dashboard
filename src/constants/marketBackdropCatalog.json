@@ -60,7 +60,7 @@
       { "symbol": "RB", "label": "RBOB Gasoline", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "RB=F", "secType": "FUT" } },
       { "symbol": "GC", "label": "Gold", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "GC=F", "secType": "FUT" } },
       { "symbol": "HG", "label": "Copper", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "HG=F", "secType": "FUT" } },
-      { "symbol": "SI", "label": "Silver", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "SI=F", "secType": "FUT" } },
+      { "symbol": "SI", "label": "Silver", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "SI=F", "secType": "FUT" } },
       { "symbol": "PL", "label": "Platinum", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "PL=F", "secType": "FUT" } },
       { "symbol": "PA", "label": "Palladium", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "PA=F", "secType": "FUT" } },
       { "symbol": "ZC", "label": "Corn", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "ZC=F", "secType": "FUT" } },
@@ -75,6 +75,7 @@
     "rows": [
       { "symbol": "UST2Y", "label": "UST 2Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "us_treasuries", "provider": { "provider": "fred", "secType": "ECONOMIC" } },
       { "symbol": "UST10Y", "label": "UST 10Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "us_treasuries", "provider": { "provider": "yahoo", "yahooSymbol": "^TNX", "secType": "IND" } },
+      { "symbol": "UST30Y", "label": "UST 30Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "us_treasuries", "provider": { "provider": "yahoo", "yahooSymbol": "^TYX", "secType": "IND" } },
       { "symbol": "BUND10Y", "label": "Germany 10Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "eu_sovereigns", "country": "Germany", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
       { "symbol": "JGB10Y", "label": "Japan 10Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "asia_sovereigns", "country": "Japan", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
       { "symbol": "GILT10Y", "label": "UK 10Y", "summary": true, "unit": "yield", "changeUnit": "bps", "tab": "eu_sovereigns", "country": "United Kingdom", "provider": { "provider": "fred", "secType": "ECONOMIC", "intl": true } },
@@ -100,7 +101,8 @@
       { "symbol": "SOL", "label": "Solana/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "SOL-USD", "secType": "CRYPTO" } },
       { "symbol": "ADA", "label": "Cardano/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "ADA-USD", "secType": "CRYPTO" } },
       { "symbol": "DOGE", "label": "Dogecoin/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "DOGE-USD", "secType": "CRYPTO" } },
-      { "symbol": "LINK", "label": "Chainlink/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "LINK-USD", "secType": "CRYPTO" } }
+      { "symbol": "LINK", "label": "Chainlink/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "LINK-USD", "secType": "CRYPTO" } },
+      { "symbol": "TRX", "label": "TRON/USD", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "TRX-USD", "secType": "CRYPTO" } }
     ]
   }
 ]

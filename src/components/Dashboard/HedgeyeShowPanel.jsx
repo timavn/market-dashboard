@@ -3,6 +3,7 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import { isTradingDay } from '../../utils/marketHolidays';
 import ReferencePanelShell from './ReferencePanelShell';
 import { useSurfaceActivity } from '../common/PersistentSurface';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const NEW_YORK_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
@@ -178,7 +179,7 @@ const HedgeyeShowPanel = ({ snapshotType, title, onClose }) => {
       refreshing={refreshing}
       onClose={onClose}
     >
-      {loading && <div className="reference-alert">Loading the latest five market-day snapshots…</div>}
+      {loading && <div className="reference-alert"><LoadingIndicator label="Loading the latest five market-day snapshots…" size="sm" /></div>}
       {error && <div className={`reference-alert ${latest ? '' : 'reference-alert--error'}`}>{error}</div>}
 
       <div className="reference-grid reference-grid--summary">

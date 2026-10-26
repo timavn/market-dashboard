@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { Download, RefreshCw, X } from 'lucide-react';
 import { MarketDataService } from '../../../services/api/marketDataService';
 import './InterestLedgerPanel.css';
+import LoadingIndicator from '../../common/LoadingIndicator';
 
 const LEDGER_RESPONSE_MAX_AGE_MS = 5 * 60 * 1000;
 
@@ -495,7 +496,7 @@ const InterestLedgerPanel = ({ accountId, onClose, open }) => {
       <div className="interest-ledger-panel__body">
         {requestState.status === 'loading' && (
           <div className="interest-ledger-panel__loading" role="status">
-            Loading verified interest ledger…
+            <LoadingIndicator label="Loading verified interest ledger…" size="sm" announce={false} />
           </div>
         )}
         {requestState.status === 'unavailable' && (

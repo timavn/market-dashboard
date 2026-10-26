@@ -391,6 +391,23 @@ describe('radar reference volume card', () => {
     data: [],
   };
 
+  const originalResizeObserver = global.ResizeObserver;
+
+  // The expanded Money Flow view draws Recharts containers, which need it.
+  beforeAll(() => {
+    global.ResizeObserver = class ResizeObserver {
+      observe() {}
+
+      unobserve() {}
+
+      disconnect() {}
+    };
+  });
+
+  afterAll(() => {
+    global.ResizeObserver = originalResizeObserver;
+  });
+
   beforeEach(() => {
     resetSessionResourceStore();
     window.sessionStorage.clear();
@@ -465,10 +482,7 @@ describe('radar reference volume card', () => {
     expect(card.querySelector('header time')).not.toBeInTheDocument();
   });
 
-  test('renders four reference cards with Volume below Dollar Liquidity and Money Flow last', async () => {
-    MarketDataService.getDollarLiquidityModels.mockResolvedValue({
-      models: { us: { latest: { date: '2026-07-10', stackToGdp: 0.939 } } },
-    });
+  test('renders three reference cards with Money Flow carrying supply, participation and volume', async () => {
     MarketDataService.getMarketShareVolume.mockResolvedValue({
       totalMarket: [],
       totalExchange: [],
@@ -484,36 +498,41 @@ describe('radar reference volume card', () => {
     const cards = Array.from(grid.children);
     const cftc = screen.getByRole('region', { name: 'CFTC Positioning' });
     const quads = screen.getByRole('region', { name: 'Global Quads' });
-    const liquidity = screen.getByRole('region', { name: 'Dollar Liquidity' });
-    const volume = screen.getByRole('region', { name: 'Volume' });
     const moneyFlow = screen.getByRole('region', { name: 'Money Flow' });
-    expect(cards).toHaveLength(4);
-    expect(cards).toEqual([cftc, quads, liquidity, moneyFlow]);
+    const volume = screen.getByRole('region', { name: 'Volume' });
+    expect(cards).toEqual([cftc, quads, moneyFlow]);
+    expect(within(referenceBar).queryByRole('region', { name: 'Dollar Liquidity' })).not.toBeInTheDocument();
+    expect(moneyFlow).toContainElement(volume);
     expect(await within(moneyFlow).findByText('Neutral')).toHaveClass('money-flow-block--flat');
+    expect(within(moneyFlow).getByText('Neutral').closest('header')).toBeInTheDocument();
     expect(within(moneyFlow).getByText('$5.80T')).toBeInTheDocument();
     expect(within(moneyFlow).getByText('mixed')).toHaveClass('money-flow-block--flat');
     expect(within(moneyFlow).getByText('−$116B')).toBeInTheDocument();
     expect(within(moneyFlow).getByText('contracting')).toHaveClass('money-flow-block--down');
     expect(within(moneyFlow).getByText('0.98')).toBeInTheDocument();
-    expect(within(moneyFlow).getAllByRole('row')).toHaveLength(12);
-    expect(liquidity).toContainElement(volume);
-    const liquidityMetric = await within(liquidity).findByText('U.S. stack / GDP');
-    expect(liquidityMetric.compareDocumentPosition(volume))
-      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const supply = within(moneyFlow).getByRole('table', { name: 'Money flow supply' });
+    const participation = within(moneyFlow).getByRole('table', { name: 'Money flow participation' });
+    // Each side fills the card to the same twelve rows as Global Quads.
+    expect(within(supply).getAllByRole('row')).toHaveLength(12);
+    expect(within(supply).getByText('U.S. dollar liquidity 3M')).toBeInTheDocument();
+    expect(within(participation).getAllByRole('row')).toHaveLength(8);
+    expect(participation.compareDocumentPosition(volume)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(within(referenceBar).queryByRole('button', { name: /full view/i })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Market Situation' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Style Factors' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Currencies' })).not.toBeInTheDocument();
     await waitFor(() => expect(volume).toHaveAttribute('data-status', 'unavailable'));
-    expect(liquidity).toHaveAttribute('data-status', 'historical');
+    expect(moneyFlow).toHaveAttribute('data-status', 'mixed');
     expect(within(volume).queryByRole('button', { name: /status details/i })).not.toBeInTheDocument();
+    // The monthly U.S. stack loads only when the expanded view opens.
+    expect(MarketDataService.getDollarLiquidityModels).not.toHaveBeenCalled();
   });
 
   test('opens and closes each expanded window from its title without a separate close button', async () => {
     MarketDataService.getMarketShareVolume.mockResolvedValue({ totalMarket: [], totalExchange: [], meta: { status: 'missing' } });
     const { container } = render(<RadarReferencePanels />);
     const referenceBar = screen.getByRole('region', { name: 'Normal / Reference' });
-    for (const title of ['CFTC Positioning', 'Global Quads', 'Dollar Liquidity', 'Volume']) {
+    for (const title of ['CFTC Positioning', 'Global Quads', 'Money Flow']) {
       const card = within(referenceBar).getByRole('region', { name: title });
       const trigger = within(card).getByRole('button', { name: title });
       expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
@@ -586,8 +605,6 @@ describe('radar reference volume card', () => {
       'cftc-positioning',
       'market-situation',
       'global-quads',
-      'dollar-liquidity',
-      'volume',
       'money-flow',
     ]);
     expect(latestStatuses.find(({ id }) => id === 'global-quads')).toEqual(expect.objectContaining({
@@ -612,7 +629,7 @@ describe('radar reference volume card', () => {
       }, []);
       return (
         <>
-          <output data-testid="volume-parent-status">{statuses.volume.status}</output>
+          <output data-testid="money-flow-parent-status">{statuses['money-flow'].status}</output>
           <RadarReferencePanels onDashboardStatusChange={handleStatusChange} />
         </>
       );
@@ -620,7 +637,7 @@ describe('radar reference volume card', () => {
 
     render(<StatefulParent />);
 
-    await waitFor(() => expect(screen.getByTestId('volume-parent-status')).toHaveTextContent('unavailable'));
+    await waitFor(() => expect(screen.getByTestId('money-flow-parent-status')).toHaveTextContent('mixed'));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -637,7 +654,7 @@ describe('radar reference volume card', () => {
     consoleError.mockRestore();
   });
 
-  test('shares one verified dated volume response with its detail view', async () => {
+  test('shares one verified dated volume response with the Money Flow detail view', async () => {
     MarketDataService.getMarketShareVolume.mockResolvedValue({
       asOf: '2026-07-10',
       totalMarket: [],
@@ -671,20 +688,18 @@ describe('radar reference volume card', () => {
 
     const panel = screen.getByRole('region', { name: 'Volume' });
     await waitFor(() => expect(panel).toHaveAttribute('data-status', 'mixed'));
-    const title = within(panel).getByRole('button', { name: 'Volume (7/10)' });
-    expect(within(title).getByText('(7/10)')).toHaveAttribute('dateTime', '2026-07-10');
+    const subhead = within(panel).getByRole('heading', { name: 'Volume (7/10)' });
+    expect(within(subhead).getByText('(7/10)')).toHaveAttribute('dateTime', '2026-07-10');
     expect(within(panel).queryByText(/AS OF/)).not.toBeInTheDocument();
     expect(within(panel).queryByText(/Tape A/)).not.toBeInTheDocument();
     expect(within(panel).queryByText(/ACWX/)).not.toBeInTheDocument();
     expect(within(panel).getByRole('row', { name: 'ex-US volume unavailable' })).toHaveTextContent('—');
     expect(within(panel).queryByRole('button', { name: /status details/i })).not.toBeInTheDocument();
-    expect(onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'volume'))
-      .toEqual(expect.objectContaining({ sourceDate: '2026-07-10' }));
+    expect(onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'money-flow').diagnostics)
+      .toEqual(expect.arrayContaining([{ label: 'Volume', value: 'JUL 10' }]));
 
-    fireEvent.click(title);
-    const dialog = await screen.findByRole('dialog', { name: 'Volume (7/10)' });
-    expect(within(within(dialog).getByRole('heading', { name: 'Volume (7/10)' })).getByText('(7/10)'))
-      .toHaveAttribute('dateTime', '2026-07-10');
+    fireEvent.click(screen.getByRole('button', { name: 'Money Flow' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Money Flow' });
     expect(within(dialog).queryByText(/AS OF/)).not.toBeInTheDocument();
     expect(within(dialog).getByText(/Tape A\+B\+C/)).toBeInTheDocument();
     expect(within(dialog).getByText(/ACWX regular-session ETF volume/)).toHaveTextContent('not total overseas-exchange volume');
@@ -696,11 +711,10 @@ describe('radar reference volume card', () => {
     expect(panel).toHaveAttribute('data-status', 'unavailable');
     expect(within(panel).getByText('UNAVAILABLE')).toBeInTheDocument();
     expect(within(panel).queryByText('(7/10)')).not.toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: 'Volume' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('heading', { name: 'Volume' })).toBeInTheDocument();
+    expect(within(panel).getByRole('heading', { name: 'Volume' })).toBeInTheDocument();
     expect(within(dialog).queryByText('20%')).not.toBeInTheDocument();
-    expect(onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'volume'))
-      .toEqual(expect.objectContaining({ status: 'unavailable', sourceDate: undefined }));
+    expect(onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'money-flow'))
+      .toEqual(expect.objectContaining({ status: 'mixed' }));
   });
 
   test.each([

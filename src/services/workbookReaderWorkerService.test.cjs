@@ -9,7 +9,6 @@ const { zipSync, strToU8 } = require('fflate');
 const readNodeWorkbook = require('read-excel-file/node');
 const readUniversalWorkbook = require('read-excel-file/universal');
 const { createWorkbookReaderWorkerService, closeWorkbookReaders } = require('./workbookReaderWorkerService.cjs');
-const { loadGdpNowHistory, parseGdpNowArchives } = require('./predictionMarketTest/gdpHistoryService.cjs');
 const { createLeveragedProductOverlapService, HOLDINGS_SOURCES } = require('./leveragedProductOverlapService.cjs');
 
 const escapeXml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
@@ -213,14 +212,8 @@ test('a real large XLSX parse permits a main-loop heartbeat while parsing is in 
   } finally { await service.close(); }
 });
 
-test('GDP and leveraged default readers consume exact bytes while preserving dates, provenance, and failure invalidation', async () => {
+test('leveraged default reader consumes exact bytes and invalidates on failure', async () => {
   const verifiedAt = '2026-10-06T18:00:00Z';
-  const sourceUrl = 'https://www.atlantafed.org/GDPTrackingModelDataAndForecasts.xlsx';
-  const bytes = workbook([{ sheet: 'TrackingArchives', data: [
-    ['Forecast Date', 'Quarter being forecasted', 'GDP Nowcast'],
-    [new Date('2026-07-28'), new Date('2026-06-30'), 1.53997],
-  ] }]);
-  const originalHash = crypto.createHash('sha256').update(bytes).digest('hex');
   const holdingsBytes = workbook([{ sheet: 'Holdings', data: [
     ['Holdings:', 'As of 06-Oct-2026'], ['Name', 'Ticker', 'Weight'],
     ['Alpha', 'A', 30], ['Charlie', 'C', 70],
@@ -234,13 +227,6 @@ test('GDP and leveraged default readers consume exact bytes while preserving dat
       : { ok: true, arrayBuffer: async () => failWorkbook ? new ArrayBuffer(1) : holdingsBytes.buffer.slice(holdingsBytes.byteOffset, holdingsBytes.byteOffset + holdingsBytes.length) };
   } });
   try {
-    const records = await loadGdpNowHistory({ html: `<a href="${sourceUrl}">Archive</a>`, verifiedAt, minQuarter: '2025-Q2', fetchBinary: async url => {
-      assert.equal(url, sourceUrl); return bytes;
-    } });
-    assert.deepEqual(records, parseGdpNowArchives(await readNodeWorkbook(bytes), { sourceUrl, verifiedAt, evidenceSha256: originalHash }, '2025-Q2'));
-    assert.equal(records[0].publishedAt, '2026-07-28');
-    assert.equal(records[0].evidenceSha256, originalHash);
-    assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), originalHash);
     const overlap = await service.getOverlap({ baseSymbol: 'IAK', referenceSymbol: 'XLF' });
     assert.equal(overlap.available, true); assert.equal(overlap.weightedOverlapPct, 30);
     assert.deepEqual(overlap.sources.map(value => value.url), [HOLDINGS_SOURCES.IAK.url, HOLDINGS_SOURCES.XLF.url]);

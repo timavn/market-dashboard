@@ -216,19 +216,6 @@ const IBKR_PORTFOLIO_FRESH_MS = 60 * 1000;
 const IBKR_PORTFOLIO_STALE_MS = 5 * 60 * 1000;
 const INTEREST_VALIDATION_STATUS_MAX_AGE_MS = 2 * 60 * 1000;
 const INTEREST_VALIDATION_FUTURE_TOLERANCE_MS = 5 * 1000;
-const PREDICTION_MARKET_STATUS_LABELS = {
-  connected: 'Connected',
-  connected_no_contracts: 'IBKR connected, no event contracts discovered',
-  connected_positions_only: 'IBKR connected; CPI positions loaded from portfolio, contract catalog missing',
-  gateway_half_connected: 'Gateway half-connected: account data stale/timeouts',
-  gateway_offline: 'Gateway offline',
-  sidecar_offline: 'Sidecar offline',
-  tws_offline: 'IB Gateway offline',
-  auth_required: 'Login required',
-  stale: 'Stale',
-  error: 'Error',
-  unknown: 'Unknown',
-};
 
 export function getIbkrPortfolioFreshness(updatedAt, now = Date.now()) {
   if (!updatedAt) {
@@ -496,137 +483,6 @@ function buildEtfProStatusSource({ etfProSnapshot }) {
   };
 }
 
-function getPredictionMarketContractsTotal(ibkr = {}) {
-  const values = [
-    ibkr.contracts_total,
-    ibkr.contractsTotal,
-    ibkr.cpi_discovery?.contracts_total,
-    ibkr.cpi_discovery?.contractsTotal,
-    ibkr.cpiDiscovery?.contracts_total,
-    ibkr.cpiDiscovery?.contractsTotal,
-  ].map(Number).filter((value) => Number.isFinite(value));
-  return values.length ? Math.max(...values) : null;
-}
-
-function getPredictionMarketCpiDiscovery(ibkr = {}) {
-  return ibkr.cpi_discovery || ibkr.cpiDiscovery || {};
-}
-
-function formatPredictionMarketStrikes(values = []) {
-  return values.map((value) => `${Number(value).toFixed(1)}%`).join(', ');
-}
-
-function hasCompletePredictionMarketCpiCoverage(ibkr = {}) {
-  const cpiDiscovery = getPredictionMarketCpiDiscovery(ibkr);
-  const targetStrikes = cpiDiscovery.targetStrikes || [];
-  const missingStrikes = cpiDiscovery.missingStrikes || [];
-  const contractsTotal = getPredictionMarketContractsTotal(ibkr);
-  if (targetStrikes.length === 0) return false;
-  return missingStrikes.length === 0 && Number(contractsTotal || 0) >= targetStrikes.length;
-}
-
-function buildPredictionMarketStatusSource(predictionMarketProviderStatus) {
-  const providers = predictionMarketProviderStatus?.providers || predictionMarketProviderStatus || {};
-  const ibkr = providers?.ibkr || {};
-  const status = ibkr.status || (predictionMarketProviderStatus?.error ? 'error' : null);
-  const providerErrorCode = ibkr.errorCode
-    || predictionMarketProviderStatus?.readiness?.ibkrExecution?.errorCode
-    || predictionMarketProviderStatus?.errorCode
-    || null;
-  const rawProviderError = [
-    predictionMarketProviderStatus?.error,
-    ibkr.message,
-    predictionMarketProviderStatus?.readiness?.ibkrExecution?.reason,
-  ].filter(Boolean).join(' ');
-  const catalogAccessDenied = providerErrorCode === 'PREDICTION_CATALOG_ACCESS_DENIED'
-    || (
-      /access.?denied|not authorized/i.test(rawProviderError)
-      && /PredictionMarketCatalogV2|dynamodb:(?:Query|TransactWriteItems)/i.test(rawProviderError)
-    );
-  if (catalogAccessDenied) {
-    return {
-      id: 'prediction-markets',
-      label: 'Prediction markets',
-      detail: 'Error',
-      detailRows: [
-        makeStatusDetail(
-          'prediction-markets:catalog-access-code',
-          'Code: PREDICTION_CATALOG_ACCESS_DENIED',
-        ),
-        makeStatusDetail(
-          'prediction-markets:catalog-access-principal',
-          'market-dashboard-local lacks dynamodb:Query and dynamodb:TransactWriteItems on PredictionMarketCatalogV2.',
-        ),
-        makeStatusDetail(
-          'prediction-markets:catalog-access-fix',
-          'Admin fix: attach infra/iam/local-readiness-catalog-policy.json using infra/scripts/install_local_principal_policies.sh.',
-        ),
-      ],
-      status: 'defective',
-    };
-  }
-  const gatewayOk = ibkr.gateway?.ok;
-  const contractsTotal = getPredictionMarketContractsTotal(ibkr);
-  const cpiDiscovery = getPredictionMarketCpiDiscovery(ibkr);
-  const targetStrikes = cpiDiscovery.targetStrikes || [];
-  const missingStrikes = cpiDiscovery.missingStrikes || [];
-  const portfolioSeedCount = ibkr.portfolio_seed_count ?? ibkr.portfolioSeedCount ?? 0;
-  const completeCpiCoverage = hasCompletePredictionMarketCpiCoverage(ibkr);
-  const message =
-    predictionMarketProviderStatus?.error ||
-    ibkr.message ||
-    PREDICTION_MARKET_STATUS_LABELS[status] ||
-    status ||
-    'Prediction market provider status unavailable';
-  const detailRows = [];
-  let detail = 'Live';
-
-  if (!status) {
-    detailRows.push(makeStatusDetail('prediction-markets:missing', 'Prediction market provider status unavailable'));
-    detail = 'Error';
-  } else if (status !== 'connected' && !(status === 'connected_positions_only' && gatewayOk === true && completeCpiCoverage)) {
-    detailRows.push(makeStatusDetail('prediction-markets:provider-status', `Prediction markets: ${message}`));
-    detail = 'Error';
-  }
-  if (gatewayOk === false) {
-    detailRows.push(makeStatusDetail('prediction-markets:gateway', 'Prediction markets: IB Gateway is not connected'));
-    detail = 'Error';
-  }
-  if (status === 'connected' && (contractsTotal == null || Number(contractsTotal) <= 0)) {
-    detailRows.push(makeStatusDetail('prediction-markets:no-contracts', 'Prediction markets: no executable CPI contracts discovered'));
-    detail = 'Error';
-  }
-  if ((status === 'connected' || status === 'connected_positions_only') && targetStrikes.length > 0 && missingStrikes.length > 0) {
-    detailRows.push(makeStatusDetail(
-      'prediction-markets:missing-strikes',
-      `Prediction markets: CPI contract catalog incomplete; missing strikes ${formatPredictionMarketStrikes(missingStrikes)}`,
-    ));
-    detail = 'Error';
-  }
-  if ((status === 'connected' || status === 'connected_positions_only') && targetStrikes.length > 0 && Number(contractsTotal || 0) < targetStrikes.length) {
-    detailRows.push(makeStatusDetail(
-      'prediction-markets:incomplete-catalog',
-      `Prediction markets: discovered ${contractsTotal || 0} of ${targetStrikes.length} target CPI contracts`,
-    ));
-    detail = 'Error';
-  }
-  if (status === 'connected' && Number(contractsTotal || 0) > 0 && Number(portfolioSeedCount || 0) >= Number(contractsTotal || 0)) {
-    detailRows.push(makeStatusDetail(
-      'prediction-markets:portfolio-seeded',
-      'Prediction markets: only portfolio-seeded CPI contracts are available; executable contract catalog is incomplete',
-    ));
-    detail = 'Error';
-  }
-
-  return {
-    id: 'prediction-markets',
-    label: 'Prediction markets',
-    detail,
-    detailRows: uniqueDetailRows(detailRows),
-    status: detailRows.length > 0 ? 'stale' : 'current',
-  };
-}
-
 function getAggregateStatusFromSources(baseStatus, sources) {
   const hardFailure = sources.some((source) => source.status === 'defective' || source.status === 'inactive');
   if (hardFailure || baseStatus === 'inactive' || baseStatus === 'defective') return 'inactive';
@@ -692,7 +548,6 @@ export function getIbkrPortfolioStatusDot({
   loading,
   rtaPositions,
   etfProSnapshot,
-  predictionMarketProviderStatus,
   interestValidation,
   interestValidationLoading = false,
   selectedAccount,
@@ -980,9 +835,6 @@ export function getIbkrPortfolioStatusDot({
   }
   if (etfProSnapshot != null) {
     dependencySources.push(buildEtfProStatusSource({ portfolioData, etfProSnapshot }));
-  }
-  if (predictionMarketProviderStatus != null) {
-    dependencySources.push(buildPredictionMarketStatusSource(predictionMarketProviderStatus));
   }
   if (dependencySources.length > 0) {
     sources.push(...dependencySources);

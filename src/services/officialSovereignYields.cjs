@@ -25,7 +25,24 @@ const SERIES = Object.freeze({
     sourceUrl: 'https://www.bankofengland.co.uk/boeapps/database/index.asp?Travel=NIxSUx&levels=1&XNotes=Y&A3951XNode3951.x=10&A3951XNode3951.y=10&Nodes=&SectionRequired=I&HideNums=-1&ExtraInfo=true&EC=IUDMNPY',
     dataUrl: 'https://www.bankofengland.co.uk/boeapps/database/_iadb-fromshowcolumns.asp',
   }),
+  CAN10Y: Object.freeze({
+    source: 'bank_of_canada',
+    seriesId: 'BD.CDN.10YR.DQ.YLD',
+    sourceInstrument: 'Government of Canada 10 year benchmark bond yield',
+    sourceUrl: 'https://www.bankofcanada.ca/rates/interest-rates/canadian-bonds/',
+    dataUrl: 'https://www.bankofcanada.ca/valet/observations/BD.CDN.10YR.DQ.YLD/csv',
+  }),
+  ACGB10Y: Object.freeze({
+    source: 'rba',
+    seriesId: 'FCMYGBAG10D',
+    sourceInstrument: 'Australian Government 10 year bond yield, interpolated (RBA F2)',
+    sourceUrl: 'https://www.rba.gov.au/statistics/tables/#interest-rates',
+    dataUrl: 'https://www.rba.gov.au/statistics/tables/csv/f2-data.csv',
+  }),
 });
+// Where each publisher puts its series column and how it writes dates.
+const HEADER_LABELS = Object.freeze({ JGB10Y: ['Date', '10Y'], GILT10Y: ['DATE'], CAN10Y: ['date'], ACGB10Y: ['Series ID'] });
+const DATE_FORMATS = Object.freeze({ JGB10Y: 'ymd-slash', GILT10Y: 'dmy-space', ACGB10Y: 'dmy-dash' });
 const clientCaches = new WeakMap();
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -47,12 +64,13 @@ function csvFields(line) {
 
 function dateNumber(value, symbol) {
   let parts;
-  if (symbol === 'GILT10Y') {
-    const match = /^(\d{1,2}) ([A-Za-z]{3}) (\d{4})$/.exec(value);
+  const format = DATE_FORMATS[symbol];
+  if (format === 'dmy-space' || format === 'dmy-dash') {
+    const match = (format === 'dmy-space' ? /^(\d{1,2}) ([A-Za-z]{3}) (\d{4})$/ : /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/).exec(value);
     if (!match) return null;
     parts = [Number(match[3]), MONTHS.indexOf(match[2]), Number(match[1])];
   } else {
-    const match = (symbol === 'JGB10Y' ? /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/ : /^(\d{4})-(\d{2})-(\d{2})$/).exec(value);
+    const match = (format === 'ymd-slash' ? /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/ : /^(\d{4})-(\d{2})-(\d{2})$/).exec(value);
     if (!match) return null;
     parts = [Number(match[1]), Number(match[2]) - 1, Number(match[3])];
   }
@@ -67,11 +85,12 @@ function parseOfficialSovereignCsv(symbol, csv, { now = Date.now(), startDate } 
   const config = SERIES[symbol];
   if (!config || typeof csv !== 'string' || !Number.isFinite(now)) return [];
   const lines = csv.replace(/^\uFEFF/, '').split(/\r?\n/).map(csvFields);
+  const [rowLabel, columnLabel = config.seriesId] = HEADER_LABELS[symbol] || [];
   const headerIndex = lines.findIndex(fields => symbol === 'BUND10Y'
     ? fields[1] === config.seriesId
-    : fields[0] === (symbol === 'JGB10Y' ? 'Date' : 'DATE') && fields.includes(symbol === 'JGB10Y' ? '10Y' : config.seriesId));
+    : fields[0] === rowLabel && fields.includes(columnLabel));
   if (headerIndex < 0) return [];
-  const column = symbol === 'BUND10Y' ? 1 : lines[headerIndex].indexOf(symbol === 'JGB10Y' ? '10Y' : config.seriesId);
+  const column = symbol === 'BUND10Y' ? 1 : lines[headerIndex].indexOf(columnLabel);
   const start = startDate ? Date.parse(`${startDate}T00:00:00Z`) : -Infinity;
   if (Number.isNaN(start)) return [];
   const byDate = new Map();
@@ -89,8 +108,12 @@ function parseOfficialSovereignCsv(symbol, csv, { now = Date.now(), startDate } 
 function dataUrls(symbol, startDate, endDate) {
   const config = SERIES[symbol];
   if (symbol === 'JGB10Y') return [config.historyUrl, config.dataUrl];
+  // The RBA publishes one complete daily file; the parser applies the window.
+  if (symbol === 'ACGB10Y') return [config.dataUrl];
   const url = new URL(config.dataUrl);
-  if (symbol === 'BUND10Y') {
+  if (symbol === 'CAN10Y') {
+    url.search = new URLSearchParams({ start_date: startDate, end_date: endDate }).toString();
+  } else if (symbol === 'BUND10Y') {
     url.search = new URLSearchParams({ format: 'csv', lang: 'en', startPeriod: startDate, endPeriod: endDate }).toString();
   } else {
     const boeDate = date => { const [year, month, day] = date.split('-'); return `${day}/${MONTHS[Number(month) - 1]}/${year}`; };

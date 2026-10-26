@@ -152,7 +152,7 @@ test('gives loading priority over prepared rows and errors without exposing thei
   expect(screen.queryByText('Previously published research context.')).not.toBeInTheDocument();
   expect(screen.queryByText('Historical references unavailable.')).not.toBeInTheDocument();
   expect(details).not.toHaveTextContent('Raw provider failure');
-  expect(container.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  expect(container.querySelector('.analyst-spinner')).toHaveAttribute('aria-hidden', 'true');
 });
 
 test('preserves the existing prepared-row branch ahead of error messaging for historical context', () => {

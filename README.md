@@ -1,6 +1,6 @@
 # Market Dashboard
 
-A local Mac workspace for portfolio monitoring, market research, prediction-market analysis, and operational checks. React 18 renders the dashboard; a local Express API coordinates IBKR, research providers, AWS storage, and optional Analyst services. Broker access is read-only.
+A local Mac workspace for portfolio monitoring, market research, and operational checks. React 18 renders the dashboard; a local Express API coordinates IBKR, research providers, AWS storage, and optional Analyst services. Broker access is read-only.
 
 ## Capabilities
 
@@ -8,8 +8,6 @@ A local Mac workspace for portfolio monitoring, market research, prediction-mark
 | --- | --- | --- |
 | Market backdrop | Market pulse, volatility, currencies, correlations, published research and macro context | `src/components/Dashboard`, `src/services/providers` |
 | Portfolio and Exposure Lab | Verified account balances and positions, factor exposure, interval-aligned risk analysis | `src/services/ibkr`, `src/utils/exposureLabFactorRisk.cjs` |
-| Prediction markets | Venue-native ladders, resolver identity, dated context, CPI and other strategy sizing | `src/services/predictionMarketTest`, `src/utils/*StrategySizing*` |
-| Contract P&L | Evidence-backed historical positions, executions and realized results | `src/services`, `infra/prediction-market-performance-ledger.yaml` |
 | Research | Hedgeye publications, immutable artifacts, canonical event ledgers and validated projections | `infra`, `src/services`, `docs` |
 | The Analyst | Optional local research chat, indexing and isolated PDF processing | `src/routes/analyst.cjs`, `scripts/analyst_sidecar`, `scripts/analyst` |
 | Systems | Timestamped readiness, typed failures, ownership and bounded repair operations | `src/routes/systemReadiness.cjs`, `scripts/dev-stack`, `ops/services.json` |
@@ -66,7 +64,7 @@ The quote boundary carries source time separately from receipt time, expiry, ins
 
 `dashboardResourceRegistry.js` declares each UI resource's role and scope. `sessionResourceStore.js` clears executable/account data on **any failed refresh**, including generic HTTP, timeout and network errors. Mixed resources may retain only a validated reference projection with all executable books removed. Inactive panels preserve interaction state while polling and timers stop; executable expiry checks continue. See [data retention rules](docs/DASHBOARD_DATA_RETENTION.md).
 
-CPI payoff risk evaluates held and proposed thresholds plus both tails, including contracts outside the visible ladder. Unknown terms produce incomplete-risk status. Exposure Lab compares matching return intervals and aggregates identical economic exposures before residual-risk calculation.
+Exposure Lab compares matching return intervals and aggregates identical economic exposures before residual-risk calculation.
 
 Native PDF parsing runs in disposable workers with bounded concurrency, input/output size, page geometry, CPU time, wall time and monitored memory. Credentials, embedding requests and storage operations stay in the parent service. These limits contain parser failures and resource exhaustion; the workers are not an OS filesystem sandbox.
 
@@ -102,4 +100,4 @@ For an opt-in development measurement session, open `http://localhost:3000/?meas
 - Missing Analyst: inspect its availability reason and contract verification. Core dashboard access should remain usable.
 - Expired Systems checks are historical observations, not current health. Refresh and inspect the typed failure.
 
-See [morning workflow](docs/DASHBOARD_MORNING_CHECKLIST.md), [read-only broker boundaries](docs/IBKR_READ_ONLY_BOUNDARIES.md), [Exposure Lab](docs/EXPOSURE_LAB.md), [prediction catalog](docs/PREDICTION_MARKET_CATALOG.md), [The Analyst](docs/THE_ANALYST.md), and [refinement validation](docs/REFINEMENT_2026-09-04.md).
+See [morning workflow](docs/DASHBOARD_MORNING_CHECKLIST.md), [read-only broker boundaries](docs/IBKR_READ_ONLY_BOUNDARIES.md), [Exposure Lab](docs/EXPOSURE_LAB.md), [The Analyst](docs/THE_ANALYST.md), and [refinement validation](docs/REFINEMENT_2026-09-04.md).

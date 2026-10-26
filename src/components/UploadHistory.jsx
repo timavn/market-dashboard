@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Text, Title, TextInput, Button, Badge } from '@tremor/react';
 import { useTheme } from '../context/ThemeContext';
 import { usePortfolio } from '../context/PortfolioContext';
+import LoadingIndicator from './common/LoadingIndicator';
 
 const UploadHistory = () => {
   const { theme } = useTheme();
@@ -125,7 +126,7 @@ const UploadHistory = () => {
   if (loading) {
     return (
       <Card className="mt-4 rounded-lg">
-        <Text>Loading upload history...</Text>
+        <LoadingIndicator label="Loading upload history..." size="sm" />
       </Card>
     );
   }

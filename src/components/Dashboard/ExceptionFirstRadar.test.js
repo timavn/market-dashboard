@@ -269,7 +269,7 @@ describe('Exception-First header', () => {
     expect(screen.getByTestId('usd-matrix')).toHaveAttribute('data-show-fx-volatility', 'false');
   });
 
-  test('preserves the macro roster and eight summary rows with related commodities grouped together', () => {
+  test('preserves the macro roster and summary rows with related commodities grouped together', () => {
     expect(BACKDROP_GROUPS.map(({ id }) => id)).toEqual([
       'us', 'europe', 'asia', 'commodities', 'rates', 'crypto',
     ]);
@@ -278,20 +278,20 @@ describe('Exception-First header', () => {
       'STOXX600', 'SX5E', 'FTSE', 'DAX', 'CAC', 'FTSEMIB', 'IBEX', 'SMI',
       'N225', 'HSI', 'CSI300', 'NIFTY50', 'SSEC', 'KOSPI', 'TAIEX', 'AXJO', 'JKSE', 'KLSE',
       'CRB', 'CL', 'BZ', 'NG', 'RB', 'GC', 'HG', 'SI', 'PL', 'PA', 'ZC', 'ZW', 'ZS',
-      'UST2Y', 'UST10Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s',
+      'UST2Y', 'UST10Y', 'UST30Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s',
       'OAT10Y', 'BTP10Y', 'ACGB10Y', 'CAN10Y', 'KTB10Y', 'IG_OAS', 'HY_OAS',
-      'BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK',
+      'BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK', 'TRX',
     ]);
-    expect(BACKDROP_GROUPS.flatMap(({ rows }) => rows)).toHaveLength(62);
+    expect(BACKDROP_GROUPS.flatMap(({ rows }) => rows)).toHaveLength(64);
     expect(BACKDROP_GROUPS.map(({ rows }) => rows
       .filter(({ summary }) => summary).map(({ symbols }) => symbols[0])))
       .toEqual([
         ['SPX', 'RSP', 'MID', 'RUT', 'NDX', 'SMH', 'XLF', 'VNQ'],
         ['STOXX600', 'SX5E', 'FTSE', 'DAX', 'CAC', 'FTSEMIB', 'IBEX', 'SMI'],
         ['N225', 'HSI', 'CSI300', 'NIFTY50', 'KOSPI', 'TAIEX', 'AXJO', 'JKSE'],
-        ['CRB', 'CL', 'BZ', 'NG', 'GC', 'HG', 'ZC', 'ZS'],
-        ['UST2Y', 'UST10Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s', 'IG_OAS', 'HY_OAS'],
-        ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK'],
+        ['CRB', 'CL', 'BZ', 'NG', 'GC', 'HG', 'SI', 'ZC', 'ZS'],
+        ['UST2Y', 'UST10Y', 'UST30Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s', 'IG_OAS', 'HY_OAS'],
+        ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK', 'TRX'],
       ]);
   });
 
@@ -316,7 +316,7 @@ describe('Exception-First header', () => {
     expect(reference.parentElement).toBe(primaryGrid);
   });
 
-  test('keeps eight rows in each market summary when provider observations are unavailable', () => {
+  test('keeps eight rows in each top market summary and nine in Commodities, Rates and Crypto when provider observations are unavailable', () => {
     const onDashboardStatusChange = jest.fn();
     render(<ExceptionFirstRadar onDashboardStatusChange={onDashboardStatusChange} />);
 
@@ -324,7 +324,7 @@ describe('Exception-First header', () => {
     for (const label of ['US', 'Europe', 'Asia', 'Commodities', 'Rates', 'Crypto']) {
       const card = within(backdrop).getByRole('region', { name: label });
       const rows = within(card).getAllByRole('row').slice(1);
-      expect(rows).toHaveLength(8);
+      expect(rows).toHaveLength(['Commodities', 'Rates', 'Crypto'].includes(label) ? 9 : 8);
       for (const row of rows) {
         const valueCells = within(row).getAllByRole('cell').slice(1);
         expect(valueCells.map(({ textContent }) => textContent))
@@ -334,7 +334,7 @@ describe('Exception-First header', () => {
     const status = onDashboardStatusChange.mock.calls.at(-1)[0]
       .find(({ id }) => id === 'market-backdrop');
     expect(status.diagnostics).toEqual(expect.arrayContaining([
-      { label: 'Coverage', value: '0/62 markets' },
+      { label: 'Coverage', value: '0/64 markets' },
     ]));
   });
 
@@ -940,8 +940,8 @@ describe('Exception-First header', () => {
     fireEvent.click(within(ratesDialog).getByRole('button', { name: 'Rates', exact: true }));
     const cryptoSection = screen.getByRole('region', { name: 'Crypto' });
     const cryptoRows = within(cryptoSection).getAllByRole('row').slice(1);
-    expect(cryptoRows).toHaveLength(8);
-    ['Bitcoin/USD', 'Ethereum/USD', 'BNB/USD', 'XRP/USD', 'Solana/USD', 'Cardano/USD', 'Dogecoin/USD', 'Chainlink/USD'].forEach((label, index) => {
+    expect(cryptoRows).toHaveLength(9);
+    ['Bitcoin/USD', 'Ethereum/USD', 'BNB/USD', 'XRP/USD', 'Solana/USD', 'Cardano/USD', 'Dogecoin/USD', 'Chainlink/USD', 'TRON/USD'].forEach((label, index) => {
       expect(within(cryptoRows[index]).getByText(label, { exact: true })).toBeInTheDocument();
     });
     expect(within(cryptoSection).getByRole('row', { name: /Solana/ }))

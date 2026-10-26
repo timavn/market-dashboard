@@ -8,7 +8,7 @@ import {
 } from './dashboardStatus';
 
 describe('dashboard card status registry', () => {
-  test('defines the nine main cards in display order', () => {
+  test('defines the seven main cards in display order', () => {
     expect(DASHBOARD_CARD_DEFINITIONS.map(({ id }) => id)).toEqual([
       'volatility',
       'usd',
@@ -16,8 +16,6 @@ describe('dashboard card status registry', () => {
       'cftc-positioning',
       'market-situation',
       'global-quads',
-      'dollar-liquidity',
-      'volume',
       'money-flow',
     ]);
   });
@@ -25,7 +23,7 @@ describe('dashboard card status registry', () => {
   test('keeps every card present while accepting isolated updates', () => {
     const initial = createUnknownDashboardCardStatuses();
     const next = mergeDashboardCardStatuses(initial, {
-      id: 'volume',
+      id: 'money-flow',
       status: 'delayed',
       statusLabel: 'PROVISIONAL',
       detail: 'AS OF JUL 10',
@@ -33,8 +31,8 @@ describe('dashboard card status registry', () => {
       issues: ['Dataset is preliminary.'],
     });
 
-    expect(Object.keys(next)).toHaveLength(9);
-    expect(next.volume).toEqual(expect.objectContaining({
+    expect(Object.keys(next)).toHaveLength(7);
+    expect(next['money-flow']).toEqual(expect.objectContaining({
       status: 'delayed',
       statusLabel: 'PROVISIONAL',
       detail: 'AS OF JUL 10',
@@ -46,22 +44,22 @@ describe('dashboard card status registry', () => {
 
   test('preserves the registry reference for freshly allocated equivalent diagnostics and issues', () => {
     const initial = mergeDashboardCardStatuses(createUnknownDashboardCardStatuses(), {
-      id: 'volume',
+      id: 'money-flow',
       status: 'delayed',
       diagnostics: [{ label: 'Sources', value: 2 }],
       issues: [' Dataset is preliminary. '],
     });
 
     const equivalent = mergeDashboardCardStatuses(initial, {
-      id: 'volume',
+      id: 'money-flow',
       status: 'delayed',
       diagnostics: [{ label: 'Sources', value: '2' }],
       issues: ['Dataset is preliminary.'],
     });
 
     expect(equivalent).toBe(initial);
-    expect(equivalent.volume.diagnostics).toEqual([{ label: 'Sources', value: '2' }]);
-    expect(equivalent.volume.issues).toEqual(['Dataset is preliminary.']);
+    expect(equivalent['money-flow'].diagnostics).toEqual([{ label: 'Sources', value: '2' }]);
+    expect(equivalent['money-flow'].issues).toEqual(['Dataset is preliminary.']);
   });
 
   test('normalizes unknown card input to an explicit unavailable state', () => {
@@ -70,7 +68,7 @@ describe('dashboard card status registry', () => {
     });
 
     expect(normalized.usd.status).toBe('unavailable');
-    expect(normalized.volume.status).toBe('unavailable');
+    expect(normalized['money-flow'].status).toBe('unavailable');
   });
 
   test('maps data freshness states to the SYS status vocabulary', () => {

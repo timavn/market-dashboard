@@ -2,6 +2,8 @@ import React from 'react';
 import { AreaChart, Area, BarChart, Bar, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Activity, Landmark } from 'lucide-react';
 import LoadingIndicator from '../common/LoadingIndicator';
+import MarketVolumeTable from './MarketVolumeTable';
+import UsDollarLiquidityPanel from './DollarLiquidityModels';
 import './MoneyFlowPanel.css';
 
 const CHANGE_WINDOWS = ['1w', '4w', '13w', '52w'];
@@ -40,10 +42,10 @@ const shortDate = (date) => {
 // Same four-color blocks as Global Quads: green adds money to stocks, red
 // drains it, yellow is mixed or low conviction, white is no reading.
 const UP_READS = new Set([
-  'inflow', 'expanding', 'accumulation', 'confirmed advance', 'leverage rising', 'cash drawing down', 'tga adding', 'green',
+  'inflow', 'expanding', 'accumulation', 'confirmed advance', 'leverage rising', 'cash drawing down', 'adding', 'green',
 ]);
 const DOWN_READS = new Set([
-  'outflow', 'contracting', 'distribution', 'confirmed decline', 'leverage falling', 'cash building', 'tga draining',
+  'outflow', 'contracting', 'distribution', 'confirmed decline', 'leverage falling', 'cash building', 'draining',
   'red risk',
 ]);
 
@@ -69,33 +71,94 @@ export const VerdictPill = ({ verdict }) => (
   <ReadBlock read={verdict} label={VERDICT_LABELS[verdict] || VERDICT_LABELS.unavailable} strong />
 );
 
-// The Treasury account fills when it takes cash out of the system.
-const treasuryAccountRead = (history = []) => {
-  const [prior, latest] = history.slice(-2);
-  const change = latest && prior ? latest.treasuryGeneralAccount - prior.treasuryGeneralAccount : null;
+// Weekly change in one net-liquidity input. Moves under $10B read flat.
+// Fed assets add money as they grow; the Treasury account and reverse repo
+// take cash out of the system as they fill.
+const componentRead = (history = [], key, weeks, [upRead, downRead]) => {
+  const latest = history[history.length - 1];
+  const prior = history[history.length - 1 - weeks];
+  const change = latest && prior ? latest[key] - prior[key] : null;
   if (!isNumber(change)) return { change: null, read: 'unavailable' };
   if (Math.abs(change) < 10) return { change, read: 'flat' };
-  return { change, read: change > 0 ? 'tga draining' : 'tga adding' };
+  return { change, read: change > 0 ? upRead : downRead };
 };
 
-export const MoneyFlowPreview = ({ data, loading = false }) => {
+const FED_ASSETS_READS = ['expanding', 'contracting'];
+const CASH_ACCOUNT_READS = ['draining', 'adding'];
+
+// Idle brokerage and fund cash piling up is money parked outside stocks.
+const cashRead = (pct) => {
+  if (!isNumber(pct)) return 'unavailable';
+  if (pct > 0.005) return 'cash building';
+  if (pct < -0.005) return 'cash drawing down';
+  return 'cash flat';
+};
+
+const PreviewTable = ({ label, rows }) => (
+  <table className="efr-mini-table money-flow-mini" aria-label={`Money flow ${label.toLowerCase()}`}>
+    <thead>
+      <tr><th>{label}</th><th>Value</th><th>Read</th></tr>
+    </thead>
+    <tbody>
+      {rows.map(([rowLabel, value, read, readLabel]) => (
+        <tr key={rowLabel}>
+          <td>{rowLabel}</td>
+          <td>{value}</td>
+          <td className={`money-flow-read money-flow-block--${readTone(read)}`}>{readLabel || read || '—'}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+);
+
+// One card for money entering or leaving stocks: supply on the left, the
+// volume and positioning that confirm it on the right. `volume` is the
+// exchange-volume table, which loads on its own.
+// The volume table keeps the same slot in every state so it never remounts.
+const MoneyFlowCard = ({ supply, participation, volume }) => (
+  <div className="money-flow-card">
+    {supply}
+    <div className="money-flow-card__column">
+      {participation}
+      {volume}
+    </div>
+  </div>
+);
+
+export const MoneyFlowPreview = ({ data, loading = false, volume = null }) => {
   if (!data) {
-    return <div className="efr-reference-empty">{loading ? 'Loading money flow…' : 'No verified data available'}</div>;
+    const empty = (
+      <div className="efr-reference-empty">{loading ? <LoadingIndicator label="Loading money flow…" size="sm" /> : 'No verified data available'}</div>
+    );
+    return <MoneyFlowCard supply={empty} participation={null} volume={volume} />;
   }
   const netModel = data.layers?.netLiquidity;
   const net = netModel?.latest;
   const participation = data.layers?.participation;
   const margin = data.layers?.margin?.latest;
   const funds = data.layers?.moneyFunds?.latest;
-  const tga = treasuryAccountRead(netModel?.history);
+  const usStack = data.layers?.usStack;
   const change = (key) => net?.changes?.[key];
-  const rows = [
+  const componentRow = (label, key, weeks, reads) => {
+    const { change: delta, read } = componentRead(netModel?.history, key, weeks, reads);
+    return [label, formatBillions(delta, { signed: true }), read];
+  };
+  const supplyRows = [
     ['Fed net liquidity', formatBillions(net?.netLiquidity), net?.regime],
     ['1W change', formatBillions(change('1w')?.change, { signed: true }), change('1w')?.direction],
     ['4W change', formatBillions(change('4w')?.change, { signed: true }), change('4w')?.direction],
     ['13W change', formatBillions(change('13w')?.change, { signed: true }), change('13w')?.direction],
     ['52W change', formatBillions(change('52w')?.change, { signed: true }), change('52w')?.direction],
-    ['Treasury cash 1W', formatBillions(tga.change, { signed: true }), tga.read, tga.read.replace('tga ', '')],
+    componentRow('Fed balance sheet 1W', 'fedBalanceSheet', 1, FED_ASSETS_READS),
+    componentRow('Fed balance sheet 4W', 'fedBalanceSheet', 4, FED_ASSETS_READS),
+    componentRow('Treasury cash 1W', 'treasuryGeneralAccount', 1, CASH_ACCOUNT_READS),
+    componentRow('Treasury cash 4W', 'treasuryGeneralAccount', 4, CASH_ACCOUNT_READS),
+    componentRow('Reverse repo 4W', 'reverseRepo', 4, CASH_ACCOUNT_READS),
+    ['U.S. dollar liquidity 3M', formatPct(usStack?.growth3m), usStack?.regime],
+  ];
+  const freeCredit = margin?.changes?.['3m']?.freeCredit;
+  const funds4w = cashRead(funds?.change4w);
+  const participationRows = [
     ['Up/down volume 1M', formatRatio(participation?.windows?.['1m']?.upDownRatio), participation?.windows?.['1m']?.regime],
     ['Up/down volume 3M', formatRatio(participation?.windows?.['3m']?.upDownRatio), participation?.windows?.['3m']?.regime],
     [
@@ -104,29 +167,16 @@ export const MoneyFlowPreview = ({ data, loading = false }) => {
       participation?.latest?.signal,
     ],
     ['Margin debt 3M', formatPct(margin?.changes?.['3m']?.marginDebt), margin ? `leverage ${margin.leverage}` : null, margin?.leverage],
+    ['Brokerage free credit 3M', formatPct(freeCredit), cashRead(freeCredit), cashRead(freeCredit).replace('cash ', '')],
+    ['Retail money funds 4W', formatPct(funds?.change4w), funds4w, funds4w.replace('cash ', '')],
     ['Retail money funds 13W', formatPct(funds?.change13w), funds ? `cash ${funds.cash}` : null, funds?.cash],
   ];
   return (
-    <table className="efr-mini-table money-flow-mini" aria-label="Money flow">
-      <thead>
-        <tr>
-          <th>Verdict</th>
-          <th>Supply + volume</th>
-          <th className={`money-flow-read money-flow-block--${readTone(data.verdict)}`}>
-            {VERDICT_LABELS[data.verdict] || VERDICT_LABELS.unavailable}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(([label, value, read, readLabel]) => (
-          <tr key={label}>
-            <td>{label}</td>
-            <td>{value}</td>
-            <td className={`money-flow-read money-flow-block--${readTone(read)}`}>{readLabel || read || '—'}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <MoneyFlowCard
+      supply={<PreviewTable label="Supply" rows={supplyRows} />}
+      participation={<PreviewTable label="Participation" rows={participationRows} />}
+      volume={volume}
+    />
   );
 };
 
@@ -274,14 +324,6 @@ const monthLabel = (date) => {
     : parsed.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 };
 
-// Idle brokerage cash piling up is money parked outside stocks.
-const cashRead = (pct) => {
-  if (!isNumber(pct)) return 'unavailable';
-  if (pct > 0.005) return 'cash building';
-  if (pct < -0.005) return 'cash drawing down';
-  return 'cash flat';
-};
-
 const ContextSection = ({ layers = {} }) => {
   const { usStack, margin, moneyFunds } = layers;
   const marginLatest = margin?.latest;
@@ -347,7 +389,39 @@ const ContextSection = ({ layers = {} }) => {
   );
 };
 
-const MoneyFlowPanel = ({ resourceState }) => {
+const VolumeSection = () => (
+  <section className="dollar-liquidity-model money-flow-volume">
+    <div className="dollar-liquidity-model-header">
+      <div className="dollar-liquidity-title-block">
+        <Activity size={16} />
+        <div>
+          <h3>Volume · vs trailing averages</h3>
+          <span>Completed-session U.S. and ex-U.S. share volume</span>
+        </div>
+      </div>
+    </div>
+    <MarketVolumeTable showDetails showAsOf={false} />
+  </section>
+);
+
+const UsStackSection = ({ liquidityState }) => {
+  const { data, loading, error } = liquidityState || {};
+  if (data?.models?.us) return <UsDollarLiquidityPanel model={data.models.us} />;
+  return (
+    <section className="dollar-liquidity-model">
+      {loading
+        ? <LoadingIndicator label="Loading U.S. dollar liquidity…" size="lg" centered className="py-8" />
+        : (
+          <div className="dollar-liquidity-empty">
+            <strong>No verified U.S. dollar liquidity</strong>
+            <span>{error || 'The monthly U.S. stack was unavailable on the latest refresh.'}</span>
+          </div>
+        )}
+    </section>
+  );
+};
+
+const MoneyFlowPanel = ({ resourceState, liquidityState }) => {
   const { data, loading, error } = resourceState || {};
   if (loading && !data) {
     return (
@@ -381,6 +455,10 @@ const MoneyFlowPanel = ({ resourceState }) => {
       <div className="dollar-liquidity-grid">
         <SupplySection model={data.layers?.netLiquidity} />
         <ParticipationSection participation={data.layers?.participation} />
+      </div>
+      <div className="dollar-liquidity-grid">
+        <VolumeSection />
+        <UsStackSection liquidityState={liquidityState} />
       </div>
       <ContextSection layers={data.layers} />
     </section>

@@ -41,61 +41,19 @@
   height: 13px;
 }
 
-@keyframes app-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.app-spin {
-  animation: app-spin 1s linear infinite;
-}
-
-/* Loading indicator */
+/* Loading indicator: ring and blue elapsed seconds (AnalystSpinner), then Unavailable. */
 .app-loading {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  color: #4682b4;
   font-size: 12px;
-  font-weight: 600;
 }
 
+.app-loading--expired { color: var(--analyst-muted, #667085); }
+
 .app-loading--centered {
-  flex-direction: column;
+  display: flex;
   justify-content: center;
-  align-items: center;
-  gap: 6px;
   width: 100%;
   padding: 12px 4px;
   text-align: center;
-}
-
-.app-loading-icon {
-  flex-shrink: 0;
-  stroke-width: 2;
-}
-
-.app-loading--sm .app-loading-icon {
-  width: 16px;
-  height: 16px;
-}
-
-.app-loading--md .app-loading-icon {
-  width: 20px;
-  height: 20px;
-}
-
-.app-loading--lg .app-loading-icon {
-  width: 24px;
-  height: 24px;
-}
-
-.app-loading-label {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.app-loading--centered .app-loading-label {
-  color: #64748b;
 }

@@ -38,6 +38,23 @@ describe('official sovereign daily yield references', () => {
     }
   });
 
+  test('parses the Bank of Canada quoted Valet export and the RBA F2 daily table by series ID', () => {
+    const canada = `"TERMS AND CONDITIONS"\n\n"SERIES"\n"id","label"\n"BD.CDN.10YR.DQ.YLD","Benchmark bond yield, 10-year"\n\n"OBSERVATIONS"\n"date","BD.CDN.10YR.DQ.YLD"\n"2026-09-23","3.94"\n"2026-09-24",""\n"2026-09-26","4.1"`;
+    expect(parseOfficialSovereignCsv('CAN10Y', canada, { now: NOW })).toEqual([point('2026-09-23', 3.94)]);
+    const rba = 'F2 CAPITAL MARKET YIELDS\nFrequency,Daily,Daily\nSeries ID,FCMYGBAG5D,FCMYGBAG10D\n23-Sep-2026,4.9,5.229\n24-Sep-2026,4.91,\n31-Sep-2026,1,2';
+    expect(parseOfficialSovereignCsv('ACGB10Y', rba, { now: NOW })).toEqual([point('2026-09-23', 5.229)]);
+    expect(parseOfficialSovereignCsv('ACGB10Y', rba.replace('FCMYGBAG10D', 'FCMYGBAG10M'), { now: NOW })).toEqual([]);
+  });
+
+  test('bounds the Bank of Canada request to the requested window', async () => {
+    const httpClient = { get: jest.fn().mockResolvedValue(response('"date","BD.CDN.10YR.DQ.YLD"\n"2026-09-24","3.9"')) };
+    const series = await fetchOfficialSovereignSeries('CAN10Y', { httpClient, now: NOW, startDate: '2025-09-01' });
+    const url = new URL(httpClient.get.mock.calls[0][0]);
+    expect(url.searchParams.get('start_date')).toBe('2025-09-01');
+    expect(url.searchParams.get('end_date')).toBe('2026-09-25');
+    expect(series).toMatchObject({ source: 'bank_of_canada', closes: [point('2026-09-24', 3.9)] });
+  });
+
   test('fetches a date-bounded Bundesbank series with its historical-only provenance intact', async () => {
     const httpClient = { get: jest.fn().mockResolvedValue(response(bundesbank('2026-09-24,3.57,\n2026-09-25,3.58,'))) };
     const series = await fetchOfficialSovereignSeries('bund10y', { httpClient, now: NOW, startDate: '2025-09-01' });

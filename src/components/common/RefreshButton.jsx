@@ -1,5 +1,6 @@
 import React from 'react';
 import { RefreshCw } from 'lucide-react';
+import AnalystSpinner from '../Dashboard/AnalystSpinner';
 import './RefreshButton.css';
 
 /**
@@ -32,10 +33,7 @@ function RefreshButton({
       disabled={isDisabled}
       aria-busy={loading || undefined}
     >
-      <RefreshCw
-        className={`app-refresh-btn-icon${loading ? ' app-spin' : ''}`}
-        aria-hidden
-      />
+      {loading ? <AnalystSpinner size={14} elapsed /> : <RefreshCw className="app-refresh-btn-icon" aria-hidden />}
       {!iconOnly && label}
     </button>
   );

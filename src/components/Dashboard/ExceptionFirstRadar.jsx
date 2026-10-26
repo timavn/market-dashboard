@@ -39,6 +39,7 @@ import VolatilityMetricRow, {
 } from './VolatilityMetricRow';
 import VolatilitySpreadsheetRow, { VolatilitySpreadsheetHeader } from './VolatilitySpreadsheetRow';
 import './ExceptionFirstRadar.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const BACKDROP_GROUPS = marketBackdropCatalog.map((group) => ({
   id: group.id,
@@ -159,6 +160,8 @@ const QUOTE_SOURCE_LABELS = {
   bundesbank: 'Bundesbank',
   japan_mof: 'Japan Ministry of Finance',
   bank_of_england: 'Bank of England',
+  us_treasury: 'U.S. Treasury',
+  cnbc: 'CNBC',
 };
 
 const quoteSourceLabel = (row) => {
@@ -411,7 +414,7 @@ const VolatilityMapPanel = ({ volatilityState, vixRiskRangeState = null, researc
       />
       {spreadsheet && <header className="efr-vol-spreadsheet__title"><h2>Volatility</h2></header>}
       {loading && !hasDisplayableRows ? (
-        <div className="efr-vol-map__state">Loading current volatility data…</div>
+        <div className="efr-vol-map__state"><LoadingIndicator label="Loading current volatility data…" size="sm" /></div>
       ) : !hasDisplayableRows ? (
         <div className="efr-vol-map__state efr-vol-map__state--error" role="alert">
           <span>
@@ -950,7 +953,7 @@ const USDCurrencySpreadsheet = ({ leftRows, rightRows, loading, providerStatus, 
   if (rows.length === 0) {
     return (
       <div className="usd-card-currencies__empty">
-        {loading ? 'Loading verified currency data…' : 'No verified currency data available'}
+        {loading ? <LoadingIndicator label="Loading verified currency data…" size="sm" /> : 'No verified currency data available'}
       </div>
     );
   }

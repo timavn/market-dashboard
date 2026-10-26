@@ -1,7 +1,5 @@
 'use strict';
 
-const { unavailableGoldCorrelationSnapshot } = require('../utils/goldCorrelations.cjs');
-
 function createUsdCorrelationHandler({ usdCorrelationService }) {
   return async (req, res) => {
     const startTime = Date.now();
@@ -28,21 +26,4 @@ function createUsdCorrelationHandler({ usdCorrelationService }) {
   };
 }
 
-function createGoldCorrelationHandler({ goldCorrelationService }) {
-  return async (req, res) => {
-    const startTime = Date.now();
-    res.set('Cache-Control', 'no-store');
-    try {
-      const snapshot = await goldCorrelationService.getSnapshot();
-      const totalTime = Date.now() - startTime;
-      console.log(`[API] /api/gold/correlations completed in ${totalTime}ms (${snapshot.calculationDate})`);
-      res.json(snapshot);
-    } catch (error) {
-      const totalTime = Date.now() - startTime;
-      console.error(`[API] Error in /api/gold/correlations after ${totalTime}ms:`, error);
-      res.status(503).json(unavailableGoldCorrelationSnapshot(error));
-    }
-  };
-}
-
-module.exports = { createUsdCorrelationHandler, createGoldCorrelationHandler };
+module.exports = { createUsdCorrelationHandler };

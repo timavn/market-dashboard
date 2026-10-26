@@ -57,8 +57,8 @@ are configured per resource, not granted to every informational card.
 Retention is limited to eligible informational/reference dashboard observations.
 Freshness limits whether a reading is current; the resource's retention policy
 separately determines whether it may remain visible as dated context. Live executable
-resources—portfolio balances, positions, order tickets, sizing inputs, and
-prediction-market quote ladders—fail closed after any failed refresh, on
+resources—portfolio balances, positions, order tickets, and sizing
+inputs—fail closed after any failed refresh, on
 provider disconnection, and when their freshness window expires. A retained dashboard value must not be promoted
 into one of those surfaces.
 
@@ -68,7 +68,7 @@ The shared `useSessionResource` store supports this explicitly through
 hydration is separately opt-in through `displayRole: 'informational'` and
 `persistReferenceSnapshot`. The persistence option is rejected for executable
 resources, so a new live resource cannot accidentally turn a stored value into
-an order, sizing input, portfolio balance, or prediction-market quote. An
+an order, sizing input, or portfolio balance. An
 executable or account-scoped resource clears immediately on every failed
 verification, regardless of whether the error has a provider-specific code.
 Mixed resources retain only their validated reference projection after failure;
@@ -130,7 +130,6 @@ Only informational projections are written. The following must never appear in
 session storage:
 
 - account identifiers, balances, portfolio positions, or account P&L;
-- prediction-market books, bids, asks, depth, or live position overlays;
 - sizing calculations, order drafts, eligibility, or executable controls;
 - mock, seeded, synthetic, inferred, portfolio-derived, or wrong-scope data.
 
@@ -144,8 +143,7 @@ validated live response.
 unmounting. Hidden surfaces use `hidden`, `aria-hidden`, and `inert` and publish
 inactive state through `useSurfaceActivity`, allowing non-core polling,
 observers, timers, and global listeners to pause. The dashboard, Process overlay,
-top-level cards, nested views, Balance, Contract P&L, and each individual
-prediction market retain their own instances. Component state and
+top-level cards, nested views, and Balance retain their own instances. Component state and
 scroll positions therefore survive close/reopen without any storage of
 sensitive drafts.
 
@@ -177,8 +175,8 @@ incompatible contract generation, or a genuine live-data invalidation.
 After the visible dashboard settles, the idle queue automatically warms only
 restored panel state. Other eligible chunks and provider-pure informational
 resources are enqueued on navigation focus, pointer intent, or panel opening.
-Startup does not preload every monitor or utility panel. Balance and Contract
-P&L are lazy-loaded like the other navigation panels.
+Startup does not preload every monitor or utility panel. Balance is
+lazy-loaded like the other navigation panels.
 
 The queue is capped at two concurrent tasks, runs each key once per page load,
 promotes intended tasks, and reuses the central store's in-flight request. It
@@ -186,9 +184,7 @@ pauses while the document is hidden or the browser is offline and starts no
 recurring hidden polling.
 
 Executable/account resources, forced refreshes, order and sizing endpoints, and
-requests that initiate provider work are rejected. Prediction-monitor warmup is
-allowed only for the existing read-only coordinator snapshot route; the stored
-result is its sanitized reference projection.
+requests that initiate provider work are rejected.
 
 ## Retained legacy components
 
@@ -209,12 +205,6 @@ drawdown, liquidity, sensitivities, factor weights, and scenario outcomes now
 remain null where the required verified history or model inputs are absent.
 No cross-sectional gain/loss proxy, random days-to-exit, or fixed allocation is
 presented as a measured account statistic. Missing daily change stays null.
-
-`MacroSignalsCard` is imported by the legacy prediction-markets module but is
-not rendered by current navigation. Missing or failed signal inputs now show
-unavailable; its demo rows and hardcoded inflation-nowcast fallback were
-removed. Supplied nowcasts retain their publication date and release date.
-The old duplicate nowcast filename forwards to the same guarded component.
 
 ## Rollback and test requirements
 

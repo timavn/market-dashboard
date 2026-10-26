@@ -9,8 +9,6 @@ const {
   buildSystemReadiness,
   evaluateHermesWorker,
   evaluateGmailIngestion,
-  evaluatePredictionMarketDisplay,
-  evaluatePredictionMarketExecution,
 } = require('../utils/systemReadiness.cjs');
 const { computeRuntimeFingerprint } = require('../utils/runtimeFingerprint.cjs');
 const {
@@ -557,19 +555,6 @@ async function probeUrl(url, { timeoutMs = 2_000 } = {}) {
     contentType: response.headers.get('content-type'),
     observedAt: new Date().toISOString(),
   };
-}
-
-async function getLocalCurrentPredictionMarkets({ timeoutMs = 8_000 } = {}) {
-  const port = Number(process.env.PORT || 3001);
-  const response = await fetch(`http://127.0.0.1:${port}/api/prediction-markets/cpi/current`, {
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || `Current CPI endpoint returned HTTP ${response.status}`);
-  }
-  return payload;
 }
 
 function processIsAlive(pid) {
@@ -1176,7 +1161,6 @@ function countedNoun(count, singular) {
 function buildAnalystActivityCheck({ activity = null, error = null, now }) {
   const counts = {
     reviews: analystActivityCount(activity?.reviews),
-    manualCaptures: analystActivityCount(activity?.manualCaptures),
     turns: analystActivityCount(activity?.turns),
   };
   const verified = !error && Object.values(counts).every((count) => count !== null);
@@ -1193,7 +1177,6 @@ function buildAnalystActivityCheck({ activity = null, error = null, now }) {
       : (active
         ? `Analyst work is in progress: ${[
           countedNoun(counts.reviews, 'review run'),
-          countedNoun(counts.manualCaptures, 'manual capture'),
           countedNoun(counts.turns, 'turn'),
         ].join(', ')}.`
         : 'No Analyst work is in progress.'),
@@ -1295,7 +1278,7 @@ function buildSidecarChecks({
         label: 'IBKR sidecar',
         message: `Sidecar did not answer /livez${errorMessage(livezResult) ? `: ${errorMessage(livezResult)}` : '.'}`,
         errorCode: 'IBKR_SIDECAR_UNREACHABLE',
-        impact: 'Portfolio, IBKR quotes, and prediction-market discovery are unavailable.',
+        impact: 'Portfolio and IBKR quotes are unavailable.',
         recovery: restartSidecar,
       });
 
@@ -1405,7 +1388,7 @@ function buildSidecarChecks({
           : accounts.join(', '),
         observedAt: gateway.time || now,
         impact: missingExpectedAccounts.length
-          ? 'Disconnected accounts remain history-only and current prediction-market totals are withheld.'
+          ? 'Disconnected accounts remain history-only until they reconnect.'
           : null,
         recovery: missingExpectedAccounts.length ? {
           kind: 'manual',
@@ -1929,7 +1912,6 @@ function buildResearchChecks({
 
 function createSystemReadinessService({
   sidecarRequest,
-  getCurrentPredictionMarkets = getLocalCurrentPredictionMarkets,
   getDirectorSnapshot,
   buildWorkflowStatusSnapshot,
   getHermesInboxStatus,
@@ -1992,13 +1974,11 @@ function createSystemReadinessService({
         errorCode: 'HERMES_CONTROLLER_STATE_INVALID',
       };
     }
-    const [uiResult, livezResult, readyzResult, statusResult, eventsResult, currentPredictionResult, workflowResult, rtaResult, etfResult] = await Promise.allSettled([
+    const [uiResult, livezResult, readyzResult, statusResult, workflowResult, rtaResult, etfResult] = await Promise.allSettled([
       probeLocalUrl('http://127.0.0.1:3000/', { timeoutMs: 2_000 }),
       sidecarRequest('/livez', { timeoutMs: 1500 }),
       sidecarRequest('/readyz', { timeoutMs: 2500 }),
       sidecarRequest('/status', { timeoutMs: 3000 }),
-      sidecarRequest('/events', { timeoutMs: 7000 }),
-      getCurrentPredictionMarkets(),
       buildWorkflowStatusSnapshot(),
       buildRtaResponse(),
       buildEtfResponse(),
@@ -2164,34 +2144,6 @@ function createSystemReadinessService({
       capabilityIds: [legacyReadOnly ? 'automation.readiness' : 'automation.hermes'],
     };
 
-    const currentPredictionPayload = fulfilledValue(currentPredictionResult);
-    const predictionDisplayCheck = currentPredictionPayload
-      ? evaluatePredictionMarketDisplay({ payload: currentPredictionPayload, now: evaluationNow })
-      : serviceFailureCheck({
-          id: 'prediction.display',
-          label: 'Prediction-market live display',
-          message: `Current CPI venue data could not be loaded${errorMessage(currentPredictionResult) ? `: ${errorMessage(currentPredictionResult)}` : '.'}`,
-          impact: 'Verified live prediction-market prices are unavailable.',
-          recovery: {
-            kind: 'manual',
-            label: 'Verify the current CPI release and Kalshi venue response, then refresh.',
-          },
-        });
-    const executionPayload = currentPredictionPayload || fulfilledValue(eventsResult);
-    const predictionExecutionCheck = executionPayload
-      ? evaluatePredictionMarketExecution({ payload: executionPayload, now: evaluationNow })
-      : serviceFailureCheck({
-          id: 'prediction.ibkrExecution',
-          label: 'Prediction-market IBKR execution catalog',
-          message: `IBKR prediction catalog could not be loaded${errorMessage(eventsResult) ? `: ${errorMessage(eventsResult)}` : '.'}`,
-          impact: 'Prediction-market order entry through IBKR is unavailable.',
-          recovery: {
-            kind: 'command',
-            label: 'Restore the sidecar, then rediscover the current CPI contracts.',
-            command: 'npm run ibkr-sidecar:discover',
-          },
-        });
-
     const apiCheck = makeCheck({
       id: 'dashboard.api',
       label: 'Dashboard API server',
@@ -2253,11 +2205,6 @@ function createSystemReadinessService({
         checks: legacyReadOnly ? [gmailCheck] : [bridgeCheck, ...workerChecks, gmailCheck],
       },
       { id: 'analyst', label: 'The Analyst', checks: [analystRuntimeCheck, ...(portfolioCloseCheck ? [portfolioCloseCheck] : [])] },
-      {
-        id: 'prediction-markets',
-        label: 'Prediction markets',
-        checks: [predictionDisplayCheck, predictionExecutionCheck],
-      },
       { id: 'research', label: 'Research data', checks: researchChecks },
       { id: 'host', label: 'Host and reliability controller', checks: hostChecks },
     ], { now: evaluationNow });
@@ -2389,5 +2336,4 @@ module.exports = {
   buildResearchPipelineCheck,
   buildResearchChecks,
   createSystemReadinessService,
-  getLocalCurrentPredictionMarkets,
 };

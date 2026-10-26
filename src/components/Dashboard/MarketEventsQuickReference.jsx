@@ -18,6 +18,7 @@ import {
   validateMarketEventsSnapshot,
 } from '../../hooks/useMarketEvents';
 import './MarketEventsQuickReference.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
 const TODAY_REFRESH_MS = 5 * 60 * 1000;
 const CLOCK_SKEW_MS = 2 * 60 * 1000;
@@ -123,7 +124,7 @@ export function isCurrentVerifiedSnapshot(data, currentTime = Date.now(), week =
 
 function EventsState({ status, reason, onRetry, week }) {
   if (status === 'loading') {
-    return <div className="market-events-state" role="status">Loading verified calendar…</div>;
+    return <div className="market-events-state"><LoadingIndicator label="Loading verified calendar…" size="sm" /></div>;
   }
   return (
     <div className="market-events-state" role="status" title={reason || undefined}>

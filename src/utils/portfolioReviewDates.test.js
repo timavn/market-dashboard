@@ -28,12 +28,12 @@ test('mixed research dates describe the complete captured span', () => {
     .toEqual({ text: '', period: 'Period: Sep 21, 2026 – Sep 28, 2026' });
 });
 
-test('Period occupies its own slot for a single publication and unavailable dates', () => {
+test('Period occupies its own slot for a single publication and is omitted without dates', () => {
   expect(publicationDatelineParts([source('single', '2026-09-28', { publishedAt: '2026-09-28T11:20:00Z' })], { label: 'Period' }))
     .toEqual({ text: '', period: 'Period: Sep 28, 2026 04:20 PDT' });
-  expect(publicationDatelineParts([], { label: 'Period' })).toEqual({ text: '', period: 'Period: —' });
+  expect(publicationDatelineParts([], { label: 'Period' })).toEqual({ text: '', period: '' });
   expect(publicationDatelineParts([source('invalid', 'invalid')], { label: 'Period' }))
-    .toEqual({ text: '', period: 'Period: —' });
+    .toEqual({ text: '', period: '' });
   expect(publicationDatelineParts([source('single', '2026-09-28')]))
     .toEqual({ text: 'Published: Sep 28, 2026' });
 });
@@ -127,7 +127,7 @@ test.each(['position-confirmations', 'position-contradictions', 'refresh-realign
 });
 
 test('an empty comparison never uses the render date as a holdings or publication timestamp', () => {
-  expect(rollupDateline({ id: 'position-confirmations' }, [], sourceMap())).toEqual({ text: 'Positioning: —', period: 'Period: —' });
+  expect(rollupDateline({ id: 'position-confirmations' }, [], sourceMap())).toEqual({ text: 'Positioning: —', period: '' });
   expect(rollupDateline({ id: 'market-drivers' }, [], sourceMap()).text).toBe('Published: —');
 });
 

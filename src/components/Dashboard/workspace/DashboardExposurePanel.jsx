@@ -3,7 +3,6 @@ import DashboardWorkspaceWindow from './DashboardWorkspaceWindow';
 
 export default function DashboardExposurePanel({
   showExposureLab,
-  showContractPnl,
   getSidebarPanelZIndex,
   children
 }) {
@@ -13,8 +12,6 @@ export default function DashboardExposurePanel({
         aria-label="PCA"
         manageFocus
         active={showExposureLab}
-        occluded={showContractPnl}
-        data-contract-pnl-coverable="true"
         data-testid="exposure-lab-panel"
         data-layout="centered-workspace"
         className="dashboard-side-panel dashboard-side-panel--exposure-card"

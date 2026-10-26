@@ -26,6 +26,8 @@ const DISPLAYABLE_QUOTE_SOURCES = new Set([
   'bundesbank',
   'japan_mof',
   'bank_of_england',
+  'us_treasury',
+  'cnbc',
 ]);
 
 const IBKR_MAX_QUOTE_AGE_MS = MAX_AGE_MS;
@@ -123,6 +125,7 @@ function classifyQuoteAvailability(quote, { now = Date.now() } = {}) {
   if (
     source === 'yahoo'
     || source === 'trading_economics'
+    || source === 'cnbc'
     || dataType === 'delayed'
     || dataType === 'delayed_frozen'
   ) {

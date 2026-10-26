@@ -603,8 +603,8 @@
 
 .dashboard-shell--modern-grid .efr-reference-card__body .efr-mini-table th,
 .dashboard-shell--modern-grid .efr-reference-card__body .efr-mini-table td,
-.dashboard-shell--modern-grid .efr-reference-card--volume .region-mw-th,
-.dashboard-shell--modern-grid .efr-reference-card--volume .region-mw-td {
+.dashboard-shell--modern-grid .money-flow-card__volume .region-mw-th,
+.dashboard-shell--modern-grid .money-flow-card__volume .region-mw-td {
   height: var(--dashboard-table-row-height);
   padding: 0 4px;
   border-right: 0;
@@ -615,14 +615,14 @@
 
 .dashboard-shell--modern-grid .efr-reference-card__body thead th,
 .dashboard-shell--modern-grid .efr-reference-card__body .efr-mini-table thead th,
-.dashboard-shell--modern-grid .efr-reference-card--volume .region-mw-th {
+.dashboard-shell--modern-grid .money-flow-card__volume .region-mw-th {
   font-weight: 700;
   background: var(--modern-grid-header);
   color: var(--modern-grid-muted);
   border-bottom-color: var(--modern-grid-line);
 }
 
-.dashboard-shell--modern-grid .efr-reference-card--volume .market-volume-table--mw .region-mw-quotes-table .region-mw-th {
+.dashboard-shell--modern-grid .money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table .region-mw-th {
   font-size: 9px;
 }
 
@@ -650,29 +650,29 @@
   box-shadow: var(--modern-grid-shadow);
 }
 
-/* Dollar Liquidity stretches its table so it and Volume fill the card. */
-.dashboard-shell--modern-grid .efr-reference-card--liquidity {
+/* Money Flow takes the two columns Dollar Liquidity and Volume used to fill. */
+.dashboard-shell--modern-grid .efr-reference-card--money-flow {
   display: flex;
   flex-direction: column;
 }
 
-.dashboard-shell--modern-grid .efr-reference-card--liquidity > .efr-reference-card__body {
+.dashboard-shell--modern-grid .efr-reference-card--money-flow > .efr-reference-card__body {
   display: flex;
   flex: 1 1 auto;
-  flex-direction: column;
   min-height: 0;
 }
 
-.dashboard-shell--modern-grid .efr-reference-card--liquidity > .efr-reference-card__body > .efr-mini-table {
-  flex: 1 1 auto;
+.dashboard-shell--modern-grid .money-flow-card__volume {
+  border-top: 1px solid var(--modern-grid-line);
 }
 
-.dashboard-shell--modern-grid .efr-reference-card--liquidity .efr-reference-card--volume {
-  flex: 0 0 auto;
-  margin-top: 0;
-  border: 0;
-  border-top: 1px solid var(--modern-grid-line);
-  box-shadow: none;
+.dashboard-shell--modern-grid .money-flow-card__subhead {
+  height: var(--dashboard-table-row-height);
+  border-bottom: 1px solid var(--modern-grid-rule);
+  background: var(--modern-grid-section);
+  color: var(--modern-grid-ink);
+  font-size: 10px;
+  letter-spacing: .035em;
 }
 
 .dashboard-shell--modern-grid .efr-vol-spreadsheet__title {
@@ -1052,6 +1052,12 @@
   }
   .dashboard-shell--modern-grid .efr-backdrop__body,
   .dashboard-shell--modern-grid .efr-reference__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dashboard-shell--modern-grid .efr-reference-card--money-flow {
+    grid-column: auto;
+  }
+  .dashboard-shell--modern-grid .money-flow-card {
     grid-template-columns: minmax(0, 1fr);
   }
   .dashboard-shell--modern-grid .efr-pulse-metric__slide {

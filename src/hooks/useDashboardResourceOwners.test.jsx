@@ -3,9 +3,7 @@ import { useDashboardPortfolio } from './useDashboardPortfolio';
 import { useDashboardOverviewResources } from './useDashboardOverviewResources';
 import { useDashboardEtfProResource } from './useDashboardEtfProResource';
 import { useDashboardChangelog } from './useDashboardChangelog';
-import { useDashboardPredictionIndicators } from './useDashboardPredictionIndicators';
 import { MarketDataService } from '../services/api/marketDataService';
-import predictionMarketTestService from '../services/api/predictionMarketTestService';
 import { resetSessionResourceStore } from '../utils/sessionResourceStore';
 import { IBKR_SELECTED_ACCOUNT_KEY } from '../constants/ibkrAccountStorage';
 
@@ -17,9 +15,6 @@ jest.mock('../services/api/marketDataService', () => ({ MarketDataService: {
   getPortfolio: jest.fn(), getProviderStatus: jest.fn(), getMultiRegionQuotes: jest.fn(),
   getHedgeyeEtfPro: jest.fn(), getHedgeyeChangelog: jest.fn(),
 } }));
-jest.mock('../services/api/predictionMarketTestService', () => ({
-  __esModule: true, default: { getMorningReport: jest.fn() },
-}));
 
 const NOW = Date.parse('2026-09-11T17:00:00.000Z');
 const observedAt = new Date(NOW).toISOString();
@@ -214,32 +209,6 @@ describe('dashboard overview and support owners', () => {
     expect(MarketDataService.getHedgeyeChangelog).toHaveBeenCalledTimes(1);
     await act(async () => { jest.advanceTimersByTime(1); });
     expect(MarketDataService.getHedgeyeChangelog).toHaveBeenCalledTimes(2);
-    unmount();
-  });
-
-  it('expires prediction indicators locally before their next resource poll', async () => {
-    const marketOrder = ['sp500', 'wti', 'nasdaq100', 'gold'];
-    const expiresAt = new Date(NOW + 1000).toISOString();
-    const section = { status: 'available', source: 'ibkr', asOf: observedAt, expiresAt };
-    predictionMarketTestService.getMorningReport.mockResolvedValue({
-      schemaVersion: 1, reportType: 'four_market_morning', status: 'partial', generatedAt: observedAt,
-      marketOrder, policy: { recommendationAllowed: false },
-      markets: marketOrder.map(marketId => marketId !== 'sp500' ? { marketId } : {
-        marketId,
-        riskRange: { ...section, ticker: 'SPX', lrr: 6000, hrr: 6300, trend: 'BULLISH', date: '2026-09-11', setupEligible: true, fit: 'exact' },
-        trade: { ...section, ticker: 'SPX', direction: 'BULLISH', date: '2026-09-11' },
-        reference: { ...section, value: 6050, availability: 'live', fit: 'exact' },
-        bias: { status: 'aligned', aligned: true, trade: 'BULLISH', trend: 'BULLISH' },
-        rangeLocation: { status: 'available', zone: 'LRR', value: 6050 },
-        setup: { status: 'matched', pattern: 'BULLISH_AT_LRR', tradeTrendAligned: true, researchQualified: true, recommendationAllowed: false },
-      }),
-    });
-    const { result, unmount } = renderHook(() => useDashboardPredictionIndicators());
-    await flush();
-    expect(result.current.sp500).toMatchObject({ tone: 'bullish', expiresAt });
-    await act(async () => { jest.advanceTimersByTime(1001); });
-    expect(result.current).toEqual({});
-    expect(predictionMarketTestService.getMorningReport).toHaveBeenCalledTimes(1);
     unmount();
   });
 });

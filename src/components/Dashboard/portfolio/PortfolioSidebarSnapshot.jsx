@@ -1,5 +1,6 @@
 import React, { useMemo, useEffect, useCallback, useState } from 'react';
 import { ArrowRight, RefreshCw } from 'lucide-react';
+import AnalystSpinner from '../AnalystSpinner';
 import StatusDot from '../../common/StatusDot';
 import LoadingIndicator from '../../common/LoadingIndicator';
 import PopoverSelect from '../../common/PopoverSelect';
@@ -856,7 +857,7 @@ const PortfolioSidebarSnapshot = ({
               title={refreshing ? 'Refreshing portfolio' : 'Refresh portfolio'}
               aria-label="Refresh portfolio"
             >
-              <RefreshCw className={`pf-icon-btn__arrow${loading || refreshing ? ' pf-spin' : ''}`} size={15} strokeWidth={2} />
+              {loading || refreshing ? <AnalystSpinner size={15} elapsed /> : <RefreshCw className="pf-icon-btn__arrow" size={15} strokeWidth={2} />}
             </button>
           </div>
         </div>
@@ -890,11 +891,11 @@ const PortfolioSidebarSnapshot = ({
             role="status"
             aria-live="polite"
           >
-            <RefreshCw className="pf-refresh-state__icon pf-spin" size={12} aria-hidden="true" />
+            <AnalystSpinner size={12} elapsed />
             <span>
               {retainingVerifiedSnapshot
-                ? `Refreshing · last verified as of ${formatPortfolioRefreshAsOf(portfolioData)}`
-                : 'Syncing live IBKR…'}
+                ? `Last verified as of ${formatPortfolioRefreshAsOf(portfolioData)}`
+                : <span className="sr-only">Syncing live IBKR…</span>}
             </span>
           </div>
         )}

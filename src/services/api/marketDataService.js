@@ -176,7 +176,7 @@ export class MarketDataService {
     return response.data;
   }
 
-  static async getSystemStatus({ marketId = null } = {}) {
+  static async getSystemStatus() {
     try {
       // The probes themselves remain tightly bounded server-side. Allow a
       // loopback UI proxy to keep this control-plane request out of the busy
@@ -184,7 +184,6 @@ export class MarketDataService {
       // The existing fail-closed timeout remains unchanged.
       const response = await dedupedGet(resolveSystemStatusEndpoint({ backendUrl }), {
         timeout: 4000,
-        params: marketId ? { marketId } : undefined,
       });
       return response.data;
     } catch (error) {
@@ -228,11 +227,6 @@ export class MarketDataService {
   }
 
   // Get real-time quotes
-  static async getSp500Contributors() {
-    const response = await dedupedGet(ENDPOINTS.SP500_CONTRIBUTORS);
-    return response.data;
-  }
-
   static async getQuotes(symbols) {
     try {
       const response = await dedupedGet(ENDPOINTS.QUOTES, {
@@ -666,88 +660,6 @@ export class MarketDataService {
     }
   }
 
-  static async getPortfolioPredictionMarketPositions({ primaryAccount = null } = {}) {
-    try {
-      const params = {};
-      if (primaryAccount) params.primaryAccount = primaryAccount;
-      const response = await dedupedGet(ENDPOINTS.PORTFOLIO_PREDICTION_MARKET_POSITIONS, { params });
-      return response.data || { accounts: [], positions: [] };
-    } catch (error) {
-      console.error('Error fetching prediction market positions:', error);
-      throw error;
-    }
-  }
-
-  static async getPredictionMarketPerformance({
-    scope = null,
-    account = null,
-    venue = 'all',
-    market = 'all',
-    sort = 'date',
-    direction = 'desc',
-    signal,
-  } = {}) {
-    try {
-      const response = await dedupedGet(ENDPOINTS.PREDICTION_MARKET_PERFORMANCE, {
-        signal,
-        params: {
-          ...(account ? { account } : {}),
-          scope: scope || (account ? 'account' : 'all'),
-          venue,
-          market,
-          sort,
-          direction,
-        },
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching prediction market performance:', error);
-      throw error;
-    }
-  }
-
-  static async getPredictionMarketPerformanceHistory({ account, signal } = {}) {
-    const response = await dedupedGet(ENDPOINTS.PREDICTION_MARKET_PERFORMANCE_HISTORY, {
-      params: { account }, signal, timeout: 15_000,
-    });
-    return response.data;
-  }
-
-  static async getPredictionMarketPerformanceCurrent({ account, signal } = {}) {
-    const response = await dedupedGet(ENDPOINTS.PREDICTION_MARKET_PERFORMANCE_CURRENT, {
-      params: { account }, signal, timeout: 15_000,
-    });
-    return response.data;
-  }
-
-  static async getPredictionMarketPerformanceExecutions(id, { account = null, revision } = {}) {
-    try {
-      const response = await dedupedGet(
-        `${ENDPOINTS.PREDICTION_MARKET_PERFORMANCE}/${encodeURIComponent(id)}/executions`,
-        { params: { ...(account ? { account } : {}), ...(revision ? { revision } : {}) } },
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching prediction market execution details:', error);
-      throw error;
-    }
-  }
-
-  static async getPredictionMarketSp500Research({ account = null, window = 'all' } = {}) {
-    try {
-      const response = await dedupedGet(`${ENDPOINTS.PREDICTION_MARKET_PERFORMANCE}/research/sp500`, {
-        params: {
-          ...(account ? { account } : {}),
-          window,
-        },
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching ForecastEx FES SP500 research:', error);
-      throw error;
-    }
-  }
-
   static async getSecurityIdentities(symbols, { signal } = {}) {
     const requested = [...new Set(symbols.map(symbol => String(symbol || '').trim().toUpperCase()).filter(Boolean))];
     if (!requested.length) return { status: 'available', historicalOnly: true, executable: false, rows: [] };
@@ -1117,23 +1029,6 @@ export class MarketDataService {
     }
   }
 
-  static async getHedgeyeInflationNowcastHistory({ from = null, to = null } = {}) {
-    try {
-      const params = {
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
-      };
-      const response = await dedupedGet(
-        '/api/hedgeye/inflation-nowcast/history',
-        { params },
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching Hedgeye inflation nowcast history:', error);
-      throw error;
-    }
-  }
-
   // Get Hedgeye freshness status for all 6 data types
   static async getHedgeyeFreshness() {
     try {
@@ -1278,19 +1173,6 @@ export class MarketDataService {
       return response.data;
     } catch (error) {
       console.error('Error fetching USD correlations:', error);
-      throw error;
-    }
-  }
-
-  static async getGoldCorrelations({ signal } = {}) {
-    try {
-      const response = await dedupedGet('/api/gold/correlations', {
-        signal,
-        timeout: 20_000,
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching Gold correlations:', error);
       throw error;
     }
   }
