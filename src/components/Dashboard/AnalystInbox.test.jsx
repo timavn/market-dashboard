@@ -63,7 +63,10 @@ test('operational attention describes the issue and consequence without position
   const onCitation = jest.fn();
   const onAcknowledge = jest.fn();
   render(<AnalystInbox findings={[item]} onCitation={onCitation} onAcknowledge={onAcknowledge} />);
-  expect(screen.getByRole('heading', { name: 'IB Gateway' }).closest('header')).toHaveTextContent('Sep 22, 2026');
+  expect(screen.getByRole('heading', { name: 'IB Gateway' })).toBeInTheDocument();
+  expect(screen.queryByText('Ticker:')).not.toBeInTheDocument();
+  expect(screen.getByText('Issue:').parentElement).toHaveTextContent(/^Issue: IB Gateway is disconnected\.$/);
+  expect(screen.getByRole('group', { name: 'Alert actions' })).toHaveTextContent('Sep 22 08:30');
   expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Issue:', 'Impact:', 'Next step:']);
   expect(screen.queryByText('Current position:')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Source' }));
@@ -143,21 +146,19 @@ test('leads with current position before the actual signal and dated source with
   render(<AnalystInbox findings={[finding()]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
   const inbox = screen.getByRole('region', { name: 'Portfolio inbox' });
   expect(within(inbox).queryByRole('heading', { name: 'Portfolio inbox' })).not.toBeInTheDocument();
-  const titleBar = within(inbox).getByRole('heading', { name: 'AMZN' }).closest('header');
-  expect(titleBar).toHaveTextContent(/^AMZNSep 14, 2026$/);
-  expect(titleBar).not.toHaveTextContent(/Trend|Bearish/);
-  expect(within(inbox).getAllByRole('term')[0]).toHaveTextContent('Current position:');
-  expect(within(inbox).getAllByRole('definition')[0]).toHaveTextContent(/^Unavailable$/);
-  expect(within(inbox).getAllByRole('term').slice(0, 2).map(term => term.textContent.trim())).toEqual([
-    'Current position:', 'Action:',
-  ]);
+  // A date-only publication shows no time of day.
+  expect(within(inbox).getByText('Ticker:').parentElement).toHaveTextContent(/^Ticker: AMZN$/);
+  expect(within(inbox).getAllByRole('term')[1]).toHaveTextContent('Current position:');
   expect(within(inbox).getAllByRole('definition')[1]).toHaveTextContent(/^Unavailable$/);
+  expect(within(inbox).getAllByRole('term').slice(0, 3).map(term => term.textContent.trim())).toEqual([
+    'Ticker:', 'Current position:', 'Action:',
+  ]);
+  expect(within(inbox).getAllByRole('definition')[2]).toHaveTextContent(/^Unavailable$/);
   expect(within(inbox).getByText('Trend:')).toBeInTheDocument();
   expect(within(inbox).queryByRole('list')).not.toBeInTheDocument();
   expect(within(inbox).queryByRole('listitem')).not.toBeInTheDocument();
   expect(within(inbox).getByText('Bearish', { exact: true })).toHaveClass('analyst-inbox-signal--negative');
   expect(within(inbox).getByText('Risk Ranges')).toBeInTheDocument();
-  expect(within(inbox).getByText('Sep 14, 2026')).toBeInTheDocument();
   expect(inbox).not.toHaveTextContent(/pending verification|holdings verified|Verified holding|does not confirm|signal changed|marketSession|19:02:36|\bopen\b/i);
 });
 
@@ -179,20 +180,25 @@ test('shows the dated change, portfolio implication, and source evidence without
   expect(screen.getByText('History:').parentElement).toHaveTextContent('First reported Sep 10, after Neutral on Sep 9. Confirmed Bearish Sep 14.');
   expect(screen.getByText('Context:')).toBeInTheDocument();
   expect(screen.getByText('Context:').parentElement).toHaveTextContent('Trend has weakened further for your long position. If Trade is Bullish, both Neutral and Bearish Trend call for your minimum size.');
-  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Current position:', 'Action:', 'Trend:', 'History:', 'Context:']);
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Ticker:', 'Current position:', 'Action:', 'Trend:', 'History:', 'Context:']);
   const details = screen.getAllByRole('definition');
-  expect(details[2]).toHaveTextContent('Neutral → Bearish');
-  expect(details[3]).toHaveTextContent(/^First reported Sep 10/);
-  expect(details[4]).toHaveTextContent(/^Trend has weakened further/);
-  expect(within(details[3]).getByText('Neutral')).toHaveClass('analyst-inbox-signal--neutral');
-  expect(within(details[3]).getByText('Bearish')).toHaveClass('analyst-inbox-signal--negative');
-  expect(within(details[4]).getByText('long')).toHaveClass('analyst-inbox-signal--positive');
-  expect(within(details[4]).getByText('Bullish')).toHaveClass('analyst-inbox-signal--positive');
+  expect(details[3]).toHaveTextContent('Neutral → Bearish');
+  expect(details[4]).toHaveTextContent(/^First reported Sep 10/);
+  expect(details[5]).toHaveTextContent(/^Trend has weakened further/);
+  expect(within(details[4]).getByText('Neutral')).toHaveClass('analyst-inbox-signal--neutral');
   expect(within(details[4]).getByText('Bearish')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(details[5]).getByText('long')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(details[5]).getByText('Bullish')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(details[5]).getByText('Bearish')).toHaveClass('analyst-inbox-signal--negative');
   expect(screen.getByText('Hedgeye Risk Ranges')).toBeInTheDocument();
-  expect(screen.getByText('Sep 10, 2026')).toBeInTheDocument();
+  expect(screen.getByText('Ticker:').parentElement).toHaveTextContent(/^Ticker: AMZN$/);
   const actions = screen.getByRole('group', { name: 'Alert actions' });
   expect(within(actions).getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+  // The date sits between Source and Dismiss.
+  expect(actions).toHaveTextContent(/^Hedgeye Risk Ranges\s*SourceSep 10Dismiss$/);
+  // The alert's actions sit beneath its Analyst chat.
+  const composer = screen.getByRole('textbox', { name: 'Discuss this alert with the Analyst' });
+  expect(composer.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // Every dated publication opens from the one Source popover.
   expect(within(actions).getAllByRole('button').map(button => button.textContent)).toEqual(['Source', 'Dismiss']);
   fireEvent.click(within(actions).getByRole('button', { name: 'Source' }));
@@ -206,7 +212,7 @@ test('uses green for a verified bullish signal while keeping its English label',
     event: { ...current.payload.event, signalValue: 'BULLISH' },
   } })]} />);
   expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
-  expect(within(screen.getAllByRole('definition')[2]).getByText('Bullish')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(screen.getAllByRole('definition')[3]).getByText('Bullish')).toHaveClass('analyst-inbox-signal--positive');
 });
 
 test('suppresses a generic sell report that identifies no change for an existing short', () => {
@@ -250,16 +256,16 @@ test('shows SJM’s current long position before the report’s explicit partial
   const onCitation = jest.fn();
   render(<AnalystInbox findings={[alert]} onCitation={onCitation} onAcknowledge={jest.fn()} />);
   const inbox = screen.getByRole('region', { name: 'Portfolio inbox' });
-  expect(within(inbox).getByRole('heading', { name: 'SJM' }).closest('header')).toHaveTextContent(/^SJMSep 14, 2026$/);
+  expect(within(inbox).getByText('Ticker:').parentElement).toHaveTextContent(/^Ticker: SJM$/);
   expect(within(inbox).getAllByRole('term').map(term => term.textContent.trim())).toEqual([
-    'Current position:', 'Action:', 'Context:',
+    'Ticker:', 'Current position:', 'Action:', 'Context:',
   ]);
   const details = within(inbox).getAllByRole('definition');
-  expect(details[0]).toHaveTextContent(/^Long @ 2.35%$/);
-  expect(within(details[0]).getByText('Long')).toHaveClass('analyst-inbox-signal--positive');
-  expect(details[1]).toHaveTextContent(/^Sell some — reduce position size$/);
-  expect(details[2]).toHaveTextContent(/^Trend remains bullish\.$/);
-  expect(within(details[2]).getByText('bullish')).toHaveClass('analyst-inbox-signal--positive');
+  expect(details[1]).toHaveTextContent(/^Long @ 2.35%$/);
+  expect(within(details[1]).getByText('Long')).toHaveClass('analyst-inbox-signal--positive');
+  expect(details[2]).toHaveTextContent(/^Sell some — reduce position size$/);
+  expect(details[3]).toHaveTextContent(/^Trend remains bullish\.$/);
+  expect(within(details[3]).getByText('bullish')).toHaveClass('analyst-inbox-signal--positive');
   expect(inbox).not.toHaveTextContent(/Report:|of portfolio|The report|Portfolio Managers/);
   expect(inbox).not.toHaveTextContent(/sell signal update|goes against your long position|Coaching Notes|sold 4 Macro|Exit the position/i);
   expect(within(inbox).queryByRole('list')).not.toBeInTheDocument();
@@ -278,7 +284,7 @@ test('expires current position and size after 60 seconds without a refresh and r
       alertContext: { recordedPosition: { side: 'LONG', asOf: '2026-09-13T19:00:00Z' } },
     } });
     const view = render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
-    const position = () => screen.getAllByRole('definition')[0];
+    const position = () => screen.getAllByRole('definition')[1];
     expect(position()).toHaveTextContent(/^Long @ 1.25%$/);
     expect(within(position()).getByText('Long')).toHaveClass('analyst-inbox-signal--positive');
     act(() => jest.advanceTimersByTime(60_000));
@@ -303,6 +309,21 @@ test('expires current position and size after 60 seconds without a refresh and r
   }
 });
 
+test('a verified position without a weight is sized by its share count', () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-09-14T19:00:00Z'));
+  try {
+    const alert = attention('giii', { kind: 'portfolio', severity: 'action-required', quantity: -147.0313, holdingsVerified: true,
+      holdingsVerifiedAt: new Date().toISOString(), currentHolding: null, presentation: { subject: 'GIII', date: '2026-09-14', rows: [
+        { label: 'Current position', text: 'Short' }, { label: 'Action', text: 'Signal Strength removed GIII (Short) → exit Short' },
+      ] } });
+    render(<AnalystInbox findings={[alert]} />);
+    expect(screen.getByText('Current position:').nextSibling).toHaveTextContent(/^Short 147.03 sh$/);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('emphasizes the Russell source index beneath IWM’s RUT Trend update', () => {
   const current = finding();
   const rows = [['prior', '2026-09-09', 'NEUTRAL'], ['changed', '2026-09-10', 'BEARISH']].map(([id, date, signalValue]) => finding({
@@ -315,14 +336,13 @@ test('emphasizes the Russell source index beneath IWM’s RUT Trend update', () 
   }));
   const { findings } = buildAnalystInbox({ findings: rows }, '2026-09-14T21:00:00Z');
   render(<AnalystInbox findings={findings} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
-  const titleBar = screen.getByRole('heading', { name: 'IWM' }).closest('header');
-  expect(titleBar).toHaveTextContent(/^IWMSep 10, 2026$/);
-  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Current position:', 'Action:', 'RUT Trend:', 'Underlying:', 'History:']);
-  expect(screen.getAllByRole('definition')[2]).toHaveTextContent('Neutral → Bearish');
+  expect(screen.getByText('Ticker:').parentElement).toHaveTextContent(/^Ticker: IWM$/);
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Ticker:', 'Current position:', 'Action:', 'RUT Trend:', 'Underlying:', 'History:']);
+  expect(screen.getAllByRole('definition')[3]).toHaveTextContent('Neutral → Bearish');
   const sourceIndex = screen.getByText('Russell 2000 (RUT)');
   expect(sourceIndex.tagName).toBe('STRONG');
-  expect(screen.getAllByRole('definition')[3]).toContainElement(sourceIndex);
-  expect(screen.getAllByRole('definition')[3]).toHaveTextContent('Russell 2000 (RUT) — tracked by IWM.');
+  expect(screen.getAllByRole('definition')[4]).toContainElement(sourceIndex);
+  expect(screen.getAllByRole('definition')[4]).toHaveTextContent('Russell 2000 (RUT) — tracked by IWM.');
 });
 
 test('shows a short-cover action once and omits an empty context row', () => {
@@ -337,12 +357,10 @@ test('shows a short-cover action once and omits an empty context row', () => {
     },
   } };
   render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
-  const titleBar = screen.getByRole('heading', { name: 'XLU' }).closest('header');
-  expect(titleBar).toHaveTextContent(/^XLUSep 11, 2026$/);
-  expect(titleBar).not.toHaveTextContent(/Hedgeye|:|Close/);
-  expect(screen.getAllByRole('definition')[0]).toHaveTextContent(/^Short @ 1.75%$/);
-  expect(screen.getAllByRole('definition')[1]).toHaveTextContent(/^Close part of the short position — reduce position size$/);
-  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Current position:', 'Action:']);
+  expect(screen.getByText('Ticker:').parentElement).toHaveTextContent(/^Ticker: XLU$/);
+  expect(screen.getAllByRole('definition')[1]).toHaveTextContent(/^Short @ 1.75%$/);
+  expect(screen.getAllByRole('definition')[2]).toHaveTextContent(/^Close part of the short position — reduce position size$/);
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Ticker:', 'Current position:', 'Action:']);
   const directions = screen.getAllByText(/^short$/i);
   expect(directions).toHaveLength(2);
   directions.forEach(word => expect(word).toHaveClass('analyst-inbox-signal--negative'));
@@ -409,8 +427,8 @@ test.each([
     event: { ...current.payload.event, ...event },
   } })]} />);
   expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
-  const update = screen.getAllByRole('definition')[2];
-  expect(screen.getAllByRole('term')[2]).toHaveTextContent('Signal:');
+  const update = screen.getAllByRole('definition')[3];
+  expect(screen.getAllByRole('term')[3]).toHaveTextContent('Signal:');
   expect(within(update).queryByText(/Bullish|Bearish/)).not.toBeInTheDocument();
   expect(within(update).getByText('Signal details unavailable')).not.toHaveClass('analyst-inbox-signal--negative', 'analyst-inbox-signal--positive');
 });
@@ -459,4 +477,37 @@ test('action-required items are pinned first and dismiss with one click', () => 
   expect(within(card).queryByRole('button', { name: /Keep/ })).not.toBeInTheDocument();
   fireEvent.click(within(card).getByRole('button', { name: 'Dismiss' }));
   expect(onAcknowledge).toHaveBeenCalledWith('snow', 'snow-fp', 2);
+});
+
+test('a security alert puts Tick, Trade, Trend and Tail beside its 1D–90D windows in one table', async () => {
+  const stats = { asOf: '2026-10-20', baselineVolPct: 20, columns: [
+    { label: '1D', priceChangePct: -1.8, realizedVolPct: 31, volumeRatio: 1.6, rangePct: 8 },
+    { label: '15D', priceChangePct: -4.2, realizedVolPct: 26, volumeRatio: 1.3, rangePct: 12 },
+    { label: '30D', priceChangePct: -2.1, realizedVolPct: 22, volumeRatio: 1.1, rangePct: 35 },
+    { label: '90D', priceChangePct: 6.4, realizedVolPct: 19, volumeRatio: null, rangePct: 68 },
+  ] };
+  const loadHorizonStats = jest.fn().mockResolvedValue({ XLK: stats });
+  const alert = attention('xlk', { kind: 'portfolio', severity: 'action-required', quantity: 10, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    presentation: { subject: 'XLK', date: '2026-10-21', sourceLinks: [], rows: [
+      { label: 'Action', text: 'Reduce to MIN 1.50%' }, { label: 'Order', text: 'Sell 2.39 / 10 → 7.61' },
+      { label: 'Context', text: 'Trend broke → reduce to MIN.' },
+      { label: 'Tick', text: 'Bearish' }, { label: 'Trade', text: 'Bullish' }, { label: 'Trend', text: 'Neutral' }, { label: 'Tail', text: 'N/A' },
+    ] } });
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} loadHorizonStats={loadHorizonStats} />);
+  const card = screen.getByRole('heading', { name: 'XLK' }).closest('article');
+  expect(within(card).queryByText('Tick:')).not.toBeInTheDocument();
+  expect(within(card).getByText('Order:').nextSibling).toHaveTextContent(/^Sell 2\.39 \/ 10 → 7\.61$/);
+  const table = within(card).getByRole('table');
+  expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Tick', 'Trade', 'Trend', 'Tail', '1D', '15D', '30D', '90D']);
+  expect(within(table).getByText('Bearish')).toHaveClass('is-negative');
+  expect(within(table).getByText('Bullish')).toHaveClass('is-positive');
+  expect(within(table).getByText('N/A')).toHaveClass('is-unavailable');
+  expect(within(table).getAllByText('—')).toHaveLength(16);
+  await waitFor(() => expect(within(table).getByText('−4.2%')).toBeInTheDocument());
+  expect(loadHorizonStats).toHaveBeenCalledWith(['XLK']);
+  expect(within(table).getByText('−4.2%')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(table).getByText('+6.4%')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(table).getByText('31%')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(table).getByText('1.6×')).not.toHaveClass('analyst-inbox-signal--negative');
+  expect(within(table).getByText('—')).toHaveClass('analyst-inbox-signal--muted');
 });

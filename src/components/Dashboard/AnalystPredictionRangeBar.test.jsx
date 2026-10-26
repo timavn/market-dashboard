@@ -59,3 +59,24 @@ test('the position reads green from 66%, red at 33% and below, ink between', () 
   expect(tone('RR(0;100;33;0;)')).toContain('is-bottom');
   expect(tone('RR(0;100;;0;)')).toBe('analyst-range-bar__position');
 });
+
+test('the Alpha Code reads AC Trade/Trend in the bottom-left corner, AC N/A without one, with black dots at its levels inside the range', () => {
+  expect(parsePredictionRange('RR(4100;4224;4216;0;;4180;4120;1;1;The Macro Show)').alphaCode)
+    .toEqual({ trade: 4180, trend: 4120, approximate: true, dots: true, product: 'The Macro Show' });
+  const gold = draw('RR(4100;4224;4216;0;;4180;4120;1;1;The Macro Show)');
+  expect(gold.querySelector('.analyst-range-bar__alpha-code')).toHaveTextContent('AC : ~4,180/~4,120');
+  expect([...gold.querySelectorAll('.analyst-range-bar__alpha-dot')].map(dot => Math.round(parseFloat(dot.style.left))))
+    .toEqual([65, 16]);
+  expect(gold.querySelector('[role="img"]')).toHaveAttribute('aria-label',
+    'Price 4,216 · Risk Range 4,100–4,224 · 94% · Alpha Code ~4,180/~4,120 (Trade/Trend) · The Macro Show');
+  // A missing level reads —; a level outside the range, or a code on another instrument, gets no dot.
+  const ust2y = draw('RR(4.73;4.96;4.75;2;%;;4.4;0;1;Top 3 Things)');
+  expect(ust2y.querySelector('.analyst-range-bar__alpha-code')).toHaveTextContent('AC : —/4.40');
+  expect(ust2y.querySelectorAll('.analyst-range-bar__alpha-dot')).toHaveLength(0);
+  expect(draw('RR(25979;26667;26703;0;;26500;26100;0;0;Top 3 Things)').querySelectorAll('.analyst-range-bar__alpha-dot')).toHaveLength(0);
+  // Every bar keeps the corner: no published code reads AC N/A, muted.
+  for (const token of ['RR(4100;4237;4197;0;)', 'RR(4100;4237;4197;0;;;;0;1;)']) {
+    expect(draw(token).querySelector('.analyst-range-bar__alpha-code')).toHaveTextContent('AC : N/A');
+    expect(draw(token).querySelector('.analyst-range-bar__alpha-code')).toHaveClass('is-na');
+  }
+});

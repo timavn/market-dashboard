@@ -76,11 +76,9 @@ function verificationFinding({ now, research = false, key = 'monitor', significa
   return finding({
     key,
     subject: research ? 'Research delivery' : 'Dashboard monitoring',
-    concern: research ? 'Research delivery cannot be verified.' : 'Dashboard health cannot be fully verified.',
-    impact: research
-      ? 'The latest receipt and delivery checks cannot establish which research products reached the dashboard.'
-      : 'Some dashboard functions may be unavailable; the current checks cannot establish an all-clear.',
-    next: 'Open Systems to restore the unavailable check, then verify the affected dashboard data.',
+    concern: research ? 'Research delivery unverified.' : 'Dashboard health unverified.',
+    impact: research ? 'Unknown which research reached the dashboard.' : 'No all-clear; some views may be down.',
+    next: 'Restore the failed check in Systems.',
     now,
     significance,
   });
@@ -99,67 +97,61 @@ function serviceCopy(check, affected = []) {
   const gatewayAffected = affected.some(id => id.startsWith('ibkr.'));
   if (check.id === 'dashboard.ui') return {
     subject: 'Dashboard availability',
-    concern: 'The dashboard page failed both current availability checks.',
-    impact: 'New dashboard loads may fail; an already-open page can remain visible.',
-    next: 'Use Systems to check the dashboard web service, then verify that a fresh page load succeeds.',
+    concern: 'Dashboard page down.',
+    impact: 'New loads may fail; open pages stay visible.',
+    next: 'Restart the web service in Systems → reload.',
   };
   if (check.id === 'hermes.controller') return {
     subject: 'Automatic recovery',
-    concern: 'The automatic recovery service could not complete its dashboard health check.',
-    impact: 'Automatic repairs are not verified; failed services may need manual attention.',
-    next: 'Open Systems and verify that automatic recovery resumes after dashboard services are healthy.',
+    concern: 'Auto-recovery check failed.',
+    impact: 'Failed services may need manual repair.',
+    next: 'Confirm auto-recovery resumes in Systems.',
   };
   if (check.id === 'dashboard.hermes-bridge') return {
     subject: 'Portfolio research updates',
-    concern: 'The scheduled portfolio snapshot could not be delivered to the research workers.',
-    impact: 'Scheduled research may not have the current portfolio; the dashboard portfolio is checked separately.',
-    next: 'Open Systems to restore portfolio delivery and verify that the research workers receive a fresh snapshot.',
-  };
-  if (check.id === 'prediction.display') return {
-    subject: 'CPI prediction markets',
-    concern: 'Current CPI prediction-market prices could not be verified.',
-    impact: 'The CPI contract display has no verified current response from its market check.',
-    next: 'Open the CPI market and Systems, then verify that current native contract prices load.',
+    concern: 'Portfolio snapshot not delivered to research.',
+    impact: 'Scheduled research may use an old portfolio.',
+    next: 'Restore delivery in Systems.',
   };
   if (['DASHBOARD_CODE_VERSION_DRIFT', 'DASHBOARD_SUPERVISOR_CODE_DRIFT'].includes(check.errorCode)) return {
     subject: 'Dashboard restart',
-    concern: 'The dashboard is still running an older version of its local code.',
-    impact: 'Recent fixes will not take effect until the running dashboard is refreshed.',
-    next: 'Restart the dashboard through Systems, then verify its services and affected views.',
+    concern: 'Dashboard running old code.',
+    impact: 'Recent fixes not live.',
+    next: 'Restart the dashboard in Systems.',
   };
   if (check.id === 'ibkr.gateway') return {
     subject: 'IB Gateway',
     concern: check.errorCode === 'IBKR_GATEWAY_API_UNRESPONSIVE'
-      ? 'IB Gateway is not completing its connection check.' : 'IB Gateway is disconnected.',
-    impact: 'Portfolio holdings and balances cannot refresh; current portfolio assessments are unavailable.',
+      ? 'IB Gateway unresponsive.' : 'IB Gateway disconnected.',
+    impact: 'Holdings and balances frozen; no portfolio alerts.',
     next: check.errorCode === 'IBKR_GATEWAY_API_UNRESPONSIVE'
-      ? 'Use Systems to restore the brokerage connection, then verify fresh holdings and balances.'
-      : 'Open IB Gateway, sign in and verify API access, then check that the portfolio refreshes.',
+      ? 'Restore the brokerage connection in Systems.'
+      : 'Sign in to IB Gateway → confirm the portfolio refreshes.',
   };
   if (check.id === 'ibkr.sidecar' || check.id === 'ibkr.runtime') return {
     subject: 'Portfolio connection',
-    concern: 'The dashboard brokerage connection is unavailable.',
-    impact: 'Portfolio holdings, balances and IBKR market data cannot be verified.',
-    next: 'Use Systems to restore the brokerage service, then verify fresh portfolio data.',
+    concern: 'Brokerage connection down.',
+    impact: 'Holdings, balances and IBKR quotes unverified.',
+    next: 'Restore the brokerage service in Systems.',
   };
   if (check.id === 'ibkr.accounts' || check.id === 'ibkr.portfolio') return {
     subject: 'Portfolio updates',
     concern: check.errorCode === 'IBKR_PARTIAL_ACCOUNT_COVERAGE'
-      ? 'The current connection does not cover every expected account.'
-      : 'Current holdings and balances cannot be fully verified.',
-    impact: 'Portfolio assessments cannot rely on an incomplete or old account snapshot.',
+      ? 'Not all accounts connected.'
+      : 'Holdings and balances unverified.',
+    impact: 'Portfolio alerts paused until all accounts are current.',
     next: check.errorCode === 'IBKR_PARTIAL_ACCOUNT_COVERAGE'
-      ? 'Connect the IB Gateway login that exposes all expected accounts, then refresh the portfolio.'
-      : 'Open Systems and verify a fresh portfolio response across all expected accounts.',
+      ? 'Log in to IB Gateway with all accounts → refresh.'
+      : 'Confirm a fresh portfolio for every account in Systems.',
   };
   if (check.id === 'gmail.ingestion') return {
     subject: 'Research delivery',
     concern: check.errorCode === 'GMAIL_QUARANTINED_ARTIFACTS_PENDING'
-      ? 'Some received research could not be loaded.' : 'Research delivery cannot be verified.',
-    impact: 'Email research may not be reaching its dashboard views and Analyst research.',
+      ? 'Some research failed to load.' : 'Research delivery unverified.',
+    impact: 'Email research may be missing from the dashboard.',
     next: /AUTH|OAUTH/.test(check.errorCode || '')
-      ? 'Restore Gmail authorization in Systems, then verify the affected research products.'
-      : 'Open Systems to inspect the ingestion issue and verify product delivery after recovery.',
+      ? 'Re-authorize Gmail in Systems.'
+      : 'Fix ingestion in Systems.',
   };
   if (check.id.startsWith('hermes.') && check.id !== 'hermes.controller') {
     const workerLabel = check.id === 'hermes.security' ? 'Security checks'
@@ -167,25 +159,25 @@ function serviceCopy(check, affected = []) {
     return {
       subject: workerLabel,
       concern: /STALE|MISSING/.test(check.errorCode || '')
-        ? `${workerLabel} ${check.id === 'hermes.security' ? 'have' : 'has'} not reported a completed check within the expected schedule.`
-        : `${workerLabel} did not complete its scheduled check.`,
+        ? `${workerLabel} overdue.`
+        : `${workerLabel} failed.`,
       impact: check.id === 'hermes.security'
-        ? 'Scheduled security and system checks are not reporting current results.'
-        : 'Scheduled market research and portfolio analysis may be missing current updates.',
-      next: `Open Systems to restore ${workerLabel} and verify its next completed check.`,
+        ? 'Security checks not current.'
+        : 'Scheduled research may be missing updates.',
+      next: `Restore ${workerLabel} in Systems.`,
     };
   }
   if (check.id === 'analyst.runtime') return {
     subject: 'Analyst monitoring',
-    concern: 'The Analyst or a scheduled research check is not completing normally.',
-    impact: 'New research and dashboard issues may not reach the Inbox promptly.',
-    next: 'Open Systems to restore the affected worker and verify a completed check.',
+    concern: 'Analyst checks stalled.',
+    impact: 'New items may reach the Inbox late.',
+    next: 'Restore the worker in Systems.',
   };
   return {
     subject: check.label || 'Dashboard issue',
-    concern: `${check.label || 'A dashboard service'} needs attention.`,
-    impact: gatewayAffected ? 'Portfolio updates are blocked.' : check.impact || 'The affected dashboard function cannot be verified.',
-    next: 'Open Systems to inspect this issue and verify the affected function after recovery.',
+    concern: `${check.label || 'A dashboard service'} failing.`,
+    impact: gatewayAffected ? 'Portfolio updates blocked.' : check.impact || 'Affected function unverified.',
+    next: 'Inspect in Systems.',
   };
 }
 
@@ -202,8 +194,8 @@ function productConcern(product, now, receiptHealthy) {
   if (issues.length && product.status !== 'indexed') return {
     stage: 'source-discrepancy',
     concern: discrepancyText(issues),
-    impact: `${product.label || registered?.label} was received; its import has not yet made the unaffected research available.`,
-    next: 'Import the full publication and retain the original values as evidence; withhold only the disputed fields from calculations. Confirm those values with Hedgeye.',
+    impact: 'Received, but not yet imported.',
+    next: 'Import it; withhold only the disputed fields → confirm with Hedgeye.',
   };
   // A failed risk-range read or an old edition is not evidence of a failed parse.
   if (!received) {
@@ -213,22 +205,22 @@ function productConcern(product, now, receiptHealthy) {
     ].includes(product.errorCode)) return { verification: true };
     return {
       stage: 'missing',
-      concern: `${registered?.label || product.label} has not been received for ${edition}.`,
-      impact: 'The expected research update is unavailable in the dashboard and Analyst research.',
-      next: 'Check the source delivery and import the expected edition, then verify its dashboard views.',
+      concern: `${registered?.label || product.label} missing for ${edition}.`,
+      impact: 'Dashboard and Analyst lack this update.',
+      next: 'Check delivery → import the edition.',
     };
   }
   if (product.status === 'failed') return {
     stage: 'processing-failed',
     concern: product.id.startsWith('unsupported:')
-      ? 'A received publication could not be identified and loaded.'
-      : `${product.label || registered?.label} arrived, but its data could not be fully loaded.`,
-    impact: 'The affected dashboard views and Analyst research cannot rely on this publication.',
+      ? 'Unregistered publication received.'
+      : `${product.label || registered?.label} failed to load.`,
+    impact: 'Its research is ignored.',
     next: /invalid risk range.+lrr=.+hrr=/i.test(product.detail || '')
-      ? 'Verify the conflicting range bounds against the source report and obtain a corrected publication before using those ranges.'
-      : 'Open the research product in Systems, repair the failed import, then verify the delivered data.',
+      ? 'Get a corrected report before using these ranges.'
+      : product.id.startsWith('unsupported:') ? 'Register a parser for it in Systems.' : 'Repair the import in Systems.',
     ...( /invalid risk range.+lrr=.+hrr=/i.test(product.detail || '')
-      ? { context: 'A published Risk Range has conflicting lower and upper bounds, so the report was rejected.' } : {}),
+      ? { context: 'Risk Range low ≥ high → report rejected.' } : {}),
   };
   if (stages.indexed !== true && product.status !== 'indexed') {
     const observed = Date.parse(product.observedAt || '');
@@ -237,9 +229,9 @@ function productConcern(product, now, receiptHealthy) {
     if (now.getTime() - observed < PROCESSING_GRACE_MS) return null;
     return {
       stage: 'processing-incomplete',
-      concern: `${product.label || registered?.label} arrived, but its dashboard update has not completed.`,
-      impact: 'The latest publication is not yet available to all downstream research views.',
-      next: 'Open the research product in Systems and verify that its import and delivery complete.',
+      concern: `${product.label || registered?.label} received, import stalled.`,
+      impact: 'Latest edition not in all views.',
+      next: 'Finish the import in Systems.',
     };
   }
   return null;
@@ -316,11 +308,11 @@ async function snapshotConsumerIssues({ matrix, fetchJson, now, diagnostics }) {
         subject: product.label,
         concern: discrepancyText(issues),
         impact: available
-          ? 'The publication and its unaffected research are available. Only the disputed fields are withheld from calculations; the original published values remain in the source.'
-          : 'The source discrepancy is established; current delivery of the unaffected research could not be verified.',
+          ? 'Disputed fields withheld; the rest is usable.'
+          : 'Disputed fields withheld; delivery of the rest unverified.',
         next: available
-          ? 'Use the remaining research and confirm the disputed values with Hedgeye before using those fields.'
-          : 'Restore delivery of the full publication, preserve the original values, and confirm the disputed fields with Hedgeye.',
+          ? 'Confirm the disputed values with Hedgeye.'
+          : 'Restore delivery → confirm the disputed values with Hedgeye.',
         now, firstObservedAt: issues[0].source?.publishedAt || product.observedAt,
         significance: { stage: 'source-discrepancy', issues, available: Boolean(available) }, path,
       }), { ...product, sourceQuality: { status: 'discrepancy', issues } }));
@@ -331,14 +323,14 @@ async function snapshotConsumerIssues({ matrix, fetchJson, now, diagnostics }) {
     if (result.status === 'rejected' || !payload || unsafeEvidence(payload)) complete = false;
     const behind = receivedDate && receivedDate < expectedDate;
     const concern = behind
-      ? `${product.label} was received for ${expectedDate}, but its ${(consumer.label || 'Research view').toLowerCase()} still serves ${receivedDate}.`
-      : `${product.label} was received, but its current ${(consumer.label || 'Research view').toLowerCase()} could not be verified.`;
+      ? `${product.label}: ${(consumer.label || 'Research view').toLowerCase()} shows ${receivedDate}, not ${expectedDate}.`
+      : `${product.label}: ${(consumer.label || 'Research view').toLowerCase()} unverified.`;
     findings.push(attachProductEvidence(finding({
       key: `product:${product.id}:${product.marketDate}`,
       subject: product.label,
       concern,
-      impact: 'This dashboard destination does not have a verified current copy of the publication.',
-      next: 'Open Systems to restore delivery, then verify the expected publication in this view.',
+      impact: 'This view may be out of date.',
+      next: 'Restore delivery in Systems.',
       now,
       significance: { stage: 'consumer-unverified', destination: path, behind: Boolean(behind), revisionMismatch: Boolean(revisionMismatch) },
       path,
@@ -383,20 +375,20 @@ async function publishedBookConsumerIssues({ fetchJson, now, diagnostics }) {
       const item = attachProductEvidence(finding({
         key: `product:${product.id}:${date}`, subject: product.label,
         concern: hasCounts
-          ? `The headline lists ${published.long} Longs and ${published.short} Shorts; the recorded instrument actions reconstruct ${reconstructed.long} Buy and ${reconstructed.short} Short positions.`
+          ? `Headline ${published.long}L/${published.short}S ≠ recorded ${reconstructed.long}L/${reconstructed.short}S.`
           : discrepancyText([issue]),
         impact: hasCounts
-          ? `${parsingRecovered ? 'Email action parsing is recovered' : 'The dated instrument actions are verified'}, but the published aggregate differs from the reconstructed book.`
-          : 'The original publication and unaffected instrument readings remain available; the disputed field is unresolved.',
+          ? `${parsingRecovered ? 'Parsing recovered' : 'Actions verified'}; totals don’t match.`
+          : 'Disputed field unresolved; the rest is usable.',
         next: hasCounts
-          ? 'Verify the publication’s full-book PDF or a publisher correction. Preserve each recorded security action; no unreported closes are assumed.'
-          : 'Verify the disputed field against the original source while preserving the unaffected research.',
+          ? 'Check the full-book PDF or a correction.'
+          : 'Verify the disputed field against the source.',
         now, firstObservedAt: publishedAt,
         significance: { stage: 'source-discrepancy', issues }, path,
       }), { ...product, marketDate: date, publicationDate: date, sourceQuality: { status: 'discrepancy', issues } });
       item.presentation.rows.push({ label: 'Status', text: hasCounts
-        ? `${verifiedRows.length} instrument readings remain available. Full-book PDF verification is pending; the published totals remain unreconciled.`
-        : 'The source discrepancy remains unresolved.' });
+        ? `${verifiedRows.length} readings usable; totals unreconciled.`
+        : 'Unresolved.' });
       findings.push(item);
     }
   }
@@ -503,9 +495,9 @@ async function collectOperationalAttention({ fetchJson, now = new Date() }) {
       key,
       ...(awaitingAccountVerification ? {
         subject: 'Portfolio verification',
-        concern: 'Portfolio data is responding again, but full account recovery is not yet verified.',
-        impact: 'The latest connection and position check passed; the complete account check still needs to confirm recovery.',
-        next: 'Verify a fresh portfolio response covering every expected account in Systems.',
+        concern: 'Portfolio back; full recovery unverified.',
+        impact: 'Positions pass; account check pending.',
+        next: 'Confirm all accounts in Systems.',
       } : serviceCopy(check, cause.affectedCheckIds)),
       now: clock,
       firstObservedAt: check.firstFailedAt || check.failedAt,

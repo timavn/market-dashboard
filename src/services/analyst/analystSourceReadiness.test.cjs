@@ -124,6 +124,22 @@ test('a Crypto Quant email filed as its Bitcoin Tracker is ready under both ids 
   assert.equal(library.length, registry.products.length - 1);
 });
 
+test('a product with nothing received today is not received, not a pipeline failure', () => {
+  const input = evidence();
+  // Coverage dates a not-due product to the market day with no receipt.
+  input.products[0] = { product: 'risk-ranges', latestPublicationDate: '2026-09-14', observedAt: providerTime,
+    sourceIds: [], evidenceHash: 'coverage-1', status: 'not_due',
+    stages: { received: false, parsed: false, validated: false, indexed: false } };
+  input.indexed = [];
+  assert.equal(first(input).status, 'not_received');
+  assert.equal(first(input).reason, 'No publication received today');
+  assert.equal(first({ ...input, products: [] }).status, 'not_received');
+  const failed = evidence();
+  failed.products[0].stages.validated = false;
+  assert.equal(first(failed).status, 'unavailable');
+  assert.equal(first({ ...input, feedGeneratedAt: null }).status, 'unavailable');
+});
+
 test('source availability guard does not alter the existing daily review gate', () => {
   const input = evidence();
   const before = dailyReadiness(input, now);

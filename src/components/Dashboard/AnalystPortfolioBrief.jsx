@@ -1,7 +1,6 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { portfolioPositionNeedsAttention, sortPortfolioPositions, summarizePortfolioRules } from '../../utils/portfolioReviewRules';
 import { portfolioReviewOutlook } from '../../utils/portfolioReviewOutlook';
-import { portfolioReviewGreeting } from '../../utils/portfolioReviewGreeting';
 import { portfolioExposurePercentages } from '../../utils/portfolioReviewExposure';
 import { portfolioPositionProducts } from '../../utils/portfolioPositionProducts';
 import { portfolioComparisonDateline, portfolioDate, publicationDatelineParts } from '../../utils/portfolioReviewDates';
@@ -13,15 +12,18 @@ import AnalystDailyRollup from './AnalystDailyRollup';
 import PortfolioReviewDateline from './PortfolioReviewDateline';
 import { PortfolioReviewTextProvider } from './PortfolioReviewTextContext';
 import './AnalystPortfolioBrief.css';
+import LoadingIndicator from '../common/LoadingIndicator';
 
-const money = value => value == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+// Exposure reads in whole dollars and whole percentages; cents and hundredths are noise here.
+const money = value => value == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Math.round(value) || 0);
 function ExposureAmount({ value }) {
   const formatted = money(value);
   return <span className="portfolio-exposure-amount">{formatted.startsWith('-')
     ? <><span className="portfolio-exposure-sign">-</span>{formatted.slice(1)}</>
     : formatted}</span>;
 }
-const weight = value => value == null ? 'unavailable' : `${value.toFixed(1)}%`;
+// Limits move in 25 bp steps, so keep a second decimal when it carries one.
+const weight = value => value == null ? 'unavailable' : `${value.toFixed(Math.abs(value * 10 - Math.round(value * 10)) > 1e-9 ? 2 : 1)}%`;
 const adjustment = value => value > 0 && value < 0.1 ? '<0.1' : value.toFixed(1);
 const holdingWeight = row => (row.action === 'REDUCE' && row.reduction < 0.2) || (row.weightDeviation > 0 && row.weightDeviation < 0.2) ? `${row.weightPct.toFixed(3)}%` : weight(row.weightPct);
 const label = value => typeof value === 'string' && value ? value[0].toUpperCase() + value.slice(1).toLowerCase() : 'Unavailable';
@@ -47,11 +49,11 @@ export function PortfolioConflict({ row, onCitation, current = false }) {
   const prior = row.priorSignals?.[field];
   const value = row[field];
   return <article className={`portfolio-brief-conflict is-${row.action === 'EXIT' ? 'exit' : 'reduce'}`}>
-    <h3><AnalystSemanticText>{row.action === 'EXIT' ? `Exit${row.heldSide === 'SHORT' ? ' short' : ''} under ${row.rule === 'TRADE_BREAK' ? 'Trade-break' : 'risk-cap'} rule` : `Reduce ${adjustment(row.reduction)} percentage points`}</AnalystSemanticText></h3>
-    <p><strong><AnalystSemanticText context="Ticker">{row.holding}</AnalystSemanticText></strong> — {sizingConflict ? row.rule === 'ABOVE_MAX' ? 'Position exceeds MAX' : 'Risk cap is below MIN' : <>{label(field)}: {prior && prior !== value && <><span className={`signal-${prior.toLowerCase()}`}>{label(prior)}</span> → </>}<span className={`signal-${value?.toLowerCase()}`}>{label(value)}</span></>}</p>
+    <h3><AnalystSemanticText>{row.action === 'EXIT' ? `Exit${row.heldSide === 'SHORT' ? ' short' : ''} under ${row.rule === 'TRADE_BREAK' ? 'Trade-break' : 'volatility'} rule` : `Reduce ${adjustment(row.reduction)} percentage points`}</AnalystSemanticText></h3>
+    <p><strong><AnalystSemanticText context="Ticker">{row.holding}</AnalystSemanticText></strong> — {sizingConflict ? row.rule === 'ABOVE_MAX' ? 'Position exceeds MAX' : 'Too volatile to size' : <>{label(field)}: {prior && prior !== value && <><span className={`signal-${prior.toLowerCase()}`}>{label(prior)}</span> → </>}<span className={`signal-${value?.toLowerCase()}`}>{label(value)}</span></>}</p>
     {row.rule === 'TREND_BREAK' && row.trade && <p><AnalystSemanticText>{`Trade remains ${label(row.trade).toLowerCase()}`}</AnalystSemanticText></p>}
     <p>{current ? 'Current weight' : 'Held at snapshot'} <strong>{holdingWeight(row)}</strong> <span aria-hidden="true"> → </span> {row.targetLabel} <strong>{weight(row.targetWeight)}</strong></p>
-    {sizingConflict ? <span className="portfolio-brief-source">Sizing inputs · Beta <time dateTime={row.sizingInputs?.beta?.asOf}><AnalystSemanticText>{reviewTime(row.sizingInputs?.beta?.asOf)}</AnalystSemanticText></time> · ATR <time dateTime={row.sizingInputs?.atr14?.asOf}><AnalystSemanticText>{reviewTime(row.sizingInputs?.atr14?.asOf)}</AnalystSemanticText></time></span> : <Source source={row.sources?.[field]} onCitation={onCitation} />}
+    {sizingConflict ? <span className="portfolio-brief-source">Sizing inputs · ATR <time dateTime={row.sizingInputs?.atr14?.asOf}><AnalystSemanticText>{reviewTime(row.sizingInputs?.atr14?.asOf)}</AnalystSemanticText></time></span> : <Source source={row.sources?.[field]} onCitation={onCitation} />}
   </article>;
 }
 
@@ -112,13 +114,13 @@ function PositionRuleReview({ row }) {
     const transition = `${label(field)}: ${prior && prior !== row[field] ? `${label(prior)} → ` : ''}${label(row[field])}`;
     return <>
       <strong className={row.rule === 'ABOVE_MAX' ? undefined : 'portfolio-position-action'}>{row.rule === 'ABOVE_MAX' ? 'Overweight' : row.action === 'EXIT' ? `${row.heldSide === 'SHORT' ? 'Cover' : 'Exit'} to 0.0%` : `Reduce to ${weight(row.targetWeight)} MIN`}</strong>
-      <span><AnalystSemanticText>{row.rule === 'ABOVE_MAX' ? `Trim ${adjustment(row.reduction)} pp to ${weight(row.targetWeight)} MAX` : row.rule === 'RISK_CAP' ? 'Risk cap below MIN' : transition}</AnalystSemanticText></span>
+      <span><AnalystSemanticText>{row.rule === 'ABOVE_MAX' ? `Trim ${adjustment(row.reduction)} pp to ${weight(row.targetWeight)} MAX` : row.rule === 'RISK_CAP' ? 'Too volatile to size' : transition}</AnalystSemanticText></span>
     </>;
   }
   if (row.status === 'aligned') return <span className="portfolio-position-aligned"><AnalystSemanticText>{row.reason || 'Within limits'}</AnalystSemanticText></span>;
   if (!row.trade || !row.trend) return null;
   if (row.weightPct == null) return <span>Verify weight</span>;
-  if (row.minWeight == null || row.maxWeight == null) return <><span>Verify sizing</span><small>{row.minWeight == null ? 'Beta needed' : 'ATR / price needed'}</small></>;
+  if (row.minWeight == null || row.maxWeight == null) return <><span>Verify sizing</span><small>ATR / price needed</small></>;
   return <span>Verify range</span>;
 }
 
@@ -156,20 +158,26 @@ function PositionProducts({ row, brief, onCitation }) {
   });
 }
 
+function PositionStop({ row }) {
+  const title = row.stopPrice == null ? 'Stop needs verified ATR and price'
+    : `2 × ATR ${row.heldSide === 'SHORT' ? 'above' : 'below'} the last close (${row.stopDistancePct.toFixed(1)}%)${row.stopLossPctNlv == null ? '' : ` · costs ${row.stopLossPctNlv.toFixed(2)}% of NLV at this weight`}`;
+  return <span className="portfolio-position-field"><small>Stop</small><span title={title}>{row.stopPrice == null ? '—' : row.stopPrice.toFixed(2)}</span></span>;
+}
+
 function PortfolioPositions({ rows, brief, citations, onCitation, emptyText }) {
   const securityNames = usePortfolioSecurityNames(rows);
   return <div className="portfolio-brief-table-scroll"><table className="portfolio-positions" aria-label="Position exceptions">
     <colgroup><col className="portfolio-position-holding-col" /><col className="portfolio-position-name-col" /><col className="portfolio-position-signals-col" /><col className="portfolio-position-limits-col" /><col className="portfolio-position-review-col" /><col className="portfolio-position-products-col" /></colgroup>
-    <thead><tr><th scope="col">Ticker</th><th scope="col">Security</th><th scope="col">Tick / Trade / Trend</th><th scope="col">MIN / MAX</th><th scope="col" title="Sizing flags allow a 10 bps buffer. Trade exits still take priority.">Review</th><th scope="col">Product</th></tr></thead>
+    <thead><tr><th scope="col">Ticker</th><th scope="col">Security</th><th scope="col">Tick / Trade / Trend</th><th scope="col" title="MIN and MAX cost 0.125% and 0.25% of NLV if the 2 × ATR stop is hit">MIN / MAX / Stop</th><th scope="col" title="Sizing flags allow a 10 bps buffer. Trade exits still take priority.">Review</th><th scope="col">Product</th></tr></thead>
     {!rows.length && <tbody><tr className="portfolio-position-placeholder"><td colSpan={6}>{emptyText}</td></tr></tbody>}
     {['LONG', 'SHORT'].map(side => {
       const positions = sortPortfolioPositions(rows.filter(row => row.heldSide === side), { preferredWeightStatus: side === 'LONG' ? 'overweight' : 'underweight' });
       return positions.length > 0 && <tbody key={side} className={`portfolio-position-section is-${side.toLowerCase()}`} aria-label={`${label(side)} positions`}>
         {positions.map(row => <tr key={`${row.holding}:${side}`} className="portfolio-position-row">
-          <th scope="row"><strong><AnalystSemanticText context="Ticker">{row.holding}</AnalystSemanticText></strong><span className="portfolio-position-weight" title="Weight as a percentage of net liquidation value">{row.weightPct == null ? '—' : holdingWeight(row)}</span></th>
+          <th scope="row"><strong><AnalystSemanticText context="Ticker">{row.holding}</AnalystSemanticText></strong>{row.weightPct != null && <span className="portfolio-position-weight" title="Weight as a percentage of net liquidation value">{holdingWeight(row)}</span>}</th>
           <td><span className="portfolio-position-name" title={row.securityName || (securityNames[row.holding] ? `${securityNames[row.holding].name} · Current security name · ${securityNames[row.holding].source}` : undefined)}><AnalystSemanticText context="Security">{row.securityName || securityNames[row.holding]?.name || '—'}</AnalystSemanticText></span></td>
           <td><PositionTick row={row} citations={citations} onCitation={onCitation} /><PositionSignal row={row} field="trade" onCitation={onCitation} /><PositionSignal row={row} field="trend" onCitation={onCitation} /></td>
-          <td className="portfolio-position-limits">{[['MIN', row.minWeight], ['MAX', row.maxWeight]].map(([name, value]) => <span className="portfolio-position-field" key={name}><small>{name}</small><span title={value == null ? `${name} needs verified sizing inputs` : `${name} as a percentage of NLV`}>{value == null ? '—' : weight(value)}</span></span>)}</td>
+          <td className="portfolio-position-limits">{[['MIN', row.minWeight], ['MAX', row.maxWeight]].map(([name, value]) => <span className="portfolio-position-field" key={name}><small>{name}</small><span title={value == null ? `${name} needs verified sizing inputs` : `${name} as a percentage of NLV`}>{value == null ? '—' : weight(value)}</span></span>)}<PositionStop row={row} /></td>
           <td className="portfolio-position-review"><PositionReview row={row} /></td>
           <td className="portfolio-position-products"><PositionProducts row={row} brief={brief} onCitation={onCitation} /></td>
         </tr>)}
@@ -178,13 +186,24 @@ function PortfolioPositions({ rows, brief, citations, onCitation, emptyText }) {
   </table></div>;
 }
 
-const interestTitle = 'Month-to-date net accrued interest from the captured IBKR account; negative is a debit.';
+const percent = value => `${Math.abs(value).toFixed(0)}%`;
+// Weights change in basis points of NLV; dollar pairs change in whole dollars.
+// The displayed sign sets the color: green up, red down, muted when flat or missing.
+const exposureChange = (value, basisPoints) => {
+  if (value === null) return { text: '—', color: 'signal-unavailable' };
+  const rounded = Math.round(basisPoints ? value * 100 : value) || 0;
+  const sign = rounded > 0 ? '+' : rounded < 0 ? '-' : '';
+  return { text: `${sign}${basisPoints ? `${Math.abs(rounded).toLocaleString('en-US')} bp` : money(Math.abs(rounded))}`,
+    color: rounded > 0 ? 'signal-bullish' : rounded < 0 ? 'signal-bearish' : 'signal-unavailable' };
+};
 
-function PortfolioComparison({ comparison, capturedMetrics = {}, asOf, loading }) {
-  const metrics = comparison?.status === 'available' ? comparison.metrics || {} : {};
+// Exposure & risk: the capture's dollar values, then Current, Δ and Previous
+// close side by side so the day-to-day move reads in one row.
+function PortfolioExposure({ metrics, comparison, asOf, loading, state }) {
+  const pairs = comparison?.status === 'available' ? comparison.metrics || {} : {};
   const capturedEndpoint = side => ({
-    ...(side === 'current' ? capturedMetrics : {}),
-    ...Object.fromEntries(Object.entries(metrics).filter(([, metric]) => Number.isFinite(metric?.[side]))
+    ...(side === 'current' ? metrics : {}),
+    ...Object.fromEntries(Object.entries(pairs).filter(([, metric]) => Number.isFinite(metric?.[side]))
       .map(([name, metric]) => [name, metric[side]])),
   });
   const current = capturedEndpoint('current');
@@ -195,40 +214,48 @@ function PortfolioComparison({ comparison, capturedMetrics = {}, asOf, loading }
     current: Number.isFinite(currentValue) ? currentValue : null,
     previous: Number.isFinite(previousValue) ? previousValue : null,
   });
+  const displayedNet = Number.isFinite(metrics.netExposure) ? Math.round(metrics.netExposure) : null;
   const rows = [
     ['Gross', 'gross', 'grossExposure'],
-    ['Long', 'long', 'longMarketValue'],
-    ['Short', 'short', 'shortMarketValue'],
-    ['Net', 'net', 'netExposure'],
-  ].map(([name, percentageKey, valueKey]) => {
+    ['Long', 'long', 'longMarketValue', 'is-long'],
+    ['Short', 'short', 'shortMarketValue', 'is-short'],
+    ['Net', 'net', 'netExposure', displayedNet > 0 ? 'is-net-positive' : displayedNet < 0 ? 'is-net-negative' : undefined],
+  ].map(([name, percentageKey, valueKey, className]) => {
     const percentagePair = pair(currentPercentages[percentageKey], previousPercentages[percentageKey]);
     const values = pair(current[valueKey], previous[valueKey]);
     const comparablePercentages = percentagePair.previous !== null && percentagePair.current !== null;
     const comparableValues = values.previous !== null && values.current !== null;
     const usePercentages = comparablePercentages || !comparableValues && percentagePair.current !== null;
     const metric = usePercentages ? percentagePair : values;
-    const format = value => value === null ? '—' : usePercentages ? `${Math.abs(value).toFixed(2)}%` : <ExposureAmount value={value} />;
+    const format = value => value === null ? '—' : usePercentages ? percent(value) : <ExposureAmount value={value} />;
     const color = value => value === null ? 'signal-unavailable' : name === 'Gross' || value === 0 ? undefined
       : name === 'Short' || value < 0 ? 'signal-bearish' : 'signal-bullish';
-    return { name, metric, current: format(metric.current), previous: format(metric.previous),
+    // Weights display as magnitudes, so Long and Short change by magnitude; Net keeps its sign.
+    const change = metric.current === null || metric.previous === null ? null
+      : !usePercentages || name === 'Net' ? metric.current - metric.previous : Math.abs(metric.current) - Math.abs(metric.previous);
+    return { name, className, metric, value: metrics[valueKey], current: format(metric.current), previous: format(metric.previous),
+      change: exposureChange(change, usePercentages),
       currentColor: color(metric.current), previousColor: color(metric.previous) };
   });
-  const interest = pair(current.netAccruedInterest, previous.netAccruedInterest);
-  const interestColor = value => value === null ? 'signal-unavailable' : value > 0 ? 'signal-bullish' : value < 0 ? 'signal-bearish' : undefined;
-  rows.push({ name: 'Interest', title: interestTitle, metric: interest,
-    current: interest.current === null ? '—' : <ExposureAmount value={interest.current} />,
-    previous: interest.previous === null ? '—' : <ExposureAmount value={interest.previous} />,
-    currentColor: interestColor(interest.current), previousColor: interestColor(interest.previous) });
-  const unavailable = rows.every(row => row.metric.previous === null);
-  const dateline = portfolioComparisonDateline(comparison?.currentAsOf || asOf, comparison?.baselineAsOf, comparison);
-  return <section className="portfolio-review-section portfolio-review-comparison" aria-label="Since previous close" aria-busy={unavailable && loading || undefined}><h2>Since previous close</h2>
-    <PortfolioReviewDateline text={dateline.text.replace(/^Previous close snapshot:/, 'Previous:')} />
-    <div className="portfolio-review-section-body"><div className="portfolio-brief-table-scroll"><table className="portfolio-brief-table portfolio-brief-comparison" aria-label="Exposure changes since previous close">
-      <colgroup><col /><col /><col /></colgroup>
-      <thead><tr><th scope="col">Exposure</th><th scope="col">Current</th><th scope="col" className="portfolio-exposure-percent">Previous</th></tr></thead>
-      <tbody>{rows.map(row => <tr key={row.name}><th scope="row" title={row.title}><AnalystSemanticText>{row.name}</AnalystSemanticText></th><td className={`portfolio-exposure-value ${row.currentColor || ''}`.trim()}>{row.current}</td><td className={`portfolio-exposure-percent ${row.previousColor || ''}`.trim()}>{row.previous}</td></tr>)}</tbody>
+  const previousUnavailable = rows.every(row => row.metric.previous === null);
+  const previousDate = portfolioComparisonDateline(comparison?.currentAsOf || asOf, comparison?.baselineAsOf, comparison).text
+    .replace(/^Previous close snapshot:/, 'Previous:');
+  const sectionState = state || (previousUnavailable ? loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Previous close unavailable' : null);
+  return <section className="portfolio-review-section portfolio-review-exposure" aria-label="Exposure and risk" aria-busy={(state || previousUnavailable) && loading || undefined}><h2>Exposure &amp; risk</h2>
+    <PortfolioReviewDateline text={`Positioning: ${portfolioDate(asOf)}`} previous={previousDate} />
+    <div className="portfolio-review-section-body"><div className="portfolio-brief-table-scroll"><table className="portfolio-brief-table portfolio-brief-exposure" aria-label="Portfolio exposure">
+      <colgroup><col /><col /><col /><col /><col /></colgroup>
+      <thead><tr><th scope="col">Exposure</th><th scope="col">Value</th><th scope="col" className="portfolio-exposure-percent">Current</th>
+        <th scope="col" className="portfolio-exposure-change" title="Change since previous close; weights in basis points of NLV">Δ</th><th scope="col" className="portfolio-exposure-percent">Previous</th></tr></thead>
+      <tbody>{rows.map(row => <tr key={row.name} className={row.className}>
+        <th scope="row"><AnalystSemanticText>{row.name}</AnalystSemanticText></th>
+        <td className="portfolio-exposure-value"><ExposureAmount value={row.value} /></td>
+        <td className={`portfolio-exposure-percent ${row.currentColor || ''}`.trim()}>{row.current}</td>
+        <td className={`portfolio-exposure-change ${row.change.color}`}>{row.change.text}</td>
+        <td className={`portfolio-exposure-percent ${row.previousColor || ''}`.trim()}>{row.previous}</td>
+      </tr>)}</tbody>
     </table></div>
-    {unavailable && <p className="portfolio-review-section-state">{loading ? 'Loading…' : 'Previous close unavailable'}</p>}</div>
+    {sectionState && <p className="portfolio-review-section-state">{sectionState}</p>}</div>
   </section>;
 }
 
@@ -283,25 +310,11 @@ const AnalystPortfolioBrief = memo(function AnalystPortfolioBrief({ message, onC
   const [expanded, setExpanded] = useState(false);
   const summary = useMemo(() => summarizePortfolioRules(brief.available ? brief : { ...brief, holdings: [] }), [brief]);
   const outlook = useMemo(() => portfolioReviewOutlook(brief), [brief]);
-  const greeting = useMemo(() => portfolioReviewGreeting(message), [message]);
   const metrics = brief.available ? brief.metrics || {} : {};
-  const exposurePercentages = portfolioExposurePercentages(metrics);
-  const displayedNet = Number.isFinite(metrics.netExposure) ? Number(metrics.netExposure.toFixed(2)) : null;
-  const exposureRows = [
-    { label: 'Gross', value: metrics.grossExposure, percentage: exposurePercentages.gross },
-    { label: 'Long', value: metrics.longMarketValue, percentage: exposurePercentages.long, className: 'is-long' },
-    { label: 'Short', value: metrics.shortMarketValue, percentage: exposurePercentages.short, className: 'is-short' },
-    { label: 'Net', value: metrics.netExposure, percentage: exposurePercentages.net,
-      className: displayedNet > 0 ? 'is-net-positive' : displayedNet < 0 ? 'is-net-negative' : undefined },
-  ];
-  const exposureUnavailable = exposureRows.every(row => !Number.isFinite(row.value));
-  // The same capture's IBKR month-to-date net accrued interest (negative is a debit).
-  const interest = Number.isFinite(metrics.netAccruedInterest) ? Number(metrics.netAccruedInterest.toFixed(2)) : null;
-  const tableRows = [...exposureRows, { label: 'Interest', value: metrics.netAccruedInterest, interest: true,
-    className: interest > 0 ? 'is-net-positive' : interest < 0 ? 'is-net-negative' : undefined }];
-  const exposureState = !brief.available ? loading ? 'Loading…'
+  const exposureUnavailable = ['grossExposure', 'longMarketValue', 'shortMarketValue', 'netExposure'].every(key => !Number.isFinite(metrics[key]));
+  const exposureState = !brief.available ? loading ? <LoadingIndicator label="Loading…" size="sm" />
     : unavailableText || unavailableReasonText[brief.unavailableReason] || unavailableReasonText.gateway_disconnected
-    : exposureUnavailable ? loading ? 'Loading…' : 'Unavailable'
+    : exposureUnavailable ? loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Unavailable'
     : brief.reviewedAt && brief.historicalHoldings ? !brief.unavailableReason || brief.unavailableReason === 'gateway_disconnected'
       ? 'Last verified holdings. Connect to IB Gateway to update.' : 'Last verified holdings. Refresh to update.' : null;
   const sources = new Map((brief.citations || []).map(source => [source.id, source]));
@@ -314,24 +327,11 @@ const AnalystPortfolioBrief = memo(function AnalystPortfolioBrief({ message, onC
     ...Object.values(row.sources || {}), ...Object.values(row.researchSignals || {}).map(signal => signal?.source), row.tick?.source,
   ]).filter(Boolean).map(source => ({ ...source.citation, publishedAt: source.publishedAt || source.citation?.publishedAt }));
   return <PortfolioReviewTextProvider brief={brief}><article data-message-id={message.id} className={`portfolio-brief portfolio-brief-centered${deferred ? ' analyst-captured-report-placeholder' : ''}${historical ? ' analyst-historical-report' : ''}`} aria-label="Portfolio Review summary" aria-busy={loading || undefined}>
-    <p className="portfolio-review-greeting">{greeting}</p>
-    <section className="portfolio-review-section portfolio-review-exposure" aria-label="Exposure and risk" aria-busy={!brief.available && loading || undefined}><h2>Exposure &amp; risk</h2>
-      <PortfolioReviewDateline text={`Positioning: ${portfolioDate(brief.available ? brief.asOf : null)}`} />
-      <div className="portfolio-review-section-body"><div className="portfolio-brief-table-scroll"><table className="portfolio-brief-table portfolio-brief-exposure" aria-label="Portfolio exposure">
-        <colgroup><col /><col /><col /></colgroup>
-        <thead><tr><th scope="col">Exposure</th><th scope="col">Value</th><th scope="col" className="portfolio-exposure-percent">Weight</th></tr></thead>
-        <tbody>{tableRows.map(row => <tr key={row.label} className={row.className}>
-          <th scope="row" title={row.interest ? interestTitle : undefined}><AnalystSemanticText>{row.label}</AnalystSemanticText></th>
-          <td className="portfolio-exposure-value"><ExposureAmount value={row.value} /></td>
-          <td className="portfolio-exposure-percent">{row.interest ? '' : Number.isFinite(row.percentage) ? `${Math.abs(row.percentage).toFixed(2)}%` : '—'}</td>
-        </tr>)}</tbody>
-      </table></div>{exposureState && <p className="portfolio-review-section-state">{exposureState}</p>}</div>
-    </section>
-    <PortfolioComparison comparison={brief.available ? brief.comparison : null} capturedMetrics={metrics} asOf={brief.available ? brief.asOf : null} loading={loading} />
+    <PortfolioExposure metrics={metrics} comparison={brief.available ? brief.comparison : null} asOf={brief.available ? brief.asOf : null} loading={loading} state={exposureState} />
     <section className="portfolio-review-section portfolio-brief-exceptions" aria-label="Position exceptions" aria-busy={!brief.available && loading || undefined}><h2>Position exceptions</h2>
       <PortfolioReviewDateline text={`Positioning: ${portfolioDate(brief.available ? brief.asOf : null)}`} period={publicationDatelineParts(exceptionSources, { label: 'Period' }).period} />
       <div className="portfolio-review-section-body"><PortfolioPositions rows={displayedExceptions} brief={brief} citations={sources} onCitation={onCitation}
-        emptyText={!brief.available || brief.coverageComplete === false ? loading ? 'Loading…' : 'Unavailable' : 'No position exceptions'} /></div>
+        emptyText={!brief.available || brief.coverageComplete === false ? loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Unavailable' : 'No position exceptions'} /></div>
       {hasMoreExceptions && <div className="portfolio-review-section-controls"><button type="button" className="portfolio-brief-more" onClick={() => setExpanded(!expanded)}>{expanded ? 'Show fewer exceptions' : `Show all ${flaggedCount} exceptions`}</button></div>}
     </section>
     {brief.available && <>

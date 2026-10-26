@@ -6,7 +6,7 @@ import PersistentSurface from '../common/PersistentSurface';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 import ReactMarkdown from 'react-markdown';
 import * as analystMarkdown from './analystMarkdown';
-jest.mock('./AnalystLandingStatus', () => ({ __esModule: true, default: () => null, AnalystLandingClock: () => null }));
+jest.mock('./AnalystLandingStatus', () => ({ __esModule: true, default: () => null }));
 jest.mock('remark-gfm', () => function mockGfm() {});
 jest.mock('react-markdown', () => ({ __esModule: true, default: jest.fn(({ children }) => <div>{children}</div>), defaultUrlTransform: value => value }));
 jest.mock('../../hooks/usePortfolioSecurityNames', () => ({ __esModule: true, default: () => ({}) }));
@@ -28,9 +28,6 @@ beforeEach(() => {
     if (path.startsWith('/conversations/')) {
       const id = path.split('/')[2].split('?')[0];
       if (path.endsWith('/sources')) return { conversationId: id,
-        ...(conversations[id]?.manualVerification ? { basis: 'manual',
-          runId: conversations[id].manualVerification.captureId, turnId: conversations[id].manualVerification.turnId,
-          state: conversations[id].manualVerification.state } : {}),
         items: [{ id: 'holdings', label: 'IBKR holdings', status: 'ready', observedAt: '2026-09-04T15:00:00Z' }] };
       if (method === 'DELETE') { delete conversations[id]; return { ok: true }; }
       if (method === 'PATCH') { conversations[id].archived = body.archived; return { ok: true }; }
@@ -52,10 +49,10 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 const pacificToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles',
   year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 function portfolioExposureAmount(value) {
-  // Current values also appear in the previous-close comparison. Require one
-  // match across exposure sections so saved posts stay bound to their own book.
+  // Dollar-only captures repeat the Value in Current. Require one Value match
+  // across exposure sections so saved posts stay bound to their own book.
   const matches = screen.getAllByRole('region', { name: 'Exposure and risk' })
-    .flatMap(region => within(region).queryAllByText(value));
+    .flatMap(region => [...region.querySelectorAll('.portfolio-exposure-value')].flatMap(cell => within(cell).queryAllByText(value)));
   expect(matches).toHaveLength(1);
   return matches[0];
 }
@@ -213,23 +210,22 @@ test('reload restores the last selected conversation, draft and scroll without c
   expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
 });
 
-test('completed manual history survives reload and exhausted reads with only navigation metadata saved', async () => {
-  conversations.manual = { ...make('manual', 'Private captured account report'), revision: 4,
-    title: 'Manual Portfolio Update', message_count: 3,
-    manualVerification: { operation: 'portfolio-cross-verification', captureId: 'saved-manual-capture', turnId: 'saved-manual-turn', state: 'ready', holdings: [{ symbol: 'PRIVATE_ACCOUNT_HOLDING' }] },
-    lastTurn: { id: 'saved-manual-turn', state: 'complete', request_id: 'saved-manual-request', error: 'Private turn diagnostic' },
+test('completed review history survives reload and exhausted reads with only navigation metadata saved', async () => {
+  conversations.saved = { ...make('saved', 'Private captured account report'), kind: 'balance-review', revision: 4,
+    title: 'Balance Review', message_count: 3, holdings: [{ symbol: 'PRIVATE_ACCOUNT_HOLDING' }],
+    lastTurn: { id: 'saved-turn', state: 'complete', request_id: 'saved-request', error: 'Private turn diagnostic' },
     portfolioBrief: { metrics: { grossExposure: 987654 }, holdings: [{ symbol: 'PRIVATE_ACCOUNT_HOLDING' }] },
     citations: [{ excerpt: 'Private captured publication' }] };
   const request = api.request.getMockImplementation();
   const sourceRead = deferred();
   let cold = false;
   api.request.mockImplementation((path, body, method) => {
-    if (cold && (path.startsWith('/conversations?') || path === '/conversations/manual')) return Promise.reject(Object.assign(new Error('API warming up.'), { code: 'HTTP_503' }));
-    if (path === '/conversations/manual/sources') return sourceRead.promise;
+    if (cold && (path.startsWith('/conversations?') || path.startsWith('/conversations/saved?') || path === '/conversations/saved')) return Promise.reject(Object.assign(new Error('API warming up.'), { code: 'HTTP_503' }));
+    if (path === '/conversations/saved/sources') return sourceRead.promise;
     return request(path, body, method);
   });
   const view = render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Manual Portfolio Update' }));
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Balance Review' }));
   await screen.findByText('Private captured account report');
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep my unsent question' } });
   const transcript = screen.getByRole('log');
@@ -237,79 +233,80 @@ test('completed manual history survives reload and exhausted reads with only nav
   fireEvent.scroll(transcript);
   view.unmount();
   const index = JSON.parse(localStorage.getItem('analyst.workspace.sidebar'));
-  expect(index.find(row => row.id === 'manual')).toEqual({ id: 'manual', archived: false,
-    title: 'Manual Portfolio Update', kind: 'chat', created_at: '2026-09-04T14:00:00Z', revision: 4,
+  expect(index.find(row => row.id === 'saved')).toEqual({ id: 'saved', archived: false,
+    title: 'Balance Review', kind: 'balance-review', created_at: '2026-09-04T14:00:00Z', revision: 4,
     state: 'complete', message_count: 3, activeTurn: null,
-    lastTurn: { id: 'saved-manual-turn', state: 'complete', request_id: 'saved-manual-request' },
-    manualVerification: { operation: 'portfolio-cross-verification', captureId: 'saved-manual-capture', turnId: 'saved-manual-turn', state: 'ready' } });
+    lastTurn: { id: 'saved-turn', state: 'complete', request_id: 'saved-request' } });
   expect(JSON.stringify(index)).not.toMatch(/PRIVATE_ACCOUNT_HOLDING|987654|Private captured|Private turn|messages|citations|portfolioBrief|holdings/);
 
   cold = true;
   api.request.mockClear();
   render(<AnalystPanel />);
-  await expectSelected('Manual Portfolio Update');
+  await expectSelected('Balance Review');
   expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('IB Gateway');
   expect(screen.getByRole('textbox')).toHaveValue('Keep my unsent question');
   expect(screen.getByRole('log').scrollTop).toBe(173);
   expect(screen.queryByText('Private captured account report')).not.toBeInTheDocument();
   await screen.findByRole('button', { name: 'Retry conversation' });
   await waitFor(() => expect(api.request.mock.calls.filter(([path]) => path.startsWith('/conversations?'))).toHaveLength(3));
-  expect(api.request.mock.calls.filter(([path]) => path === '/conversations/manual')).toHaveLength(3);
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
+  expect(api.request.mock.calls.filter(([path]) => path.split('?')[0] === '/conversations/saved')).toHaveLength(3);
+  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('saved');
 
   cold = false;
   fireEvent.click(screen.getByRole('button', { name: 'Retry conversation' }));
   await screen.findByText('Private captured account report');
-  await act(async () => sourceRead.resolve({ conversationId: 'manual', basis: 'manual',
-    reviewKind: 'portfolio-cross-verification', runId: 'saved-manual-capture', turnId: 'saved-manual-turn', state: 'ready',
+  await act(async () => sourceRead.resolve({ conversationId: 'saved', basis: 'review', runId: 'saved-capture', state: 'ready',
     items: [{ id: 'risk-ranges', label: 'Risk Ranges', status: 'ready', publishedAt: '2026-10-08T12:00:00Z' }] }));
   expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Oct 8');
   expect(screen.getByRole('textbox')).toHaveValue('Keep my unsent question');
   expect(screen.getByRole('log').scrollTop).toBe(173);
   // The saved rows and the history retry sit on the Analyst home.
   expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).toHaveTextContent('3 messages');
+  expect(screen.getByRole('button', { name: 'Open conversation: Balance Review' })).toHaveTextContent('3 messages');
   expect(screen.queryByText('No saved conversations.')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Retry history' }));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry history' })).not.toBeInTheDocument());
   expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
 });
 
-test.each(['detail hydration', 'event recovery'])('%s restores cached manual Sources that kept checking through transient read failures, without changing its capture or Gateway status', async recovery => {
+test.each(['detail hydration', 'event recovery'])('%s restores review Sources that kept checking through transient read failures, without changing its capture or Gateway status', async recovery => {
   jest.useFakeTimers();
   try {
-    const manual = { ...make('manual', 'Completed captured verification'), title: 'Manual Portfolio Update', revision: 4,
-      manualVerification: { operation: 'portfolio-cross-verification', captureId: 'saved-manual-capture', turnId: 'saved-manual-turn', state: 'partial' },
-      lastTurn: { id: 'saved-manual-turn', state: 'complete', request_id: 'saved-manual-request' } };
-    conversations.manual = manual;
-    localStorage.setItem('analyst.workspace.selected', JSON.stringify('manual'));
-    localStorage.setItem('analyst.workspace.sidebar', JSON.stringify([manual]));
+    const saved = { ...make('saved', 'Completed captured review'), kind: 'balance-review', title: 'Balance Review', revision: 4,
+      lastTurn: { id: 'saved-turn', state: 'complete', request_id: 'saved-request' } };
+    conversations.saved = saved;
+    localStorage.setItem('analyst.workspace.selected', JSON.stringify('saved'));
+    localStorage.setItem('analyst.workspace.sidebar', JSON.stringify([saved]));
     const detail = deferred();
-    const sources = { conversationId: 'manual', basis: 'manual', reviewKind: 'portfolio-cross-verification',
-      runId: 'saved-manual-capture', turnId: 'saved-manual-turn', state: 'partial',
+    const sources = { conversationId: 'saved', basis: 'review', runId: 'saved-capture', state: 'partial',
       items: Array.from({ length: 20 }, (_, index) => ({ id: index === 0 ? 'ibGateway' : `captured-product-${index}`,
         label: index === 0 ? 'IB Gateway' : `Captured product ${index}`, status: index < 13 ? 'ready' : 'partial',
         ...(index === 0 ? { observedAt: '2026-10-09T15:30:00Z' } : { publishedAt: '2026-10-08T12:00:00Z' }) })) };
     const request = api.request.getMockImplementation();
+    let detailReads = 0;
     let sourceReads = 0;
     api.request.mockImplementation((path, body, method) => {
-      if (path === '/conversations/manual') return detail.promise;
-      if (path === '/conversations/manual/sources') return ++sourceReads <= 3
+      // The record is unreadable at first, so its Sources are read by conversation ID.
+      if (path.startsWith('/conversations/saved?') || path === '/conversations/saved') return ++detailReads <= 3
+        ? Promise.reject(Object.assign(new Error('API warming up.'), { code: 'HTTP_503' })) : detail.promise;
+      if (path === '/conversations/saved/sources') return ++sourceReads <= 3
         ? Promise.reject(Object.assign(new Error('Sources warming up.'), { code: 'HTTP_503' })) : Promise.resolve(sources);
       return request(path, body, method);
     });
     render(<AnalystPanel />);
-    await act(async () => jest.advanceTimersByTimeAsync(0));
+    // Its three transient record reads exhaust first, so Sources are read by conversation ID.
+    await act(async () => jest.advanceTimersByTimeAsync(600));
+    expect(sourceReads).toBe(1);
     await act(async () => jest.advanceTimersByTimeAsync(1500));
     expect(sourceReads).toBe(2);
     // AGENTS.md: transient metadata-read failures keep unfinished rows Checking
     // and keep reading; they never settle the capture as Unavailable.
     const retrying = screen.getByRole('region', { name: 'Review sources' });
-    expect(retrying).toHaveTextContent('0/21 ready');
+    expect(retrying).toHaveTextContent('0/3 ready');
     expect(retrying).toHaveAttribute('aria-busy', 'true');
     expect(retrying.querySelector('header')).toHaveTextContent('Reconnecting…');
     expect(retrying).not.toHaveTextContent('Unavailable');
-    if (recovery === 'detail hydration') await act(async () => detail.resolve({ conversation: manual, cursor: 0 }));
+    if (recovery === 'detail hydration') await act(async () => detail.resolve({ conversation: saved, cursor: 0 }));
     else {
       const unavailable = stream.addEventListener.mock.calls.find(([name]) => name === 'unavailable')[1];
       const ready = stream.addEventListener.mock.calls.find(([name]) => name === 'ready')[1];
@@ -321,16 +318,19 @@ test.each(['detail hydration', 'event recovery'])('%s restores cached manual Sou
     const sourceTable = screen.getByRole('region', { name: 'Review sources' });
     expect(sourceTable).toHaveTextContent('13/20 ready');
     expect(sourceTable).toHaveAttribute('aria-busy', 'false');
-    expect(within(sourceTable).getByText('IB Gateway').closest('.analyst-review-source')).toHaveTextContent('Connected');
+    expect(within(sourceTable).getByText('IB Gateway').closest('.analyst-review-source')).toHaveTextContent('Ready');
     expect(within(sourceTable).queryByRole('button', { name: 'IB Gateway: Unavailable. Show explanation' })).not.toBeInTheDocument();
     expect(within(sourceTable).getByText('Captured product 19').closest('.analyst-review-source')).toHaveTextContent('Partial');
     expect(sourceReads).toBe(4);
-    await act(async () => detail.resolve({ conversation: manual, cursor: 0 }));
+    await act(async () => detail.resolve({ conversation: saved, cursor: 0 }));
+    await act(async () => jest.advanceTimersByTimeAsync(0));
+    const settledReads = sourceReads;
     const ready = stream.addEventListener.mock.calls.find(([name]) => name === 'ready')[1];
     act(() => { ready({ data: JSON.stringify({ cursor: 0 }) }); ready({ data: JSON.stringify({ cursor: 0 }) }); });
     await act(async () => jest.advanceTimersByTimeAsync(60_000));
-    expect(sourceReads).toBe(4);
-    expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
+    expect(sourceReads).toBe(settledReads);
+    expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('13/20 ready');
+    expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('saved');
     expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
   } finally { jest.useRealTimers(); }
 });
@@ -378,7 +378,7 @@ test('verified sidebar rows survive list omissions and reload until an exact del
 
 test.each(['ANALYST_CONVERSATION_NOT_FOUND', 'ANALYST_CONVERSATION_DELETED'])('a verified selected %s response evicts persisted navigation without transient retries', async serverCode => {
   localStorage.setItem('analyst.workspace.selected', JSON.stringify('deleted'));
-  localStorage.setItem('analyst.workspace.sidebar', JSON.stringify([{ ...make('deleted', 'Private deleted report'), manualVerification: { captureId: 'old-capture', turnId: 'old-turn', state: 'ready' } }]));
+  localStorage.setItem('analyst.workspace.sidebar', JSON.stringify([make('deleted', 'Private deleted report')]));
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/conversations/deleted'
     ? Promise.reject(Object.assign(new Error('Conversation unavailable.'), { code: serverCode, serverCode,
@@ -669,7 +669,10 @@ test('new chat creates no row; search is server-side and review actions remain a
   expect(screen.getByRole('button', { name: 'Predictive Markets Review' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Balance Review' })).not.toBeInTheDocument();
   expect(within(screen.getByRole('group', { name: 'Start a review' })).getAllByRole('button').map(button => [button.getAttribute('aria-label'), button.textContent, button.getAttribute('aria-keyshortcuts')])).toEqual([
-    ['Portfolio Review', 'Portfolio reviewP', 'P'], ['Predictive Markets Review', 'Predictive marketsM', 'M'], ['Manual Portfolio Update', 'Manual portfolio updateU', 'U']]);
+    ['Portfolio Review', 'Portfolio reviewP', 'P'], ['Predictive Markets Review', 'Predictive marketsM', 'M']]);
+  fireEvent.keyDown(screen.getByRole('dialog', { name: 'The Analyst', exact: true }), { key: 'U' });
+  expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
+  expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
   expect(screen.queryByText(/Waiting for|Research ready|Market Situation Report/i)).not.toBeInTheDocument();
   expect(api.request.mock.calls.some(([path]) => path === '/daily')).toBe(false);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'needle in archived body' } });
@@ -690,248 +693,18 @@ test('history has no archive controls and keeps legacy hidden conversations hidd
   expect(Object.keys(conversations)).toEqual(['a', 'b', 'old']);
 });
 
-test('Manual Portfolio Update starts one complete cross-verification chat and preserves an unsent draft', async () => {
-  const pending = deferred();
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((path, body, method) => path === '/messages' ? pending.promise : request(path, body, method));
-  render(<AnalystPanel />);
-  const input = screen.getByRole('textbox', { name: 'Message The Analyst' });
-  fireEvent.change(input, { target: { value: 'Keep my next question' } });
-  const button = screen.getByRole('button', { name: 'Manual Portfolio Update', exact: true });
-  expect(api.request.mock.calls.some(([path]) => path === '/messages')).toBe(false);
-  fireEvent.click(button);
-  fireEvent.click(button);
-  const calls = api.request.mock.calls.filter(([path]) => path === '/messages');
-  expect(calls).toHaveLength(1);
-  const submission = calls[0][1];
-  expect(submission).toEqual({
-    conversationId: null,
-    requestId: expect.any(String),
-    operation: 'portfolio-cross-verification',
-    text: 'Manually cross-verify my complete current portfolio against all available research products and portfolio rules. Show material exceptions, verification scope, and all holdings checked, with dated sources.',
-  });
-  expectReviewProgress();
-  expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('IB Gateway');
-  await expectSelected('Manual Portfolio Update');
-  expect(input).toHaveValue('Keep my next question');
-  expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily'))).toBe(false);
-
-  conversations.manual = { ...make('manual', 'Dated portfolio verification findings'),
-    messages: [{ id: 'manual-request', role: 'user', state: 'complete', text: submission.text },
-      { id: 'manual-answer', role: 'assistant', state: 'complete', text: 'Dated portfolio verification findings' }],
-    lastTurn: { id: 'manual-turn', request_id: submission.requestId, state: 'complete' }, message_count: 2 };
-  await act(async () => pending.resolve({ conversation: conversations.manual }));
-  await screen.findByText('Dated portfolio verification findings');
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
-  expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue('Keep my next question');
-  expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-});
-
-test('saved Manual Portfolio Update uses section sources without changing its captured chat', async () => {
-  const prompt = 'Manually cross-verify my complete current portfolio against all available research products and portfolio rules. Show material exceptions, verification scope, and all holdings checked, with dated sources.';
-  const capture = '### Realignment\nAAPL sell some. 【[1]】\n\n### Watch list\nDated watch. 【[1]】';
-  conversations.manual = { ...make('manual', capture),
-    messages: [{ id: 'manual-user', role: 'user', text: prompt, state: 'complete' },
-      { id: 'manual-answer', role: 'assistant', text: capture, state: 'complete',
-        citations: [{ id: 'source', product: 'real-time-alert', title: 'Captured AAPL publication' }] }], message_count: 2 };
-  const original = JSON.parse(JSON.stringify(conversations.manual));
-  render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat manual' }));
-  const sources = await screen.findAllByRole('button', { name: '[1] Real Time Alert' });
-  expect(sources).toHaveLength(2);
-  expect(screen.getByRole('log', { name: 'Conversation' })).not.toHaveTextContent('【');
-  expect(conversations.manual).toEqual(original);
-  expect(api.request.mock.calls.some(([path]) => path === '/messages')).toBe(false);
-});
-
-test('manual captured Sources stay above the running and completed report without a duplicate markdown panel', async () => {
-  const pending = deferred();
-  const request = api.request.getMockImplementation();
-  let sourceState = 'acquiring';
-  api.request.mockImplementation((path, body, method) => path === '/messages' ? pending.promise
-    : path === '/conversations/manual/sources' ? Promise.resolve({ conversationId: 'manual', basis: 'manual',
-      runId: 'manual-capture', turnId: 'manual-turn', state: sourceState,
-      items: [{ id: 'ibGateway', label: 'IB Gateway', status: 'ready', observedAt: '2026-10-09T15:30:00Z' },
-        { id: 'risk-ranges', label: 'Risk Ranges', status: sourceState === 'acquiring' ? 'checking' : 'ready',
-          ...(sourceState === 'ready' ? { publishedAt: '2026-10-09T12:00:00Z' } : {}) }] })
-      : request(path, body, method));
-  render(<AnalystPanel />);
-  fireEvent.click(screen.getByRole('button', { name: 'Manual Portfolio Update', exact: true }));
-  expectReviewProgress();
-  const submission = api.request.mock.calls.find(([path]) => path === '/messages')[1];
-  conversations.manual = { ...make('manual', ''), activeTurn: { id: 'manual-turn', request_id: submission.requestId },
-    manualVerification: { captureId: 'manual-capture', turnId: 'manual-turn', state: 'acquiring' },
-    messages: [{ id: 'manual-user', role: 'user', text: submission.text, state: 'complete' },
-      { id: 'manual-answer', role: 'assistant', text: '', state: 'running' }] };
-  await act(async () => pending.resolve({ conversation: conversations.manual }));
-  await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/manual/sources'));
-  expect(screen.getAllByRole('region', { name: 'Review sources' })).toHaveLength(1);
-  expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('IB Gateway');
-
-  const report = '### Indexed research coverage\n| Product | Latest publication |\n|---|---|\n| Risk Ranges | Oct 9, 2026 |\n\n### Realignment\nComplete captured findings.';
-  sourceState = 'ready';
-  conversations.manual = { ...conversations.manual, revision: 2, activeTurn: null,
-    lastTurn: { id: 'manual-turn', request_id: submission.requestId, state: 'complete' },
-    manualVerification: { captureId: 'manual-capture', turnId: 'manual-turn', state: 'ready' },
-    messages: [conversations.manual.messages[0], { ...conversations.manual.messages[1], text: report, state: 'complete' }] };
-  act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'manual' }) }));
-  await screen.findByText(/Complete captured findings/);
-  await waitFor(() => expect(screen.getByRole('region', { name: 'Review sources' })).toHaveAttribute('aria-busy', 'false'));
-  expect(screen.getAllByRole('region', { name: 'Review sources' })).toHaveLength(1);
-  expect(screen.getByRole('log').firstElementChild.firstElementChild).toBe(screen.getByRole('region', { name: 'Review sources' }));
-  expect(conversations.manual.messages[1].text).toBe(report);
-});
-
-test('reload recovers the exact accepted manual request before its POST receipt without submitting again', async () => {
-  const requestId = 'manual-before-reload';
-  const prompt = 'Manually cross-verify my complete current portfolio against all available research products and portfolio rules. Show material exceptions, verification scope, and all holdings checked, with dated sources.';
-  localStorage.setItem('analyst.workspace.outbox', JSON.stringify({ requestId, conversationId: null, operation: 'portfolio-cross-verification', text: prompt }));
-  localStorage.setItem('analyst.workspace.selected', JSON.stringify(`pending-manual:${requestId}`));
-  localStorage.setItem('analyst.workspace.drafts', JSON.stringify({ landing: 'Keep my next question' }));
-  conversations.manual = { ...make('manual', ''), activeTurn: { id: 'manual-turn', request_id: requestId, state: 'running' },
-    manualVerification: { captureId: 'capture-after-reload', turnId: 'manual-turn', state: 'acquiring' },
-    messages: [{ id: 'user', role: 'user', state: 'complete', text: prompt },
-      { id: 'answer', role: 'assistant', state: 'running', text: '' }] };
-  const recovery = deferred();
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((path, body, method) => path === `/requests/${requestId}` ? recovery.promise : request(path, body, method));
-  render(<AnalystPanel />);
-  expectReviewProgress();
-  expect(screen.getByRole('textbox')).toHaveValue('Keep my next question');
-  await act(async () => recovery.resolve({ status: 'accepted', turn: conversations.manual.activeTurn, conversation: conversations.manual }));
-  await expectSelected('Chat manual');
-  expect(screen.getByRole('textbox')).toHaveValue('Keep my next question');
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.outbox'))).toBeNull();
-  expect(api.request.mock.calls.filter(([path]) => path === `/requests/${requestId}`)).toHaveLength(1);
-  expect(api.request.mock.calls.some(([path]) => path === '/messages' || path.startsWith('/daily/'))).toBe(false);
-});
-
-test('a lost manual POST response recovers its accepted chat despite a failed history refresh', async () => {
-  const request = api.request.getMockImplementation();
-  let submitted;
-  api.request.mockImplementation(async (path, body, method) => {
-    if (path === '/messages') {
-      submitted = body;
-      conversations.manual = { ...make('manual', 'Captured manual response'),
-        lastTurn: { id: 'manual-turn', request_id: body.requestId, state: 'complete' },
-        manualVerification: { captureId: 'manual-capture', turnId: 'manual-turn', state: 'ready' } };
-      throw new Error('POST acknowledgment lost.');
-    }
-    if (path === `/requests/${submitted?.requestId}`) return { status: 'accepted', turn: conversations.manual.lastTurn, conversation: conversations.manual };
-    if (submitted && path.startsWith('/conversations?')) throw new Error('History temporarily unavailable.');
-    return request(path, body, method);
-  });
-  render(<AnalystPanel />);
-  fireEvent.click(screen.getByRole('button', { name: 'Manual Portfolio Update', exact: true }));
-  await screen.findByText('Captured manual response');
-  await expectSelected('Chat manual');
-  expect(screen.queryByText('POST acknowledgment lost.')).not.toBeInTheDocument();
-  expect(api.request.mock.calls.filter(([path]) => path === '/messages')).toHaveLength(1);
-});
-
-test('a late manual acceptance leaves a newer selected chat in place and retains only its durable sidebar row', async () => {
-  const pending = deferred();
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((path, body, method) => path === '/messages' ? pending.promise : request(path, body, method));
-  render(<AnalystPanel />);
-  fireEvent.click(screen.getByRole('button', { name: 'Manual Portfolio Update', exact: true }));
-  await open('b');
-  const submission = api.request.mock.calls.find(([path]) => path === '/messages')[1];
-  conversations.manual = { ...make('manual', 'Late manual findings'),
-    manualVerification: { captureId: 'manual-capture', turnId: 'manual-turn', state: 'ready' },
-    lastTurn: { id: 'manual-turn', request_id: submission.requestId, state: 'complete' } };
-  await act(async () => pending.resolve({ conversation: conversations.manual }));
-  expect(screen.getByRole('log')).toHaveTextContent('Only answer B');
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('b');
-  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat manual' })).toBeInTheDocument();
-  expect(historyRows().queryByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).not.toBeInTheDocument();
-});
-
-test('a failed manual capture keeps its Sources visible and Retry starts manual verification in the same chat', async () => {
-  const prompt = 'Manually cross-verify my complete current portfolio against all available research products and portfolio rules. Show material exceptions, verification scope, and all holdings checked, with dated sources.';
-  conversations.manual = { ...make('manual', ''), lastTurn: { id: 'failed-turn', request_id: 'failed-manual', state: 'failed', error: 'Portfolio verification unavailable.' },
-    manualVerification: { captureId: 'failed-capture', turnId: 'failed-turn', state: 'failed' },
-    messages: [{ id: 'user', role: 'user', text: prompt, turn_id: 'failed-turn', state: 'complete' }] };
-  const request = api.request.getMockImplementation();
-  const retry = deferred();
-  api.request.mockImplementation((path, body, method) => path === '/messages' ? retry.promise
-    : path === '/conversations/manual/sources' ? Promise.resolve({ conversationId: 'manual', basis: 'manual',
-      runId: conversations.manual.manualVerification.captureId, turnId: conversations.manual.manualVerification.turnId, state: conversations.manual.manualVerification.state,
-      items: [conversations.manual.manualVerification.state === 'failed'
-        ? { id: 'ibGateway', label: 'IB Gateway', status: 'unavailable', diagnostic: { code: 'IBKR_GATEWAY_NOT_CONNECTED' } }
-        : { id: 'ibGateway', label: 'IB Gateway', status: 'ready', observedAt: '2026-10-09T15:40:00Z' }] })
-      : request(path, body, method));
-  render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat manual' }));
-  await waitFor(() => expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Disconnected'));
-  expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
-  expect(api.request).toHaveBeenCalledWith('/messages', { conversationId: 'manual', text: prompt,
-    requestId: expect.any(String), operation: 'portfolio-cross-verification' });
-  expect(api.request.mock.calls.some(([path]) => path === '/daily/chat')).toBe(false);
-  expectReviewProgress();
-  const submission = api.request.mock.calls.find(([path]) => path === '/messages')[1];
-  conversations.manual = { ...conversations.manual, revision: 2,
-    lastTurn: { id: 'retry-turn', request_id: submission.requestId, state: 'complete' },
-    manualVerification: { captureId: 'retry-capture', turnId: 'retry-turn', state: 'ready' },
-    messages: [...conversations.manual.messages, { id: 'retry-answer', role: 'assistant', state: 'complete', text: 'Retried manual findings' }] };
-  await act(async () => retry.resolve({ conversation: conversations.manual }));
-  await screen.findByText('Retried manual findings');
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
-  expect(historyRows().queryByRole('button', { name: 'Open conversation: Manual Portfolio Update' })).not.toBeInTheDocument();
-});
-
-test('a missing restored manual request settles its local shell without an automatic resubmission', async () => {
-  localStorage.setItem('analyst.workspace.outbox', JSON.stringify({ requestId: 'unaccepted-manual', conversationId: null,
-    operation: 'portfolio-cross-verification', text: 'Manually cross-verify my portfolio.' }));
-  localStorage.setItem('analyst.workspace.selected', JSON.stringify('pending-manual:unaccepted-manual'));
-  render(<AnalystPanel />);
-  await screen.findByText('The update was not accepted. Retry Manual Portfolio Update.');
-  expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-  expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
-  expect(api.request.mock.calls.filter(([path]) => path === '/requests/unaccepted-manual')).toHaveLength(1);
-  expect(api.request.mock.calls.some(([path]) => path === '/messages')).toBe(false);
-});
-
-test('transient request reads keep the manual shell until the third read confirms its exact acceptance', async () => {
-  const requestId = 'transient-manual';
-  const submission = { requestId, conversationId: null, operation: 'portfolio-cross-verification', text: 'Manual verification request' };
+test('exhausted request reads retain the selected chat and Retry confirmation reads the same ID', async () => {
+  const requestId = 'chat-confirmation-retry';
+  const owner = 'a';
+  const submission = { requestId, conversationId: owner, text: 'Already submitted request' };
   localStorage.setItem('analyst.workspace.outbox', JSON.stringify(submission));
-  localStorage.setItem('analyst.workspace.selected', JSON.stringify(`pending-manual:${requestId}`));
-  const request = api.request.getMockImplementation();
-  let reads = 0;
-  conversations.manual = { ...make('manual', 'Recovered manual verification'),
-    manualVerification: { captureId: 'manual-capture', turnId: 'manual-turn', state: 'ready' },
-    lastTurn: { id: 'manual-turn', request_id: requestId, state: 'complete' } };
-  api.request.mockImplementation((path, body, method) => {
-    if (path !== `/requests/${requestId}`) return request(path, body, method);
-    if (++reads < 3) return Promise.reject(Object.assign(new Error('History warming up.'), { code: 'HTTP_503' }));
-    return Promise.resolve({ status: 'accepted', turn: conversations.manual.lastTurn, conversation: conversations.manual });
-  });
-  render(<AnalystPanel />);
-  expectReviewProgress();
-  await screen.findByText('Recovered manual verification', {}, { timeout: 2000 });
-  expect(reads).toBe(3);
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('manual');
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.outbox'))).toBeNull();
-  expect(api.request.mock.calls.some(([path]) => path === '/messages')).toBe(false);
-});
-
-test.each([false, true])('exhausted request reads retain the %s manual shell or selected chat and Retry confirmation reads the same ID', async manual => {
-  const requestId = manual ? 'manual-confirmation-retry' : 'chat-confirmation-retry';
-  const owner = manual ? null : 'a';
-  const submission = { requestId, conversationId: owner, text: 'Already submitted request',
-    ...(manual ? { operation: 'portfolio-cross-verification' } : {}) };
-  localStorage.setItem('analyst.workspace.outbox', JSON.stringify(submission));
-  localStorage.setItem('analyst.workspace.selected', JSON.stringify(manual ? `pending-manual:${requestId}` : owner));
-  localStorage.setItem('analyst.workspace.drafts', JSON.stringify({ [owner || 'landing']: 'Keep the newer draft' }));
+  localStorage.setItem('analyst.workspace.selected', JSON.stringify(owner));
+  localStorage.setItem('analyst.workspace.drafts', JSON.stringify({ [owner]: 'Keep the newer draft' }));
   const request = api.request.getMockImplementation();
   let available = false;
   let reads = 0;
-  const accepted = { ...make(manual ? 'manual' : 'a', 'Accepted response recovered'),
-    lastTurn: { id: 'accepted-turn', request_id: requestId, state: 'complete' },
-    ...(manual ? { manualVerification: { captureId: 'manual-capture', turnId: 'accepted-turn', state: 'ready' } } : {}) };
+  const accepted = { ...make('a', 'Accepted response recovered'),
+    lastTurn: { id: 'accepted-turn', request_id: requestId, state: 'complete' } };
   api.request.mockImplementation((path, body, method) => {
     if (path !== `/requests/${requestId}`) return request(path, body, method);
     reads += 1;
@@ -941,8 +714,8 @@ test.each([false, true])('exhausted request reads retain the %s manual shell or 
   render(<AnalystPanel />);
   await screen.findByRole('button', { name: 'Retry confirmation' }, { timeout: 2000 });
   expect(reads).toBe(3);
-  expect(Boolean(screen.queryByRole('region', { name: 'Review sources' }))).toBe(manual);
-  expect(Boolean(screen.queryByText('Only answer A'))).toBe(!manual);
+  expect(screen.queryByRole('region', { name: 'Review sources' })).not.toBeInTheDocument();
+  expect(screen.getByText('Only answer A')).toBeInTheDocument();
   expect(screen.getByRole('textbox')).toHaveValue('Keep the newer draft');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.outbox'))).toEqual(submission);
   available = true;
@@ -966,7 +739,7 @@ test('Portfolio launch reserves account tables before acceptance without display
   const body = within(report).getByRole('article', { name: 'Portfolio Review summary' });
   expect(body).toHaveAttribute('aria-busy', 'true');
   expect(within(body).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
-  expect(within(body).getByRole('table', { name: 'Portfolio exposure' }).querySelectorAll('tbody tr')).toHaveLength(5);
+  expect(within(body).getByRole('table', { name: 'Portfolio exposure' }).querySelectorAll('tbody tr')).toHaveLength(4);
   expect(within(body).getByRole('region', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
   expect(within(body).getByRole('table', { name: 'Position exceptions' })).toBeVisible();
   expect(body).not.toHaveTextContent(/\$|\d+\.\d+%/);
@@ -1156,7 +929,6 @@ test.each([
   // Leaving for the history keeps the pending launch in its Starting slot.
   const row = historyRows().getByRole('button', { name: `Open conversation: ${label}` });
   expect(row).toHaveTextContent('Starting…');
-  expect(screen.getByRole('button', { name: `Update review: ${label}` })).toBeDisabled();
   // A history request that began before acceptance must leave the local start.
   await screen.findByRole('button', { name: 'Open conversation: Chat a' });
   expect(row).toBeVisible();
@@ -1178,9 +950,9 @@ test('a Starting review cannot be deleted and its late receipt opens the one acc
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
   const row = historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
   expect(row).toHaveTextContent('Starting…');
-  // Refresh and trash stay beside each other; neither acts until the start is accepted.
+  // The row has only its trash action, which cannot act until the start is accepted.
   expect([...row.closest('.analyst-conversation-row').querySelectorAll('button')].map(button => button.getAttribute('aria-label')))
-    .toEqual(['Open conversation: Predictive Markets Review', 'Update review: Predictive Markets Review', 'Delete conversation: Predictive Markets Review']);
+    .toEqual(['Open conversation: Predictive Markets Review', 'Delete conversation: Predictive Markets Review']);
   expect(historyRows().getByRole('button', { name: 'Delete conversation: Predictive Markets Review' })).toBeDisabled();
   fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Predictive Markets Review' }));
   // Reopen the Starting slot so its late receipt can select the accepted chat.
@@ -1374,6 +1146,7 @@ test('lightweight accepted refresh preserves the same captured brief until a ful
   const capturedBrief = { available: true, asOf: '2026-09-04T20:05:00Z', metrics: {},
     holdings: [{ holding: 'IGV', heldSide: 'LONG', weightPct: 4, trade: 'BEARISH', trend: 'BULLISH', sizingInputs: {}, sources: {} }], nextSession: [] };
   conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1,
+    lastTurn: { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' },
     messages: [{ id: 'captured-message', role: 'assistant', state: 'complete', text: 'Saved report', portfolioBrief: capturedBrief }] };
   const pending = deferred();
   const request = api.request.getMockImplementation();
@@ -1381,7 +1154,7 @@ test('lightweight accepted refresh preserves the same captured brief until a ful
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await screen.findByRole('row', { name: /IGV/ });
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   conversations.a = { ...conversations.a, revision: 2, briefsIncluded: false, activeTurn: { id: 'refresh-turn' }, reviewPhase: 'queued',
     messages: [{ id: 'captured-message', role: 'assistant', state: 'complete', text: 'Saved report' }] };
   await act(async () => pending.resolve({ conversation: conversations.a }));
@@ -1402,7 +1175,7 @@ test('a rejected compact capture clears previously verified metrics even when it
     messages: [{ id: 'captured-message', role: 'assistant', state: 'complete', text: 'Saved report', portfolioBrief: capturedBrief }] };
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  await findPortfolioExposureAmount('$1,234.00');
+  await findPortfolioExposureAmount('$1,234');
   const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
   const exposureTable = within(exposure).getByRole('table', { name: 'Portfolio exposure' });
   const exceptions = screen.getByRole('region', { name: 'Position exceptions' });
@@ -1411,14 +1184,12 @@ test('a rejected compact capture clears previously verified metrics even when it
       presentation: 'compact', available: false, metrics: {} } }] };
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'a' }) }));
   await screen.findByText('Unavailable — connect to IB Gateway.');
-  expect(screen.queryAllByText('$1,234.00')).toHaveLength(0);
+  expect(screen.queryAllByText('$1,234')).toHaveLength(0);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBe(exposure);
   expect(within(exposure).getByRole('table', { name: 'Portfolio exposure' })).toBe(exposureTable);
-  expect(exposureTable.querySelectorAll('tbody tr')).toHaveLength(5);
-  expect(exposureTable.querySelectorAll('tbody td')).toHaveLength(10);
-  // Interest has no NLV weight; every value cell is unavailable.
-  expect([...exposureTable.querySelectorAll('tbody td')].every(cell => cell.textContent === '—'
-    || (cell.textContent === '' && cell.closest('tr').textContent.startsWith('Interest')))).toBe(true);
+  expect(exposureTable.querySelectorAll('tbody tr')).toHaveLength(4);
+  expect(exposureTable.querySelectorAll('tbody td')).toHaveLength(16);
+  expect([...exposureTable.querySelectorAll('tbody td')].every(cell => cell.textContent === '—')).toBe(true);
   expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
   expect(exceptions).toHaveTextContent('Unavailable');
 });
@@ -1463,7 +1234,7 @@ test('Portfolio sections keep their slots and tables from an empty loading post 
       trade: 'BEARISH', trend: 'BULLISH', sizingInputs: {}, sources: {} }] };
   conversations.a = { ...conversations.a, revision: 3, messages: [{ ...pending, portfolioBrief: ready }] };
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 2, conversation_id: 'a' }) }));
-  await within(exposure).findByText('$500.00');
+  await findPortfolioExposureAmount('$500');
   expect(within(positions).getByRole('row', { name: /IGV/ })).toBeVisible();
   expectSameSlots();
   expect(transcript.scrollTop).toBe(180);
@@ -1473,7 +1244,7 @@ test('Portfolio sections keep their slots and tables from an empty loading post 
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 3, conversation_id: 'a' }) }));
   await within(article).findByText('Unavailable — connect to IB Gateway.');
   expectSameSlots();
-  expect(screen.queryAllByText('$500.00')).toHaveLength(0);
+  expect(screen.queryAllByText('$500')).toHaveLength(0);
   expect(within(positions).queryByRole('row', { name: /IGV/ })).not.toBeInTheDocument();
   expect(positions).toHaveTextContent('Unavailable');
   expect(article).not.toHaveAttribute('aria-busy', 'true');
@@ -1510,59 +1281,10 @@ test('a metadata-only partial revision rehydrates the exact active compact book 
     reportRevision: 'verified-book', metrics: { grossExposure: 200 }, asOf: '2026-09-04T20:05:00Z' } };
   conversations.a = { ...conversations.a, messages: [verified] };
   await act(async () => hydrated.resolve({ conversation: conversations.a }));
-  await findPortfolioExposureAmount('$200.00');
+  await findPortfolioExposureAmount('$200');
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
   expect(conversations.a.activeTurn).not.toBeNull();
   expect(api.request.mock.calls.some(([path]) => path === '/conversations/a')).toBe(false);
-});
-
-test('a cold sidebar refresh defers duplicated historical exports until compact saved posts hydrate', async () => {
-  const prepare = jest.spyOn(analystMarkdown, 'prepareAnalystMarkdown');
-  ReactMarkdown.mockClear();
-  try {
-    const raw = '# PORTFOLIO REVIEW\n\n<!-- analyst-daily-rollup -->\n\nDuplicated historical export\n'.repeat(300);
-    const old = index => ({ id: `saved-${index}`, role: 'assistant', state: 'complete', text: raw,
-      reviewPostId: `saved-post-${index}`, reviewRunId: `saved-run-${index}` });
-    conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, message_count: 2,
-      messages: [old(1), old(2)] };
-    const compact = deferred();
-    const request = api.request.getMockImplementation();
-    api.request.mockImplementation((path, body, method) => {
-      if (path.startsWith('/conversations/a?includeBriefs=false')) return compact.promise;
-      if (path === '/daily/portfolio-review') {
-        conversations.a = { ...conversations.a, revision: 2, briefsIncluded: false, reviewPhase: 'queued',
-          reviewRunId: 'fresh-run', activeTurn: { id: 'fresh-turn' }, messages: [...conversations.a.messages,
-            { id: 'fresh-report', role: 'assistant', state: 'reviewing', text: '', reviewPostId: 'fresh-post',
-              reviewRunId: 'fresh-run', turn_id: 'fresh-turn' }] };
-        return Promise.resolve({ conversation: conversations.a });
-      }
-      return request(path, body, method);
-    });
-    render(<AnalystPanel />);
-    fireEvent.click(await historyRows().findByRole('button', { name: 'Update review: Chat a' }));
-    await waitFor(() => expect(screen.getByRole('status', { name: 'Response running' })).toHaveTextContent('Queued…'));
-    expect(screen.getByRole('region', { name: 'Review sources' })).toBeVisible();
-    expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toBeEnabled();
-    expect(screen.queryByText(/Duplicated historical export/)).not.toBeInTheDocument();
-    expect(prepare).not.toHaveBeenCalled();
-    expect(ReactMarkdown).not.toHaveBeenCalled();
-    await waitFor(() => expect(api.request.mock.calls.some(([path]) => path.startsWith('/conversations/a?includeBriefs=false'))).toBe(true));
-    expect(api.request.mock.calls.some(([path]) => path === '/conversations/a')).toBe(false);
-    const saved = conversations.a.messages.map((message, index) => index < 2 ? { ...message, text: '', reportTextIncluded: false,
-      portfolioBrief: { presentation: 'compact', available: true, runId: message.reviewRunId,
-        metrics: { grossExposure: index ? 200 : 100 }, holdings: [], nextSession: [] } } : message);
-    await act(async () => compact.resolve({ conversation: { ...conversations.a, briefView: 'compact', messages: saved } }));
-    await findPortfolioExposureAmount('$200.00');
-    expect(portfolioExposureAmount('$100.00')).toBeVisible();
-    expect(screen.getAllByRole('article', { name: 'Portfolio Review summary' })).toHaveLength(3);
-    const loadingReport = screen.getByRole('log').querySelector('[data-message-id="fresh-report"]');
-    expect(loadingReport).toHaveAttribute('aria-busy', 'true');
-    expect(within(loadingReport).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
-    expect(loadingReport).not.toHaveTextContent(/\$100\.00|\$200\.00/);
-    expect(prepare).not.toHaveBeenCalled();
-    expect(ReactMarkdown).not.toHaveBeenCalled();
-    expect(conversations.a.messages[0].text).toBe(raw);
-  } finally { prepare.mockRestore(); }
 });
 
 test('latest-only progress keeps each warm saved body and its citation bound to the same capture', async () => {
@@ -1576,7 +1298,7 @@ test('latest-only progress keeps each warm saved body and its citation bound to 
   conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [saved] };
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  await findPortfolioExposureAmount('$100.00');
+  await findPortfolioExposureAmount('$100');
   const article = screen.getByRole('article', { name: 'Portfolio Review summary' });
   conversations.a = { ...conversations.a, revision: 2, briefsIncluded: false, briefScope: 'latest',
     activeTurn: { id: 'new-turn' }, reviewRunId: 'new-run', reviewPhase: 'acquiring', messages: [
@@ -1586,8 +1308,8 @@ test('latest-only progress keeps each warm saved body and its citation bound to 
           metrics: { grossExposure: 200 }, holdings: [] } },
     ] };
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'a' }) }));
-  await findPortfolioExposureAmount('$200.00');
-  expect(portfolioExposureAmount('$100.00').closest('article')).toBe(article);
+  await findPortfolioExposureAmount('$200');
+  expect(portfolioExposureAmount('$100').closest('article')).toBe(article);
   expect(article).toHaveTextContent('Original saved research reading.');
   fireEvent.click(within(article).getByRole('button', { name: 'Source: Original saved publication · Sep 4, 2026' }));
   expect(screen.getByRole('dialog', { name: 'Citation source' })).toHaveTextContent(citation.excerpt);
@@ -1603,13 +1325,13 @@ test('opening a cold completed Portfolio reads its latest compact primary withou
   conversations.a = { ...conversations.a, kind: 'portfolio-review', activeTurn: null, briefsIncluded: false, messages: [old, latest] };
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  await findPortfolioExposureAmount('$250.00');
+  await findPortfolioExposureAmount('$250');
   const placeholder = screen.getByRole('log', { name: 'Conversation' }).querySelector('[data-message-id="old-post"]');
   expect(placeholder).toHaveClass('analyst-captured-report-placeholder', 'portfolio-brief-centered');
   expect(placeholder).toHaveAttribute('aria-busy', 'true');
   expect(within(placeholder).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
   expect(within(placeholder).getByRole('table', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
-  expect(placeholder).not.toHaveTextContent('$250.00');
+  expect(placeholder).not.toHaveTextContent('$250');
   expect(api.request.mock.calls.filter(([path]) => path === '/conversations/a?includeBriefs=false&briefScope=latest')).toHaveLength(1);
   expect(api.request.mock.calls.some(([path]) => path === '/conversations/a')).toBe(false);
   expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toBeEnabled();
@@ -1638,12 +1360,12 @@ test('an older failed post keeps its published partial report and status line wh
       : request(path, body, method));
     render(<AnalystPanel />);
     fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-    await findPortfolioExposureAmount('$250.00');
+    await findPortfolioExposureAmount('$250');
     const placeholder = screen.getByRole('log', { name: 'Conversation' }).querySelector('[data-message-id="failed-post"]');
     expect(within(placeholder).queryByRole('note')).not.toBeInTheDocument();
     await waitFor(() => expect(observers.length).toBeGreaterThan(0));
     act(() => observers.at(-1).callback([{ target: placeholder, isIntersecting: true }]));
-    await findPortfolioExposureAmount('$100.00');
+    await findPortfolioExposureAmount('$100');
     const loaded = screen.getByRole('log', { name: 'Conversation' }).querySelector('[data-message-id="failed-post"]');
     expect(within(loaded).getByRole('note')).toHaveTextContent(status);
     expect(loaded).not.toHaveAttribute('aria-busy', 'true');
@@ -1678,7 +1400,7 @@ test('a rejected exact saved-body read settles its existing report slots without
     });
     render(<AnalystPanel />);
     fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-    await findPortfolioExposureAmount('$250.00');
+    await findPortfolioExposureAmount('$250');
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     const placeholder = transcript.querySelector('[data-message-id="old-post"]');
     const sections = [...placeholder.querySelectorAll('.portfolio-review-section')];
@@ -1707,62 +1429,17 @@ test('a rejected exact saved-body read settles its existing report slots without
       act(() => observers.at(-1).callback([{ target: placeholder, isIntersecting: true }]));
     }
     expect(exactReads).toBe(1);
-    expect(portfolioExposureAmount('$250.00')).toBeVisible();
+    expect(portfolioExposureAmount('$250')).toBeVisible();
     expect(api.request.mock.calls.some(([path]) => path === '/daily/portfolio-review')).toBe(false);
     await open('b');
     fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Chat a' }));
-    await findPortfolioExposureAmount('$250.00');
+    await findPortfolioExposureAmount('$250');
     const reopened = transcript.querySelector('[data-message-id="old-post"]');
     act(() => observers.at(-1).callback([{ target: reopened, isIntersecting: true }]));
-    await findPortfolioExposureAmount('$100.00');
+    await findPortfolioExposureAmount('$100');
     expect(exactReads).toBe(2);
-    expect(portfolioExposureAmount('$250.00')).toBeVisible();
+    expect(portfolioExposureAmount('$250')).toBeVisible();
     expect(screen.queryByText('Unavailable — saved review could not be loaded.')).not.toBeInTheDocument();
-  } finally { global.IntersectionObserver = originalObserver; }
-});
-
-test('cold history waits for the fresh primary and an exact viewport read cannot roll back live progress', async () => {
-  const originalObserver = global.IntersectionObserver;
-  const observers = [];
-  global.IntersectionObserver = jest.fn(callback => {
-    const observer = { callback, observe: jest.fn(), disconnect: jest.fn() }; observers.push(observer); return observer;
-  });
-  try {
-    const old = { id: 'saved-post', reviewPostId: 'saved-post', reviewRunId: 'saved-run', role: 'assistant', state: 'complete',
-      created_at: '2026-09-04T15:00:00Z', reviewBodyIncluded: false };
-    const fresh = { id: 'fresh-post', reviewPostId: 'fresh-post', reviewRunId: 'fresh-run', role: 'assistant', state: 'reviewing', turn_id: 'fresh-turn', text: '' };
-    conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [old] };
-    const request = api.request.getMockImplementation();
-    const oldRead = deferred();
-    api.request.mockImplementation((path, body, method) => {
-      if (path.endsWith('briefMessageId=saved-post')) return oldRead.promise;
-      if (path === '/daily/portfolio-review') {
-        conversations.a = { ...conversations.a, briefsIncluded: false, revision: 2, activeTurn: { id: 'fresh-turn' },
-          reviewRunId: 'fresh-run', reviewPhase: 'acquiring', messages: [old, fresh] };
-        return Promise.resolve({ conversation: conversations.a });
-      }
-      return request(path, body, method);
-    });
-    render(<AnalystPanel />);
-    fireEvent.click(await historyRows().findByRole('button', { name: 'Update review: Chat a' }));
-    await waitFor(() => expect(api.request.mock.calls.some(([path]) => path.includes('briefScope=latest'))).toBe(true));
-    expect(observers).toHaveLength(0);
-    expect(api.request.mock.calls.some(([path]) => path.includes('briefMessageId='))).toBe(false);
-    conversations.a = { ...conversations.a, revision: 3, messages: [old, { ...fresh,
-      portfolioBrief: { presentation: 'compact', available: true, runId: 'fresh-run', metrics: { grossExposure: 200 }, holdings: [] } }] };
-    act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'a' }) }));
-    await findPortfolioExposureAmount('$200.00');
-    await waitFor(() => expect(observers.length).toBeGreaterThan(0));
-    const placeholder = screen.getByRole('log', { name: 'Conversation' }).querySelector('[data-message-id="saved-post"]');
-    observers.at(-1).callback([{ target: placeholder, isIntersecting: true }]);
-    await waitFor(() => expect(api.request.mock.calls.some(([path]) => path.endsWith('briefMessageId=saved-post'))).toBe(true));
-    await act(async () => oldRead.resolve({ conversation: { ...conversations.a, revision: 1, activeTurn: null,
-      messages: [{ ...old, reviewBodyIncluded: true, text: '', citations: [],
-        portfolioBrief: { presentation: 'compact', available: true, runId: 'saved-run', metrics: { grossExposure: 100 }, holdings: [] } }] } }));
-    await findPortfolioExposureAmount('$100.00');
-    expect(portfolioExposureAmount('$200.00')).toBeVisible();
-    expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeVisible();
   } finally { global.IntersectionObserver = originalObserver; }
 });
 
@@ -1774,7 +1451,8 @@ test.each(['ready', 'partial', 'checking', 'unavailable'])('a blank managed runn
     const pending = { id: 'managed-post', reviewPostId: 'new-run', role: 'assistant', state: 'running', text: '',
       reviewRunId: 'new-run', turn_id: 'new-turn', portfolioBrief: { presentation: 'compact', available: false,
         runId: 'new-run', reportRevision: 'pending-book', metrics: {}, holdings: [] } };
-    conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [saved] };
+    conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [saved],
+      lastTurn: { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' } };
     const receipt = deferred();
     const primary = deferred();
     const request = api.request.getMockImplementation();
@@ -1792,35 +1470,35 @@ test.each(['ready', 'partial', 'checking', 'unavailable'])('a blank managed runn
     });
     render(<AnalystPanel />);
     fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-    await findPortfolioExposureAmount('$100.00');
+    await findPortfolioExposureAmount('$100');
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     Object.defineProperties(transcript, { scrollHeight: { configurable: true, value: 1800 }, clientHeight: { configurable: true, value: 500 } });
-    fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
     conversations.a = { ...conversations.a, briefsIncluded: false, revision: 2, activeTurn: { id: 'new-turn' },
       reviewRunId: 'new-run', reviewPhase: 'acquiring', messages: [saved, pending] };
     await act(async () => receipt.resolve({ conversation: conversations.a }));
-    await within(screen.getByText('IB Gateway').closest('li')).findByText('Connected');
+    await within(screen.getByText('IB Gateway').closest('li')).findByText('Ready');
     expect(transcript.scrollTop).toBe(0);
     const loadingReport = transcript.querySelector('[data-message-id="managed-post"]');
     const loadingExposure = within(loadingReport).getByRole('region', { name: 'Exposure and risk' });
     expect(loadingExposure).toHaveTextContent('Loading…');
     const gatewaySource = screen.getByText('IB Gateway').closest('li');
     expect(gatewaySource).toHaveClass('is-ready');
-    expect(gatewaySource).toHaveTextContent('Connected');
+    expect(gatewaySource).toHaveTextContent('Ready');
     expect(screen.queryByText('Verified book')).not.toBeInTheDocument();
     expect(screen.queryByText('Verified balance')).not.toBeInTheDocument();
     expect(screen.queryByText('Unavailable — connect to IB Gateway.')).not.toBeInTheDocument();
-    expect(screen.queryAllByText('$200.00')).toHaveLength(0);
+    expect(screen.queryAllByText('$200')).toHaveLength(0);
     fireEvent.scroll(transcript, { target: { scrollTop: 175 } });
     conversations.a = { ...conversations.a, messages: [saved, { ...pending,
       portfolioBrief: { ...pending.portfolioBrief, available: true, reportRevision: 'verified-book', metrics: { grossExposure: 200 },
         asOf: '2026-09-04T20:05:00Z' } }] };
     await act(async () => primary.resolve({ conversation: conversations.a }));
-    await findPortfolioExposureAmount('$200.00');
+    await findPortfolioExposureAmount('$200');
     expect(transcript.scrollTop).toBe(175);
     expect(transcript.querySelector('[data-message-id="managed-post"]')).toBe(loadingReport);
     expect(within(loadingReport).getByRole('region', { name: 'Exposure and risk' })).toBe(loadingExposure);
-    expect(portfolioExposureAmount('$100.00')).toBeVisible();
+    expect(portfolioExposureAmount('$100')).toBeVisible();
     expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Research archive');
     expect(screen.getByRole('button', { name: 'Stop' })).toBeVisible();
@@ -1843,7 +1521,7 @@ test('a saved Balance Review stays readable and deletable but can no longer be r
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Balance Review' }));
   await screen.findByText(/\$100\.00/);
-  expect(historyRows().queryByRole('button', { name: 'Update review: Balance Review' })).not.toBeInTheDocument();
+  expect(historyRows().queryByRole('button', { name: /^Update review/ })).not.toBeInTheDocument();
   expect(historyRows().getByRole('button', { name: 'Delete conversation: Balance Review' })).toBeEnabled();
   expect(within(screen.getByRole('group', { name: 'Start a review' })).queryByRole('button', { name: 'Balance Review' })).not.toBeInTheDocument();
   expect(api.request.mock.calls.some(([path]) => path === '/daily/balance-review')).toBe(false);
@@ -1895,12 +1573,12 @@ test.each(['ready', 'partial', 'checking', 'unavailable'])('captured book with %
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(packets).toBe(1));
   expect(screen.getByText('IB Gateway').closest('li')).toHaveTextContent('Checking');
-  expect(screen.getByText('IB Gateway').closest('li')).not.toHaveTextContent('Connected');
+  expect(screen.getByText('IB Gateway').closest('li')).not.toHaveTextContent('Ready');
   expect(screen.getByText('IB Gateway').closest('li')).not.toHaveTextContent('Unavailable');
   expect(reads).toBe(1);
-  expect(screen.queryAllByText('$300.00')).toHaveLength(0);
-  await findPortfolioExposureAmount('$300.00', { timeout: 3000 });
-  await within(screen.getByText('IB Gateway').closest('li')).findByText('Connected');
+  expect(screen.queryAllByText('$300')).toHaveLength(0);
+  await findPortfolioExposureAmount('$300', { timeout: 3000 });
+  await within(screen.getByText('IB Gateway').closest('li')).findByText('Ready');
   expect(reads).toBe(2);
   expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Research archive');
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
@@ -1929,14 +1607,14 @@ test('settled Portfolio requests do not certify an unavailable primary, and late
   await waitFor(() => expect(reads).toBe(2));
   expect(screen.getByText('IB Gateway').closest('li')).toHaveTextContent('Checking');
   expect(screen.queryByText('Captured book')).not.toBeInTheDocument();
-  expect(screen.queryAllByText('$300.00')).toHaveLength(0);
+  expect(screen.queryAllByText('$300')).toHaveLength(0);
   expect(screen.queryByText('Unavailable — connect to IB Gateway.')).not.toBeInTheDocument();
   balanceStatus = 'unavailable';
   await waitFor(() => expect(reads).toBe(3), { timeout: 3000 });
   // Failed account requests alone never establish a disconnect.
   expect(screen.getByText('IB Gateway').closest('li')).toHaveTextContent('Unverified');
   expect(screen.queryByText('Captured balance')).not.toBeInTheDocument();
-  expect(screen.queryAllByText('$300.00')).toHaveLength(0);
+  expect(screen.queryAllByText('$300')).toHaveLength(0);
   expect(screen.queryByText('Unavailable — connect to IB Gateway.')).not.toBeInTheDocument();
   expect(screen.getByRole('status', { name: 'Response running' })).toHaveTextContent('Gathering sources…');
 });
@@ -1945,21 +1623,22 @@ test('a refresh renders its first compact brief while preserving an older comple
   const original = { id: 'older-report', role: 'assistant', state: 'complete', text: 'Saved report',
     reviewPostId: 'base', reviewRunId: 'older-run', portfolioBrief: { available: true,
       runId: 'older-run', reportRevision: 'older-revision', metrics: { grossExposure: 100 }, holdings: [], nextSession: [] } };
-  conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [original] };
+  conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [original],
+    lastTurn: { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' } };
   const receipt = deferred();
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? receipt.promise : request(path, body, method));
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  await findPortfolioExposureAmount('$100.00');
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+  await findPortfolioExposureAmount('$100');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   const pending = { id: 'fresh-report', role: 'assistant', state: 'reviewing', text: '',
     reviewPostId: 'fresh-post', reviewRunId: 'fresh-run' };
   const olderMetadata = { ...original }; delete olderMetadata.portfolioBrief;
   conversations.a = { ...conversations.a, revision: 2, briefsIncluded: false, activeTurn: { id: 'fresh-turn' },
     reviewPhase: 'queued', messages: [olderMetadata, pending] };
   await act(async () => receipt.resolve({ conversation: conversations.a }));
-  expect(portfolioExposureAmount('$100.00')).toBeVisible();
+  expect(portfolioExposureAmount('$100')).toBeVisible();
   expect(screen.getByRole('status', { name: 'Response running' })).toBeVisible();
   conversations.a = { ...conversations.a, revision: 3, reviewPhase: 'acquiring', messages: [olderMetadata,
     { ...pending, portfolioBrief: { presentation: 'compact', available: true, runId: 'fresh-run', reportRevision: 'fresh-revision',
@@ -1967,8 +1646,8 @@ test('a refresh renders its first compact brief while preserving an older comple
         id: 'drivers', title: 'Market drivers', blocks: [{ type: 'paragraph', text: 'Fresh captured research.' }],
       }] } } }] };
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'a' }) }));
-  await findPortfolioExposureAmount('$200.00');
-  expect(portfolioExposureAmount('$100.00')).toBeVisible();
+  await findPortfolioExposureAmount('$200');
+  expect(portfolioExposureAmount('$100')).toBeVisible();
   expect(screen.getAllByRole('article', { name: 'Portfolio Review summary' })).toHaveLength(2);
   expect(screen.getByText('Fresh captured research.')).toBeVisible();
   expect(screen.queryByText('The Analyst view could not render.')).not.toBeInTheDocument();
@@ -2237,115 +1916,15 @@ test('a disconnected refresh retains saved position exceptions until a verified 
   expect(screen.queryByText(/latest refresh could not verify holdings/i)).not.toBeInTheDocument();
 });
 
-test.each([2, 3])('terminal review detail revision %s clears a stale running sidebar row and permits explicit refresh', async revision => {
-  conversations.a = { ...conversations.a, kind: 'prediction-markets-review', revision, activeTurn: null,
-    lastTurn: { id: 'completed-turn', state: 'complete' } };
-  const stale = { ...conversations.a, revision: 2, state: 'running', activeTurn: undefined, lastTurn: undefined };
-  const start = deferred();
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((path, body, method) => {
-    if (path.startsWith('/conversations?')) return Promise.resolve({ conversations: [stale], cursor: 0 });
-    if (path === '/daily/prediction-markets-review') return start.promise;
-    return request(path, body, method);
-  });
-  render(<AnalystPanel />);
-  await open('a');
-  const button = historyRows().getByRole('button', { name: 'Update review: Chat a' });
-  await waitFor(() => expect(button).toBeEnabled());
-  fireEvent.click(button);
-  fireEvent.click(button);
-  expect(api.request.mock.calls.filter(([path]) => path === '/daily/prediction-markets-review')).toHaveLength(1);
-  expect(api.request).toHaveBeenCalledWith('/daily/prediction-markets-review', expect.objectContaining({ refresh: true, conversationId: 'a' }));
-  expect(historyRows().getByRole('button', { name: 'Update review: Chat a' })).toBeDisabled();
-});
-
-test.each(['older detail', 'active detail', 'partial detail'])('%s cannot clear authoritative running sidebar state', async scenario => {
-  conversations.a = { ...conversations.a, kind: 'prediction-markets-review', revision: scenario === 'older detail' ? 1 : 3,
-    lastTurn: { id: 'completed-turn', state: 'complete' } };
-  if (scenario === 'active detail') conversations.a.activeTurn = { id: 'active-turn', state: 'running' };
-  if (scenario === 'partial detail') delete conversations.a.activeTurn;
-  const row = { ...conversations.a, revision: 2, state: 'running', activeTurn: undefined, lastTurn: undefined };
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((path, body, method) => path.startsWith('/conversations?')
-    ? Promise.resolve({ conversations: [row], cursor: 0 }) : request(path, body, method));
-  render(<AnalystPanel />);
-  await open('a');
-  const button = historyRows().getByRole('button', { name: 'Update review: Chat a' });
-  expect(button).toBeDisabled();
-  fireEvent.click(button);
-  expect(api.request.mock.calls.some(([path]) => path === '/daily/prediction-markets-review')).toBe(false);
-});
-
-test('opening a historical placeholder never starts a review; its refresh button is an explicit action', async () => {
+test('opening a historical placeholder never starts a review', async () => {
   conversations.a.kind = 'portfolio-review';
   conversations.a.referenceReview = { targetDate: '2026-09-04', missing: true };
   conversations.a.messages[0].text = 'Market closed on 2026-09-07. Daily reviews resume on the next exchange trading day.';
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation(async (path, body, method) => {
-    if (path === '/daily/portfolio-review') {
-      conversations.a = { ...conversations.a, referenceReview: null, messages: [], activeTurn: { id: 'new-review' } };
-      return { conversation: conversations.a };
-    }
-    return request(path, body, method);
-  });
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
   await waitFor(() => expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument());
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
-  await waitFor(() => expect(historyRows().getByRole('button', { name: 'Update review: Chat a' })).toBeDisabled());
-  expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) });
-  expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
-  await waitFor(() => expect(screen.queryByText(/market.*closed|reviews resume|No saved portfolio review/i)).not.toBeInTheDocument());
-});
-
-test.each([false, true])('explicitly refreshing an empty placeholder never steals later navigation (switch: %s)', async switched => {
-  conversations.a.kind = 'portfolio-review';
-  conversations.a.referenceReview = { targetDate: '2026-09-04', missing: true };
-  conversations.a.messages = [];
-  localStorage.setItem('analyst.workspace.selected', JSON.stringify('a'));
-  const request = api.request.getMockImplementation();
-  const pending = deferred();
-  api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review'
-    ? pending.promise
-    : request(path, body, method));
-  render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
-  expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
-  expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) });
-  expectReviewProgress();
-  expect(screen.queryByText('Loading the latest portfolio review…')).not.toBeInTheDocument();
-  if (switched) await open('b');
-  conversations.a = { ...conversations.a, referenceReview: null, messages: [{ id: 'new-review', role: 'assistant', state: 'complete', text: 'Latest available portfolio review' }] };
-  await act(async () => pending.resolve({ conversation: conversations.a }));
-  await screen.findByText(switched ? 'Only answer B' : 'Latest available portfolio review');
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe(switched ? 'b' : 'a');
-  expect(Boolean(screen.queryByText('Latest available portfolio review'))).toBe(!switched);
-});
-
-test('a failed explicit placeholder refresh keeps the error notice and never retries automatically', async () => {
-  conversations.a.kind = 'portfolio-review';
-  conversations.a.referenceReview = { targetDate: '2026-09-04', missing: true };
-  conversations.a.messages = [];
-  const pending = deferred();
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending.promise : request(path, body, method));
-  render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
-  expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
-  expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) });
-  expectReviewProgress();
-  expect(screen.queryByText('Loading the latest portfolio review…')).not.toBeInTheDocument();
-  await act(async () => pending.reject(new Error('Saved review is unavailable.')));
-  expect(screen.getByRole('alert')).toHaveTextContent('Saved review is unavailable.');
-  expect(screen.getByRole('note')).toHaveTextContent('The portfolio review could not be loaded. Use the refresh icon to retry.');
-  expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-  expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
 });
 
 test('a delayed historical placeholder response stays selected without starting recovery', async () => {
@@ -2361,37 +1940,6 @@ test('a delayed historical placeholder response stays selected without starting 
   await expectSelected('Chat a');
   expect(api.request.mock.calls.some(([path]) => path === '/daily/portfolio-review')).toBe(false);
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-});
-
-test('explicit placeholder refreshes deduplicate by conversation while the reopened review stays selected', async () => {
-  for (const id of ['a', 'b']) conversations[id] = { ...conversations[id], kind: 'portfolio-review', referenceReview: { targetDate: '2026-09-04', missing: true }, messages: [] };
-  const pending = { a: deferred(), b: deferred() };
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending[body.conversationId].promise : request(path, body, method));
-  render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/a?includeBriefs=false&briefScope=latest'));
-  expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
-  expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', expect.objectContaining({ refresh: true, conversationId: 'a' }));
-  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Chat b' }));
-  await waitFor(() => expect(api.request).toHaveBeenCalledWith('/conversations/b?includeBriefs=false&briefScope=latest'));
-  expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat b' }));
-  expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', expect.objectContaining({ refresh: true, conversationId: 'b' }));
-  // A duplicate refresh from the history is ignored and leaves the home view open.
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
-  expectReviewProgress();
-  expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(2);
-  conversations.a = { ...conversations.a, referenceReview: null, messages: [{ id: 'finished-a', role: 'assistant', state: 'complete', text: 'Selected recovered review A' }] };
-  await act(async () => pending.a.resolve({ conversation: conversations.a }));
-  expect(screen.getByText('Selected recovered review A')).toBeInTheDocument();
-  conversations.b = { ...conversations.b, referenceReview: null, messages: [{ id: 'finished-b', role: 'assistant', state: 'complete', text: 'Late recovered review B' }] };
-  await act(async () => pending.b.resolve({ conversation: conversations.b }));
-  expect(screen.getByText('Selected recovered review A')).toBeInTheDocument();
-  expect(screen.queryByText('Late recovered review B')).not.toBeInTheDocument();
-  expect(JSON.parse(localStorage.getItem('analyst.workspace.selected'))).toBe('a');
 });
 
 test('reopening the same empty history entry never creates or refreshes a review', async () => {
@@ -2437,7 +1985,7 @@ test('stop is targeted; closing and remounting reads saved background completion
   await screen.findByText('Saved while closed');
   expect(api.request.mock.calls.some(([path]) => path === '/messages')).toBe(false);
 });
-test('every history row has one trash button beside refresh and no archive action', async () => {
+test('every history row has one trash button and no archive action', async () => {
   conversations.review = { ...make('review', 'Saved review'), title: 'Portfolio Review', kind: 'portfolio-review', trading_date: '2026-09-04' };
   render(<AnalystPanel />);
   await open('a');
@@ -2445,20 +1993,29 @@ test('every history row has one trash button beside refresh and no archive actio
   const buttons = id => [...historyRows().getByRole('button', { name: `Open conversation: ${id}` }).closest('.analyst-conversation-row')
     .querySelectorAll('button')].map(button => button.getAttribute('aria-label'));
   expect(buttons('Chat a')).toEqual(['Open conversation: Chat a', 'Delete conversation: Chat a']);
-  expect(buttons('Portfolio Review')).toEqual(['Open conversation: Portfolio Review', 'Update review: Portfolio Review', 'Delete conversation: Portfolio Review']);
+  expect(buttons('Portfolio Review')).toEqual(['Open conversation: Portfolio Review', 'Delete conversation: Portfolio Review']);
   expect(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' })).toBeEnabled();
   expect(api.request.mock.calls.some(([, , method]) => method === 'DELETE')).toBe(false);
 });
 
-test.each(['Update review: Chat a', 'Retry'])('%s explicitly refreshes the selected portfolio before the open or after the close', async button => {
+test('review history rows have no in-place refresh; a new review starts from the home launcher', async () => {
+  conversations.a = { ...conversations.a, kind: 'portfolio-review', title: 'Portfolio Review' };
+  conversations.b = { ...conversations.b, kind: 'prediction-markets-review', title: 'Predictive Markets Review' };
+  render(<AnalystPanel />);
+  await historyRows().findByRole('button', { name: 'Open conversation: Portfolio Review' });
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toBeVisible();
+  expect(historyRows().queryByRole('button', { name: /^Update review/ })).not.toBeInTheDocument();
+  expect(document.querySelector('.analyst-conversation-refresh')).toBeNull();
+});
+
+test('Retry explicitly refreshes the selected portfolio before the open or after the close', async () => {
   conversations.a.kind = 'portfolio-review';
-  if (button === 'Retry') conversations.a.lastTurn = { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' };
+  conversations.a.lastTurn = { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' };
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? Promise.resolve({ conversation: conversations.a }) : request(path, body, method));
   render(<AnalystPanel />);
   await open('a');
-  // Retry sits in the open chat; Update review sits on its history row.
-  fireEvent.click((button === 'Retry' ? screen : historyRows()).getByRole('button', { name: button, exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) }));
 });
 test('saved history remains readable with event-stream outage', async () => {
@@ -2483,18 +2040,15 @@ test.each(['portfolio-review', 'prediction-markets-review'])('refreshing %s show
     ] });
     return original(path, body, method);
   });
+  conversations.a.lastTurn = { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' };
   render(<AnalystPanel />);
   await open('a');
-  await open('b');
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+  const retry = screen.getByRole('button', { name: 'Retry', exact: true });
+  fireEvent.click(retry);
   expectReviewProgress();
   expect(screen.getByText('Only answer A')).toBeInTheDocument();
-  const refresh = historyRows().getByRole('button', { name: 'Update review: Chat a' });
-  fireEvent.click(refresh);
-  expect(refresh).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Chat a' }));
-  await screen.findByText('Only answer A');
-  expect(screen.queryByRole('button', { name: 'Update review', exact: true })).not.toBeInTheDocument();
+  // A second click while the refresh is starting is ignored.
+  fireEvent.click(retry);
   expect(screen.queryByRole('button', { name: 'Show earlier messages' })).not.toBeInTheDocument();
   expect(api.request.mock.calls.filter(([path]) => path === `/daily/${kind}`)).toHaveLength(1);
   expect(api.request).toHaveBeenCalledWith(`/daily/${kind}`, expect.objectContaining({ conversationId: 'a', refresh: true, requestId: expect.any(String) }));
@@ -2545,6 +2099,7 @@ test('completing a review keeps its captured source rows visible during the fina
 
 test('portfolio refresh progress and failure preserve the saved report and Sources layout', async () => {
   conversations.a.kind = 'portfolio-review';
+  conversations.a.lastTurn = { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' };
   conversations.a.messages[0].portfolioBrief = { available: true, runId: 'saved-run', holdings: [], metrics: {} };
   const sourceItems = [{ id: 'portfolio', label: 'IBKR holdings', status: 'ready', observedAt: '2026-09-04T15:00:00Z' }];
   const request = api.request.getMockImplementation();
@@ -2555,10 +2110,10 @@ test('portfolio refresh progress and failure preserve the saved report and Sourc
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
   await waitFor(() => expect(screen.getByRole('article', { name: 'Portfolio Review summary' })).toHaveAttribute('data-message-id', 'a-message'));
-  await within(await screen.findByRole('region', { name: 'Review sources' })).findByText('Connected');
+  await within(await screen.findByRole('region', { name: 'Review sources' })).findByText('Ready');
   const presentationClass = screen.getByTestId('analyst-panel').className;
-  // Starting a refresh from the history reopens the report with its Sources in place.
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+  // Retrying the review keeps the report with its Sources in place.
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveAttribute('data-message-id', 'a-message');
   expect(screen.getByTestId('analyst-panel')).toHaveAttribute('class', presentationClass);
@@ -2566,7 +2121,7 @@ test('portfolio refresh progress and failure preserve the saved report and Sourc
   const header = sources.querySelector('header');
   const list = sources.querySelector('ul');
   const sourceRow = within(sources).getByText('IB Gateway').closest('li');
-  expect(within(sources).getAllByRole('listitem')).toHaveLength(23);
+  expect(within(sources).getAllByRole('listitem')).toHaveLength(22);
   expect(within(header).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
   expect(within(sourceRow).getByText('Checking')).toBeVisible();
   expect(within(sourceRow).queryByText('Sep 4 08:00 PDT')).not.toBeInTheDocument();
@@ -2576,31 +2131,34 @@ test('portfolio refresh progress and failure preserve the saved report and Sourc
   expect(sources.querySelector('ul')).toBe(list);
   expect(within(sources).getByText('IB Gateway').closest('li')).toBe(sourceRow);
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-  expect(screen.getByRole('alert')).toHaveTextContent('IB Gateway unavailable.');
+  expect(screen.getByText('IB Gateway unavailable.').closest('[role="alert"]')).toBeInTheDocument();
 });
 
 test('a sidebar timeout after an accepted review refresh does not mark the review failed', async () => {
   conversations.a.kind = 'portfolio-review';
+  conversations.a.lastTurn = { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' };
   const original = api.request.getMockImplementation();
   let accepted = false;
+  let timedOut = false;
   api.request.mockImplementation(async (path, body, method) => {
     if (path === '/daily/portfolio-review') {
       accepted = true;
-      conversations.a = { ...conversations.a, messages: [
+      conversations.a = { ...conversations.a, lastTurn: { id: 'refresh-turn', state: 'complete' }, messages: [
         { id: 'refreshed-report', role: 'assistant', state: 'complete', text: 'Completed refreshed portfolio report' },
       ] };
       return { conversation: conversations.a };
     }
     if (accepted && path.startsWith('/conversations?')) {
+      timedOut = true;
       throw Object.assign(new Error('The Analyst request timed out.'), { code: 'ANALYST_REQUEST_TIMEOUT' });
     }
     return original(path, body, method);
   });
   render(<AnalystPanel />);
   await open('a');
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   await screen.findByText('Completed refreshed portfolio report');
-  await waitFor(() => expect(historyRows().getByRole('button', { name: 'Update review: Chat a' })).toBeEnabled());
+  await waitFor(() => expect(timedOut).toBe(true));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.queryByText('The Analyst request timed out.')).not.toBeInTheDocument();
   expect(api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review')).toHaveLength(1);
@@ -2608,14 +2166,15 @@ test('a sidebar timeout after an accepted review refresh does not mark the revie
 
 test('a failed refresh keeps its request ID for retry and clears old source checks', async () => {
   conversations.a.kind = 'portfolio-review';
+  conversations.a.lastTurn = { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' };
   const original = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review'
     ? Promise.reject(new Error('Could not start the review.')) : original(path, body, method));
   render(<AnalystPanel />);
   await open('a');
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   await screen.findByText('Could not start the review.');
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
   await screen.findByText('Could not start the review.');
   const requests = api.request.mock.calls.filter(([path]) => path === '/daily/portfolio-review');
   expect(requests).toHaveLength(2);
@@ -2676,7 +2235,7 @@ test.each(['portfolio-review', 'prediction-markets-review'])('%s launch preserve
     const sourceTable = within(transcript).getByRole('region', { name: 'Review sources' });
     await act(async () => sources.resolve({ conversationId: 'review', state: 'complete',
       items: [{ id: 'portfolio', label: 'Captured holdings', status: 'ready', observedAt: '2026-09-04T15:00:00Z' }] }));
-    await within(screen.getByText('IB Gateway').closest('li')).findByText('Connected');
+    await within(screen.getByText('IB Gateway').closest('li')).findByText('Ready');
     expect(within(transcript).getByRole('region', { name: 'Review sources' })).toBe(sourceTable);
     expect(transcript.scrollTop).toBe(175);
   } finally { position.mockRestore(); }
@@ -2688,17 +2247,18 @@ test('an explicit Portfolio refresh keeps the reader position through its loadin
     const original = { id: 'older-report', role: 'assistant', state: 'complete', text: 'Saved report',
       reviewPostId: 'base', reviewRunId: 'older-run', portfolioBrief: { available: true,
         metrics: { grossExposure: 100 }, holdings: [], nextSession: [] } };
-    conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [original] };
+    conversations.a = { ...conversations.a, kind: 'portfolio-review', revision: 1, messages: [original],
+      lastTurn: { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' } };
     const receipt = deferred();
     const request = api.request.getMockImplementation();
     api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? receipt.promise : request(path, body, method));
     render(<AnalystPanel />);
     fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-    await findPortfolioExposureAmount('$100.00');
+    await findPortfolioExposureAmount('$100');
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     Object.defineProperties(transcript, { scrollHeight: { configurable: true, value: 750 }, clientHeight: { configurable: true, value: 500 } });
     fireEvent.scroll(transcript, { target: { scrollTop: 225 } });
-    fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
     expect(transcript.scrollTop).toBe(225);
     const pending = { id: 'fresh-report', role: 'assistant', state: 'reviewing', text: '',
       reviewPostId: 'fresh-post', reviewRunId: 'fresh-run', turn_id: 'fresh-turn' };
@@ -2721,13 +2281,13 @@ test('an explicit Portfolio refresh keeps the reader position through its loadin
     expect(transcript.querySelector('[data-message-id="fresh-report"]')).toHaveTextContent('Fresh captured research');
     expect(screen.getByRole('status', { name: 'Response running' })).toHaveTextContent('Gathering sources…');
     expect(screen.queryByText(/latest refresh could not verify holdings|Unavailable — connect to IB Gateway/i)).not.toBeInTheDocument();
-    expect(portfolioExposureAmount('$100.00')).toBeVisible();
+    expect(portfolioExposureAmount('$100')).toBeVisible();
     fireEvent.scroll(transcript, { target: { scrollTop: 225 } });
     const fresh = conversations.a.messages.at(-1);
     conversations.a = { ...conversations.a, revision: 4, messages: [...conversations.a.messages.slice(0, -1),
       { ...fresh, portfolioBrief: { ...fresh.portfolioBrief, available: true, metrics: { grossExposure: 200 } } }] };
     act(() => stream.onmessage({ data: JSON.stringify({ seq: 2, conversation_id: 'a' }) }));
-    await findPortfolioExposureAmount('$200.00');
+    await findPortfolioExposureAmount('$200');
     expect(transcript.scrollTop).toBe(225);
     conversations.a = { ...conversations.a, revision: 5, activeTurn: null, lastTurn: { id: 'fresh-turn', state: 'complete' },
       messages: conversations.a.messages.filter(message => message.id !== 'empty-pending').map(message => message.id === 'fresh-report'
@@ -2742,12 +2302,13 @@ test.each(['portfolio-review', 'prediction-markets-review'])('%s refresh complet
   const position = reportPosition('Completed before acceptance');
   try {
     conversations.a.kind = kind;
+    conversations.a.lastTurn = { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' };
     const pending = deferred();
     const request = api.request.getMockImplementation();
     api.request.mockImplementation((path, body, method) => path === `/daily/${kind}` ? pending.promise : request(path, body, method));
     render(<AnalystPanel />);
     await open('a');
-    fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     conversations.a = { ...conversations.a, revision: 2, lastTurn: { id: 'new-turn', state: 'complete' }, messages: [...conversations.a.messages,
       { id: 'completed', role: 'assistant', state: 'complete', text: 'Completed before acceptance' }] };
@@ -2757,7 +2318,6 @@ test.each(['portfolio-review', 'prediction-markets-review'])('%s refresh complet
     fireEvent.scroll(transcript, { target: { scrollTop: 225 } });
     await act(async () => pending.resolve({ conversation: conversations.a }));
     expect(transcript.scrollTop).toBe(225);
-    expect(historyRows().getByRole('button', { name: 'Update review: Chat a' })).toBeEnabled();
   } finally { position.mockRestore(); }
 });
 
@@ -2765,12 +2325,13 @@ test('leaving a refreshing report for history cancels its automatic completion s
   const position = reportPosition('Completed after navigation');
   try {
     conversations.a.kind = 'portfolio-review';
+    conversations.a.lastTurn = { id: 'failed-review', state: 'failed', request_id: 'daily-turn:failed-review', error: 'Supporting data timed out' };
     const pending = deferred();
     const request = api.request.getMockImplementation();
     api.request.mockImplementation((path, body, method) => path === '/daily/portfolio-review' ? pending.promise : request(path, body, method));
     render(<AnalystPanel />);
     await open('a');
-    fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Chat a' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
     await open('b');
     const transcript = screen.getByRole('log', { name: 'Conversation' });
     fireEvent.scroll(transcript, { target: { scrollTop: 125 } });
@@ -3021,7 +2582,7 @@ test('unavailable deletion verification reports uncertainty without claiming the
   expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat a' })).not.toBeInTheDocument();
 });
 
-test('a stuck review is stopped and run again from Refresh without deleting it', async () => {
+test('a stuck review is stopped and run again from Retry without deleting it', async () => {
   conversations.a = { ...conversations.a, title: 'Portfolio Review', kind: 'portfolio-review', trading_date: '2026-09-04',
     state: 'running', activeTurn: { id: 'stuck-turn', state: 'running' } };
   const request = api.request.getMockImplementation();
@@ -3035,14 +2596,13 @@ test('a stuck review is stopped and run again from Refresh without deleting it',
     return request(path, body, method);
   });
   render(<AnalystPanel />);
-  // While the review is active, Stop is the way out; refresh waits for it.
-  expect(await historyRows().findByRole('button', { name: 'Update review: Portfolio Review' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Portfolio Review' }));
+  // While the review is active, Stop is the way out; Retry appears once it stops.
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Portfolio Review' }));
   expect(await screen.findByRole('button', { name: 'Stop' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Retry', exact: true })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument());
-  await waitFor(() => expect(historyRows().getByRole('button', { name: 'Update review: Portfolio Review' })).toBeEnabled());
-  fireEvent.click(historyRows().getByRole('button', { name: 'Update review: Portfolio Review' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry', exact: true }));
   await waitFor(() => expect(api.request).toHaveBeenCalledWith('/daily/portfolio-review', { refresh: true, conversationId: 'a', requestId: expect.stringMatching(/^review-refresh:/) }));
   expect(historyRows().getAllByRole('button', { name: 'Open conversation: Portfolio Review' })).toHaveLength(1);
   expect(api.request.mock.calls.some(([, , method]) => method === 'DELETE')).toBe(false);
@@ -3559,9 +3119,9 @@ test('a progressive Portfolio capture renders its structured report without pars
       } }] };
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  await findPortfolioExposureAmount('$1,234.00');
+  await findPortfolioExposureAmount('$1,234');
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
-  expect(report).toHaveTextContent('$1,234.00');
+  expect(report).toHaveTextContent('$1,234');
   expect(report).toHaveTextContent('Captured research appears promptly.');
   expect(report).not.toHaveTextContent(/PORTFOLIO REVIEW|analyst-daily-rollup|Raw duplicate/);
   expect(prepare).not.toHaveBeenCalled();
@@ -3756,19 +3316,15 @@ test('review Sources keep reading by conversation ID when the conversation recor
     : request(path, body, method));
   render(<AnalystPanel />);
   const sources = screen.getByRole('region', { name: 'Review sources' });
-  await waitFor(() => expect(within(sources).getByText('IB Gateway').closest('li')).toHaveTextContent('Connected'));
+  await waitFor(() => expect(within(sources).getByText('IB Gateway').closest('li')).toHaveTextContent('Ready'));
   expect(screen.getByRole('button', { name: 'Retry conversation' })).toBeVisible();
   expect(sources).toHaveAttribute('aria-busy', 'false');
 });
 
-test('a model phase after settled Sources stays in the Sources header for Balance and Manual reviews', async () => {
+test('a model phase after settled Sources stays in the Sources header for Balance reviews', async () => {
   conversations.a = { ...conversations.a, kind: 'balance-review', revision: 1, reviewPhase: 'summarizing',
     activeTurn: { id: 'narrative-turn', state: 'running', request_id: 'daily-narrative:run-1' },
     messages: [{ id: 'report', role: 'assistant', state: 'complete', text: 'Captured balance report', reviewRunId: 'run-1' }] };
-  conversations.manual = { ...make('manual', ''), title: 'Manual Portfolio Update', revision: 1,
-    activeTurn: { id: 'manual-turn', state: 'running', request_id: 'manual-request' },
-    manualVerification: { captureId: 'manual-capture', turnId: 'manual-turn', state: 'ready' },
-    messages: [{ id: 'manual-answer', role: 'assistant', state: 'running', text: '' }] };
   const request = api.request.getMockImplementation();
   api.request.mockImplementation((path, body, method) => path === '/conversations/a/sources'
     ? Promise.resolve({ conversationId: 'a', runId: 'run-1', basis: 'review', state: 'succeeded', items: [
@@ -3780,8 +3336,6 @@ test('a model phase after settled Sources stays in the Sources header for Balanc
   await waitFor(() => expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Interest accruals'));
   const header = () => screen.getByRole('region', { name: 'Review sources' }).querySelector('header');
   expect(within(header()).getByRole('status', { name: 'Response running' })).toHaveTextContent('Summarizing…');
-  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Manual Portfolio Update' }));
-  await waitFor(() => expect(within(header()).getByRole('status', { name: 'Response running' })).toHaveTextContent('Writing verification…'));
   expect(screen.getAllByRole('status', { name: 'Response running' })).toHaveLength(1);
 });
 

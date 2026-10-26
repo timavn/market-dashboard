@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import AnalystReportLink from './AnalystReportLink';
 import AnalystPredictionRangeBar, { parsePredictionRange, predictionRangeLabel } from './AnalystPredictionRangeBar';
@@ -7,7 +7,7 @@ import AnalystPredictionResearch, { parsePredictionResearch } from './AnalystPre
 import remarkGfm from 'remark-gfm';
 import { remarkAnalystProcessColors } from './analystProcessColors';
 import { predictionReportSources } from './analystPredictionSources';
-import { predictionReportTables } from './analystPredictionTables';
+import { foldPredictionAlphaCode, onceAcrossPredictionResearch, pinPredictionDollar, predictionReportTables } from './analystPredictionTables';
 import { presentAnalystReportDates } from '../../utils/analystReportDates';
 import './AnalystPredictionReport.css';
 
@@ -22,12 +22,117 @@ const MARKET_TOKEN = /^(MKT|REF)\(([^;()]+);([^;()]+)\)$/;
 const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*)\)$/;
 // ALPHA(trade;trend;tradeRel;trendRel;unit;approximate;product): this morning's Alpha Code with the price above or below each level.
 const ALPHA_TOKEN = /^ALPHA\(([^;()]*);([^;()]*);(above|below|at|);(above|below|at|);(%?);([01]);([^;()]*)\)$/;
+// STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone[;direction]]): the Risk Range
+// against its earlier publications. Steps run oldest to today as + (higher), - (lower) or = (unchanged); runs are signed
+// counts ending today. Boards with volume add DV/AV, whether a move against the Trend is supported or warned by it, and
+// later boards the day's direction (+ up, - down).
+const STRUCTURE_TOKEN = /^STRUCT\(([-+=]*);([-+]?\d+);([-+=]*);([-+]?\d+);([^;()]*);([^;()]*);([-+]?\d*);([01]);(%?)(?:;(DV|AV)?;(supports|warns)?(?:;([-+]?))?)?\)$/;
+// VOL(d1;d15;d30;d90;date;symbol): the latest session's ETF volume against the prior session and its 15-, 30- and
+// 90-calendar-day averages, in signed whole percents. Drawn under Tick, Trade and Trend.
+const VOLUME_TOKEN = /^VOL\(([-+]?\d*);([-+]?\d*);([-+]?\d*);([-+]?\d*);([^;()]*);([^;()]*)\)$/;
+const VOLUME_WINDOWS = ['vs prior day', 'vs 15D avg', 'vs 30D avg', 'vs 90D avg'];
+function VolumeCell({ match, ...span }) {
+  const [, d1, d15, d30, d90, date, symbol] = match;
+  const values = [d1, d15, d30, d90];
+  const label = values.every(value => value === '') ? 'Volume unavailable'
+    : `${symbol} volume${date ? ` on ${date}` : ''} vs the prior session and its 15-, 30- and 90-day averages`;
+  return <td {...span} className="analyst-prediction-volume-cell" title={label}>
+    <span className="analyst-prediction-volume">
+      {VOLUME_WINDOWS.map((key, index) => {
+        const value = values[index] === '' ? null : Number(values[index]);
+        const tone = value > 0 ? ' is-heavier' : value < 0 ? ' is-lighter' : '';
+        return <span key={key} className={`analyst-prediction-volume__window${tone}`}>
+          <span className="analyst-prediction-volume__key">{key}</span>
+          <span className="analyst-prediction-volume__value">{value === null ? 'N/A' : `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value)}%`}</span>
+        </span>;
+      })}
+    </span>
+  </td>;
+}
 const RELATION = { above: ['▲', 'analyst-process--positive', 'price above'], below: ['▼', 'analyst-process--negative', 'price below'], at: ['=', 'analyst-prediction-stack--muted', 'price at'] };
 // Two-digit days keep the right-aligned As of dates in one column: Sep 9 -> Sep 09.
 const padDay = date => date.replace(/^([A-Za-z]{3}) (\d)\b/, '$1 0$2');
 const BIAS_CLASS = { Bullish: 'analyst-process--positive', Bearish: 'analyst-process--negative' };
-const MarkdownCell = ({ node, children }) => {
+const STEP_CLASS = { '+': 'is-higher', '-': 'is-lower', '=': 'is-unchanged' };
+const STEP_LABEL = { '+': 'higher', '-': 'lower', '=': 'unchanged' };
+// Today's move as HL/LL/=L for lows and HH/LH/=H for highs.
+const todayMove = (steps, leg) => {
+  const step = steps.at(-1);
+  const text = step === '+' ? (leg === 'low' ? 'HL' : 'HH') : step === '-' ? (leg === 'low' ? 'LL' : 'LH') : `=${leg === 'low' ? 'L' : 'H'}`;
+  return { text, tone: step === '+' ? ' is-on' : step === '-' ? ' is-against' : '' };
+};
+const runLabel = (run, leg) => {
+  const count = Number(run);
+  if (!count) return { text: '—', className: 'analyst-prediction-stack--muted' };
+  const higher = count > 0;
+  return { text: `${higher ? 'H' : 'L'}${leg === 'low' ? 'L' : 'H'} ${Math.abs(count)}`,
+    className: higher ? 'analyst-process--positive' : 'analyst-process--negative' };
+};
+// The ATH line opens a small note under it with the date the record was set.
+function AthLine({ level, distance, date }) {
+  const [open, setOpen] = useState(false);
+  const reading = <>
+    <span className="analyst-prediction-structure-record">{level}</span>
+    {distance && <span className="analyst-prediction-structure-distance">{` : ${distance}`}</span>}
+  </>;
+  if (!date) return <span className="analyst-prediction-stack">{reading}</span>;
+  return <span className="analyst-prediction-structure-ath">
+    <button type="button" className="analyst-prediction-structure-ath__toggle" aria-expanded={open}
+      onClick={() => setOpen(value => !value)} onBlur={() => setOpen(false)}
+      onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}>{reading}</button>
+    {open && <span role="tooltip" className="analyst-prediction-structure-ath__date">ATH on {date}</span>}
+  </span>;
+}
+// Hedgeye reads volume against the Trend: a move against it on DV is a buy (Bullish) or short (Bearish) setup,
+// on AV a warning. A move with the Trend says nothing either way and keeps the plain outline.
+const VOLUME_TONE = { supports: ' is-on', warns: ' is-against' };
+const VOLUME_ARROW = { '+': '↑', '-': '↓' };
+const VOLUME_SENTENCE = { DV: 'volume below its 30-day average', AV: 'volume above its 30-day average' };
+const VOLUME_DAY = { '+': 'Up day on ', '-': 'Down day on ' };
+const VOLUME_READING = { supports: ' (against the Trend: setup)', warns: ' (against the Trend: warning)' };
+function StructureCell({ match, ...span }) {
+  const [, lowSteps, lowRun, highSteps, highRun, ath, athDate, athPct, topAbove, unit, volume, volumeTone, direction] = match;
+  const legs = [['high', highSteps, highRun], ['low', lowSteps, lowRun]];
+  const moves = [todayMove(lowSteps, 'low'), todayMove(highSteps, 'high'),
+    { text: 'ATH', tone: topAbove === '1' ? ' is-record' : '' },
+    ...(volume ? [{ text: `${VOLUME_ARROW[direction] || ''}${volume}`, tone: VOLUME_TONE[volumeTone] || '' }] : [])];
+  // The level reads blue; after a black colon, how far price is below it (a + marks price above it).
+  const athLevel = topAbove === '1' ? `Top > ATH ${ath}${unit}` : `ATH ${ath}${unit}`;
+  const pct = Number(athPct);
+  const athDistance = athPct ? `${pct > 0 ? '+' : ''}${Math.abs(pct)}%` : null;
+  // The tooltip says in words what the percent is: price against the all-time high.
+  const record = `${ath}${unit}${athDate ? ` (${athDate})` : ''}`;
+  const athSentence = !ath ? 'All-time high unavailable'
+    : topAbove === '1' ? `Range top above the all-time high of ${record}`
+      : !athPct ? `All-time high ${record}`
+        : pct === 0 ? `Price at the all-time high of ${record}`
+          : `Price ${Math.abs(pct)}% ${pct < 0 ? 'below' : 'above'} the all-time high of ${record}`;
+  const label = [`Today ${moves.map(move => move.text).join(' ')}`,
+    ...legs.map(([leg, , run]) => runLabel(run, leg).text), athSentence,
+    ...(volume ? [`${VOLUME_DAY[direction] || 'Day on '}${VOLUME_SENTENCE[volume]}${VOLUME_READING[volumeTone] || ' (not against the Trend)'}`] : [])].join(' · ');
+  return <td {...span} className="analyst-prediction-structure-cell" title={label}>
+    <span className="analyst-prediction-stack analyst-prediction-structure-moves">
+      {moves.map(move => <span key={move.text} className={`analyst-prediction-structure-move${move.tone}`}>{move.text}</span>)}
+    </span>
+    {legs.map(([leg, steps, run]) => {
+      const count = runLabel(run, leg);
+      return <span key={leg} className="analyst-prediction-stack analyst-prediction-structure-leg">
+        <span className={`analyst-prediction-structure-count ${count.className}`}>{count.text}</span>
+        <span className="analyst-prediction-structure-steps" aria-label={`${leg === 'low' ? 'Lows' : 'Highs'}, oldest to today: ${[...steps].map(step => STEP_LABEL[step]).join(', ')}`}>
+          {[...steps].map((step, index) => <i key={index} className={STEP_CLASS[step]} />)}
+        </span>
+      </span>;
+    })}
+    {ath ? <AthLine level={athLevel} distance={athDistance} date={athDate} />
+      : <span className="analyst-prediction-stack analyst-prediction-stack--muted">ATH N/A</span>}
+  </td>;
+}
+function cellFor({ node, children }) {
   const text = nodeText(node).trim();
+  const structure = text.match(STRUCTURE_TOKEN);
+  if (structure) return <StructureCell match={structure} />;
+  const volume = text.match(VOLUME_TOKEN);
+  if (volume) return <VolumeCell match={volume} />;
   const bias = text.match(BIAS_TOKEN);
   if (bias) {
     const [, direction, date, product] = bias;
@@ -76,9 +181,32 @@ const MarkdownCell = ({ node, children }) => {
   if (range) return <td className="analyst-prediction-range-cell" title={predictionRangeLabel(range).text}><AnalystPredictionRangeBar range={range} /></td>;
   const value = presentAnalystReportDates(nodeText(node));
   const dates = value.split(' · ');
-  return <td title={value} className={shortReading.test(value) ? 'analyst-prediction-short-reading' : undefined}>{dates.every(date => dateValue.test(date))
+  const className = shortReading.test(value) ? 'analyst-prediction-short-reading' : /^(?:N\/A|—)$/.test(value.trim()) ? 'is-na' : undefined;
+  return <td title={value} className={className}>{dates.every(date => dateValue.test(date))
     ? dates.map((date, index) => <React.Fragment key={`${date}-${index}`}>{index > 0 && ' · '}<span className="analyst-prediction-cell-date analyst-process--key">{date}</span></React.Fragment>)
     : children}</td>;
+}
+// The row renderer spans cells over the volume row by passing rowSpan/colSpan through.
+const MarkdownCell = ({ rowSpan, colSpan, ...props }) => {
+  const cell = cellFor(props);
+  return rowSpan || colSpan ? React.cloneElement(cell, { rowSpan, colSpan }) : cell;
+};
+const isVolumeHeading = cell => cell.tagName === 'th' && /^Volume$/i.test(nodeText(cell).trim());
+const isVolumeCell = cell => cell.tagName === 'td' && VOLUME_TOKEN.test(nodeText(cell).trim());
+// Boards with volume carry it as a column after Trend; Tick, Trade and Trend take the top half of the row
+// and the volume windows span the three of them underneath, while the other cells run the full height.
+const MarkdownRow = ({ node, children }) => {
+  const cells = (node?.children || []).filter(child => child.tagName === 'td' || child.tagName === 'th');
+  const elements = React.Children.toArray(children).filter(React.isValidElement);
+  const volume = cells.findIndex(cell => isVolumeHeading(cell) || isVolumeCell(cell));
+  if (volume < 3 || elements.length !== cells.length) return <tr>{children}</tr>;
+  const rest = elements.filter((_cell, index) => index !== volume);
+  if (cells[volume].tagName === 'th') return <tr>{rest}</tr>;
+  const signal = index => index >= volume - 3 && index < volume;
+  return <>
+    <tr>{rest.map((cell, index) => (signal(index) ? cell : React.cloneElement(cell, { rowSpan: 2 })))}</tr>
+    <tr className="analyst-prediction-volume-row">{React.cloneElement(elements[volume], { colSpan: 3 })}</tr>
+  </>;
 };
 const MarkdownTable = ({ children, node }) => {
   const heading = node?.children?.find(child => child.tagName === 'thead')?.children?.find(child => child.tagName === 'tr');
@@ -91,8 +219,14 @@ const MarkdownTable = ({ children, node }) => {
   // Setup boards: saved captures used separate Price/Risk Range/In range columns; current ones use one range bar.
   const rangeBoard = headings.some(label => /^Price and Risk Range$/i.test(label.trim()));
   const alphaBoard = rangeBoard && headings.some(label => /^Alpha Code$/i.test(label.trim()));
+  const structureBoard = rangeBoard && headings.some(label => /^Structure\b/i.test(label.trim()));
   const setupBoard = rangeBoard || (headings.some(label => /^Setup$/i.test(label.trim()))
     && headings.some(label => /^In range$/i.test(label.trim())));
+  // CPI nowcast: Low in red, Base as is, High in green.
+  const nowcast = /^(?:Nowcast low|Low)\|Base\|High$/i.test(headings.slice(2, 5).map(label => label.trim()).join('|'));
+  // The single US Dollar row pinned above the sections stays in view while the report scrolls.
+  const bodyRows = node?.children?.find(child => child.tagName === 'tbody')?.children?.filter(child => child.tagName === 'tr') || [];
+  const pinned = bodyRows.length === 1 && /^REF\(US Dollar;/.test(nodeText(bodyRows[0].children?.find(child => child.tagName === 'td')).trim());
   const contractComparison = headings.some(label => /^Outcome$/i.test(label.trim()))
     && headings.some(label => /^Market-implied odds$/i.test(label.trim()));
   const contractColumn = label => {
@@ -105,16 +239,42 @@ const MarkdownTable = ({ children, node }) => {
     if (/^Gross reward\/risk \(before fees\)$/i.test(label.trim())) return 'analyst-prediction-contract-payoff-col';
     return undefined;
   };
-  return <div className={`analyst-table-frame${dated ? ' has-dates' : ''}${tickers ? ' has-tickers' : ''}${securities ? ' has-securities' : ''}${labels ? ' has-labels' : ''}${tickComparison ? ' is-tick-comparison' : ''}${contractComparison ? ' is-contract-comparison' : ''}${setupBoard ? ' is-setup-board' : ''}${rangeBoard ? ' is-range-board' : ''}${alphaBoard ? ' has-alpha' : ''}${rangeBoard && headings.some(label => /^Setup$/i.test(label.trim())) ? ' has-setup' : ''}`}>
-    <table>{headings.length > 0 && <colgroup>{headings.map((label, index) => <col key={`${label}-${index}`} className={
+  const frameClass = `analyst-table-frame${dated ? ' has-dates' : ''}${tickers ? ' has-tickers' : ''}${securities ? ' has-securities' : ''}${labels ? ' has-labels' : ''}${tickComparison ? ' is-tick-comparison' : ''}${contractComparison ? ' is-contract-comparison' : ''}${setupBoard ? ' is-setup-board' : ''}${rangeBoard ? ' is-range-board' : ''}${alphaBoard ? ' has-alpha' : ''}${structureBoard ? ' has-structure' : ''}${rangeBoard && headings.some(label => /^Setup$/i.test(label.trim())) ? ' has-setup' : ''}${nowcast ? ' is-nowcast' : ''}${pinned ? ' is-pinned-dollar' : ''}`;
+  // The volume column draws inside the signal columns, so it has no column of its own.
+  const columns = rangeBoard ? headings.filter(label => !/^Volume$/i.test(label.trim())) : headings;
+  const table = <table>{columns.length > 0 && <colgroup>{columns.map((label, index) => <col key={`${label}-${index}`} className={
       contractColumn(label) || (index === 0 && tickers ? 'analyst-prediction-ticker-col'
         : index === 1 && securities ? 'analyst-prediction-security-col'
           : index === 0 && labels ? 'analyst-prediction-metric-col'
-            : index === headings.length - 1 && dated ? 'analyst-prediction-date-col' : undefined)
+            : index === columns.length - 1 && dated ? 'analyst-prediction-date-col' : undefined)
     } />)}
-    </colgroup>}{children}</table>
-  </div>;
+    </colgroup>}{children}</table>;
+  return pinned ? <PinnedFrame className={frameClass}>{table}</PinnedFrame> : <div className={frameClass}>{table}</div>;
 };
+// While the pinned frame is stuck it masks the transcript's top padding, so rows scrolling under it never show above it.
+function PinnedFrame({ className, children }) {
+  const marker = useRef(null);
+  const frame = useRef(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    let scroller = frame.current?.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    if (!scroller) return undefined;
+    let pending = 0;
+    const measure = () => {
+      pending = 0;
+      if (marker.current && frame.current) setStuck(marker.current.getBoundingClientRect().top < frame.current.getBoundingClientRect().top - 1);
+    };
+    const onScroll = () => { if (!pending) pending = requestAnimationFrame(measure); };
+    measure();
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => { scroller.removeEventListener('scroll', onScroll); cancelAnimationFrame(pending); };
+  }, []);
+  return <>
+    <div ref={marker} aria-hidden="true" className="analyst-pinned-marker" />
+    <div ref={frame} className={`${className}${stuck ? ' is-stuck' : ''}`}>{children}</div>
+  </>;
+}
 // ```analyst-drivers blocks carry a section's shared variables and ```analyst-research its
 // markets' morning research; other code blocks render normally.
 const MarkdownPre = ({ node, children }) => {
@@ -132,7 +292,13 @@ const SourceButton = ({ group, onCitation, children }) => <button type="button" 
 const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageId, markdown, citations, onCitation, error }) {
   const report = useMemo(() => {
     const sourced = predictionReportSources(markdown, citations);
-    return { ...sourced, markdown: predictionReportTables(sourced.markdown) };
+    // Saved reports titled the CPI nowcast's first column "Nowcast low".
+    return { ...sourced, markdown: onceAcrossPredictionResearch(pinPredictionDollar(foldPredictionAlphaCode(predictionReportTables(sourced.markdown))))
+      .replace(/^(\| Market \| Kalshi \| )Nowcast low( \| Base \| High \|)/gm, '$1Low$2')
+      // Setup boards saved before Status was named for their publication times.
+      .replace(/^(\| Market \| Tick \|.*\| )As of \(PT\)( \|)$/gm, '$1Status$2')
+      // Boards saved while Structure carried its session count in the title.
+      .replace(/^(\| Market \| Tick \|.*\| )Structure \(\d+d\)( \|)/gm, '$1Structure$2') };
   }, [markdown, citations]);
   const parts = useMemo(() => {
     const match = report.markdown.match(/<details data-analyst-hedgai>\s*<summary>([^<\n]+)<\/summary>\s*([\s\S]*?)\s*<\/details>/);
@@ -141,6 +307,7 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
   const components = useMemo(() => ({
     table: MarkdownTable,
     td: MarkdownCell,
+    tr: MarkdownRow,
     pre: MarkdownPre,
     // Older captures keep their original evidence and publication names. Only
     // the generated signal-field label follows today's Tick terminology.

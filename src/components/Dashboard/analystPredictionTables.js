@@ -169,3 +169,113 @@ export function predictionReportTables(markdown) {
   flush();
   return output.join('\n').replace(/\n$/, String(markdown || '').endsWith('\n') ? '\n' : '');
 }
+
+// Boards saved with an Alpha Code column show it in the range cell instead, as current captures do:
+// ALPHA(trade;trend;tradeRel;trendRel;unit;approx;product) joins RR(...) as ;trade;trend;approx;dots;product.
+const ALPHA_CELL = /^ALPHA\(([^;()]*);([^;()]*);[^;()]*;[^;()]*;%?;([01]);([^;()]*)\)$/;
+const RANGE_CELL = /^RR\(([^;()]*;){4}%?\)$/;
+const level = value => value.replace(/[~,]/g, '');
+export function foldPredictionAlphaCode(markdown) {
+  const lines = String(markdown || '').split('\n');
+  for (let start = 0; start < lines.length; start += 1) {
+    const headings = /^\s*\|/.test(lines[start]) ? cells(lines[start]) : [];
+    const alpha = headings.findIndex(heading => /^Alpha Code$/i.test(plain(heading)));
+    const range = headings.findIndex(heading => /^Price and Risk Range$/i.test(plain(heading)));
+    if (alpha < 0 || range < 0) continue;
+    let end = start + 2;
+    while (end < lines.length && /^\s*\|/.test(lines[end])) end += 1;
+    const rows = lines.slice(start + 2, end).map(cells);
+    // A code with no range bar to sit in keeps the captured layout rather than being dropped.
+    if (rows.some(row => row.length !== headings.length
+      || (ALPHA_CELL.test(row[alpha]) && !RANGE_CELL.test(row[range])))) continue;
+    const without = row => row.filter((_value, index) => index !== alpha);
+    const folded = rows.map(row => {
+      const code = row[alpha].match(ALPHA_CELL);
+      if (!code) return without(row);
+      const [, trade, trend, approximate, product] = code;
+      // A range drawn on another instrument (MKT(...;COMPQ range)) shows the code without dots.
+      const dots = /^MKT\(/.test(row[0]) ? 0 : 1;
+      return without(row.map((value, index) => (index === range
+        ? `${value.slice(0, -1)};${level(trade)};${level(trend)};${approximate};${dots};${product})` : value)));
+    });
+    // Cells are already escaped as captured; they are rejoined as they were.
+    const line = row => `| ${row.join(' | ')} |`;
+    lines.splice(start, end - start, line(without(headings)), line(without(headings).map(() => '---')), ...folded.map(line));
+    start += folded.length + 1;
+  }
+  return lines.join('\n');
+}
+
+// A sentence that names several markets ("Bearish Gold & Silver") is captured under each of them. It reads once,
+// under the first market that shows it anywhere in the review; a market left with nothing else says where it is.
+const researchKey = entry => [entry.product, entry.time, String(entry.source || entry.context || '').replace(/\s+/g, ' ').trim()].join('\u0000');
+export function onceAcrossPredictionResearch(markdown) {
+  const lines = String(markdown || '').split('\n');
+  const seen = new Map();
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index].trim() !== '```analyst-research' || lines[index + 2]?.trim() !== '```') continue;
+    let block;
+    try {
+      block = JSON.parse(lines[index + 1]);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(block?.markets)) continue;
+    const markets = block.markets.map(row => {
+      if (!Array.isArray(row?.entries)) return row;
+      const shownWith = [];
+      const entries = row.entries.filter(entry => {
+        const key = researchKey(entry || {});
+        if (!seen.has(key)) {
+          seen.set(key, row.market);
+          return true;
+        }
+        if (!shownWith.includes(seen.get(key))) shownWith.push(seen.get(key));
+        return false;
+      });
+      return { ...row, entries, ...(!entries.length && shownWith.length ? { mentionedWith: shownWith } : {}) };
+    });
+    lines[index + 1] = JSON.stringify({ ...block, markets });
+    index += 2;
+  }
+  return lines.join('\n');
+}
+
+// Setup boards repeat the US Dollar reference row in every section. It shows once, above the
+// first section, with its research ledger under it; each section's board keeps its own markets.
+const DOLLAR_ROW = /^\s*\|\s*REF\(US Dollar;[^)]*\)\s*\|/;
+export function pinPredictionDollar(markdown) {
+  const text = String(markdown || '');
+  const lines = text.split('\n');
+  const rowIndex = lines.findIndex(line => DOLLAR_ROW.test(line));
+  const firstSection = lines.findIndex(line => /^## /.test(line));
+  if (rowIndex < 0 || firstSection < 0 || firstSection > rowIndex) return text;
+  let start = rowIndex;
+  while (start > 0 && /^\s*\|/.test(lines[start - 1])) start -= 1;
+  const board = [lines[start], lines[start + 1], lines[rowIndex], ''];
+  let research = null;
+  const rest = [];
+  for (let index = firstSection; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (DOLLAR_ROW.test(line)) continue;
+    if (!research && line.trim() === '```analyst-research' && lines[index + 2]?.trim() === '```') {
+      try {
+        const block = JSON.parse(lines[index + 1]);
+        const markets = Array.isArray(block?.markets) ? block.markets : [];
+        const dollar = markets.find(row => row?.market === 'US Dollar');
+        if (dollar) {
+          research = dollar;
+          const others = markets.filter(row => row !== dollar);
+          if (others.length) rest.push(line, JSON.stringify({ ...block, markets: others }), lines[index + 2]);
+          index += 2;
+          continue;
+        }
+      } catch {
+        // An unreadable block renders as it was captured.
+      }
+    }
+    rest.push(line);
+  }
+  const ledger = research ? ['```analyst-research', JSON.stringify({ markets: [research] }), '```', ''] : [];
+  return [...lines.slice(0, firstSection), ...board, ...ledger, ...rest].join('\n');
+}

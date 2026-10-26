@@ -586,14 +586,6 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
     try { res.json(await attention.getStatus()); }
     catch { res.status(503).json({ error: 'Assessment status unavailable.' }); }
   });
-  // Existing Hermes schedules may still call this adapter. Acknowledge the
-  // user's manual-review policy without starting or resurrecting a chat.
-  for (const method of ['post', 'get']) {
-    router[method]('/automation/prediction-morning', async (_req, res) => {
-      res.set('Cache-Control', 'no-store');
-      res.json({ date: easternDate(now()), reviewKind: 'prediction-markets-review', status: 'skipped', reason: 'user_initiated_only' });
-    });
-  }
   // Hermes captures verified holdings 30 minutes after each close as a headless
   // run (no chat). It is the next session's "Since previous close" baseline;
   // GET reports, POST starts.

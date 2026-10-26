@@ -6,22 +6,16 @@ import { pendingReviewSourceItems } from '../services/analyst/analystReviewSourc
 const sameCapturedReview = (entry, conversationId, turnId, captureId, running) => entry?.turnId === turnId
   && (entry?.running === running || (entry?.running && !running))
   && entry?.sources?.conversationId === conversationId
-  && ['review', 'manual'].includes(entry?.sources?.basis) && Boolean(entry.sources.runId)
+  && entry?.sources?.basis === 'review' && Boolean(entry.sources.runId)
   && (!captureId || entry.sources.runId === captureId);
 const canonicalCaptureId = captureId => Boolean(captureId) && !/^(daily-report|review-message):/.test(captureId);
 // A read can bind metadata to the review only as far as its identity is known.
-const capturedBy = (sources, conversationId, turnId, captureId, reviewKind) => {
-  const canonical = canonicalCaptureId(captureId);
-  const manual = reviewKind === 'portfolio-cross-verification' || sources?.basis === 'manual';
-  return !((sources?.conversationId && sources.conversationId !== conversationId)
-    || (canonical && sources?.runId && sources.runId !== captureId)
-    || (manual && (sources?.conversationId !== conversationId
-      || (canonical && sources?.runId !== captureId) || (turnId && sources?.turnId !== turnId))));
-};
+const capturedBy = (sources, conversationId, captureId) => !((sources?.conversationId && sources.conversationId !== conversationId)
+  || (canonicalCaptureId(captureId) && sources?.runId && sources.runId !== captureId));
 // Sources read while the conversation record was unavailable carry no turn or
 // capture binding. Keep them only if the record then confirms that ownership.
-const unboundCapture = (entry, conversationId, turnId, captureId, reviewKind) => Boolean(entry && !entry.turnId
-  && !entry.captureId && !entry.running && entry.sources && capturedBy(entry.sources, conversationId, turnId, captureId, reviewKind));
+const unboundCapture = (entry, conversationId, captureId) => Boolean(entry && !entry.turnId
+  && !entry.captureId && !entry.running && entry.sources && capturedBy(entry.sources, conversationId, captureId));
 const unfinishedSources = sources => {
   if (['succeeded', 'complete', 'ready', 'partial', 'failed', 'cancelled', 'interrupted'].includes(sources?.state)) return false;
   return ['queued', 'accepted', 'preparing', 'acquiring', 'running', 'checking'].includes(sources?.state)
@@ -67,7 +61,7 @@ export default function useAnalystReviewSources({ conversationId, turnId, captur
       // Completing the same capture still needs a final check, but its existing
       // source metadata can remain visible. A new turn or capture starts empty.
       const sources = !entry?.refreshing && (sameCapturedReview(entry, conversationId, turnId, captureId, running)
-        || unboundCapture(entry, conversationId, turnId, captureId, reviewKind)) ? entry.sources : null;
+        || unboundCapture(entry, conversationId, captureId)) ? entry.sources : null;
       const placeholder = { basis: 'pending', items: pendingRoster(entry?.sources?.items || entry?.placeholder?.items, reviewKind) };
       entry = { turnId, captureId, running, sources, placeholder, loading: true, pending: false, again: false,
         readFailures: 0, transportFailures: 0, readFailed: false, exhausted: false, reconnecting: false, revalidationKey };
@@ -114,7 +108,7 @@ export default function useAnalystReviewSources({ conversationId, turnId, captur
         reads.current.set(conversationId, read);
         try {
           sources = await read;
-          if (!capturedBy(sources, conversationId, turnId, captureId, reviewKind)) {
+          if (!capturedBy(sources, conversationId, captureId)) {
             sources = null;
             throw Object.assign(new Error('Source metadata belongs to another capture.'), { code: 'ANALYST_CAPTURE_MISMATCH' });
           }
@@ -201,7 +195,7 @@ export default function useAnalystReviewSources({ conversationId, turnId, captur
   }
   // Preserve the rows in the completion render itself, before the effect
   // replaces the entry; otherwise even a fast final check removes them once.
-  if (sameCapturedReview(result, conversationId, turnId, captureId, running) || unboundCapture(result, conversationId, turnId, captureId, reviewKind)) {
+  if (sameCapturedReview(result, conversationId, turnId, captureId, running) || unboundCapture(result, conversationId, captureId)) {
     return { ...status, sources: result.sources, loading: true };
   }
   return { ...status, sources: reviewKind ? { basis: 'pending', items: pendingRoster(result?.sources?.items || result?.placeholder?.items, reviewKind) } : null, loading: true };

@@ -31,6 +31,7 @@ const MARKETS = {
   silver: { names: ['Silver', 'XAG', 'XAGUSD', 'Silver Spot Price'], instrument: 'silver' },
   copper: { names: ['Copper', 'Dr\\. Copper', 'Copper Spot Price'], instrument: 'copper' },
   wti: { names: ['WTI', 'WTIC', 'Crude Oil', 'Crude', 'Oil'], instrument: 'wti' },
+  brent: { names: ['Brent', 'Brent Crude', 'Brent Crude Oil', 'Brent Oil'], instrument: 'brent' },
   bitcoin: { names: ['Bitcoin', 'BTC', '₿TC', 'BTC-USD', 'BTCUSD'], instrument: 'bitcoin' },
   ethereum: { names: ['Ethereum', 'Ether', 'ETH', 'ETH-USD', 'ETHUSD'], instrument: 'ethereum' },
   sp500: { names: ['SPX', 'S&P 500', 'S&P500', 'SP500', 'S&P'], instrument: 'sp500' },
@@ -38,21 +39,29 @@ const MARKETS = {
   ust2y: { names: ['UST 2yr', 'UST 2-year', 'UST2Y', '2yr', '2-year', 'two-year', '2-Year Treasury'], instrument: 'ust2y', yield: true },
   ust10y: { names: ['UST 10yr', 'UST 10-year', 'UST10Y', '10yr', '10-year', 'ten-year', '10-Year Treasury'], instrument: 'ust10y', yield: true },
   ust30y: { names: ['UST 30yr', 'UST 30-year', 'UST30Y', '30yr', '30-year', 'thirty-year', 'Long Bond'], instrument: 'ust30y', yield: true },
-  usd: { names: ['US Dollar Index', 'U\\.S\\. Dollar Index', 'US Dollar', 'U\\.S\\. Dollar', 'USD', 'DXY', 'Dollar'], instrument: 'usd' },
+  // A bare "dollar" is not the currency ("The Always-On Dollar", "trillion dollar caps"); only currency phrasings are.
+  usd: { names: ['US Dollar Index', 'U\\.S\\. Dollar Index', 'US Dollar', 'U\\.S\\. Dollar', 'USD', 'DXY', 'Dollar Index', 'King Dollar',
+    'the dollar', 'strong dollar', 'stronger dollar', 'weak dollar', 'weaker dollar', 'dollar strength', 'dollar weakness', 'Greenback'], instrument: 'usd' },
 };
 const RELATED = {
   COMPQ: { market: 'nasdaq100', names: ['COMPQ', 'Nasdaq Composite', 'Nasdaq'], instrument: 'compq', label: 'Nasdaq Composite' },
 };
-// ETFs that track a market. Their levels are in ETF dollars, so they are kept
+// Currency pairs quoted against the dollar are dollar instruments with their own
+// prices. A pair with the dollar second (EUR/USD) moves opposite to the dollar.
+const DOLLAR_PAIRS = ['JPY', 'YEN', 'CAD', 'CHF', 'CNY', 'CNH', 'MXN'].flatMap((other) => [`USD/${other}`, `USD${other}`])
+  .map((pair) => [pair, false])
+  .concat(['EUR', 'GBP', 'AUD', 'NZD'].flatMap((other) => [`${other}/USD`, `${other}USD`]).map((pair) => [pair, true]));
+// ETFs and currency pairs that track a market. Their levels are in their own units, so they are kept
 // with the ticker and never compared with the market's own price.
 const PROXIES = {
-  GLD: 'gold', IAU: 'gold', SLV: 'silver', CPER: 'copper', USO: 'wti', IBIT: 'bitcoin', BITO: 'bitcoin',
+  GLD: 'gold', IAU: 'gold', SLV: 'silver', CPER: 'copper', USO: 'wti', BNO: 'brent', IBIT: 'bitcoin', BITO: 'bitcoin',
   ETHA: 'ethereum', ETHE: 'ethereum', SPY: 'sp500', QQQ: 'nasdaq100', SHY: 'ust2y', IEF: 'ust10y', TLT: 'ust30y', UUP: 'usd',
+  ...Object.fromEntries(DOLLAR_PAIRS.map(([pair]) => [pair, 'usd'])),
 };
-// Price-ETF positions move opposite to the yield the market settles on.
-const INVERSE_PROXIES = new Set(['SHY', 'IEF', 'TLT']);
+// Price-ETF positions move opposite to the yield the market settles on; dollar-second pairs, opposite to the dollar.
+const INVERSE_PROXIES = new Set(['SHY', 'IEF', 'TLT', ...DOLLAR_PAIRS.filter(([, inverse]) => inverse).map(([pair]) => pair)]);
 // Named instruments that end the previous market's scope in a sentence.
-const OTHER_NAMES = ['Brent', 'BNO', 'KOSPI', 'Nikkei', 'VIX', 'VXN', 'MOVE', 'Russell', 'IWM', 'RUT', 'Natural Gas', 'NATGAS',
+const OTHER_NAMES = ['KOSPI', 'Nikkei', 'VIX', 'VXN', 'MOVE', 'Russell', 'IWM', 'RUT', 'Natural Gas', 'NATGAS',
   'UNG', 'Yen', 'Euro', 'Pound', 'Swiss', 'Semis', 'Semiconductors', 'Software', 'Shipping', 'Gold Miners', 'Silver Miners',
   'Copper Miners', 'Oil Services', 'Refiners', 'Treasury Yield', 'Treasury Yields', 'Bond Yields', 'Yield Curve', 'curve', 'HYG', 'LQD',
   'PFIX'];
@@ -106,7 +115,8 @@ function mentions(statement) {
     if (entry.caseSensitive && match[0] !== entry.name) continue;
     const before = statement.slice(Math.max(0, match.index - 16), match.index);
     const after = statement.slice(match.index + match[0].length, match.index + match[0].length + 24);
-    // Brent Oil, Oil Services and Gold Miners are other instruments; GBP/USD and USD/YEN are currency pairs.
+    // Brent Oil, Oil Services and Gold Miners are other instruments; BTC/USD is a crypto price, not the dollar.
+    // Tracked currency pairs (GBP/USD, USD/JPY) match as dollar instruments before a bare USD can.
     if (entry.market === 'wti' && /^oil$/i.test(match[0]) && (/brent\s*$/i.test(before) || /^\s*(?:services|refiners|stocks|equities|majors|&|and\s+gas)/i.test(after))) {
       found.push({ index: match.index, end: match.index + match[0].length, market: null, text: match[0] });
       continue;
@@ -184,7 +194,8 @@ function statements(text) {
     .filter((line) => line.length > 2);
 }
 
-const excerptOf = (statement) => (statement.length > 320 ? `${statement.slice(0, 317)}…` : statement);
+// The ledger shows a statement in full; it is never shortened.
+const excerptOf = (statement) => statement;
 
 // Where one statement's clauses meet: semicolons, spaced dashes, ", and" before a new clause, and sentence ends
 // the statement split kept together (a closing quote, or the " . " some summaries leave), never the "U.S." in U.S. Dollar.
@@ -208,6 +219,7 @@ function contextFor(statement, market) {
   const parts = body.split(list ? LIST_ITEM : CLAUSE_BREAK);
   let inherited = [];
   let kept = '';
+  let first = -1;
   let last = -2;
   for (let index = 0; index < parts.length; index += 2) {
     const clause = parts[index];
@@ -217,9 +229,12 @@ function contextFor(statement, market) {
     // A bare name heading the statement ("USD – …") labels it; it is not a clause.
     const bare = !list && named.length && !named.reduceRight((text, item) => text.slice(0, item.index) + text.slice(item.end), clause).replace(/[\s()[\],.:–—-]/g, '');
     if (bare || !markets.includes(market)) continue;
-    kept += last === index - 2 ? (kept ? parts[index - 1].replace(/^\s+\.\s+$/, '. ') : '') + clause : (kept ? ' … ' : '') + clause;
+    // List items stand alone; prose keeps every clause between the first and last about this market, so nothing is cut out.
+    if (list) kept += last === index - 2 ? (kept ? parts[index - 1] : '') + clause : (kept ? ' … ' : '') + clause;
+    if (first < 0) first = index;
     last = index;
   }
+  if (!list && first >= 0) kept = parts.slice(first, last + 1).map((part, index) => (index % 2 ? part.replace(/^\s+\.\s+$/, '. ') : part)).join('');
   const text = (kept ? `${labelled ? `${lead[1].trim()}: ` : ''}${kept}` : statement)
     .replace(SHOW_TIMES, '').replace(/\s+([.,;:])(?=\s|$)/g, '$1').replace(list ? /[\s,;:.–—-]+$/ : /[\s,;:–—-]+$/, '');
   return excerptOf(text.charAt(0).toUpperCase() + text.slice(1));
@@ -466,7 +481,7 @@ function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
   const findings = [];
   if (product === 'early-look') {
     // "Our Levels": immediate-term Risk Ranges with the TREND in brackets.
-    const tickers = { UST10Y: 'ust10y', UST2Y: 'ust2y', UST30Y: 'ust30y', GOLD: 'gold', SILVER: 'silver', COPPER: 'copper', WTIC: 'wti',
+    const tickers = { UST10Y: 'ust10y', UST2Y: 'ust2y', UST30Y: 'ust30y', GOLD: 'gold', SILVER: 'silver', COPPER: 'copper', WTIC: 'wti', BRENT: 'brent',
       SPX: 'sp500', COMPQ: 'nasdaq100', NDX: 'nasdaq100', USD: 'usd', BTC: 'bitcoin', BITCOIN: 'bitcoin', ETH: 'ethereum' };
     for (const [name, row] of Object.entries(data)) {
       const ticker = (name.match(/\(([A-Z0-9/]+)\)\s*$/) || [])[1] || name.trim();
@@ -590,6 +605,7 @@ function buildMorningResearch({ snapshots = {}, marketDate = null, references = 
   return { version: 1, marketDate, products, markets };
 }
 
-const PROXY_TICKERS = Object.keys(PROXIES);
+// ETF tickers to quote; currency pairs have no price feed, so their levels are never kept.
+const PROXY_TICKERS = Object.keys(PROXIES).filter((ticker) => !DOLLAR_PAIRS.some(([pair]) => pair === ticker));
 
 module.exports = { PRODUCTS, PROXY_TICKERS, buildMorningResearch, contextFor, extractFromText, positionFindings, structuredFindings, statements };

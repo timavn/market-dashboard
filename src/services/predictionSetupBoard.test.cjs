@@ -44,6 +44,24 @@ test('selects the 5pm crypto event and the 4pm index close event', () => {
     { event_ticker: 'KXWTI-26NOV03' }, { event_ticker: 'KXWTI-26OCT1414' }, { event_ticker: 'KXWTI-26OCT1314' },
   ] });
   assert.equal(wti[0].eventTicker, 'KXWTI-26OCT1314');
+  const brent = selectEvents({ id: 'brent', kalshi: { series: 'KXBRENTD' } }, { KXBRENTD: [
+    { event_ticker: 'KXBRENTD-26OCT2117' }, { event_ticker: 'KXBRENTD-26OCT2014' }, { event_ticker: 'KXBRENTD-26OCT2017' },
+  ] });
+  assert.equal(brent[0].eventTicker, 'KXBRENTD-26OCT2017');
+});
+
+test('Brent sits under Oil beside WTI with its own Risk Range, price, Tick proxy and USD correlation', () => {
+  const board = buildSetupBoard({
+    riskRanges: { ranges: { BRENT: { lrr: 104, hrr: 114, trend: 'BULLISH', date: '2026-10-20' } } },
+    quotes: { 'BZ=F': { price: 106.27 } },
+    usdCorrelations: { calculationDate: '2026-10-19', correlations: { BRENT: { '15D': 0.146, '30D': 0.115, '60D': 0.489, '90D': 0.111 } } },
+  });
+  const oil = board.rows.filter((row) => row.group === 'oil');
+  assert.deepEqual(oil.map((row) => row.id), ['wti', 'brent']);
+  const brent = oil[1];
+  assert.equal(brent.label, 'Brent');
+  assert.deepEqual([brent.range.low, brent.range.high, brent.trend, brent.price.value], [104, 114, 'BULLISH', 106.27]);
+  assert.equal(brent.usdCorrelation.key, 'BRENT');
 });
 
 test('builds rows from Hedgeye research, quotes and Kalshi events', () => {
@@ -248,4 +266,180 @@ test('a morning product with no printed send time shows when the dashboard read 
     'market-structure': { date: '2026-10-16', publishedAt: '2026-10-16T00:00:00+00:00', scrapedAt: '2026-10-16T10:30:29+00:00',
       data: { signals: [{ label: 'SPX Gamma Exposure', value: 'Neutral', tone: 'neutral' }] } } } });
   assert.equal(board.research.products.find((item) => item.key === 'market-structure').publishedAt, '2026-10-16T10:30:29+00:00');
+});
+
+const publications = (ticker, days) => days.map(([date, lrr, hrr]) => ({ date, ranges: { [ticker]: { lrr, hrr } } }));
+
+test('counts consecutive higher lows and lower highs of the Risk Range, ending today', () => {
+  const board = buildSetupBoard({
+    riskRanges: { ranges: { WTIC: { lrr: 94.33, hrr: 102.97, trend: 'BULLISH', date: '2026-10-21' } } },
+    quotes: { 'CL=F': { price: 97.51 } },
+    riskRangeHistory: publications('WTIC', [['2026-10-14', 88.94, 97.34], ['2026-10-15', 89.11, 97.18],
+      ['2026-10-16', 89.44, 99.97], ['2026-10-19', 93.64, 104.21], ['2026-10-20', 94.09, 103.17]]),
+    allTimeHighs: { 'CL=F': { value: 147.27, date: '2008-07-11', symbol: 'CL=F' } },
+  });
+  const { structure } = board.rows.find((row) => row.id === 'wti');
+  assert.equal(board.structureSessions, 10);
+  assert.equal(structure.sessions, 5);
+  assert.deepEqual(structure.low, { steps: '+++++', direction: 1, run: 5 });
+  assert.deepEqual(structure.high, { steps: '-++--', direction: -1, run: 2 });
+  assert.deepEqual(structure.allTimeHigh, { value: 147.27, date: '2008-07-11', symbol: 'CL=F', rangeTopAbove: false });
+});
+
+test('an unchanged range neither adds to nor ends a run, and history stops at ten sessions', () => {
+  const weekdays = ['09-25', '09-28', '09-29', '09-30', '10-01', '10-02', '10-05', '10-06', '10-07', '10-08', '10-09',
+    '10-12', '10-13', '10-14'];
+  const days = weekdays.map((day, index) => [`2026-${day}`, 100 + index, 110 + index]);
+  days[12] = ['2026-10-13', 111, 121];
+  // A Saturday publication would break both runs if it were counted.
+  days.push(['2026-10-10', 90, 200]);
+  const board = buildSetupBoard({
+    riskRanges: { ranges: { BRENT: { lrr: 114, hrr: 123, trend: 'BULLISH', date: '2026-10-15' } } },
+    riskRangeHistory: publications('BRENT', days),
+  });
+  const { structure } = board.rows.find((row) => row.id === 'brent');
+  // The ten weekday publications before today (Oct 1–14) plus today's range give ten comparisons.
+  assert.equal(structure.sessions, 10);
+  assert.equal(structure.since, '2026-10-01');
+  assert.equal(structure.high.steps, '+++++++=+=');
+  assert.equal(structure.high.run, 8);
+  assert.equal(structure.low.steps, '+++++++=++');
+  assert.equal(structure.low.run, 9);
+});
+
+test('the range top above the instrument all-time high is flagged; Ethereum reads Crypto Quant history', () => {
+  const board = buildSetupBoard({
+    riskRanges: { ranges: { SPX: { lrr: 7616, hrr: 7850, trend: 'BULLISH', date: '2026-10-21' } } },
+    cryptoQuant: { date: '2026-10-21', data: { cryptos: { ETH: { buyTrade: 2345, sellTrade: 2516, trend: 'NEUTRAL' } } } },
+    riskRangeHistory: publications('SPX', [['2026-10-20', 7613, 7859]]),
+    // A weekend snapshot is never a session.
+    cryptoQuantHistory: [{ date: '2026-10-18', data: { cryptos: { ETH: { buyTrade: 2000, sellTrade: 3000 } } } },
+      { date: '2026-10-20', data: { cryptos: { ETH: { buyTrade: 2350, sellTrade: 2500 } } } },
+      { date: '2026-10-21', data: { cryptos: { ETH: { buyTrade: 2345, sellTrade: 2516 } } } }],
+    allTimeHighs: { '^GSPC': { value: 7844.52, date: '2026-10-06' } },
+  });
+  const spx = board.rows.find((row) => row.id === 'sp500').structure;
+  assert.equal(spx.allTimeHigh.rangeTopAbove, true);
+  assert.deepEqual([spx.low.steps, spx.high.steps], ['+', '-']);
+  const eth = board.rows.find((row) => row.id === 'ethereum').structure;
+  assert.deepEqual([eth.sessions, eth.low.steps, eth.high.steps, eth.allTimeHigh], [1, '-', '+', null]);
+});
+
+test('boards built without range history keep their original shape', () => {
+  const board = buildSetupBoard({ riskRanges: { ranges: { SPX: { lrr: 7616, hrr: 7850, date: '2026-10-21' } } } });
+  assert.equal('structureSessions' in board, false);
+  assert.equal(board.rows.some((row) => 'structure' in row), false);
+});
+
+test('the loader asks for publications before the board’s own and the all-time high of each range instrument', async () => {
+  const calls = {};
+  const empty = () => Promise.resolve(null);
+  const load = createSetupBoardLoader({
+    loadRiskRanges: () => Promise.resolve({ manifest: { publicationDate: '2026-10-21' },
+      ranges: { DXY: { lrr: 101.45, hrr: 102.59, date: '2026-10-21' } } }),
+    loadCryptoQuant: empty, loadHedgai: empty, loadSecurityIntelligence: empty, loadNowcast: empty,
+    loadQuotes: () => Promise.resolve({}), loadVolatility: empty, loadUsdCorrelations: empty,
+    loadKalshiEvents: () => Promise.resolve([]),
+    loadRiskRangeHistory: (args) => { calls.history = args; return Promise.resolve(publications('DXY', [['2026-10-20', 101.43, 102.64]])); },
+    loadCryptoQuantHistory: () => Promise.reject(new Error('down')),
+    loadAllTimeHighs: (symbols) => { calls.symbols = symbols; return Promise.resolve({}); },
+    marketDateFor: () => '2026-10-21',
+  });
+  const board = await load({ now: new Date('2026-10-21T20:00:00Z') });
+  assert.equal(calls.history.before, '2026-10-21');
+  assert.equal(calls.history.sessions, 10);
+  assert.ok(calls.symbols.includes('^IXIC') && calls.symbols.includes('DX-Y.NYB') && !calls.symbols.includes('^NDX'));
+  assert.deepEqual([board.usd.structure.low.steps, board.usd.structure.high.steps], ['+', '-']);
+  assert.equal(board.sourceStatus.cryptoQuantHistory, 'failed');
+  assert.equal(board.rows.find((row) => row.id === 'ethereum').structure, null);
+});
+
+test('an earlier research date reads only that day’s products, its own Crypto Quant, and the current ranges and prices', async () => {
+  const calls = { skipped: [] };
+  const skipped = (name) => () => { calls.skipped.push(name); return Promise.resolve(null); };
+  const load = createSetupBoardLoader({
+    loadRiskRanges: () => Promise.resolve({ ranges: { DXY: { lrr: 101.45, hrr: 102.59, date: '2026-10-23' } } }),
+    loadCryptoQuant: () => Promise.resolve({ date: '2026-10-23' }), loadQuotes: () => Promise.resolve({}),
+    loadHedgai: skipped('hedgai'), loadSecurityIntelligence: skipped('securityIntelligence'), loadNowcast: skipped('nowcast'),
+    loadVolatility: skipped('volatility'), loadUsdCorrelations: skipped('usdCorrelations'), loadKalshiEvents: skipped('kalshi'),
+    loadVolumeHistory: skipped('volume'), loadRiskRangeHistory: skipped('rangeHistory'),
+    loadMorningProducts: (args) => { calls.morning = args; return Promise.resolve({}); },
+    marketDateFor: () => '2026-10-23',
+  });
+  const board = await load({ now: new Date('2026-10-23T20:00:00Z'), researchDate: '2026-10-21' });
+  assert.equal(calls.morning.marketDate, '2026-10-21');
+  assert.ok(calls.morning.products.includes('crypto-quant'));
+  assert.deepEqual(calls.skipped, []);
+  assert.equal(board.research.marketDate, '2026-10-21');
+  // Without a stored Crypto Quant for that day, today's is not read as that day's.
+  assert.equal(board.research.products.find((product) => product.key === 'crypto-quant').status, 'missing');
+});
+
+// Weekday sessions back from a date, oldest first, each with a volume and close.
+const sessions = (last, volumes) => {
+  const dates = [];
+  for (const day = new Date(`${last}T12:00:00Z`); dates.length < volumes.length; day.setUTCDate(day.getUTCDate() - 1)) {
+    if (day.getUTCDay() % 6 !== 0) dates.unshift(day.toISOString().slice(0, 10));
+  }
+  return dates.map((date, index) => ({ date, volume: volumes[index], rawClose: 100 + index }));
+};
+
+test('volume compares the latest completed session with the prior one and its 15-, 30- and 90-calendar-day averages', () => {
+  // 70 sessions at 100, then the 21 before the latest at 200 (the last 30 calendar days), then the latest at 150.
+  const bars = sessions('2026-10-21', [...Array(70).fill(100), ...Array(21).fill(200), 150]);
+  // A session still trading (no close yet) is not the latest.
+  bars.push({ date: '2026-10-22', volume: 10, rawClose: null });
+  const board = buildSetupBoard({ volumeHistory: { IBIT: bars, SPY: [] },
+    riskRanges: { ranges: { BITCOIN: { lrr: 80000, hrr: 84000, trend: 'BULLISH', date: '2026-10-21' } } } });
+  const { volume } = board.rows.find((row) => row.id === 'bitcoin');
+  assert.deepEqual(board.volumeWindows, { d15: 15, d30: 30, d90: 90 });
+  assert.equal(volume.symbol, 'IBIT');
+  assert.equal(volume.date, '2026-10-21');
+  assert.equal(Math.round(volume.d1), -25);
+  assert.equal(Math.round(volume.d15), -25);
+  assert.equal(Math.round(volume.d30), -25);
+  // 90 calendar days reach back 64 sessions: 21 at 200 and 43 at 100.
+  assert.equal(Math.round(volume.d90), Math.round((150 / ((21 * 200 + 43 * 100) / 64) - 1) * 100));
+  // Up day in a Bullish Trend on lighter volume: DV, neither supporting nor warning.
+  assert.deepEqual(volume.signal, { move: 'DV', tone: null, direction: 'up' });
+  assert.equal(board.rows.find((row) => row.id === 'sp500').volume, null);
+});
+
+test('a move against the Trend on decelerating volume supports adding; on accelerating volume it warns', () => {
+  const down = (volumes) => sessions('2026-10-21', volumes).map((bar, index, all) => ({ ...bar, rawClose: 200 - index - (index === all.length - 1 ? 5 : 0) }));
+  const board = buildSetupBoard({
+    riskRanges: { ranges: { WTIC: { lrr: 94, hrr: 103, trend: 'BULLISH', date: '2026-10-21' },
+      SILVER: { lrr: 53, hrr: 58, trend: 'BEARISH', date: '2026-10-21' } } },
+    volumeHistory: { USO: down([...Array(30).fill(100), 140]), SLV: sessions('2026-10-21', [...Array(30).fill(100), 60]) },
+  });
+  assert.deepEqual(board.rows.find((row) => row.id === 'wti').volume.signal, { move: 'AV', tone: 'warns', direction: 'down' });
+  assert.deepEqual(board.rows.find((row) => row.id === 'silver').volume.signal, { move: 'DV', tone: 'supports', direction: 'up' });
+});
+
+test('the loader asks for each market ETF and the Dollar’s UUP volume; boards without it keep their shape', async () => {
+  let requested = null;
+  const empty = () => Promise.resolve(null);
+  const load = createSetupBoardLoader({
+    loadRiskRanges: empty, loadCryptoQuant: empty, loadHedgai: empty, loadSecurityIntelligence: empty, loadNowcast: empty,
+    loadQuotes: () => Promise.resolve({}), loadVolatility: empty, loadUsdCorrelations: empty, loadKalshiEvents: () => Promise.resolve([]),
+    loadVolumeHistory: (symbols) => { requested = symbols; return Promise.reject(new Error('down')); },
+    marketDateFor: () => '2026-10-21',
+  });
+  const board = await load({ now: new Date('2026-10-21T20:00:00Z') });
+  assert.deepEqual(requested, ['GLD', 'SLV', 'CPER', 'USO', 'BNO', 'IBIT', 'ETHA', 'SPY', 'QQQ', 'SHY', 'IEF', 'TLT', 'UUP']);
+  assert.equal(board.sourceStatus.volumeHistory, 'failed');
+  assert.equal(board.rows.find((row) => row.id === 'gold').volume, null);
+  assert.equal('volume' in buildSetupBoard({}).rows[0], false);
+});
+
+test('a bond ETF falling is its yield rising, so in a Bullish yield Trend it is not a pullback', () => {
+  const falling = sessions('2026-10-21', [...Array(30).fill(100), 60]).map((bar, index) => ({ ...bar, rawClose: 200 - index }));
+  const board = buildSetupBoard({
+    riskRanges: { ranges: { UST2Y: { lrr: 4.71, hrr: 4.87, trend: 'BULLISH', date: '2026-10-21' },
+      UST30Y: { lrr: 5.36, hrr: 5.67, trend: 'BEARISH', date: '2026-10-21' } } },
+    volumeHistory: { SHY: falling, TLT: falling },
+  });
+  assert.deepEqual(board.rows.find((row) => row.id === 'ust2y').volume.signal, { move: 'DV', tone: null, direction: 'up' });
+  assert.deepEqual(board.rows.find((row) => row.id === 'ust30y').volume.signal, { move: 'DV', tone: 'supports', direction: 'up' });
+  assert.equal(board.rows.find((row) => row.id === 'ust2y').volume.inverse, true);
 });

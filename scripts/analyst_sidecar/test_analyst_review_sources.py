@@ -286,6 +286,31 @@ class ReviewSourcesTests(unittest.TestCase):
         evidence["exactResearchDocuments"]["products"][0]["documents"] = []
         self.assertEqual(project()["status"], "missing")
 
+    def test_saved_inflation_nowcast_weekly_late_verdict_shows_its_latest_publication(self):
+        registry = json.loads((Path(__file__).resolve().parents[2] / "infra/lambdas/gmail_ingestor/research_products.json").read_text())
+        product = next(product for product in registry["products"] if product["id"] == "inflation-nowcast")
+        captured = "2026-09-21T14:33:50Z"
+        record = run("portfolio-review", {name: checkpoint(updatedAt=captured) for name in
+            ("researchCoverage", "exactResearchDocuments")}, updatedAt=captured)
+        evidence = {"researchCoverage": {"products": [{
+            "product": "inflation-nowcast", "status": "late", "cadence": "weekly",
+            "latestPublicationDate": "2026-09-10", "expectedPublicationDate": None,
+        }]}, "exactResearchDocuments": {"products": [{"product": "inflation-nowcast", "documents": [{
+            "documentId": "nowcast-sep10", "contentHash": "source-content-hash",
+            "sourceUri": "dynamodb://HedgeyeDailySnapshot/2026-09-10",
+            "publicationDate": "2026-09-10", "indexedAt": "2026-09-21T14:30:00Z",
+        }]}]}}
+
+        def project():
+            return next(item for item in review_sources(record, Store(evidence), research_products=[product])["items"]
+                        if item["id"] == "inflation-nowcast")
+
+        self.assertEqual(project()["status"], "ready")
+        self.assertEqual(project()["publishedAt"], "2026-09-10")
+        # A newer publication the index had not captured is still late.
+        evidence["researchCoverage"]["products"][0]["expectedPublicationDate"] = "2026-09-17"
+        self.assertEqual(project()["diagnostic"]["code"], "RESEARCH_PUBLICATION_LATE")
+
     def test_crypto_quant_legacy_storage_does_not_make_bitcoin_tracker_ready(self):
         record = run("prediction-markets-review", {"predictionResearch": checkpoint()})
         evidence = {"predictionResearch": {"date": "2026-09-17", "snapshots": {

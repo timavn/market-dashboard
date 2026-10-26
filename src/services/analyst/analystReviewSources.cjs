@@ -9,9 +9,6 @@ const CAPTURE_KINDS = new Set(['captured', 'review-captured']);
 const TIMED_STATES = new Set(['ready', 'partial', 'missing', 'unavailable']);
 const MAX_ELAPSED_MS = 600_000;
 const validDate = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
-const validInstant = value => typeof value === 'string'
-  && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)
-  && Number.isFinite(Date.parse(value)) ? value : null;
 const archiveReasons = value => (Array.isArray(value) ? value : []).filter(reason => typeof reason === 'string'
   && /^[A-Za-z][A-Za-z0-9_-]{0,119}$/.test(reason)).slice(0, 40);
 const ARCHIVE_QUALIFICATIONS = {
@@ -117,7 +114,7 @@ const CAPTURE_FAILURES = {
 };
 // Sources the user paused (AGENTS.md) keep their place as Pending in a roster
 // built without a capture. Only the sidecar knows which are paused.
-const PAUSABLE_SOURCES = new Set(['portfolioPca', 'alphaCodes']);
+const PAUSABLE_SOURCES = new Set(['alphaCodes']);
 const pausedSources = binding => new Set((Array.isArray(binding?.pausedSources) ? binding.pausedSources : [])
   .filter(id => PAUSABLE_SOURCES.has(id)));
 function rosterSources(kind, status, paused, code = null) {
@@ -206,18 +203,6 @@ function createReviewSources({ request, call, now = () => new Date() }) {
     const paused = pausedSources(binding);
     if (!conversation || conversation.id !== conversationId) throw Object.assign(new Error('Conversation unavailable.'), { statusCode: 404 });
     const kind = conversation.kind;
-    if (conversation.manualVerification?.captureId) {
-      const capture = conversation.manualVerification;
-      const result = await call('manual-sources', { conversationId, turnId: capture.turnId, captureId: capture.captureId });
-      if (result.conversationId !== conversationId || result.turnId !== capture.turnId || result.runId !== capture.captureId
-        || result.reviewKind !== 'portfolio-cross-verification') {
-        throw Object.assign(new Error('Manual source evidence does not belong to this conversation.'), { statusCode: 409 });
-      }
-      return { conversationId, reviewKind: result.reviewKind, runId: result.runId, turnId: result.turnId,
-        state: result.state, basis: 'manual', checkedAt: validDate(result.checkedAt),
-        ...(validDate(result.capturedAt) ? { capturedAt: result.capturedAt } : {}),
-        ...(validInstant(result.startedAt) ? { startedAt: result.startedAt } : {}), items: projectedSourceItems(result) };
-    }
     if (!REVIEW_KINDS.has(kind)) return { conversationId, reviewKind: kind, runId: null, checkedAt: null, items: [] };
     if (runId != null && (typeof runId !== 'string' || !runId.trim() || runId.length > 256)) {
       throw Object.assign(new Error('Review source binding unavailable.'), { statusCode: 409 });
@@ -272,7 +257,7 @@ function createReviewSources({ request, call, now = () => new Date() }) {
         for (const item of items) {
           const product = products.find(row => row.id === item.id);
           if (!product) continue;
-          item.status = product.status === 'ready' ? 'ready' : product.reason === 'No publication for this day' ? 'missing' : 'unavailable';
+          item.status = product.status === 'ready' ? 'ready' : product.status === 'not_received' ? 'missing' : 'unavailable';
           item.observedAt = product.publicationDate;
           if (product.publicationDate) item.publishedAt = product.publicationDate;
         }

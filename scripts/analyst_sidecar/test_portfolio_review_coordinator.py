@@ -73,10 +73,7 @@ def verified_empty_portfolio() -> dict:
 
 
 def coordinator_sources() -> analyst_app.PortfolioReviewSources:
-    registered_products = [
-        *analyst_app.REGISTRY["products"],
-        analyst_app.INFLATION_PRODUCT,
-    ]
+    registered_products = analyst_app.research_product_definitions()
 
     async def portfolio_context():
         return verified_empty_portfolio()

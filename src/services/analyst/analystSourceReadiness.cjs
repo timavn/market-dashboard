@@ -58,15 +58,19 @@ function automatedSourceReadiness(evidence = {}, now = new Date()) {
     const sourceUri = text(latestLocal?.source_uri || row?.sourceUri) || sourceIds[0] || null;
     const evidenceHash = text(row?.evidenceHash);
     const complete = row?.status === 'indexed' && (product.requiredStages || registry.stages).every(stage => row?.stages?.[stage] === true);
+    // Coverage dates every product to the market day, including one whose
+    // email has not arrived. Nothing received is an absent publication, not a
+    // pipeline failure.
+    const notReceived = feedReady && (!row || publicationDate !== date || row.stages?.received !== true);
     const reason = !feedReady ? 'Source status unavailable'
-      : !row || publicationDate !== date ? 'No publication for this day'
+      : notReceived ? 'No publication received today'
         : !observedAt || !evidenceHash || !sourceIds.length ? 'Source evidence unavailable'
             : !complete ? 'Processing incomplete'
               : !latestLocal ? 'Indexing incomplete' : null;
     return {
       id: product.id, label: product.label, publicationDate, observedAt, indexedAt,
       updatedAt: indexedAt || observedAt, usableForDay: reason === null,
-      status: reason === null ? 'ready' : 'unavailable', reason,
+      status: reason === null ? 'ready' : notReceived ? 'not_received' : 'unavailable', reason,
       sourceUri, sourceIds, evidenceHash,
     };
   });

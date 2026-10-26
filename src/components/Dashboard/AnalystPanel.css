@@ -256,27 +256,6 @@
   transform: translateY(-50%) scale(0.92);
 }
 .has-delete-action:focus-within .analyst-conversation-delete { opacity: 1; }
-.has-refresh-action .analyst-conversation-item { padding-right: 65px; }
-.analyst-conversation-refresh {
-  position: absolute;
-  z-index: 1;
-  top: 50%;
-  right: 33px;
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  padding: 0;
-  color: #667582;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 0;
-  cursor: pointer;
-  transform: translateY(-50%);
-}
-.analyst-conversation-refresh:hover:not(:disabled),
-.analyst-conversation-refresh:focus-visible { color: #243c43; background: #edf1f2; border-color: #cbd5d9; }
-.analyst-conversation-refresh:disabled { opacity: 0.45; cursor: default; }
 @media (prefers-reduced-motion: reduce) {
   .has-delete-action .analyst-conversation-delete { transition: none; }
   .has-delete-action .analyst-conversation-delete:active { transform: translateY(-50%); }
@@ -356,6 +335,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.analyst-conversation-copy small .analyst-spinner-group { gap: 4px; min-width: 0; }
 
 .analyst-panel--failed {
   display: grid;
@@ -634,10 +614,14 @@
   30% { opacity: 1; }
 }
 @keyframes analyst-spin { to { transform: rotate(360deg); } }
+/* Reduced motion swaps rotation for a fade so busy indicators still read as alive. */
+@keyframes analyst-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .analyst-streaming-dots > span { opacity: 1; animation: none; }
-  .analyst-conversation-running-icon { animation: none; }
+  .analyst-spin { animation: analyst-pulse 1.2s ease-in-out infinite; }
 }
 
 /* Dashboard conversation surface. Stored report typography stays independent
@@ -807,8 +791,7 @@
   font-size: 9px;
   line-height: 16px;
 }
-.analyst-panel-v2 .has-refresh-action .analyst-conversation-copy small { padding-right: 48px; }
-.analyst-panel-v2 :is(.analyst-conversation-refresh, .analyst-conversation-delete) {
+.analyst-panel-v2 .analyst-conversation-delete {
   top: auto;
   bottom: 0;
   width: 20px;
@@ -818,9 +801,7 @@
   opacity: 1;
   transform: none;
 }
-.analyst-panel-v2 .analyst-conversation-refresh { right: 25px; }
 .analyst-panel-v2 .analyst-conversation-delete { right: 4px; }
-.analyst-panel-v2 .analyst-conversation-refresh:disabled { opacity: 0.45; }
 .analyst-panel-v2 .analyst-conversation-delete:active { transform: scale(0.92); }
 /* A row being deleted keeps its place and size; only its controls go inert. */
 .analyst-panel-v2 .analyst-conversation-row.is-deleting .analyst-conversation-delete:disabled { opacity: 0.45; cursor: default; transform: none; }
@@ -889,7 +870,7 @@
 .analyst-landing-title {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: center;
   gap: 12px;
   padding-bottom: 5px;
   border-bottom: 1px solid var(--landing-ink);
@@ -902,13 +883,11 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.analyst-landing-clock,
 .analyst-landing-status {
   color: var(--landing-muted);
   font-family: var(--landing-mono);
   font-size: 8px;
 }
-.analyst-landing-clock { white-space: nowrap; }
 .analyst-landing-status { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .analyst-landing-stat { white-space: nowrap; }
 .analyst-landing-stat > span { color: var(--landing-ink); }
@@ -939,8 +918,9 @@
 .analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-composer:focus-within { border-color: var(--landing-accent); }
 .analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-composer textarea {
   grid-column: 1 / -1;
-  min-height: 52px;
-  padding: 10px 12px;
+  height: 30px;
+  min-height: 30px;
+  padding: 6px 12px;
   color: var(--landing-ink);
   background: #fff;
   border-bottom: 1px solid var(--landing-rule);
@@ -958,15 +938,24 @@
 .analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-stop-button {
   height: 26px;
   min-width: 26px;
-  margin: 5px 6px;
+  margin: 1px 6px;
   padding: 0;
   color: #fff;
   background: var(--landing-accent);
   border: 0;
   border-radius: 3px;
 }
-.analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-send-button:hover:not(:disabled) { color: #fff; background: #244a72; }
-.analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-send-button:disabled { opacity: 0.45; }
+.analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-send-button {
+  width: 17.42px;
+  height: 17.42px;
+  min-width: 17.42px;
+  margin: 5.29px 6px;
+  background: #2563eb;
+  border-radius: 2px;
+}
+.analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-send-button svg { width: 10.72px; height: 10.72px; }
+.analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-send-button:hover:not(:disabled) { color: #fff; background: #1d4ed8; }
+.analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-send-button:disabled { background: #3b82f6; opacity: 1; }
 
 .analyst-landing-lower {
   min-height: 0;
@@ -977,7 +966,7 @@
 }
 .analyst-landing-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   border: 1px solid var(--landing-line);
   border-radius: 4px;
 }
@@ -1081,8 +1070,7 @@
   white-space: nowrap;
 }
 .analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-copy small { flex: none; padding: 0 30px 0 0; color: var(--landing-faint); }
-.analyst-panel-v2 .analyst-landing-tabpanel .has-refresh-action .analyst-conversation-copy small { padding-right: 50px; }
-.analyst-panel-v2 .analyst-landing-tabpanel :is(.analyst-conversation-refresh, .analyst-conversation-delete) { top: calc(50% - 10px); bottom: auto; }
+.analyst-panel-v2 .analyst-landing-tabpanel .analyst-conversation-delete { top: calc(50% - 10px); bottom: auto; }
 .analyst-landing-tabpanel .analyst-inbox { padding: 4px 0 0; }
 .analyst-source-library.is-embedded { display: block; background: transparent; }
 .analyst-source-library.is-embedded .analyst-source-tabs { margin: 10px 0 0; }
@@ -1224,33 +1212,15 @@
   gap: 5px;
   margin-top: 10px;
 }
-.analyst-panel-v2 .analyst-markdown .analyst-section-sources {
-  margin: 6px 0 12px;
-  color: var(--analyst-muted, #667085);
-  font-size: 10px;
-  font-weight: 400;
-}
-.analyst-section-source {
-  display: inline;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-decoration: none;
-  cursor: pointer;
-}
-.analyst-section-source:hover, .analyst-section-source:focus-visible { color: var(--analyst-ink, #172033); }
 .analyst-running-dots {
   display: inline-flex;
-  width: 38px;
   height: 28px;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 0 6px;
   color: #087b80;
+  font-size: 12px;
 }
-.analyst-running-dots.has-phase { width: auto; justify-content: flex-start; gap: 6px; }
 .analyst-running-dots small { margin-left: 4px; color: #64748b; font-size: 12px; font-weight: 400; white-space: nowrap; }
 .analyst-connection-status {
   align-self: center;
@@ -1258,23 +1228,6 @@
   font-size: 10px;
   font-weight: 400;
   white-space: nowrap;
-}
-.analyst-running-dots span {
-  width: 6px;
-  height: 6px;
-  opacity: 0.3;
-  background: currentColor;
-  border-radius: 50%;
-  transform: scale(0.72);
-  transform-origin: center;
-  animation: analyst-running-dot 1.05s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  will-change: opacity, transform;
-}
-.analyst-running-dots span:nth-child(2) { animation-delay: 140ms; }
-.analyst-running-dots span:nth-child(3) { animation-delay: 280ms; }
-@keyframes analyst-running-dot {
-  0%, 64%, 100% { opacity: 0.3; transform: scale(0.72); }
-  32% { opacity: 1; transform: scale(1.28); }
 }
 .analyst-load-older {
   width: 100%;
@@ -1289,18 +1242,6 @@
 }
 .analyst-load-older:hover:not(:disabled) { color: #087b80; background: #fff; }
 
-@media (prefers-reduced-motion: reduce) {
-  .analyst-running-dots span {
-    animation-name: analyst-running-dot-reduced;
-    transform: none;
-    will-change: opacity;
-  }
-}
-
-@keyframes analyst-running-dot-reduced {
-  0%, 64%, 100% { opacity: 0.32; }
-  32% { opacity: 1; }
-}
 
 .dark .analyst-load-older { color: #9eb4ba; border-color: #334455; }
 

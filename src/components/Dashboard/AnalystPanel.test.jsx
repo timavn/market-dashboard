@@ -21,7 +21,7 @@ import AnalystLoading from './AnalystLoading';
 import PersistentSurface from '../common/PersistentSurface';
 import { analystApi } from '../../services/analyst/analystClient';
 
-jest.mock('./AnalystLandingStatus', () => ({ __esModule: true, default: () => null, AnalystLandingClock: () => null }));
+jest.mock('./AnalystLandingStatus', () => ({ __esModule: true, default: () => null }));
 jest.mock('remark-gfm', () => function remarkGfmMock() {});
 jest.mock('react-markdown', () => {
   function MarkdownMock({ children }) {
@@ -282,7 +282,7 @@ test('contains a rejected Analyst lazy chunk without blanking the dashboard', as
       </AnalystSurfaceBoundary>
     </>,
   );
-  expect(screen.getByRole('status', { name: 'Loading' })).toHaveTextContent(/^$/);
+  expect(screen.getByRole('status', { name: 'Loading' })).toHaveTextContent(/^\d+s$/);
   expect(await screen.findByRole('alert', { name: 'The Analyst unavailable' })).toBeInTheDocument();
   expect(screen.getByText('Main dashboard remains mounted')).toBeInTheDocument();
   consoleError.mockRestore();

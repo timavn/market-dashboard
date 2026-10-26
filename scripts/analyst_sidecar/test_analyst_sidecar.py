@@ -658,18 +658,32 @@ class CoverageTests(TempIndexTestCase):
             datetime(2026, 9, 21, 10, tzinfo=ZoneInfo("America/New_York"))), "cftc-positioning")
         self.assertEqual(result["status"], "failed")
 
-    def test_inflation_nowcast_has_weekly_freshness_not_a_monthly_allowance(self):
-        for publication, status in (("2026-08-13", "late"), ("2026-09-10", "late"), ("2026-09-11", "available"), ("2026-09-16", "available")):
+    def test_inflation_nowcast_shows_its_latest_date_and_is_late_only_behind_the_feed(self):
+        now = datetime(2026, 9, 18, 14, tzinfo=ZoneInfo("America/New_York"))
+        for publication in ("2026-08-13", "2026-09-16"):
             with self.subTest(publication=publication):
                 self.index.upsert_documents([self.document(
                     document_id="nowcast", product="inflation-nowcast", date=publication,
                     text=f"Monthly inflation nowcast published {publication}",
                 )])
-                result = self.product_row(analyst_app.research_coverage(self.index,
-                    datetime(2026, 9, 18, 14, tzinfo=ZoneInfo("America/New_York"))), "inflation-nowcast")
-                self.assertEqual(result["status"], status)
-                self.assertEqual(result["cadence"], "weekly")
+                result = self.product_row(analyst_app.research_coverage(self.index, now), "inflation-nowcast")
+                self.assertEqual(result["status"], "available")
+                self.assertEqual(result["cadence"], "event_driven")
+                self.assertEqual(result["latestPublicationDate"], publication)
                 self.assertIsNone(result["expectedPublicationDate"])
+        checked = {"product": "inflation-nowcast", "status": "not_due", "latestPublicationDate": "2026-09-17",
+                   "stages": {"received": False, "parsed": False, "validated": False, "indexed": False}}
+        self.index.set_sync_state("feed_coverage", json.dumps({"products": [checked]}))
+        result = self.product_row(analyst_app.research_coverage(self.index, now), "inflation-nowcast")
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["latestPublicationDate"], "2026-09-16")
+        received = {**checked, "status": "indexed",
+                    "stages": {"received": True, "parsed": True, "validated": True, "indexed": True}}
+        self.index.set_sync_state("feed_coverage", json.dumps({"products": [received]}))
+        result = self.product_row(analyst_app.research_coverage(self.index, now), "inflation-nowcast")
+        self.assertEqual(result["status"], "late")
+        self.assertEqual(result["latestPublicationDate"], "2026-09-16")
+        self.assertEqual(result["expectedPublicationDate"], "2026-09-17")
 
     def test_coverage_and_exact_manifest_preserve_source_times(self):
         observed = "2026-09-17T18:01:00Z"
@@ -728,7 +742,7 @@ class CoverageTests(TempIndexTestCase):
         risk_range = self.product_row(after, "risk-ranges")
         self.assertEqual(risk_range["status"], "late")
         self.assertEqual(risk_range["latestPublicationDate"], "2026-08-14")
-        self.assertEqual(self.product_row(after, "inflation-nowcast")["status"], "missing")
+        self.assertEqual(self.product_row(after, "inflation-nowcast")["status"], "not due")
 
         self.index.upsert_documents(
             [
@@ -1232,12 +1246,9 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(process.structuredContent["data"]["setupMaxLossPctNlv"], 5)
         self.assertEqual(process.structuredContent["data"]["cpiReleaseMaxLossPctNlv"], 15)
         self.assertIn("canonicalSource", process.structuredContent["data"])
-        sizing_policies = process.structuredContent["data"]["portfolioSizingPolicies"]
-        self.assertEqual(sizing_policies["scope"], "portfolio-sizing-only")
-        self.assertEqual(sizing_policies["symbols"]["IBIT"], "commodity")
-        self.assertEqual(sizing_policies["policies"]["commodity"]["minWeight"], 1)
-        self.assertEqual(sizing_policies["policies"]["commodity"]["maxWeight"], 4)
-        self.assertTrue(sizing_policies["policies"]["commodity"]["applyAtrRiskCap"])
+        # Every security is sized by the ATR band in the canonical Process source.
+        self.assertNotIn("portfolioSizingPolicies", process.structuredContent["data"])
+        self.assertIn("risk.atr_band", process.structuredContent["data"]["canonicalSource"]["text"])
         unavailable = envelope(status="unavailable", source_system="ibkr", provider="ibkr", data=None)
         with (
             patch.object(analyst_app.ibkr, "portfolio_context", AsyncMock(return_value=unavailable)),
@@ -1653,6 +1664,26 @@ class McpBoundaryTests(unittest.IsolatedAsyncioTestCase):
             len(balance_result.model_dump_json(exclude_none=True)),
             100_000,
         )
+
+    def test_feed_sweep_resumes_a_parked_cursor_and_reconciles_after_bootstrap(self):
+        class Index:
+            def __init__(self, **state):
+                self.state = state
+
+            def get_sync_state(self, key, default=""):
+                return self.state.get(key, default)
+
+        now = datetime(2026, 10, 25, 21, 0, tzinfo=timezone.utc)
+        recent = (now - timedelta(minutes=30)).isoformat()
+        old = (now - timedelta(seconds=analyst_app.FEED_RECONCILE_INTERVAL_SECONDS)).isoformat()
+        self.assertTrue(analyst_app.feed_sweep_due(Index(), now))
+        self.assertFalse(analyst_app.feed_sweep_due(Index(research_bootstrap_complete=recent), now))
+        # A sweep cut short at its page limit must finish, however recent bootstrap was.
+        self.assertTrue(analyst_app.feed_sweep_due(
+            Index(research_bootstrap_complete=recent, research_feed_cursor="parked"), now))
+        # A publication that never reached the change journal is found by reconciliation.
+        self.assertTrue(analyst_app.feed_sweep_due(Index(research_bootstrap_complete=old), now))
+        self.assertTrue(analyst_app.feed_sweep_due(Index(research_bootstrap_complete="2026-10-25T20:00:00"), now))
 
     async def test_indexing_loop_lives_for_the_whole_application_lifespan(self):
         entered = asyncio.Event()

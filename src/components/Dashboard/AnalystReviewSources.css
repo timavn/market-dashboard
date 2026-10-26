@@ -42,6 +42,7 @@
   text-overflow: ellipsis;
 }
 .analyst-review-sources-elapsed:not(:first-child) { margin-left: 6px; }
+.analyst-review-sources-elapsed { color: var(--portfolio-review-blue, #2563eb); font-variant-numeric: tabular-nums; }
 
 .analyst-review-sources-list {
   display: grid;
@@ -124,11 +125,4 @@
 .analyst-review-source-explanation-remedy { display: block; margin-top: 6px; }
 .analyst-review-source-explanation-remedy strong { font-weight: 500; }
 .analyst-review-source.is-ready .analyst-review-source-status { color: var(--dashboard-positive, #188557); }
-/* Only a capture that is actually being checked turns its icon (shared analyst-spin keyframes). */
-.analyst-review-sources[aria-busy='true'] .analyst-review-source.is-checking .analyst-review-source-status-content > svg {
-  animation: analyst-spin 1s linear infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .analyst-review-sources[aria-busy='true'] .analyst-review-source.is-checking .analyst-review-source-status-content > svg { animation: none; }
-}
 .analyst-review-sources-empty { margin: 0; padding: 6px 8px; color: #667085; }

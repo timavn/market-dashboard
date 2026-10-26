@@ -97,7 +97,7 @@ const pause=()=>new Promise(r=>setTimeout(r,15));
 async function fixture(t, external, options={}){
  const dir=mkdtempSync(path.join(tmpdir(),'analyst-integration-'));
  const request=async(url,options={})=>{
-  if (external && (!url.startsWith('/internal/workspace/') || ['readiness','changes','holdings','manual-start'].includes(url.split('/').at(-1)))) return external(url, options);
+  if (external && (!url.startsWith('/internal/workspace/') || ['readiness','changes','holdings'].includes(url.split('/').at(-1)))) return external(url, options);
   const operation=url.split('/').at(-1);
   if(operation==='import')return {};
   // Mirror the sidecar route: a KeyError keeps its own status and typed code
@@ -206,6 +206,13 @@ test('ordinary portfolio questions and negated refreshes preserve the existing c
  assert.equal(Socket.sockets.length,4);
 });
 
+test('message operations are rejected before any conversation is accepted', async t => {
+ const {api}=await fixture(t);
+ const response=await api('/messages',{requestId:'operation-request',operation:'portfolio-cross-verification',text:'Check my complete current portfolio.'});
+ assert.equal(response.status,400);
+ assert.deepEqual((await api('/conversations')).conversations,[]);
+ assert.equal(Socket.sockets.length,0);
+});
 
 test('exact request recovery survives later turns and reports unknown or deleted requests without resubmission',async t=>{
  const {api,base}=await fixture(t);
@@ -237,7 +244,7 @@ test('exact request recovery survives later turns and reports unknown or deleted
 test('late saved completion recovers the same failed turn only with exact prompt and verified same-turn portfolio evidence', async t => {
  t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-09-30T14:20:00Z')});
  const socketsBefore=Socket.sockets.length;
- const text='Manually cross-verify my complete current portfolio against research products.';
+ const text='Check my complete current portfolio against research products.';
  const citation={id:'cite_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',documentId:'doc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',product:'risk-ranges',title:'Dated portfolio evidence',sourceUri:'https://example.com/original-report',publicationDate:'2026-09-30',excerpt:'Original published reading'};
  const conversation={id:'late-chat',hermes_id:'stored-hermes',activeTurn:null,
   lastTurn:{id:'late-turn',state:'failed',error:'The response exceeded its time limit. Retry is available.',created_at:'2026-09-30T14:00:00Z',updated_at:'2026-09-30T14:10:00Z'},
@@ -990,27 +997,6 @@ test('ready research, new publications, date rollover and API restart never crea
  assert.notEqual(requested.conversation.id,first.conversation.id);
 });
 
-test('Hermes morning prediction endpoint acknowledges manual-only reviews without opening chats', async t => {
- const {attachDailyWorkflow}=require('./analystDaily.cjs');
- const external=async url=>assert.fail('Skipped automations must not acquire or publish reviews: '+url);
- const {workspace,api,base}=await fixture(t,external);
- attachDailyWorkflow({workspace,request:reviewTransport(external),now:()=>new Date('2026-09-29T20:30:00Z')});
- for(const endpoint of ['prediction-morning']){
-  for(const method of ['GET','POST']){
-   const response=await fetch(`${base}/automation/${endpoint}`,{method});
-   assert.equal(response.headers.get('cache-control'),'no-store');
-   assert.equal(response.status,200);
-   const result=await response.json();
-   assert.equal(result.status,'skipped');
-   assert.equal(result.reason,'user_initiated_only');
-   assert.equal(result.date,'2026-09-29');
-   assert.equal(result.conversationId,undefined);
-   assert.equal(result.runId,undefined);
-  }
- }
- assert.equal((await api('/conversations')).conversations.length,0);
-});
-
 test('DELETE stops just the owning response, stays deleted on replay, and leaves other chats running',async t=>{
  const {workspace,api}=await fixture(t);
  const a=await api('/messages',{requestId:'delete-a',text:'A'});
@@ -1674,7 +1660,23 @@ test('concurrent Inbox reads share one projected findings read for two seconds a
   body:JSON.stringify({acknowledge:true})});
  assert.equal(acknowledged.status,200);
  await inbox();
- assert.deepEqual(calls.map(call=>call.operation),['findings','findings','finding-read','findings'],'an acknowledgment is never answered from an earlier read');
+ // Dismissing also looks up the alert's discussion thread; that read is not an Inbox read.
+ assert.deepEqual(calls.filter(call=>call.body?.key!=='inbox-threads-v1').map(call=>call.operation),['findings','findings','finding-read','findings'],'an acknowledgment is never answered from an earlier read');
+});
+
+test('dismissing an alert deletes its Analyst discussion and unlinks it; other threads stay', async t => {
+ let threads={'alert-a':'conv-a','alert-b':'conv-b'};
+ const {calls,base}=await inboxApp(t,body=>{
+  if(body.key==='inbox-threads-v1'){ if('value' in body)threads=body.value; return {value:threads}; }
+  return {ok:true};
+ });
+ const response=await fetch(`${base}/inbox/alert-a/read`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acknowledge:true})});
+ assert.equal(response.status,200);
+ for(let i=0;i<50&&threads['alert-a'];i++)await new Promise(resolve=>setTimeout(resolve,10));
+ assert.deepEqual(threads,{'alert-b':'conv-b'});
+ assert.deepEqual(calls.filter(call=>call.operation==='delete').map(call=>call.body.conversationId),['conv-a']);
+ const listed=await (await fetch(`${base}/inbox-threads`)).json();
+ assert.deepEqual(listed.threads,{'alert-b':'conv-b'});
 });
 
 test('the legacy Inbox and a rejected projection read every finding', async t => {

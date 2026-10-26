@@ -1,0 +1,56 @@
+/* One Analyst discussion per Inbox alert, kept until the alert is dismissed. */
+.analyst-alert-thread {
+  display: grid;
+  gap: 6px;
+  padding: 7px 10px 8px;
+  border-top: 1px solid var(--analyst-line, #dfe6ea);
+  background: #fafbfc;
+}
+
+.analyst-alert-thread-messages { display: grid; gap: 6px; }
+.analyst-alert-thread-question {
+  justify-self: end;
+  max-width: 85%;
+  margin: 0;
+  padding: 4px 8px;
+  background: #eef2f5;
+  white-space: pre-wrap;
+}
+.analyst-alert-thread-answer { margin: 0; white-space: pre-wrap; }
+.analyst-alert-thread-status,
+.analyst-alert-thread-error { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 9px; }
+.analyst-alert-thread-status { color: var(--analyst-muted, #6b7280); }
+.analyst-alert-thread-error { color: #b33434; }
+.analyst-alert-thread-error { justify-content: space-between; gap: 8px; }
+.analyst-alert-thread-error button {
+  flex: none; padding: 2px 8px; border: 1px solid #cdd5dd; border-radius: 0; background: #fff;
+  color: var(--analyst-ink, #172033); font: inherit; cursor: pointer;
+}
+.analyst-alert-thread-error button:hover { background: #f1f3f5; }
+
+.analyst-alert-thread-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+}
+.analyst-alert-thread-composer textarea {
+  min-height: 22px;
+  padding: 3px 7px;
+  border: 1px solid #cdd5dd;
+  border-radius: 0;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+.analyst-alert-thread-composer button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  border: 1px solid #cdd5dd;
+  border-radius: 0;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+.analyst-alert-thread-composer button:disabled { opacity: 0.45; cursor: default; }

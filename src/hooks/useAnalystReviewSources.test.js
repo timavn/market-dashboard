@@ -58,13 +58,13 @@ test.each(['missing', 'unavailable'])('terminal %s evidence stops polling after 
   expect(api.request).toHaveBeenCalledTimes(1);
 });
 
-test.each(['ready', 'partial'])('a %s manual capture stops checking while its narrative turn is still running', async state => {
-  const sources = { ...captured('a', state), basis: 'manual', turnId: 'a-turn', items: [
+test.each(['ready', 'partial'])('a %s capture stops checking while its narrative turn is still running', async state => {
+  const sources = { ...captured('a', state), turnId: 'a-turn', items: [
     { id: 'ibGateway', label: 'IB Gateway', status: 'ready', observedAt: '2026-10-09T15:30:00Z' },
     { id: 'risk-ranges', label: 'Risk Ranges', status: state === 'partial' ? 'unavailable' : 'ready' },
   ] };
   api.request.mockResolvedValue(sources);
-  const initialProps = { ...props('a', true), reviewKind: 'portfolio-cross-verification' };
+  const initialProps = { ...props('a', true), reviewKind: 'portfolio-review' };
   const { result, rerender } = renderHook(useAnalystReviewSources, { initialProps });
   await waitFor(() => expect(result.current.sources).toBe(sources));
   expect(result.current.loading).toBe(false);
@@ -285,13 +285,13 @@ test('ownership-mismatch retries during an active capture never report Reconnect
   expect(result.current.reconnecting).toBe(true);
 });
 
-test('a revalidation signal reads a retrying manual capture immediately and restores only its exact captured Sources', async () => {
+test('a revalidation signal reads a retrying capture immediately and restores only its exact captured Sources', async () => {
   const failure = Object.assign(new Error('Source transport unavailable'), { code: 'HTTP_503' });
-  const sources = { ...captured('a', 'partial'), basis: 'manual', turnId: 'a-turn',
+  const sources = { ...captured('a', 'partial'), turnId: 'a-turn',
     items: [{ id: 'ibGateway', label: 'IB Gateway', status: 'ready', observedAt: '2026-10-09T15:30:00Z' },
       { id: 'risk-ranges', label: 'Risk Ranges', status: 'partial', publishedAt: '2026-10-08T12:00:00Z' }] };
   api.request.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure).mockRejectedValueOnce(failure).mockResolvedValue(sources);
-  const initialProps = { ...props(), reviewKind: 'portfolio-cross-verification', revalidationKey: 0 };
+  const initialProps = { ...props(), reviewKind: 'portfolio-review', revalidationKey: 0 };
   const { result, rerender } = renderHook(useAnalystReviewSources, { initialProps });
   await act(async () => jest.advanceTimersByTimeAsync(0));
   await act(async () => jest.advanceTimersByTimeAsync(1500));
@@ -319,7 +319,7 @@ test('a revalidation signal reads a retrying manual capture immediately and rest
 
 test('retries pause while the review is hidden and resume with an immediate read when it is shown again', async () => {
   api.request.mockRejectedValue(Object.assign(new Error('Source transport unavailable'), { code: 'HTTP_503' }));
-  const initialProps = { ...props(), reviewKind: 'portfolio-cross-verification', revalidationKey: 0 };
+  const initialProps = { ...props(), reviewKind: 'portfolio-review', revalidationKey: 0 };
   const { result, rerender } = renderHook(useAnalystReviewSources, { initialProps });
   await act(async () => jest.advanceTimersByTimeAsync(1500));
   expect(api.request).toHaveBeenCalledTimes(2);
@@ -337,7 +337,7 @@ test('retries pause while the review is hidden and resume with an immediate read
 
 test('a recovery signal does not reopen a definitive capture ownership rejection', async () => {
   api.request.mockRejectedValue(Object.assign(new Error('Deleted capture'), { code: 'HTTP_404' }));
-  const initialProps = { ...props(), reviewKind: 'portfolio-cross-verification', revalidationKey: 0 };
+  const initialProps = { ...props(), reviewKind: 'portfolio-review', revalidationKey: 0 };
   const { result, rerender } = renderHook(useAnalystReviewSources, { initialProps });
   await act(async () => jest.advanceTimersByTimeAsync(0));
   expect(result.current.readFailed).toBe(true);
@@ -350,9 +350,9 @@ test('a recovery signal does not reopen a definitive capture ownership rejection
 test('a hydration signal received during a pending source read keeps one serialized retry cadence', async () => {
   const first = deferred();
   const failure = Object.assign(new Error('Source transport unavailable'), { code: 'HTTP_503' });
-  const sources = { ...captured('a', 'partial'), basis: 'manual', turnId: 'a-turn' };
+  const sources = { ...captured('a', 'partial'), turnId: 'a-turn' };
   api.request.mockReturnValueOnce(first.promise).mockRejectedValueOnce(failure).mockResolvedValue(sources);
-  const initialProps = { ...props(), reviewKind: 'portfolio-cross-verification', revalidationKey: 0 };
+  const initialProps = { ...props(), reviewKind: 'portfolio-review', revalidationKey: 0 };
   const { result, rerender } = renderHook(useAnalystReviewSources, { initialProps });
   rerender({ ...initialProps, revalidationKey: 1 });
   expect(api.request).toHaveBeenCalledTimes(1);
@@ -368,15 +368,14 @@ test('a hydration signal received during a pending source read keeps one seriali
   expect(api.request).toHaveBeenCalledTimes(3);
 });
 
-test.each(['conversation', 'capture', 'turn'])('revalidation rejects successful metadata for a different %s binding', async binding => {
-  const sources = { ...captured('a', 'partial'), basis: 'manual', turnId: 'a-turn',
+test.each(['conversation', 'capture'])('revalidation rejects successful metadata for a different %s binding', async binding => {
+  const sources = { ...captured('a', 'partial'), turnId: 'a-turn',
     ...(binding === 'conversation' ? { conversationId: 'other-chat' } : {}),
-    ...(binding === 'capture' ? { runId: 'other-capture' } : {}),
-    ...(binding === 'turn' ? { turnId: 'other-turn' } : {}) };
+    ...(binding === 'capture' ? { runId: 'other-capture' } : {}) };
   api.request.mockRejectedValueOnce(Object.assign(new Error('Source transport unavailable'), { code: 'HTTP_503' }))
     .mockRejectedValueOnce(Object.assign(new Error('Source transport unavailable'), { code: 'HTTP_503' }))
     .mockResolvedValue(sources);
-  const initialProps = { ...props(), reviewKind: 'portfolio-cross-verification', revalidationKey: 0 };
+  const initialProps = { ...props(), reviewKind: 'portfolio-review', revalidationKey: 0 };
   const { result, rerender } = renderHook(useAnalystReviewSources, { initialProps });
   await act(async () => jest.advanceTimersByTimeAsync(1500));
   expect(result.current.readFailed).toBe(false);
@@ -390,20 +389,6 @@ test.each(['conversation', 'capture', 'turn'])('revalidation rejects successful 
   expect(result.current.sources.items.every(item => item.status === 'checking' && item.observedAt == null)).toBe(true);
   await act(async () => jest.advanceTimersByTimeAsync(60_000));
   expect(api.request).toHaveBeenCalledTimes(3);
-});
-
-test.each(['conversationId', 'runId', 'turnId'])('manual captured Sources cannot certify readiness without %s ownership', async field => {
-  const sources = { ...captured('a', 'partial'), basis: 'manual', turnId: 'a-turn' };
-  delete sources[field];
-  api.request.mockResolvedValue(sources);
-  const { result } = renderHook(useAnalystReviewSources, { initialProps: { ...props(), reviewKind: 'portfolio-cross-verification' } });
-  await act(async () => jest.advanceTimersByTimeAsync(0));
-  expect(result.current.readFailed).toBe(true);
-  expect(result.current.sources.basis).toBe('pending');
-  expect(result.current.sources.runId).toBeUndefined();
-  expect(result.current.sources.items.every(item => item.status === 'checking')).toBe(true);
-  await act(async () => jest.advanceTimersByTimeAsync(60_000));
-  expect(api.request).toHaveBeenCalledTimes(1);
 });
 
 test('a legacy source-message token remains a navigation key without becoming a canonical capture ownership claim', async () => {

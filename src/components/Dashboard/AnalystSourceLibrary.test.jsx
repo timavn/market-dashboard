@@ -20,6 +20,7 @@ const readyPayload = () => ({
       status: 'ready', usableForDay: true, evidenceHash: 'hash', sourceIds: ['source-1'],
     },
     { id: 'early-look', label: 'Early Look', status: 'unavailable', usableForDay: false, reason: 'Today’s publication has not arrived' },
+    { id: 'volume', label: 'Volume', status: 'not_received', usableForDay: false, reason: 'No publication received today' },
   ],
 });
 
@@ -44,6 +45,17 @@ test('keeps manual PDF intake and recent imports together without fetching autom
   expect(await screen.findByText('Portfolio.pdf')).toBeInTheDocument();
   expect(screen.getByText('indexed')).toBeInTheDocument();
   expect(analystWorkspaceApi.request).not.toHaveBeenCalled();
+});
+
+test('shows the upload day for a committed import in place of its status', async () => {
+  analystApi.imports.mockResolvedValue({ imports: [
+    { import_id: 'pdf-1', filename: 'Macro.pdf', status: 'committed', created_at: '2026-08-17T01:03:17.336892Z' },
+    { import_id: 'pdf-2', filename: 'Pending.pdf', status: 'awaiting_confirmation', created_at: '2026-09-14T16:00:00Z' },
+  ] });
+  render(<AnalystSourceLibrary />);
+  expect(await screen.findByText('Aug 16, 2026')).toHaveAttribute('datetime', '2026-08-17T01:03:17.336892Z');
+  expect(screen.queryByText('committed')).not.toBeInTheDocument();
+  expect(screen.getByText('awaiting confirmation')).toBeInTheDocument();
 });
 
 test('does not claim there are no manual imports before a successful load', async () => {
@@ -110,6 +122,7 @@ test('shows current verified product updates only inside the Automated section',
   expect(within(readyRow).getByText('Sep 14 05:01 PDT')).toHaveClass('analyst-process--key');
   expect(within(readyRow).getByText('Sep 14 05:01 PDT')).toHaveAttribute('title', 'Sep 14, 2026 05:01 PDT · Publication Sep 14, 2026');
   expect(screen.getByRole('row', { name: /Early Look/ })).toHaveTextContent('Unavailable');
+  expect(within(screen.getByRole('row', { name: /Volume/ })).getByText('Not received')).toHaveAttribute('title', 'No publication received today');
   expect(screen.queryByRole('button', { name: /Upload & index a PDF/ })).not.toBeInTheDocument();
   expect(analystWorkspaceApi.request).toHaveBeenCalledWith('/daily');
 });

@@ -39,50 +39,6 @@ test('review sources use the exact saved run and project compact metadata only',
   assert.doesNotMatch(JSON.stringify(result), /Private report|sensitive|123456/);
 });
 
-test('manual Sources follow the exact accepted capture and expose metadata while acquisition runs', async () => {
-  const calls = [];
-  const capture = { captureId: 'manual-capture', turnId: 'manual-turn', operation: 'portfolio-cross-verification' };
-  const service = createReviewSources({
-    request: async () => assert.fail('Manual evidence must not use a daily capture or reacquire account data'),
-    call: async (operation, body) => {
-      calls.push({ operation, body });
-      if (operation === 'source-binding') return { conversation: { id: 'manual-chat', kind: 'chat', manualVerification: capture } };
-      assert.equal(operation, 'manual-sources');
-      return { conversationId: 'manual-chat', turnId: 'manual-turn', runId: 'manual-capture', reviewKind: 'portfolio-cross-verification',
-        state: 'acquiring', checkedAt: at, rawEvidence: { account: 'private' }, items: [
-          { id: 'ibGateway', label: 'IB Gateway', status: 'ready', connectionState: 'connected', observedAt: at, timestampKind: 'captured', account: 'private' },
-          { id: 'portfolio', label: 'Holdings', status: 'unavailable', diagnostic: { code: 'IBKR_HOLDINGS_TIMEOUT' } },
-          { id: 'risk-ranges', label: 'Risk Ranges', status: 'checking' },
-        ] };
-    },
-  });
-  const result = await service.getReviewSources('manual-chat');
-  assert.equal(result.basis, 'manual');
-  assert.equal(result.state, 'acquiring');
-  assert.equal(result.turnId, 'manual-turn');
-  assert.equal(result.items[0].status, 'ready');
-  assert.equal(result.items[0].connectionState, 'connected');
-  assert.equal(result.items[1].status, 'unavailable');
-  assert.match(result.items[1].diagnostic.reason, /does not establish that IB Gateway was disconnected/);
-  assert.equal(result.items[2].status, 'checking');
-  assert.deepEqual(calls, [
-    { operation: 'source-binding', body: { conversationId: 'manual-chat' } },
-    { operation: 'manual-sources', body: { conversationId: 'manual-chat', turnId: 'manual-turn', captureId: 'manual-capture' } },
-  ]);
-  assert.doesNotMatch(JSON.stringify(result), /private|rawEvidence|account/);
-});
-
-test('manual Sources reject a response belonging to another capture or turn', async () => {
-  for (const mismatch of [{ runId: 'old-capture' }, { turnId: 'old-turn' }, { conversationId: 'other-chat' }]) {
-    const service = createReviewSources({ request: async () => assert.fail('No daily Sources read'),
-      call: async operation => operation === 'source-binding'
-        ? { conversation: { id: 'manual-chat', kind: 'chat', manualVerification: { captureId: 'manual-capture', turnId: 'manual-turn' } } }
-        : { conversationId: 'manual-chat', turnId: 'manual-turn', runId: 'manual-capture', reviewKind: 'portfolio-cross-verification', items: [], ...mismatch },
-    });
-    await assert.rejects(service.getReviewSources('manual-chat'), { statusCode: 409 });
-  }
-});
-
 test('the captured Gateway check remains separate from account data outcomes and excludes account evidence', async () => {
   const { service } = setup({ result: {
     runId: 'run-1', conversationId: 'conversation-1', reviewKind: 'portfolio-review', state: 'succeeded', checkedAt: at,
@@ -316,9 +272,7 @@ test('pre-run readiness is explicit and cannot check broker sources', async () =
   assert.equal(byId.portfolioOpenOrders.status, 'missing');
   assert.equal(byId.portfolio.requiresIbGateway, true);
   assert.equal(byId.portfolioOpenOrders.requiresIbGateway, true);
-  assert.equal(byId.portfolioPca.label, 'PCA model');
-  assert.equal(byId.portfolioPca.status, 'missing');
-  assert.equal(byId.portfolioPca.requiresIbGateway, undefined);
+  assert.equal(byId.portfolioPca, undefined, 'the removed PCA model has no roster row');
   assert.equal(byId.portfolioFactors, undefined);
   assert.equal(byId['risk-ranges'].requiresIbGateway, undefined);
   assert.equal(byId['early-look'].status, 'missing');
@@ -544,7 +498,7 @@ test('paused, optional and timed source metadata pass through only in their allo
     ],
   } });
   const result = await service.getReviewSources('conversation-1');
-  assert.equal(result.startedAt, undefined, 'the header start clock belongs to the manual basis only');
+  assert.equal(result.startedAt, undefined);
   const byId = Object.fromEntries(result.items.map(item => [item.id, item]));
   assert.equal(byId.portfolioPca.status, 'pending');
   assert.equal(byId.portfolioPca.elapsedMs, undefined);
@@ -561,7 +515,7 @@ test('paused, optional and timed source metadata pass through only in their allo
 test('a paused alpha-code scan keeps its Predictive place as one Pending row', async () => {
   const { pendingReviewSourceItems } = require('./analystReviewSourceCatalog.cjs');
   // The setup board review has no alpha-code scan; only a saved capture that recorded the pause lists it.
-  for (const kind of ['prediction-markets-review', 'portfolio-review', 'balance-review', 'portfolio-cross-verification']) {
+  for (const kind of ['prediction-markets-review', 'portfolio-review', 'balance-review']) {
     assert.ok(!pendingReviewSourceItems(kind).some(item => item.id === 'alphaCodes'), kind);
   }
   const { service } = setup({ saved: conversation({ kind: 'prediction-markets-review' }), result: {
@@ -575,7 +529,7 @@ test('a paused alpha-code scan keeps its Predictive place as one Pending row', a
   assert.equal(row.diagnostic.remedy, 'No action is needed while this source is paused.');
 });
 
-test('rosters built without a capture keep paused sources Pending and never list an unpaused alpha scan', async () => {
+test('rosters built without a capture leave out the PCA model and never list an unpaused alpha scan', async () => {
   const notCreated = () => { throw Object.assign(new Error('Run not created'), { statusCode: 404 }); };
   const rows = async (kind, binding) => {
     const service = createReviewSources({ call: async () => ({ conversation: { id: 'conversation-1', kind }, ...binding }),
@@ -586,18 +540,16 @@ test('rosters built without a capture keep paused sources Pending and never list
   for (const runId of ['never-created', null]) {
     // A review stopped before its worker existed, and one with no run yet.
     const portfolio = await rows('portfolio-review', { runId, ...paused });
-    assert.equal(portfolio.portfolioPca.status, 'pending');
-    assert.equal(portfolio.portfolioPca.diagnostic.code, 'SOURCE_PAUSED');
+    assert.equal(portfolio.portfolioPca, undefined);
     assert.equal(portfolio.portfolio.status, 'missing', 'only pausable sources can be paused');
     assert.equal((await rows('prediction-markets-review', { runId, ...paused })).alphaCodes, undefined);
-    // Without the sidecar's pause flags, PCA was simply not checked and the
-    // alpha-code row, which only a recorded pause creates, is absent.
-    assert.equal((await rows('portfolio-review', { runId })).portfolioPca.status, 'missing');
+    // Without the sidecar's pause flags, PCA and the alpha-code row stay absent.
+    assert.equal((await rows('portfolio-review', { runId })).portfolioPca, undefined);
     assert.equal((await rows('prediction-markets-review', { runId, pausedSources: [] })).alphaCodes, undefined);
   }
   const queued = await rows('portfolio-review', { runId: 'queued-run', ...paused,
     conversation: { id: 'conversation-1', kind: 'portfolio-review', reviewStartPending: true, activeTurn: { id: 'turn', state: 'accepted' } } });
-  assert.equal(queued.portfolioPca.status, 'pending');
+  assert.equal(queued.portfolioPca, undefined);
   assert.equal(queued.portfolio.status, 'checking');
 });
 
@@ -619,17 +571,6 @@ test('every new capture failure code explains itself without implying a disconne
   }
   for (const item of result.items.slice(0, unverified.length)) {
     assert.match(item.diagnostic.reason, /does not establish that IB Gateway was disconnected/, item.diagnostic.code);
-  }
-});
-
-test('manual Sources expose a valid acquisition start clock only', async () => {
-  for (const [startedAt, expected] of [[at, at], ['2026-09-18', undefined], ['not a time', undefined], [12, undefined]]) {
-    const service = createReviewSources({ request: async () => assert.fail('No daily Sources read'),
-      call: async operation => operation === 'source-binding'
-        ? { conversation: { id: 'manual-chat', kind: 'chat', manualVerification: { captureId: 'manual-capture', turnId: 'manual-turn' } } }
-        : { conversationId: 'manual-chat', turnId: 'manual-turn', runId: 'manual-capture', reviewKind: 'portfolio-cross-verification',
-          state: 'acquiring', startedAt, items: [] } });
-    assert.equal((await service.getReviewSources('manual-chat')).startedAt, expected);
   }
 });
 

@@ -35,6 +35,7 @@ export function normalizeAnalystSourceReadiness(payload, now = Date.now()) {
         && observedTimestamp(row.observedAt, now) && observedTimestamp(row.indexedAt, now));
       return {
         id: row.id, label: row.label, updatedAt, usableForDay,
+        notReceived: Boolean(available && !usableForDay && row.status === 'not_received'),
         publicationDate: row.publicationDate || null,
         reason: usableForDay ? null : available ? row.reason || 'Unavailable for today.' : 'Source availability is unavailable.',
       };

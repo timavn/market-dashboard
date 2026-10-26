@@ -7,21 +7,3 @@
   height: 100%;
   background: #fff;
 }
-
-.analyst-loading-ring {
-  box-sizing: border-box;
-  width: 26px;
-  height: 26px;
-  border: 2px solid #e1e6ea;
-  border-top-color: #64707e;
-  border-radius: 50%;
-  animation: analyst-loading-spin 0.85s linear infinite;
-}
-
-@keyframes analyst-loading-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .analyst-loading-ring { animation: none; }
-}

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, Loader, RefreshCw, Search, Send, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Search, Send, Square, Trash2 } from 'lucide-react';
+import AnalystSpinner from './AnalystSpinner';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 import { Message, SourceLibrary } from './AnalystConversationPanel';
 import { useSurfaceActivity } from '../common/PersistentSurface';
@@ -10,7 +11,7 @@ import useAnalystInbox from '../../hooks/useAnalystInbox';
 import { balanceReviewMessages } from './balanceReviewPresentation';
 import { analystReviewMessages } from './analystReviewMessages';
 import AnalystReviewSources from './AnalystReviewSources';
-import AnalystLandingStatus, { AnalystLandingClock } from './AnalystLandingStatus';
+import AnalystLandingStatus from './AnalystLandingStatus';
 import useAnalystReviewSources from '../../hooks/useAnalystReviewSources';
 import AnalystSourceExcerpt from './AnalystSourceExcerpt';
 import { formatResearchSourceDate } from '../../utils/researchDateFormat';
@@ -20,19 +21,19 @@ import { hydrateAnalystCapturedCitations } from '../../services/analyst/analystC
 import useAnalystCapturedHistory from '../../hooks/useAnalystCapturedHistory';
 import useAnalystReportContainment from '../../hooks/useAnalystReportContainment';
 
+const loadHorizonStats = symbols => api.request(`/horizon-stats?symbols=${encodeURIComponent(symbols.join(','))}`).then(result => result.rows || {});
+
 const reviews = [['portfolio-review', 'Portfolio Review'], ['prediction-markets-review', 'Predictive Markets Review']];
 // Balance Review is retired into Portfolio Review. Saved Balance chats stay
 // readable and deletable, but cannot be launched or refreshed.
 const retiredReviewKinds = ['balance-review'];
 const isReviewKind = kind => reviews.some(([review]) => review === kind) || retiredReviewKinds.includes(kind);
-const manualVerificationKind = 'portfolio-cross-verification';
-const sourcesAnchoredReview = kind => ['portfolio-review', 'prediction-markets-review', manualVerificationKind].includes(kind);
+const sourcesAnchoredReview = kind => ['portfolio-review', 'prediction-markets-review'].includes(kind);
 // Dated Analyst chats are filed under the user's Pacific calendar day.
 const pacificDay = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
 });
 const pacificDate = value => pacificDay.format(value);
-const manualPortfolioUpdatePrompt = 'Manually cross-verify my complete current portfolio against all available research products and portfolio rules. Show material exceptions, verification scope, and all holdings checked, with dated sources.';
 const isDailyConversation = row => row.kind === 'daily-chat' || isReviewKind(row.kind);
 const conversationDay = row => {
   if (isDailyConversation(row) && /^\d{4}-\d{2}-\d{2}$/.test(row.trading_date || '')) return row.trading_date;
@@ -58,11 +59,6 @@ function placeDailyChats(items) {
 }
 const saved = (key, fallback) => { try { return JSON.parse(localStorage.getItem(`analyst.workspace.${key}`)) ?? fallback; } catch { return fallback; } };
 const save = (key, value) => { try { localStorage.setItem(`analyst.workspace.${key}`, JSON.stringify(value)); } catch { /* Memory state still works if storage is full. */ } };
-const manualOpening = request => request?.operation === manualVerificationKind ? {
-  id: `pending-manual:${request.requestId}`, kind: manualVerificationKind, requestId: request.requestId,
-  title: 'Manual Portfolio Update', created_at: request.createdAt || new Date().toISOString(),
-  message_count: 0, state: 'starting', pending: true, archived: false,
-} : null;
 const LAUNCH_TTL_MS = 10 * 60_000;
 // The start POST's 45 s acceptance budget, with a margin for its commit.
 const LAUNCH_START_BUDGET_MS = 60_000;
@@ -86,7 +82,6 @@ const reviewOpening = ({ kind, requestId, launchKey, startedAt, tradingDate }) =
 const restoredSelection = () => {
   const selected = saved('selected', null);
   if (typeof selected !== 'string') return null;
-  if (selected.startsWith('pending-manual:')) return manualOpening(saved('outbox', null))?.id === selected ? selected : null;
   if (selected.startsWith('pending-review:')) return savedLaunches().some(row => `pending-review:${row.requestId}` === selected) ? selected : null;
   return selected;
 };
@@ -110,10 +105,9 @@ const balancePrimaryReady = conversation => {
 const landingActions = [
   { kind: 'portfolio-review', label: 'Portfolio review', key: 'P' },
   { kind: 'prediction-markets-review', label: 'Predictive markets', key: 'M' },
-  { kind: manualVerificationKind, label: 'Manual portfolio update', key: 'U', name: 'Manual Portfolio Update' },
 ];
 const landingTabs = [['chats', 'Chats'], ['inbox', 'Inbox'], ['sources', 'Sources']];
-const ResponseDots = ({ phase }) => <div className={`analyst-running-dots${phase ? ' has-phase' : ''}`} role="status" aria-label="Response running" aria-description={phase}><span /><span /><span />{phase && <small>{phase}</small>}</div>;
+const ResponseDots = ({ phase, since }) => <div className={`analyst-running-dots${phase ? ' has-phase' : ''}`} role="status" aria-label="Response running" aria-description={phase}><AnalystSpinner size={18} elapsed since={since} />{phase && <small className="sr-only">{phase}</small>}</div>;
 const acceptedConversation = (entities, request) => request && Object.values(entities).find(conversation =>
   (!request.conversationId || conversation.id === request.conversationId)
   && [conversation.activeTurn, conversation.lastTurn].some(turn => turn?.request_id === request.requestId));
@@ -142,8 +136,9 @@ const SidebarStatus = ({ row, conversation, starting, deleting }) => {
   const label = deleting ? 'Deleting…' : starting ? 'Starting…' : row.kind === 'audit' ? 'Audit history'
     : balanceReady ? sidebarCountLabel({ ...conversation, message_count: undefined })
       : phase || (loading ? 'Responding…' : sidebarCountLabel(row));
-  return <small>{loading && <Loader size={10} className="analyst-conversation-running-icon analyst-spin" aria-hidden="true" />}
-    <span className="analyst-conversation-status-text">{label}</span></small>;
+  return <small>{loading
+    ? <AnalystSpinner size={10} className="analyst-conversation-running-icon" text={label} elapsed since={row.activeTurn?.created_at} />
+    : <span className="analyst-conversation-status-text">{label}</span>}</small>;
 };
 // Retain navigation through API restarts, without retaining report, source, or
 // account evidence in the browser. Missing list rows are not deletion receipts.
@@ -162,8 +157,6 @@ const sidebarMetadata = row => {
       ['id', 'state', 'request_id'].filter(field => typeof row[key][field] === 'string').map(field => [field, row[key][field]]));
   }
   if (Object.prototype.hasOwnProperty.call(row, 'activeTurn') && row.activeTurn !== undefined) metadata.state = row.activeTurn?.state || row.lastTurn?.state || null;
-  if (row.manualVerification && typeof row.manualVerification === 'object') metadata.manualVerification = Object.fromEntries(
-    ['operation', 'captureId', 'turnId', 'state'].filter(key => typeof row.manualVerification[key] === 'string').map(key => [key, row.manualVerification[key]]));
   return metadata;
 };
 const restoredSidebar = () => {
@@ -232,7 +225,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     const drafts = saved('drafts', {});
     const outbox = saved('outbox', null);
     const key = outbox?.conversationId || 'landing';
-    return outbox?.operation !== manualVerificationKind && outbox?.text && !drafts[key] ? { ...drafts, [key]: outbox.text } : drafts;
+    return outbox?.text && !drafts[key] ? { ...drafts, [key]: outbox.text } : drafts;
   });
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
@@ -311,10 +304,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const [refreshingIds, setRefreshingIds] = useState([]);
   // An unacknowledged review start survives a reload as the same Starting slot.
   const [restoredLaunches] = useState(() => savedLaunches().map(record => ({ ...reviewOpening(record), restored: true })));
-  const [pendingReviews, setPendingReviews] = useState(() => {
-    const opening = manualOpening(saved('outbox', null));
-    return { ...Object.fromEntries(restoredLaunches.map(launch => [launch.id, launch])), ...(opening ? { [opening.id]: opening } : {}) };
-  });
+  const [pendingReviews, setPendingReviews] = useState(() => Object.fromEntries(restoredLaunches.map(launch => [launch.id, launch])));
   const pendingReviewsRef = useRef(pendingReviews);
   pendingReviewsRef.current = pendingReviews;
   const launchingReview = pendingReviews[selected] || null;
@@ -750,7 +740,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     return () => { closed = true; clearInterval(timer); clearTimeout(scheduled); clearTimeout(reopenTimer); stream.close(); };
   }, [active, load, loadInbox, forget, revalidateSources]);
   useEffect(() => {
-    if (!active || !historyLoaded || !selected || selected.startsWith('pending-review:') || selected.startsWith('pending-manual:')
+    if (!active || !historyLoaded || !selected || selected.startsWith('pending-review:')
       || refreshInFlight.current.has(selected)) return undefined;
     let stopped = false;
     let timer;
@@ -922,18 +912,11 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       setDeletingIds([...deleting.current]);
     }
   };
-  const draftKey = launchingReview?.kind === manualVerificationKind ? pendingRequest.current?.conversationId || 'landing' : selected || 'landing';
+  const draftKey = selected || 'landing';
   const draft = drafts[draftKey] || '';
   const editDraft = (key, value) => { const next = { ...draftsRef.current, [key]: value }; draftsRef.current = next; setDrafts(next); save('drafts', next); };
   const receiveSubmission = useCallback((request, accepted, nav) => {
     if (!accepted?.id) return;
-    const opening = manualOpening(request);
-    // A pending row is removed only after the server reports this request's
-    // chat deleted by the user; a late receipt stays hidden and is never deleted here.
-    if (opening && removed.current.has(opening.id)) {
-      if (pendingRequest.current?.requestId === request.requestId) { pendingRequest.current = null; save('outbox', null); }
-      return;
-    }
     update(accepted);
     receiveSidebar(accepted);
     setRequestRecoveryFailed(current => current?.requestId === request.requestId ? null : current);
@@ -942,19 +925,15 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     const key = request.conversationId || 'landing';
     const next = { ...draftsRef.current };
     if (next[key]?.trim() === request.text) next[key] = '';
-    const ownsSelection = opening && selectedRef.current === opening.id;
-    if (ownsSelection || (nav !== undefined && navigation.current === nav && selectedRef.current === request.conversationId)) {
+    if (nav !== undefined && navigation.current === nav && selectedRef.current === request.conversationId) {
       if (accepted.id !== request.conversationId) {
         if (next[key] && !next[accepted.id]) { next[accepted.id] = next[key]; next[key] = ''; }
-      }
-      if (ownsSelection || accepted.id !== request.conversationId) {
         choose(accepted.id);
-        followReply.current = !sourcesAnchoredReview(accepted.manualVerification ? manualVerificationKind : accepted.kind);
+        followReply.current = !sourcesAnchoredReview(accepted.kind);
       }
       setError('');
     }
     draftsRef.current = next; setDrafts(next); save('drafts', next);
-    if (opening) setPendingReviews(old => { const next = { ...old }; delete next[opening.id]; return next; });
   }, [choose, receiveSidebar, update]);
   const recoverRequest = useCallback(request => {
     const existing = recoveryReads.current.get(request.requestId);
@@ -968,8 +947,6 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
               && result.turn?.request_id === request.requestId) return result.conversation;
             if (result.status === 'deleted') {
               if (pendingRequest.current?.requestId === request.requestId) { pendingRequest.current = null; save('outbox', null); }
-              const opening = manualOpening(request);
-              if (opening) forget(opening.id);
               if (request.conversationId) forget(request.conversationId);
             }
             return null;
@@ -987,15 +964,11 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   }, [forget]);
   const settleMissingRequest = useCallback(request => {
     setRequestRecoveryFailed(current => current?.requestId === request.requestId ? null : current);
-    const opening = manualOpening(request);
-    if (opening) {
-      setPendingReviews(old => { const next = { ...old }; delete next[opening.id]; return next; });
-      if (selectedRef.current === opening.id) { choose(null); setError('The update was not accepted. Retry Manual Portfolio Update.'); }
-    } else if (selectedRef.current === request.conversationId) setError('The message was not accepted. Retry.');
-  }, [choose]);
+    if (selectedRef.current === request.conversationId) setError('The message was not accepted. Retry.');
+  }, []);
   const failRequestConfirmation = useCallback(request => {
     setRequestRecoveryFailed(request);
-    if (selectedRef.current === request.conversationId || selectedRef.current === manualOpening(request)?.id) {
+    if (selectedRef.current === request.conversationId) {
       setError('Couldn’t confirm whether the message was accepted. Retry confirmation.');
     }
   }, []);
@@ -1034,17 +1007,13 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   // A history-wide success must not hide this conversation's own failed read.
   const recordUnavailable = !conversation && Boolean(selected) && (Boolean(historyError) || unreadableRecord === selected);
   const selectedRow = rows.find(row => row.id === selected);
-  const manualCapture = conversation?.manualVerification || selectedRow?.manualVerification;
-  const selectedKind = manualCapture ? manualVerificationKind : conversation?.kind || selectedRow?.kind;
-  const isReview = isReviewKind(selectedKind) || selectedKind === manualVerificationKind;
+  const selectedKind = conversation?.kind || selectedRow?.kind;
+  const isReview = isReviewKind(selectedKind);
   const sourceMessage = conversation?.messages.findLast(message => message.reviewRunId || message.portfolioBrief?.runId || /^(daily-report|review-message):/.test(message.source_id || ''));
   const primaryReady = balancePrimaryReady(conversation) || (selectedKind === 'portfolio-review' && sourceMessage?.portfolioBrief?.available === true
     && sourceMessage.portfolioBriefIncluded !== false && sourceMessage.reviewRunId === sourceMessage.portfolioBrief.runId
     && (sourceMessage.turn_id === conversation?.activeTurn?.id || sourceMessage.reviewRunId === conversation?.reviewRunId));
   currentPrimaryPending.current = selectedKind === 'portfolio-review' && Boolean(conversation?.activeTurn) && !primaryReady;
-  const messageReviewKind = conversation?.kind === 'chat' && conversation.messages?.some(message =>
-    message.role === 'user' && message.text?.trim() === manualPortfolioUpdatePrompt)
-    ? manualVerificationKind : selectedKind;
   const reference = conversation?.referenceReview;
   const referenceObserved = reference?.asOf && formatAnalystReportDate(reference.asOf);
   const latestBriefIndex = conversation?.kind === 'portfolio-review' ? conversation.messages.findLastIndex(message => message.portfolioBrief) : -1;
@@ -1107,16 +1076,15 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   // that read fails: reserved rows never stay Checking with nothing reading.
   const reviewSources = useAnalystReviewSources({ conversationId: isReview ? selected : null,
     reviewKind: selectedKind,
-    turnId: manualCapture?.turnId || conversation?.activeTurn?.id || conversation?.lastTurn?.id,
-    captureId: manualCapture?.captureId || reference?.runId || sourceMessage?.reviewRunId || sourceMessage?.portfolioBrief?.runId || sourceMessage?.source_id,
-    active: active && Boolean(conversation || manualCapture || unreadableRecord === selected), running, refreshing: refreshingIds.includes(selected),
+    turnId: conversation?.activeTurn?.id || conversation?.lastTurn?.id,
+    captureId: reference?.runId || sourceMessage?.reviewRunId || sourceMessage?.portfolioBrief?.runId || sourceMessage?.source_id,
+    active: active && Boolean(conversation || unreadableRecord === selected), running, refreshing: refreshingIds.includes(selected),
     revalidationKey: sourceRevalidations[selected] || 0 });
   revalidateSelectedSources.current = reviewSources.revalidate;
-  // Model work (Balance's summary, Manual's written verification) follows
-  // settled Sources; keep its phase in the same header progress cell.
-  const manualWriting = selectedKind === manualVerificationKind && running && ['ready', 'partial'].includes(reviewSources.sources?.state);
+  // Model work (Balance's summary) follows settled Sources; keep its phase in
+  // the same header progress cell.
   const summarizing = running && conversation?.reviewPhase === 'summarizing';
-  const sourcesPhase = manualWriting ? 'Writing verification…' : summarizing ? reviewPhaseLabel('summarizing')
+  const sourcesPhase = summarizing ? reviewPhaseLabel('summarizing')
     : reviewBusy ? refreshingIds.includes(selected) ? 'Starting…' : reviewPhaseLabel(conversation?.reviewPhase) || 'Checking…' : undefined;
   const balanceCaptureId = selectedKind === 'balance-review' ? conversation?.reviewRunId : null;
   useEffect(() => {
@@ -1202,7 +1170,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     scrolls.current[selected] = transcript.current.scrollTop;
     save('scrolls', scrolls.current);
   }, [selected, selectedKind, conversation, renderedMessages, running, launchingReview]);
-  const submit = async (retryText, options = {}) => {
+  const submit = async retryText => {
     const rawDraft = draftsRef.current[draftKey] || '';
     const retry = typeof retryText === 'string';
     const text = retry ? retryText : rawDraft.trim();
@@ -1213,17 +1181,11 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     const nav = navigation.current;
     const pending = pendingRequest.current;
     const requestId = pending?.text === text && pending?.conversationId === owner ? pending.requestId : crypto.randomUUID();
-    const operation = options.operation || (pending?.text === text && pending?.conversationId === owner ? pending.operation : undefined);
-    const submission = { text, conversationId: owner, requestId, ...(operation ? { operation } : {}) };
+    const submission = { text, conversationId: owner, requestId };
     pendingRequest.current = submission;
     save('outbox', pendingRequest.current);
     sendInFlight.current = true;
     setPendingSend({ ...pendingRequest.current, navigation: nav, message: { id: `pending:${requestId}`, role: 'user', text } });
-    const opening = manualOpening(submission);
-    if (opening) {
-      setPendingReviews(old => ({ ...old, [opening.id]: opening }));
-      choose(opening.id);
-    }
     if (clearSubmittedDraft) editDraft(key, '');
     followReply.current = true;
     setSending(true); setError('');
@@ -1246,13 +1208,11 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       else {
         if (clearSubmittedDraft && !draftsRef.current[key]) editDraft(key, rawDraft);
         if (!confirmationPending) {
-          if (opening && selectedRef.current === opening.id) { choose(null); setError(e.message); }
-          else if (navigation.current === nav) setError(e.message);
+          if (navigation.current === nav) setError(e.message);
         }
       }
     }
     finally {
-      if (opening && !confirmationPending) setPendingReviews(old => { const next = { ...old }; delete next[opening.id]; return next; });
       sendInFlight.current = false; setSending(false); setPendingSend(null);
     }
   };
@@ -1325,7 +1285,6 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     finally { refreshInFlight.current.delete(id); setRefreshingIds([...refreshInFlight.current]); }
   };
   const retryResponse = async () => {
-    if (selectedKind === manualVerificationKind) return submit(lastPrompt || manualPortfolioUpdatePrompt, { operation: manualVerificationKind });
     if (!terminalError?.request_id?.startsWith('daily-narrative:') && !terminalError?.request_id?.startsWith('narrative-retry:')) {
       return isReview ? refreshReview(conversation) : submit(lastPrompt);
     }
@@ -1374,21 +1333,17 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   for (const group of groups) group.items = placeDailyChats(group.items);
   const terminalError = conversation?.lastTurn && ['failed', 'interrupted'].includes(conversation.lastTurn.state) && !(reference && conversation.lastTurn.request_id?.startsWith('daily-')) ? conversation.lastTurn : null;
   const lastPrompt = conversation?.messages.find(m => m.turn_id === terminalError?.id && m.role === 'user')?.text;
-  const selectedRecoveryFailure = requestRecoveryFailed && (requestRecoveryFailed.conversationId === selected
-    || manualOpening(requestRecoveryFailed)?.id === selected) ? requestRecoveryFailed : null;
+  const selectedRecoveryFailure = requestRecoveryFailed?.conversationId === selected ? requestRecoveryFailed : null;
   const landing = !selected && !selectedSend && !launchingReview;
   // A starting review has no saved row yet; its pending opening carries the title.
   const selectedTitle = conversation?.title || launchingReview?.title || [...rows, ...pendingDisplayRows].find(row => row.id === selected)?.title || '';
-  const manualBusy = sending || running || Boolean(launchingReview);
-  const startLanding = kind => kind === manualVerificationKind
-    ? submit(manualPortfolioUpdatePrompt, { operation: manualVerificationKind }) : launch(kind);
   const landingShortcut = e => {
     if (!landing || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;
     if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     const action = landingActions.find(row => row.key === e.key.toUpperCase());
-    if (!action || (action.kind === manualVerificationKind && manualBusy)) return;
+    if (!action) return;
     e.preventDefault();
-    startLanding(action.kind);
+    launch(action.kind);
   };
   return <section ref={panel} className={`analyst-panel analyst-panel-v2${portfolioPresentation ? ' has-portfolio-brief' : ''}`} data-testid="analyst-panel" role="dialog" aria-label="The Analyst" onKeyDown={landingShortcut}>
     <div className="analyst-workspace">
@@ -1401,33 +1356,32 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
           {launchingReview ? <div className="analyst-message-list"><AnalystReviewSources reviewKind={launchingReview.kind} loading phase="Starting…" />
             {launchingReview.kind === 'portfolio-review' && <PortfolioReviewPlaceholder />}</div>
             : !selected && !selectedSend ? <header className="analyst-landing">
-              <div className="analyst-landing-title"><h1>The Analyst</h1><AnalystLandingClock /></div>
+              <div className="analyst-landing-title"><h1>The Analyst</h1></div>
               <AnalystLandingStatus holdingsCount={holdingsCount} />
             </header>
               : <div className="analyst-message-list">
                 {isReview && <AnalystReviewSources reviewKind={selectedKind} sources={reviewSources.sources} loading={reviewSources.loading}
-                  readFailed={reviewSources.readFailed} reconnecting={reviewSources.reconnecting} phase={sourcesPhase} modelPhase={manualWriting || summarizing} />}
+                  readFailed={reviewSources.readFailed} reconnecting={reviewSources.reconnecting} phase={sourcesPhase} modelPhase={summarizing} />}
                 {selectedKind === 'portfolio-review' && !renderedMessages.some(message => message.role === 'assistant')
                   && <PortfolioReviewPlaceholder loading={!recordUnavailable && (!conversation || running)} />}
                 {portfolioBrief && <PortfolioResearchUpdates key={selected} brief={portfolioBrief} findings={inbox.findings} onCitation={openCitation} />}
                 {unavailableRefresh && <p className="portfolio-brief-caption" role="note">The latest refresh could not verify holdings. Showing the last saved portfolio below.</p>}
                 {reference && !portfolioBrief && (!reference.missing || error) && <div className="analyst-reference-note" role="note">
-                  {reference.missing ? <p>The portfolio review could not be loaded. Use the refresh icon to retry.</p> : <>
+                  {reference.missing ? <p>The portfolio review could not be loaded. Start a new Portfolio review.</p> : <>
                     <p>{reference.afterClose ? 'After-close review' : 'Latest saved review'} · {reference.tradingDate} · Historical snapshot</p>
                     <p>Observed <time dateTime={reference.asOf}>{referenceObserved}</time>. Values and source labels reflect that saved observation.</p>
                     {(reference.tradingDate !== reference.targetDate || !reference.afterClose) && <p>The closing review for {reference.targetDate} was not saved. Showing the latest available information.</p>}
                   </>}
                 </div>}
-                {portfolioBrief && !portfolioBrief.reviewedAt && reference && (reference.tradingDate !== reference.targetDate || !reference.afterClose) && <p className="portfolio-brief-caption" role="note">Last verified holdings: {reference.tradingDate}. Use the refresh icon to check all positions against the latest research.</p>}
+                {portfolioBrief && !portfolioBrief.reviewedAt && reference && (reference.tradingDate !== reference.targetDate || !reference.afterClose) && <p className="portfolio-brief-caption" role="note">Last verified holdings: {reference.tradingDate}. Start a new Portfolio review to check all positions against the latest research.</p>}
                 {renderedMessages.map(message => (
-                  <Message key={message.id} reviewKind={messageReviewKind} message={message} onCitation={openCitation}
-                    showCapturedSources={!conversation.manualVerification}
+                  <Message key={message.id} reviewKind={selectedKind} message={message} onCitation={openCitation}
                     captureUnavailable={unavailableCapturedBodies.has(`${selected}:${message.id}:${message.reviewRunId}`)}
-                    historical={messageReviewKind === 'portfolio-review' && Boolean(message.portfolioBrief) && message !== newestPortfolioPost} />
+                    historical={selectedKind === 'portfolio-review' && Boolean(message.portfolioBrief) && message !== newestPortfolioPost} />
                 ))}
                 {optimisticMessage && <Message message={optimisticMessage} onCitation={openCitation} />}
                 {recordUnavailable && <p className="analyst-conversation-empty">Conversation unavailable. <button type="button" onClick={() => { setHistoryError(''); load(selected).catch(e => setHistoryError(e.message)); }}>Retry conversation</button></p>}
-                {!isReview && (responsePending || (!conversation && selected && !recordUnavailable)) && <ResponseDots />}
+                {!isReview && (responsePending || (!conversation && selected && !recordUnavailable)) && <ResponseDots since={conversation?.activeTurn?.created_at} />}
                 {isReview && selectedSend && !reviewBusy && <ResponseDots />}
               </div>}
         </div>
@@ -1441,14 +1395,10 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
         </footer>
         {landing && <div className="analyst-landing-lower">
           <div className="analyst-landing-actions" role="group" aria-label="Start a review">
-            {landingActions.map(action => {
-              const manual = action.kind === manualVerificationKind;
-              return <button key={action.kind} type="button" className={manual ? 'analyst-manual-portfolio-update' : undefined}
-                aria-label={action.name || reviews.find(([kind]) => kind === action.kind)[1]} aria-keyshortcuts={action.key}
-                disabled={manual && manualBusy} onClick={() => startLanding(action.kind)}>
-                <span>{action.label}</span><kbd aria-hidden="true">{action.key}</kbd>
-              </button>;
-            })}
+            {landingActions.map(action => <button key={action.kind} type="button"
+              aria-label={reviews.find(([kind]) => kind === action.kind)[1]} aria-keyshortcuts={action.key} onClick={() => launch(action.kind)}>
+              <span>{action.label}</span><kbd aria-hidden="true">{action.key}</kbd>
+            </button>)}
           </div>
           <section className="analyst-landing-tabs">
             <div className="analyst-landing-tabbar">
@@ -1469,12 +1419,11 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
               // A row being deleted keeps its place until the server acknowledges.
               const rowDeleting = deletingIds.includes(row.id);
               const rowStarting = Boolean(row.pending) || refreshingIds.includes(row.id);
-              return <div key={row.id} className={`analyst-conversation-row has-delete-action${reviews.some(([kind]) => kind === row.kind) ? ' has-refresh-action' : ''}${row.id === selected ? ' is-active' : ''}${rowDeleting ? ' is-deleting' : ''}`}>
+              return <div key={row.id} className={`analyst-conversation-row has-delete-action${row.id === selected ? ' is-active' : ''}${rowDeleting ? ' is-deleting' : ''}`}>
               <button className={`analyst-conversation-item${row.id === selected ? ' is-active' : ''}`} aria-label={`Open conversation: ${row.title}`} disabled={rowDeleting} onClick={() => choose(row.id)}><span className="analyst-conversation-copy"><strong>{row.title}</strong><SidebarStatus row={row} conversation={entities[row.id]} starting={rowStarting} deleting={rowDeleting} /></span></button>
-              {reviews.some(([kind]) => kind === row.kind) && <button className="analyst-conversation-refresh" title="Update review" aria-label={`Update review: ${row.title}`} disabled={rowDeleting || rowStarting || Boolean(entities[row.id]?.activeTurn) || ['running', 'accepted'].includes(row.state)} onClick={() => refreshReview(row)}><RefreshCw size={12} /></button>}
               <button className="analyst-conversation-delete" title="Delete conversation" aria-label={`Delete conversation: ${row.title}`} disabled={rowDeleting || rowStarting} onClick={() => deleteConversation(row.id)}><Trash2 size={12} /></button>
             </div>; })}</section>)}{historyReadFailed ? <p className="analyst-conversation-empty">History unavailable. <button type="button" onClick={() => list().catch(e => setHistoryError(e.message))}>Retry history</button></p> : !visibleRows.length && <p className="analyst-conversation-empty">{query ? 'No matching conversations.' : 'No saved conversations.'}</p>}</div>
-                : landingTab === 'inbox' ? <AnalystInbox findings={inbox.findings} error={inboxError} onCitation={openCitation} onAcknowledge={acknowledge} />
+                : landingTab === 'inbox' ? <AnalystInbox findings={inbox.findings} error={inboxError} onCitation={openCitation} onAcknowledge={acknowledge} loadHorizonStats={loadHorizonStats} MessageComponent={Message} />
                   : <SourceLibrary embedded />}
             </div>
           </section>

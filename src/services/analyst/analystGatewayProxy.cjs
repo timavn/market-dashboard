@@ -4,7 +4,6 @@ const { WebSocket, WebSocketServer } = require('ws');
 const { validateLocalRequest, rejectWebSocketUpgrade, createMessageBudget } = require('../security/localTrust.cjs');
 const { getAnalystRuntimeGate } = require('./analystRuntimeGate.cjs');
 const { REVIEW_TIME_PROMPT, REVIEW_RETRIEVAL_PROMPT } = require('./analystReviewPrompt.cjs');
-const { PAGE_TOOL, validManualBinding, beginManualEvidence, noteManualPage, manualEvidenceSatisfied, manualEvidencePrompt } = require('./analystManualEvidence.cjs');
 
 const ANALYST_SOURCE = 'market-dashboard-analyst';
 // The isolated Analyst profile owns its model, reasoning effort, and service tier.
@@ -27,16 +26,13 @@ const APPROVED_TOOLS = new Set([
   'get_dashboard_context',
   'get_process_context',
   'get_portfolio_context',
-  'get_portfolio_verification_page',
   'get_balance_context',
   'get_live_market_snapshot',
-  'get_prediction_market_snapshot',
   'get_market_history',
   'get_company_fundamentals',
   'get_macro_series',
 ]);
 
-const LIVE_PREDICTION_TOOL = 'get_prediction_market_snapshot';
 const LIVE_PORTFOLIO_TOOL = 'get_portfolio_context';
 const LIVE_BALANCE_TOOL = 'get_balance_context';
 const LIVE_INSTRUCTIONS_PREFIX = '[market-dashboard-live-verification]';
@@ -44,10 +40,8 @@ const LIVE_INSTRUCTIONS_SUFFIX = '[/market-dashboard-live-verification]';
 const LIVE_SOURCE_LABELS = {
   get_balance_context: 'IBKR balances',
   get_portfolio_context: 'IBKR holdings',
-  get_prediction_market_snapshot: 'prediction-market quotes',
 };
 const LIVE_TOOL_NAMES = new Set([
-  LIVE_PREDICTION_TOOL,
   LIVE_PORTFOLIO_TOOL,
   LIVE_BALANCE_TOOL,
 ]);
@@ -284,7 +278,7 @@ function requestedReconnectGmRetry(batchId, reviewKind, text) {
   }
   const requirements = liveRequirementsForPrompt(normalizedText);
   const expectedRequirements = normalizedReviewKind === 'options-review'
-    ? [LIVE_PORTFOLIO_TOOL, LIVE_PREDICTION_TOOL]
+    ? [LIVE_PORTFOLIO_TOOL]
     : [LIVE_PORTFOLIO_TOOL, LIVE_BALANCE_TOOL];
   if (expectedRequirements.some((name) => !requirements.has(name))) {
     throw new Error('GM retry requires the canonical live-data review prompt after reconnect.');
@@ -367,8 +361,8 @@ function liveRequirementsForPrompt(value, previousRequirements = new Set()) {
     return new Set(previousRequirements || []);
   }
   const requirements = new Set();
-  if (predictionCurrent || fullLiveRefresh) requirements.add(LIVE_PREDICTION_TOOL);
-  if (portfolioCurrent || fullLiveRefresh || (predictionCurrent && /\bfor\s+us\b/i.test(text))) {
+  // Event-contract questions rely on the saved review plus verified holdings.
+  if (portfolioCurrent || fullLiveRefresh || predictionCurrent) {
     requirements.add(LIVE_PORTFOLIO_TOOL);
   }
   if (balanceCurrent) {
@@ -450,27 +444,6 @@ function reconcileLiveTurnHistory(turn, messages, completedText) {
   return liveGateSatisfied(turn);
 }
 
-function reconcileManualHistory(turn, messages, completedText) {
-  if (!turn.manualVerification || !turn.submittedPrompt || !Array.isArray(messages)) return false;
-  let start = -1;
-  messages.forEach((message, index) => { if (message.role === 'user') start = index; });
-  if (start < 0 || messageText(messages[start]) !== turn.submittedPrompt) return false;
-  const timestamp = messages[start].timestamp;
-  const submitted = typeof timestamp === 'number' ? timestamp * 1000 : Date.parse(timestamp);
-  if (!Number.isFinite(submitted) || submitted < turn.submittedAt || submitted > Date.now() + 30_000) return false;
-  const current = messages.slice(start);
-  const final = [...current].reverse().find(message => message.role === 'assistant' && messageText(message).trim());
-  if (!final || messageText(final).trim() !== String(completedText || '').trim()) return false;
-  for (const message of current) {
-    if (historyToolLeaf(message) !== PAGE_TOOL) continue;
-    const page = findToolResultObject(messageText(message), value => value?.captureId === turn.manualVerification.binding.captureId
-      && value?.representation === 'portfolio-verification-page-v1' && value?.scope === 'summary');
-    noteManualPage(turn, page);
-    collectCitations(message, turn.citations);
-  }
-  return manualEvidenceSatisfied(turn);
-}
-
 function portfolioReviewGateSatisfied(context) {
   const review = context?.portfolioReview;
   if (!review) return true;
@@ -501,7 +474,7 @@ function notePortfolioPacketComplete(context, toolId) {
 }
 
 function responseGateSatisfied(context) {
-  return liveGateSatisfied(context) && portfolioReviewGateSatisfied(context) && manualEvidenceSatisfied(context);
+  return liveGateSatisfied(context) && portfolioReviewGateSatisfied(context);
 }
 
 function resetLiveResponseBuffer(context) {
@@ -511,7 +484,6 @@ function resetLiveResponseBuffer(context) {
 
 function beginLiveTurn(context, text) {
   context.portfolioReview = null;
-  context.manualVerification = null;
   const requirements = liveRequirementsForPrompt(text, context.previousLiveRequirements);
   context.previousLiveRequirements = new Set(requirements);
   context.requiredLiveTools = new Set(requirements);
@@ -730,29 +702,6 @@ function liveToolCompletionAccepted(result) {
   return toolResultLiveVerification(result) !== false;
 }
 
-function collectVerificationCitationTable(table, output) {
-  const fields = new Set(['id', 'documentId', 'product', 'publicationDate', 'publishedAt', 'sourceUri']);
-  const required = ['id', 'documentId', 'product', 'publicationDate', 'sourceUri'];
-  if (!table || typeof table !== 'object' || Array.isArray(table)
-      || !Array.isArray(table.columns) || !Array.isArray(table.rows)
-      || !table.columns.every(column => typeof column === 'string' && fields.has(column))
-      || new Set(table.columns).size !== table.columns.length
-      || !required.every(column => table.columns.includes(column))
-      || (Object.hasOwn(table, 'rowCount') && table.rowCount !== table.rows.length)) return;
-  for (const row of table.rows) {
-    if (!Array.isArray(row) || row.length !== table.columns.length) continue;
-    const citation = Object.create(null);
-    let valid = true;
-    table.columns.forEach((column, index) => {
-      const value = row[index];
-      if ((typeof value !== 'string' || !value)
-          && !(column === 'publishedAt' && value === null)) valid = false;
-      citation[column] = value;
-    });
-    if (valid && validCitation(citation)) output.set(citation.id, { ...citation });
-  }
-}
-
 function collectCitations(value, output = new Map(), depth = 0) {
   if (depth > 12 || output.size >= 100 || value == null) return output;
   if (typeof value === 'string') {
@@ -775,9 +724,6 @@ function collectCitations(value, output = new Map(), depth = 0) {
   }
   if (typeof value !== 'object') return output;
   if (value.role === 'tool' && READ_ONLY_SKILL_TOOLS.has(historyToolLeaf(value))) return output;
-  if (Object.hasOwn(value, 'researchVerification')) {
-    collectVerificationCitationTable(value.researchVerification?.citationTable, output);
-  }
   if (Array.isArray(value.citations)) {
     value.citations.forEach((citation) => {
       if (validCitation(citation)) output.set(citation.id, { ...citation });
@@ -1104,7 +1050,6 @@ function attachAnalystGatewayProxy(server, options = {}) {
       gmStatus: null,
       visibleMessageCount: 0,
       portfolioReview: null,
-      manualVerification: null,
     });
     let context = createTurnContext();
     let upstreamConnected = false;
@@ -1127,7 +1072,6 @@ function attachAnalystGatewayProxy(server, options = {}) {
       turn.completedLiveTools = new Set();
       turn.liveGateOpen = true;
       turn.liveBufferOverflow = false;
-      turn.manualVerification = null;
       resetLiveResponseBuffer(turn);
       turn.portfolioReview = null;
     }
@@ -1319,11 +1263,6 @@ function attachAnalystGatewayProxy(server, options = {}) {
             notePortfolioPacketComplete(turn, payload.tool_id);
           }
           if (!READ_ONLY_SKILL_TOOLS.has(leaf)) collectCitations(payload.result, turn.citations);
-          if (turn.manualVerification && leaf === PAGE_TOOL) {
-            const page = findToolResultObject(payload.result, value => value?.captureId === turn.manualVerification.binding.captureId
-              && value?.representation === 'portfolio-verification-page-v1' && value?.scope === 'summary');
-            noteManualPage(turn, page);
-          }
           sendTurnFrame(turn, {
             type: 'tool',
             status: 'complete',
@@ -1435,11 +1374,10 @@ function attachAnalystGatewayProxy(server, options = {}) {
           const completingPortfolioReview = turn.portfolioReview;
           // Tool completion events may omit their full result. Reconcile only this
           // exact response against its freshly persisted tool history before failing it.
-          if (!turn.portfolioReview && (!liveGateSatisfied(turn) || !manualEvidenceSatisfied(turn))) {
+          if (!turn.portfolioReview && !liveGateSatisfied(turn)) {
             try {
               const history = await upstream.request('session.history', { session_id: turn.runtimeSessionId }, 5000);
-              if (turn.manualVerification) reconcileManualHistory(turn, history.messages, payload.text);
-              else reconcileLiveTurnHistory(turn, history.messages, payload.text);
+              reconcileLiveTurnHistory(turn, history.messages, payload.text);
               turn.liveGateOpen = responseGateSatisfied(turn);
               flushAssistantEvents(browser, turn);
             } catch (_error) { /* Missing verified history keeps the response gate closed. */ }
@@ -1454,13 +1392,11 @@ function attachAnalystGatewayProxy(server, options = {}) {
             : [];
           const missingPrepare = Boolean(turn.portfolioReview && !turn.portfolioReview.prepareComplete);
           const packetBatchViolation = Boolean(turn.portfolioReview?.packetBatchViolation);
-          const missingManualEvidence = !manualEvidenceSatisfied(turn);
           if (
             missingTools.length
             || missingPackets.length
             || missingPrepare
             || packetBatchViolation
-            || missingManualEvidence
             || turn.liveBufferOverflow
           ) {
             resetLiveResponseBuffer(turn);
@@ -1468,15 +1404,13 @@ function attachAnalystGatewayProxy(server, options = {}) {
             turn.liveGateOpen = false;
             sendTurnFrame(turn, {
               type: 'error',
-              code: turn.portfolioReview || missingManualEvidence
+              code: turn.portfolioReview
                 ? 'ANALYST_REVIEW_EVIDENCE_INCOMPLETE'
                 : 'ANALYST_LIVE_REFRESH_REQUIRED',
               error: turn.liveBufferOverflow
                 ? 'The Analyst live response exceeded the guarded buffer; no current-data answer was shown.'
                 : packetBatchViolation
                   ? 'Portfolio Review requested more than three evidence packets in one tool-call batch; no unverified answer was shown.'
-                : missingManualEvidence
-                  ? 'Manual Portfolio Update did not read its complete captured holding roster. Retry is available.'
                 : turn.portfolioReview
                   ? 'Portfolio Review did not read every server-enumerated evidence packet; no incomplete answer was shown.'
                 : liveRefreshError(missingTools),
@@ -1532,7 +1466,6 @@ function attachAnalystGatewayProxy(server, options = {}) {
           turn.citations.clear();
           const completedPortfolioRunId = completingPortfolioReview?.runId || null;
           turn.portfolioReview = null;
-          turn.manualVerification = null;
           if (completingPortfolioReview) {
             sendPortfolioReviewStatus({
               runId: completingPortfolioReview.runId,
@@ -2145,9 +2078,7 @@ function attachAnalystGatewayProxy(server, options = {}) {
         // current conditional output contract on new turns, using the same
         // hidden guidance path as live verification and captured review context.
         const guidedText = [ACCOUNT_COMPARISON_PREFIX, ACCOUNT_COMPARISON_GUIDANCE, ACCOUNT_COMPARISON_SUFFIX, text].join('\n');
-        const submittedText = turn.manualVerification
-          ? manualEvidencePrompt(guidedText, turn.manualVerification.binding, LIVE_INSTRUCTIONS_PREFIX, LIVE_INSTRUCTIONS_SUFFIX)
-          : liveVerificationPrompt(guidedText, turn.requiredLiveTools);
+        const submittedText = liveVerificationPrompt(guidedText, turn.requiredLiveTools);
         turn.submittedPrompt = submittedText;
         turn.submittedAt = Date.now();
         return upstream.request('prompt.submit', { session_id: runtimeSessionId, text: submittedText }, 30_000);
@@ -2165,13 +2096,10 @@ function attachAnalystGatewayProxy(server, options = {}) {
         turn.busy = false;
         try {
           const pendingPortfolioReview = turn.portfolioReview;
-          const pendingManual = turn.manualVerification;
           await resumeStoredRuntimeForPrompt(turn);
           turn.citations.clear();
           turn.busy = true;
-          if (pendingManual) {
-            beginManualEvidence(turn, pendingManual.binding);
-          } else if (pendingPortfolioReview) {
+          if (pendingPortfolioReview) {
             turn.portfolioReview = pendingPortfolioReview;
             turn.liveGateOpen = responseGateSatisfied(turn);
             resetLiveResponseBuffer(turn);
@@ -2878,7 +2806,7 @@ function attachAnalystGatewayProxy(server, options = {}) {
           const message = JSON.parse(String(raw));
           action = message.action || '';
           if (![
-            'open', 'open_review_chat', 'prompt', 'new_prompt', 'review_prompt', 'resume_review', 'manual_verification_prompt',
+            'open', 'open_review_chat', 'prompt', 'new_prompt', 'review_prompt', 'resume_review',
             'interrupt', 'new_chat', 'gm', 'retry_gm_review',
             'start_review', 'retry_review', 'list_sessions', 'resume', 'cancel_resume',
             'rename_session',
@@ -2959,32 +2887,6 @@ function attachAnalystGatewayProxy(server, options = {}) {
             );
           } else if (message.action === 'rename_session') {
             await renameSession(String(message.sessionId || ''), message.title);
-          } else if (message.action === 'manual_verification_prompt') {
-            const text = String(message.text || '').trim();
-            if (!text || text.length > 20_000 || message.requestId !== message.turnId) throw new Error('Manual verification owner is invalid.');
-            const expected = { conversationId: message.conversationId, turnId: message.turnId, captureId: message.captureId };
-            const saved = await reviewServiceRequest('/internal/workspace/manual-generation', {
-              method: 'POST', body: expected, timeoutMs: 5_000,
-            });
-            if (!validManualBinding(saved.context, expected)) throw new Error('Manual verification evidence is unavailable.');
-            if ((message.sessionId || null) !== (saved.context.hermesSessionId || null)) throw new Error('Manual verification session does not match the saved conversation.');
-            const requestId = String(message.requestId);
-            latestSelectionRequestId = requestId;
-            const turn = message.sessionId ? (await activate(await upstream.request('session.resume', {
-              session_id: message.sessionId, source: ANALYST_SOURCE, cols: 100,
-            }, 15_000), { requestId })).turn : await createSession({ requestId,
-              title: String(message.conversationTitle || 'Manual Portfolio Update') });
-            actionTurn = turn;
-            turn.citations.clear();
-            collectCitations({ citations: saved.citations }, turn.citations);
-            turn.busy = true;
-            beginLiveTurn(turn, text);
-            beginManualEvidence(turn, saved.context);
-            sendTurnActivity(turn);
-            turn.hasMessages = true;
-            turn.visibleMessageCount += 1;
-            sendTurnFrame(turn, { type: 'user_message', text, requestId });
-            await submitPromptWithRecovery(text, turn, { visibleText: text });
           } else if (message.action === 'new_prompt') {
             const text = String(message.text || '').trim();
             if (!text || text.length > 20_000) throw new Error('Prompt must contain 1–20,000 characters.');
@@ -3089,7 +2991,7 @@ function attachAnalystGatewayProxy(server, options = {}) {
           }
         } catch (error) {
           state.lastError = error.message;
-          if (['prompt', 'new_prompt', 'review_prompt', 'manual_verification_prompt', 'gm', 'start_review', 'retry_review'].includes(action) && actionTurn?.busy) {
+          if (['prompt', 'new_prompt', 'review_prompt', 'gm', 'start_review', 'retry_review'].includes(action) && actionTurn?.busy) {
             clearTurn(actionTurn);
             sendTurnActivity(actionTurn);
           }

@@ -157,7 +157,8 @@ test('normalizes legacy coordinator exceptions before they can reach a browser',
 });
 
 test('removes Portfolio packet tools from the model allowlist', () => {
-  assert.equal(APPROVED_TOOLS.size, 16);
+  assert.equal(APPROVED_TOOLS.size, 14);
+  assert.equal(isApprovedTool(`${ANALYST_MCP_TOOL_PREFIX}get_prediction_market_snapshot`), false);
   assert.equal(isApprovedTool(`${ANALYST_MCP_TOOL_PREFIX}prepare_portfolio_review`), false);
   assert.equal(isApprovedTool(`${ANALYST_MCP_TOOL_PREFIX}get_portfolio_review_packet`), false);
   assert.equal(isApprovedTool(`${ANALYST_MCP_TOOL_PREFIX}get_portfolio_context`), true);
@@ -166,7 +167,7 @@ test('removes Portfolio packet tools from the model allowlist', () => {
 });
 
 test('permits only the native read-only skill tools alongside the fixed market tools', () => {
-  assert.equal(new Set([...APPROVED_TOOLS, 'skills_list', 'skill_view']).size, 18);
+  assert.equal(new Set([...APPROVED_TOOLS, 'skills_list', 'skill_view']).size, 16);
   assert.equal(isApprovedTool('skills_list'), true);
   assert.equal(isApprovedTool('skill_view'), true);
   for (const name of [
@@ -865,10 +866,10 @@ test('renaming persists through the Hermes session API', async (t) => {
   assert.notEqual(titleCall.params.title, 'Balance Review');
 });
 
-test('classifies live portfolio and prediction requirements without weakening retry gates', () => {
+test('classifies event-contract questions as live portfolio requirements without weakening retry gates', () => {
   assert.deepEqual(
     liveRequirementsForPrompt('Check my current prediction-market portfolio exposure'),
-    new Set(['get_prediction_market_snapshot', 'get_portfolio_context']),
+    new Set(['get_portfolio_context']),
   );
   const state = inferLiveTurnState([
     { role: 'user', content: 'Check my current portfolio exposure' },
@@ -877,117 +878,12 @@ test('classifies live portfolio and prediction requirements without weakening re
   assert.equal(state.requirements.has('get_portfolio_context'), true);
 });
 
-for (const completeRoster of [false, true]) test(`manual capture ${completeRoster ? 'reads every summary page without reacquisition' : 'rejects missing summary evidence'}`, async t => {
-  const binding = { operation: 'portfolio-cross-verification', captureId: 'manual-capture',
-    conversationId: 'manual-chat', turnId: 'manual-turn', positionCount: 2, summaryPageCount: 2, hermesSessionId: null };
-  const { browser, calls, emitEvent } = await withGateway(t, ({ method }) => {
-    if (method === 'session.create') return { session_id: 'manual-runtime', session_key: 'manual-saved', messages: [], running: false };
-    if (method === 'session.list') return { sessions: [] };
-    if (method === 'session.history') return { messages: [] };
-    if (method === 'prompt.submit') return { accepted: true };
-    throw new Error(method);
-  }, { reviewFetchImpl: async (url, options) => {
-    assert.match(url, /\/internal\/workspace\/manual-generation$/);
-    assert.deepEqual(JSON.parse(options.body), { captureId: binding.captureId, conversationId: binding.conversationId, turnId: binding.turnId });
-    return { ok: true, json: async () => ({ context: binding, citations: [citation] }) };
-  } });
-  const frames = [];
-  browser.on('message', raw => frames.push(JSON.parse(raw)));
-  browser.send(JSON.stringify({ action: 'manual_verification_prompt', requestId: binding.turnId,
-    ...binding, text: 'Manually cross-verify my complete current portfolio.' }));
-  while (!calls.some(call => call.method === 'prompt.submit')) await new Promise(resolve => setTimeout(resolve, 1));
-  const submitted = calls.find(call => call.method === 'prompt.submit').params.text;
-  assert.match(submitted, /get_portfolio_verification_page/);
-  assert.doesNotMatch(submitted, /explicitly call each of these tools/);
-  assert.match(projectHistory([{ role: 'user', content: submitted }])[0].content, /^Manually cross-verify/);
-  const event = (type, payload) => emitEvent({ session_id: 'manual-runtime', type, payload });
-  const page = { captureId: binding.captureId, representation: 'portfolio-verification-page-v1',
-    scope: 'summary', complete: true, totalRowCount: 2, offset: 0, rowCount: 1, pageIndex: 0, pageCount: 2, nextCursor: 'next' };
-  event('message.delta', { text: 'Captured answer' });
-  event('tool.complete', { name: `${ANALYST_MCP_TOOL_PREFIX}get_portfolio_verification_page`, result: { ...page, captureId: 'unrelated' } });
-  event('tool.complete', { name: `${ANALYST_MCP_TOOL_PREFIX}get_portfolio_verification_page`, result: page });
-  if (completeRoster) event('tool.complete', { name: `${ANALYST_MCP_TOOL_PREFIX}get_portfolio_verification_page`,
-    result: { ...page, offset: 1, pageIndex: 1, nextCursor: null } });
-  const final = waitForWebSocketFrame(browser, frame => ['message_complete', 'error'].includes(frame.type));
-  event('message.complete', { text: `Captured answer ${citation.id}` });
-  const result = await final;
-  if (completeRoster) {
-    assert.equal(result.type, 'message_complete');
-    assert.equal(result.citations[0].id, citation.id);
-  } else {
-    assert.equal(result.code, 'ANALYST_REVIEW_EVIDENCE_INCOMPLETE');
-    assert.match(result.error, /complete captured holding roster/);
-    assert.ok(!frames.some(frame => ['message_delta', 'message_complete'].includes(frame.type)));
-  }
-});
-
-test('manual generation rejects a capture bound to a different accepted turn before session creation', async t => {
-  const { browser, calls } = await withGateway(t, ({ method }) => {
-    if (method === 'session.list') return { sessions: [] };
-    throw new Error(method);
-  }, { reviewFetchImpl: async () => ({ ok: true, json: async () => ({ context: {
-    operation: 'portfolio-cross-verification', captureId: 'capture', conversationId: 'chat', turnId: 'other', positionCount: 1,
-  } }) }) });
-  const failure = waitForWebSocketFrame(browser, frame => frame.type === 'error');
-  browser.send(JSON.stringify({ action: 'manual_verification_prompt', requestId: 'turn',
-    captureId: 'capture', conversationId: 'chat', turnId: 'turn', text: 'Verify my portfolio.' }));
-  assert.match((await failure).error, /evidence is unavailable/);
-  assert.ok(!calls.some(call => ['session.create', 'prompt.submit'].includes(call.method)));
-});
-
 test('accepts only structurally valid tool-issued citations', () => {
   assert.equal(validCitation(citation), true);
   assert.equal(validCitation({ ...citation, id: 'cite_invented' }), false);
   const collected = collectCitations({ citations: [citation, { ...citation }] });
   assert.equal(collected.size, 1);
   assert.equal(collected.get(citation.id).id, citation.id);
-});
-
-test('collects exact validated citation identities from the compact manual verification table', () => {
-  const columns = ['id', 'documentId', 'product', 'publicationDate', 'publishedAt', 'sourceUri'];
-  const row = columns.map(column => citation[column] ?? null);
-  const content = JSON.stringify({ researchVerification: { citationTable: { columns, rows: [row], rowCount: 1 } } });
-  const tool = { role: 'tool', name: `${ANALYST_MCP_TOOL_PREFIX}get_portfolio_context`, content };
-  const citations = collectCitations(tool);
-  assert.equal(citations.size, 1);
-  assert.deepEqual(citations.get(citation.id), Object.fromEntries(columns.map((column, index) => [column, row[index]])));
-  assert.equal(collectCitations({ citationTable: { columns, rows: [row] } }).size, 0);
-  assert.equal(collectCitations({ ...tool, name: 'skill_view' }).size, 0);
-  const history = projectHistory([tool, { role: 'assistant', content: `Captured finding ${citation.id}` }]);
-  assert.equal(history[1].content, 'Captured finding [1]');
-  assert.equal(history[1].citations[0].documentId, citation.documentId);
-});
-
-test('rejects malformed compact citation tables without registering invented or polluted metadata', () => {
-  const columns = ['id', 'documentId', 'product', 'publicationDate', 'publishedAt', 'sourceUri'];
-  const row = columns.map(column => citation[column] ?? null);
-  const collect = table => collectCitations({ researchVerification: { citationTable: table } });
-  for (const table of [
-    { columns: [...columns, 'id'], rows: [[...row, citation.id]] },
-    { columns: [...columns, '__proto__'], rows: [[...row, { polluted: true }]] },
-    { columns: columns.slice(1), rows: [row.slice(1)] },
-    { columns, rows: [row], rowCount: 2 },
-    { columns, rows: [[...row, 'extra']] },
-    { columns, rows: [row.slice(0, -1)] },
-    { columns, rows: [[`cite_${'f'.repeat(32)}`, ...row.slice(1, -1), { uri: citation.sourceUri }]] },
-    { columns, rows: [['cite_invented', ...row.slice(1)]] },
-    { columns, rows: [[row[0], 'doc_invented', ...row.slice(2)]] },
-    { columns, rows: [[...row.slice(0, 3), 20260930, ...row.slice(4)]] },
-  ]) assert.equal(collect(table).size, 0);
-  assert.equal({}.polluted, undefined);
-  assert.equal(collect({ columns, rows: [row, [...row.slice(0, -1), null]], rowCount: 2 }).size, 1);
-  assert.deepEqual(collectCitations({ citations: [citation] }).get(citation.id), citation);
-});
-
-test('retains every valid citation in one full-book table like the original citation array', () => {
-  const columns = ['id', 'documentId', 'product', 'publicationDate', 'publishedAt', 'sourceUri'];
-  const rows = Array.from({ length: 275 }, (_, index) => [
-    `cite_${index.toString(16).padStart(32, '0')}`, citation.documentId, citation.product,
-    citation.publicationDate, null, citation.sourceUri,
-  ]);
-  const collected = collectCitations({ researchVerification: { citationTable: { columns, rows, rowCount: 275 } } });
-  assert.equal(collected.size, 275);
-  assert.equal(collected.has(rows[274][0]), true);
 });
 
 test('numbers grouped citation markers without leaking their cite prefix or separators', () => {
@@ -1089,20 +985,19 @@ test('incomplete event payloads reconcile only the exact current response with v
  assert.equal(reconcileLiveTurnHistory(makeTurn(),history,'Different response'),false);
 });
 
-test('prediction narrative refreshes the exact seven pinned monitors', () => {
+test('prediction narrative keeps the venue layout and reads quotes from the saved review', () => {
  const {reviewNarrativePrompt}=require('./analystReviewPrompt.cjs');
  const prompt=reviewNarrativePrompt('prediction-markets-review','# Predictive Markets Review');
- assert.match(prompt,/review_universe=true/);
- assert.match(prompt,/same seven pinned monitors/);
+ assert.doesNotMatch(prompt,/get_prediction_market_snapshot|review_universe=true|seven pinned monitors/);
  assert.match(prompt,/Interactive Brokers with CPI and S&P 500 on ForecastEx, then Kalshi with Nasdaq-100, Gold, Silver, Bitcoin, and Ethereum/);
  assert.match(prompt,/CPI uses release-matched forecasts/);
  assert.match(prompt,/compute any totals from that same observation/);
 });
 
 for (const [visibleText, requiresHoldings] of [
-  ['Manually cross-verify my complete current portfolio against all research.', true],
+  ['Check my current portfolio exposure against all research.', true],
   ['Explain the recorded Session outlook.', false],
-]) test(`manual prompt uses hidden California timestamp guidance: ${visibleText}`, async t => {
+]) test(`chat prompt uses hidden California timestamp guidance: ${visibleText}`, async t => {
   const { REVIEW_TIME_PROMPT, REVIEW_RETRIEVAL_PROMPT } = require('./analystReviewPrompt.cjs');
   const { browser, calls } = await withGateway(t, ({ method }) => {
     if (method === 'session.create') return { session_id: 'pacific-runtime', session_key: 'pacific-saved', messages: [], running: false };
@@ -1117,7 +1012,6 @@ for (const [visibleText, requiresHoldings] of [
   const submitted = calls.find(({ method }) => method === 'prompt.submit').params.text;
   assert.ok(submitted.includes(REVIEW_TIME_PROMPT));
   assert.ok(submitted.includes(REVIEW_RETRIEVAL_PROMPT));
-  assert.match(submitted, /include_research_verification=true and compact_research_verification=true/);
   assert.match(submitted, /only while its freshness and provenance still qualify/);
   assert.match(submitted, /repeat the required live reads on every new turn/);
   assert.match(submitted, /PST in standard time and PDT in daylight time with 24-hour HH:mm/);

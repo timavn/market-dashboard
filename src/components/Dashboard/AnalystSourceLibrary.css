@@ -98,6 +98,7 @@
 .analyst-source-imports article > div { display: flex; justify-content: space-between; gap: 8px; }
 .analyst-source-imports article > div > span:first-child { overflow-wrap: anywhere; font-weight: 400; }
 .analyst-source-imports article > div > span:last-child { flex: none; color: #758194; font-size: 7px; text-transform: capitalize; }
+.analyst-source-imports article > div > time { flex: none; color: #758194; font-size: 7px; font-variant-numeric: tabular-nums; }
 .analyst-source-error { margin: 8px 0; color: #a34136; font-size: 8px; }
 .analyst-source-note { margin: 8px 0; color: #647185; font-size: 8px; }
 .analyst-source-date { margin: 0 0 9px; color: #758194; font-size: 7px; }

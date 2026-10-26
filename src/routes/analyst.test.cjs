@@ -865,7 +865,7 @@ test('conversation reads preserve the sidecar status and typed code for the brow
   const outcomes = {
     deleted: { status: 410, data: { error: 'Conversation deleted', code: 'ANALYST_CONVERSATION_DELETED' } },
     missing: { status: 404, data: { error: 'Conversation not found', code: 'ANALYST_CONVERSATION_NOT_FOUND' } },
-    untyped: { status: 404, data: { error: "'Manual verification not found'" } },
+    untyped: { status: 404, data: { error: "'Conversation record not found'" } },
   };
   const { router } = createAnalystRoutes({ s3: {}, dynamodb: {},
     httpClient: async ({ url, data }) => {

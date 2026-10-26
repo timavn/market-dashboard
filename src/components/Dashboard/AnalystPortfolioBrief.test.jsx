@@ -10,14 +10,13 @@ const wholeText = expected => (_, element) => element.textContent === expected
 jest.mock('../../hooks/usePortfolioSecurityNames', () => ({ __esModule: true, default: jest.fn(() => ({})) }));
 
 const asOf = '2026-09-04T20:05:00Z';
-const row = (holding, extra = {}) => ({ holding, heldSide: 'LONG', weightPct: 4, trade: 'BULLISH', trend: 'NEUTRAL', priorSignals: { trend: 'BULLISH' }, sizingInputs: { beta: { value: 1, observations: 252, status: 'verified_history', source: 'adjusted history', asOf: '2026-09-04' } }, sources: { trend: { publishedAt: '2026-09-04T14:30:00Z', citation: { id: 'rta', title: 'Real-Time Alert' } } }, ...extra });
+const metric = (value, observations) => ({ value, observations, status: 'verified_history', source: 'adjusted history', asOf: '2026-09-04' });
+// ATR 2.5 on a 100 reference price: 5% stop distance → MIN 2.5%, MAX 5%, long stop 95.
+const sizing = (atr = 2.5, price = 100) => ({ atr14: metric(atr, 14), referencePrice: metric(price, 1) });
+const row = (holding, extra = {}) => ({ holding, heldSide: 'LONG', weightPct: 4, trade: 'BULLISH', trend: 'NEUTRAL', priorSignals: { trend: 'BULLISH' }, sizingInputs: sizing(), sources: { trend: { publishedAt: '2026-09-04T14:30:00Z', citation: { id: 'rta', title: 'Real-Time Alert' } } }, ...extra });
 const sizedRow = (holding, extra = {}) => row(holding, {
   weightPct: 3, trade: 'BULLISH', trend: 'BULLISH', priorSignals: {},
   valuationPrice: 100, netLiquidation: 100000, lrr: 90, hrr: 110,
-  sizingInputs: {
-    beta: row('').sizingInputs.beta,
-    atr14: { ...row('').sizingInputs.beta, value: 1, observations: 20 },
-  },
   sources: {
     trade: { publishedAt: '2026-09-04T14:30:00Z', citation: { id: 'trade', title: 'Trade report' } },
     trend: { publishedAt: '2026-09-04T14:30:00Z', citation: { id: 'trend', title: 'Trend report' } },
@@ -32,41 +31,44 @@ test('the centered review puts Gross first and Net last without redundant labels
   render(<AnalystPortfolioBrief message={data} onCitation={jest.fn()} />);
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveClass('portfolio-brief-centered');
-  expect(report.firstElementChild).toHaveTextContent('Good morning, this is game 170/251 of the 2026 season.');
+  expect(report).not.toHaveTextContent('Good morning');
   expect(within(report).queryByRole('heading', { name: 'Portfolio Review' })).not.toBeInTheDocument();
   expect(report.querySelector('header')).toBeNull();
   expect(report).not.toHaveTextContent('Exposure includes verified marks only; some position values are unavailable.');
   const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
-  expect(within(exposure).getAllByRole('rowheader').map(item => item.textContent)).toEqual(['Gross', 'Long', 'Short', 'Net', 'Interest']);
-  expect(within(exposure).getByText('$159,845.17').closest('.is-long')).toBeInTheDocument();
-  expect(exposure.querySelector('.is-short .portfolio-exposure-value')).toHaveTextContent('-$50,583.65');
-  expect(exposure).toHaveTextContent('123.34%');
+  expect(within(exposure).getAllByRole('rowheader').map(item => item.textContent)).toEqual(['Gross', 'Long', 'Short', 'Net']);
+  expect(exposure.querySelector('.is-long .portfolio-exposure-value')).toHaveTextContent('$159,845');
+  expect(exposure.querySelector('.is-short .portfolio-exposure-value')).toHaveTextContent('-$50,584');
+  expect(exposure).toHaveTextContent('123%');
+  expect(exposure).not.toHaveTextContent(/\.\d/);
   expect(exposure).not.toHaveTextContent('of NLV');
   expect(screen.queryByRole('region', { name: 'Coverage' })).not.toBeInTheDocument();
   expect(screen.queryByText(/Legacy report:|VIEW LARGER IMAGE|cite_xyz/)).not.toBeInTheDocument();
 });
 
-test('exposure table separates aligned dollar values and right-aligned percentages for all four rows', () => {
+test('exposure table separates whole-dollar values from Current, Δ and Previous weights side by side', () => {
   const data = message();
-  data.portfolioBrief.metrics = { longMarketValue: 150000, shortMarketValue: -50000, grossExposure: 200000,
+  data.portfolioBrief.metrics = { longMarketValue: 150000.4, shortMarketValue: -50000, grossExposure: 200000,
     netExposure: 100000, netLiquidation: 100000, grossLeverage: 2, netExposurePctOfNlv: 100 };
   render(<AnalystPortfolioBrief message={data} />);
   const table = screen.getByRole('table', { name: 'Portfolio exposure' });
-  expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Exposure', 'Value', 'Weight']);
+  expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Exposure', 'Value', 'Current', 'Δ', 'Previous']);
   const rows = within(table).getAllByRole('row').slice(1);
   expect(rows.map(position => within(position).getAllByRole('cell').map(cell => cell.textContent))).toEqual([
-    ['$200,000.00', '200.00%'], ['$150,000.00', '150.00%'], ['-$50,000.00', '50.00%'], ['$100,000.00', '100.00%'], ['—', ''],
+    ['$200,000', '200%', '—', '—'], ['$150,000', '150%', '—', '—'], ['-$50,000', '50%', '—', '—'], ['$100,000', '100%', '—', '—'],
   ]);
-  for (const position of rows) {
-    const [value, percentage] = within(position).getAllByRole('cell');
+  for (const position of rows.slice(0, 4)) {
+    const [value, current, change, previous] = within(position).getAllByRole('cell');
     expect(value).toHaveClass('portfolio-exposure-value');
     expect(value.querySelector('.portfolio-exposure-amount')).toBeInTheDocument();
-    expect(percentage).toHaveClass('portfolio-exposure-percent', { exact: true });
+    expect(current).toHaveClass('portfolio-exposure-percent');
+    expect(change).toHaveClass('portfolio-exposure-change', 'signal-unavailable', { exact: true });
+    expect(previous).toHaveClass('portfolio-exposure-percent');
   }
   expect(rows[2].querySelector('.portfolio-exposure-sign')).toHaveTextContent('-');
 });
 
-test('every Weight is an unsigned neutral magnitude while captured Short and negative Net dollars keep their signs', () => {
+test('every Current weight is an unsigned magnitude while captured Short and negative Net dollars keep their signs', () => {
   const data = message();
   data.portfolioBrief.metrics = { longMarketValue: 50000, shortMarketValue: -150000, grossExposure: 200000,
     netExposure: -100000, netLiquidation: 100000, grossLeverage: 2, netExposurePctOfNlv: -100 };
@@ -74,16 +76,13 @@ test('every Weight is an unsigned neutral magnitude while captured Short and neg
   render(<AnalystPortfolioBrief message={data} />);
   const table = screen.getByRole('table', { name: 'Portfolio exposure' });
   const rows = within(table).getAllByRole('row').slice(1);
-  const weights = rows.map(position => within(position).getAllByRole('cell')[1]);
-  expect(weights.map(cell => cell.textContent)).toEqual(['200.00%', '50.00%', '150.00%', '100.00%', '']);
-  for (const cell of weights) {
-    expect(cell).toHaveClass('portfolio-exposure-percent', { exact: true });
-    expect(cell.children).toHaveLength(0);
-  }
+  const weights = rows.slice(0, 4).map(position => within(position).getAllByRole('cell')[1]);
+  expect(weights.map(cell => cell.textContent)).toEqual(['200%', '50%', '150%', '100%']);
+  for (const cell of weights) expect(cell.children).toHaveLength(0);
   expect(rows[2]).toHaveClass('is-short');
-  expect(within(rows[2]).getAllByRole('cell')[0]).toHaveTextContent('-$150,000.00');
+  expect(within(rows[2]).getAllByRole('cell')[0]).toHaveTextContent('-$150,000');
   expect(rows[3]).toHaveClass('is-net-negative');
-  expect(within(rows[3]).getAllByRole('cell')[0]).toHaveTextContent('-$100,000.00');
+  expect(within(rows[3]).getAllByRole('cell')[0]).toHaveTextContent('-$100,000');
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -91,15 +90,15 @@ test('legacy exposure without captured NLV keeps dollar values and captured rati
   render(<AnalystPortfolioBrief message={message()} />);
   const table = screen.getByRole('table', { name: 'Portfolio exposure' });
   expect(within(table).getAllByRole('row').slice(1).map(position => within(position).getAllByRole('cell')[1].textContent))
-    .toEqual(['123.34%', '—', '—', '64.04%', '']);
+    .toEqual(['123%', '$159,845', '-$50,584', '64%']);
 });
 
-test('the saved review date supplies the opening even when holdings are unavailable', () => {
+test('unavailable holdings still show the gateway message without an opening line', () => {
   const data = message();
   data.portfolioBrief.available = false;
   data.portfolioBrief.reviewedAt = '2026-09-22T13:00:00Z';
   render(<AnalystPortfolioBrief message={data} />);
-  expect(screen.getByRole('article', { name: 'Portfolio Review summary' }).firstElementChild).toHaveTextContent('Good morning, this is game 181/251 of the 2026 season.');
+  expect(screen.getByRole('article', { name: 'Portfolio Review summary' })).not.toHaveTextContent('Good morning');
   expect(screen.getByText('Unavailable — connect to IB Gateway.')).toBeInTheDocument();
 });
 
@@ -145,12 +144,12 @@ test('every review section dates its captured inputs without refreshing old rese
   within(report).getAllByRole('heading', { level: 2 }).forEach(heading => {
     expect(heading.nextElementSibling).toHaveClass('portfolio-review-dateline');
   });
-  expect(within(screen.getByRole('region', { name: 'Exposure and risk' })).getByText(wholeText('Positioning: Sep 4, 2026 13:05 PDT'))).toBeVisible();
+  expect(within(screen.getByRole('region', { name: 'Exposure and risk' })).getByText(wholeText('Sep 4, 2026 13:05 PDT'))).toBeVisible();
   const company = screen.getByRole('region', { name: 'Company catalysts & sector research' });
-  expect(within(company).getByText(wholeText('Published: Sep 3, 2026'))).toBeVisible();
+  expect(within(company).getByText(wholeText('Sep 3, 2026'))).toBeVisible();
   expect(company.querySelector('.portfolio-review-dateline')).not.toHaveClass('has-period');
   const confirmation = screen.getByRole('region', { name: 'Position confirmations' });
-  expect(confirmation.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Positioning: Sep 4, 2026 13:05 PDT');
+  expect(confirmation.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 4, 2026 13:05 PDT');
   expect(confirmation.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Sep 3, 2026');
   expect(confirmation.querySelector('.portfolio-review-dateline')).toHaveClass('has-period');
   expect(confirmation.querySelector('.portfolio-review-dateline')).not.toHaveTextContent('·');
@@ -176,7 +175,7 @@ test('position exceptions keep their original holdings date beside the complete 
   const section = screen.getByRole('region', { name: 'Position exceptions' });
   const dateline = section.querySelector('.portfolio-review-dateline');
   expect(dateline).toHaveClass('has-period');
-  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Positioning: Sep 4, 2026 13:05 PDT');
+  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 4, 2026 13:05 PDT');
   expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Aug 31, 2026 – Sep 3, 2026');
   expect(dateline).not.toHaveTextContent(/Sep 5|·|Research:/);
   fireEvent.click(within(section).getByRole('button', { name: /XLE Trend: Bullish · Sep 3, 2026 07:30 PDT/ }));
@@ -190,7 +189,7 @@ test('only supported position exceptions appear and their signal sources still o
   const exceptions = screen.getByRole('region', { name: 'Position exceptions' });
   expect(within(exceptions).getByRole('table', { name: 'Position exceptions' })).toBeVisible();
   expect(exceptions).not.toHaveTextContent('FBY');
-  expect(exceptions).toHaveTextContent('Reduce to 2.0% MIN');
+  expect(exceptions).toHaveTextContent('Reduce to 2.5% MIN');
   expect(exceptions).toHaveTextContent('Exit to 0.0%');
   fireEvent.click(within(exceptions).getByRole('button', { name: /IGV Trend: Neutral.*View source/ }));
   expect(onCitation).toHaveBeenCalledWith(expect.objectContaining({ id: 'rta' }));
@@ -303,10 +302,10 @@ test('position exceptions keep compact headers and captured names without classi
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const table = screen.getByRole('table', { name: 'Position exceptions' });
   expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
-    'Ticker', 'Security', 'Tick / Trade / Trend', 'MIN / MAX', 'Review', 'Product',
+    'Ticker', 'Security', 'Tick / Trade / Trend', 'MIN / MAX / Stop', 'Review', 'Product',
   ]);
   expect(within(table).getByRole('columnheader', { name: 'Ticker' }).children).toHaveLength(0);
-  expect(table).not.toHaveTextContent(/Classification|Beta sizing|Commodity policy/);
+  expect(table).not.toHaveTextContent(/Classification|Beta|ATR sizing|Commodity policy/);
   expect(table.querySelector('.portfolio-position-classification')).toBeNull();
   expect(table.querySelector('.portfolio-position-sizing-basis')).toBeNull();
   const managedFutures = within(table).getByRole('row', { name: /DBMF/ });
@@ -314,8 +313,9 @@ test('position exceptions keep compact headers and captured names without classi
   expect(capturedName).toHaveClass('analyst-process--ticker');
   expect(capturedName.closest('.portfolio-position-name')).toHaveAttribute('title', 'iMGP DBi Managed Futures Strategy ETF');
   const bitcoin = within(table).getByRole('row', { name: /IBIT/ });
+  // IBIT has no separate commodity policy; its band comes from its own ATR like every other security.
   expect(bitcoin).not.toHaveTextContent('Commodity');
-  expect(bitcoin).toHaveTextContent('1.0%');
+  expect(bitcoin.querySelector('.portfolio-position-limits')).toHaveTextContent('MIN2.5%MAX5.0%Stop95.00');
   const resolvedName = within(within(table).getByRole('row', { name: /UNKNOWN/ })).getByText('Known company');
   expect(resolvedName).toHaveClass('analyst-process--ticker');
   expect(resolvedName.closest('.portfolio-position-name')).toHaveAttribute('title', 'Known company · Current security name · SEC company ticker directory');
@@ -328,6 +328,14 @@ test('missing security names remain empty instead of repeating the ticker', () =
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const position = screen.getByRole('row', { name: /UNKNOWN/ });
   expect(within(position).getAllByRole('cell')[0]).toHaveTextContent('—');
+});
+
+test('a missing holding weight leaves the ticker cell without a placeholder dash', () => {
+  const data = brief(); data.holdings = [row('BWET', { weightPct: null, trade: 'BEARISH' })];
+  render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
+  const ticker = within(screen.getByRole('row', { name: /BWET/ })).getByRole('rowheader');
+  expect(ticker).toHaveTextContent(/^BWET$/);
+  expect(ticker.querySelector('.portfolio-position-weight')).toBeNull();
 });
 
 test('position exceptions show captured product labels beside Review and open all of that product’s evidence', () => {
@@ -477,10 +485,10 @@ test.each(['LONG', 'SHORT'])('weight flags preserve %s Trade exit and Trend redu
   expect(exit).toHaveTextContent(`${heldSide === 'SHORT' ? 'Cover' : 'Exit'} to 0.0%`);
   expect(within(exit).getByText(`${heldSide === 'SHORT' ? 'Cover' : 'Exit'} to 0.0%`)).toHaveClass('portfolio-position-action');
   expect(within(exit).getByText('Overweight')).not.toHaveClass('portfolio-position-action');
-  expect(reduce).toHaveTextContent('Reduce to 2.0% MIN');
-  expect(within(reduce).getByText('Reduce to 2.0% MIN')).toHaveClass('portfolio-position-action');
+  expect(reduce).toHaveTextContent('Reduce to 2.5% MIN');
+  expect(within(reduce).getByText('Reduce to 2.5% MIN')).toHaveClass('portfolio-position-action');
   expect(within(reduce).getByText('Overweight')).not.toHaveClass('portfolio-position-action');
-  expect(reduce).not.toHaveTextContent('Trim 1.0 pp to 6.0% MAX');
+  expect(reduce).not.toHaveTextContent('Trim 2.0 pp to 5.0% MAX');
 });
 
 test('underweight exceptions report the shortfall without suggesting an addition', () => {
@@ -488,15 +496,18 @@ test('underweight exceptions report the shortfall without suggesting an addition
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const position = screen.getByRole('row', { name: /SMALL/ });
   expect(position).toHaveTextContent('Underweight');
-  expect(position).toHaveTextContent('0.5 pp below MIN');
+  expect(position).toHaveTextContent('1.0 pp below MIN');
   expect(position).not.toHaveTextContent(/Buy|Increase|Add|Reduce|Exit|Cover/i);
 });
 
 test('the 10 bp buffer and invalid sizing evidence never create exceptions', () => {
-  const data = brief(); data.holdings = [sizedRow('MINBUFFER', { weightPct: 1.9 }), sizedRow('MAXBUFFER', { weightPct: 6.1 }),
-    ...['stale', 'offline', 'cacheOnly', 'mock', 'seed'].map(flag => sizedRow(`INVALID-${flag}`, {
+  const data = brief(); data.holdings = [sizedRow('MINBUFFER', { weightPct: 2.4 }), sizedRow('MAXBUFFER', { weightPct: 5.1 }),
+    ...['stale', 'offline', 'cacheOnly', 'mock', 'seed'].map(flag => sizedRow(`INVALID-ATR-${flag}`, {
       weightPct: flag === 'stale' || flag === 'mock' ? 1 : 8,
-      sizingInputs: { beta: { ...sizedRow('').sizingInputs.beta, [flag]: true }, atr14: { ...sizedRow('').sizingInputs.atr14, [flag]: true } },
+      sizingInputs: { ...sizing(), atr14: { ...sizing().atr14, [flag]: true } },
+    })),
+    ...['stale', 'mock'].map(flag => sizedRow(`INVALID-PRICE-${flag}`, {
+      weightPct: 8, sizingInputs: { ...sizing(), referencePrice: { ...sizing().referencePrice, [flag]: true } },
     })),
   ];
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
@@ -508,58 +519,114 @@ test('stop evidence does not create a report section or an exception', () => {
   const data = brief(); data.stopCoverage = { status: 'captured', asOf };
   data.holdings = ['missing', 'partial', 'oversized', 'wrong_side', 'unavailable'].map(status => sizedRow(status, { stopCheck: { status, coveragePct: 60 } }));
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  expect(screen.getByRole('region', { name: 'Position exceptions' })).toHaveTextContent('Unavailable');
-  expect(screen.queryByText(/stop|none found|60.0% covered/i)).not.toBeInTheDocument();
+  const section = screen.getByRole('region', { name: 'Position exceptions' });
+  expect(section).toHaveTextContent('Unavailable');
+  expect(section.querySelectorAll('.portfolio-position-row')).toHaveLength(0);
+  // Only the ATR stop column header mentions a stop; captured stop coverage stays out of the report.
+  expect(screen.queryAllByText(/stop/i).map(element => element.textContent)).toEqual(['MIN / MAX / Stop']);
+  expect(screen.queryByText(/none found|60.0% covered/i)).not.toBeInTheDocument();
 });
 
 test('a dated opposing Trend retains the MIN warning when Trade is unavailable', () => {
-  const data = brief(); data.holdings = [row('AMZN', { weightPct: 1.615, trade: null, trend: 'BEARISH', sizingInputs: { beta: { ...row('').sizingInputs.beta, value: 1.4 } } }), row('BUFFER', { weightPct: 2.1, trade: null, trend: 'BEARISH' })];
+  // ATR 5 on 100: 10% stop distance → MIN 1.25%, MAX 2.5%.
+  const data = brief(); data.holdings = [row('AMZN', { weightPct: 1.365, trade: null, trend: 'BEARISH', sizingInputs: sizing(5) }), row('BUFFER', { weightPct: 2.6, trade: null, trend: 'BEARISH' })];
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const position = screen.getByRole('row', { name: /AMZN/ });
-  expect(position).toHaveTextContent('1.615%');
-  expect(position).toHaveTextContent('Reduce to 1.5% MIN');
+  expect(position).toHaveTextContent('1.365%');
+  expect(position).toHaveTextContent('Reduce to 1.25% MIN');
   expect(position).not.toHaveTextContent(/Trade remains|Exit|Verify Trade/);
   expect(screen.queryByRole('row', { name: /BUFFER/ })).not.toBeInTheDocument();
 });
 
-test('since previous close keeps only the prior observation date and Current / Previous exposure columns', () => {
+test('the limits cell shows the ATR-derived MIN, MAX and stop with 25 bp precision', () => {
+  // ATR 2 on 100: 4% stop distance → MIN roundUp(3.125) = 3.25%, MAX roundDown(6.25) = 6.25%.
+  const data = brief(); data.holdings = [
+    sizedRow('LONGATR', { weightPct: 7.25, sizingInputs: sizing(2) }),
+    sizedRow('SHORTATR', { heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: -7.25, sizingInputs: sizing(2) }),
+  ];
+  render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
+  const long = screen.getByRole('row', { name: /LONGATR/ });
+  const limits = long.querySelector('.portfolio-position-limits');
+  expect(Array.from(limits.querySelectorAll('.portfolio-position-field'), field => field.textContent)).toEqual(['MIN3.25%', 'MAX6.25%', 'Stop96.00']);
+  expect(within(limits).getByText('96.00')).toHaveAttribute('title', '2 × ATR below the last close (4.0%) · costs 0.29% of NLV at this weight');
+  expect(long).toHaveTextContent('Trim 1.0 pp to 6.25% MAX');
+  const short = screen.getByRole('row', { name: /SHORTATR/ });
+  expect(short.querySelector('.portfolio-position-limits')).toHaveTextContent('MIN3.25%MAX6.25%Stop104.00');
+  expect(within(short).getByText('104.00')).toHaveAttribute('title', expect.stringContaining('2 × ATR above the last close (4.0%)'));
+  const header = screen.getByRole('columnheader', { name: 'MIN / MAX / Stop' });
+  expect(header).toHaveAttribute('title', 'MIN and MAX cost 0.125% and 0.25% of NLV if the 2 × ATR stop is hit');
+});
+
+test('missing ATR leaves MIN, MAX and the stop as dashes while a Trade exit still shows', () => {
+  const data = brief(); data.holdings = [sizedRow('NOATR', { trade: 'BEARISH', sizingInputs: {} })];
+  render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
+  const position = screen.getByRole('row', { name: /NOATR/ });
+  expect(position.querySelector('.portfolio-position-limits')).toHaveTextContent('MIN—MAX—Stop—');
+  expect(within(position).getByText('—', { selector: '.portfolio-position-limits [title="Stop needs verified ATR and price"]' })).toBeInTheDocument();
+  expect(position).toHaveTextContent('Exit to 0.0%');
+  expect(position).not.toHaveTextContent(/Beta/);
+});
+
+test('an ATR too large to size exits with the volatility copy instead of a beta or risk-cap label', () => {
+  // ATR 60 on 100: MIN rounds up to 0.25% while MAX rounds down to 0, so the position cannot be sized.
+  const data = brief(); data.holdings = [sizedRow('WILD', { sizingInputs: sizing(60) })];
+  render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
+  const position = screen.getByRole('row', { name: /WILD/ });
+  expect(position).toHaveTextContent('Exit to 0.0%');
+  expect(position).toHaveTextContent('Too volatile to size');
+  expect(position.querySelector('.portfolio-position-limits')).toHaveTextContent('MIN0.25%MAX0.0%Stop—');
+  expect(position).not.toHaveTextContent(/Beta|risk cap/i);
+});
+
+test('a verified current volatility exit names the rule and cites only the ATR sizing input', () => {
+  const rule = { ...sizedRow('WILD', { sizingInputs: sizing(60) }), status: 'conflict', rule: 'RISK_CAP', action: 'EXIT', targetLabel: 'Target', targetWeight: 0, reduction: 3 };
+  const payload = { publicationTime: '2026-09-05T14:30:00Z', holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(), event: { qualityStatus: 'validated', eventType: 'trend_signal', signalValue: 'NEUTRAL' }, signalField: 'trend', rule };
+  const data = brief(); data.holdings = [rule];
+  render(<PortfolioResearchUpdates brief={data} findings={[{ id: 'a', symbol: 'WILD', state: 'open', action: 'signal change', payload }]} onCitation={jest.fn()} />);
+  const conflict = screen.getByRole('heading', { name: 'Exit under volatility rule' }).closest('article');
+  expect(conflict).toHaveTextContent('WILD — Too volatile to size');
+  expect(conflict).toHaveTextContent('Current weight 3.0% → Target 0.0%');
+  expect(conflict.querySelector('.portfolio-brief-source')).toHaveTextContent(/^Sizing inputs · ATR Sep 4, 2026/);
+  expect(conflict).not.toHaveTextContent(/Beta/);
+});
+
+test('Exposure & risk sets Current, Δ in basis points and Previous side by side under both observation dates', () => {
   const data = brief(); data.comparison = { status: 'available', baselineAsOf: '2026-09-02T14:30:00Z', metrics: {
     grossLeverage: { previous: 1.3, current: 1.2334 }, netExposurePctOfNlv: { previous: 60, current: 64.04 },
     grossExposure: { previous: 211000, current: 210428.82 }, netExposure: { previous: 100000, current: 109261.52 },
   } };
   const original = JSON.stringify(data);
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const section = screen.getByRole('region', { name: 'Since previous close' });
+  expect(screen.queryByRole('region', { name: 'Since previous close' })).not.toBeInTheDocument();
+  const section = screen.getByRole('region', { name: 'Exposure and risk' });
   const dateline = section.querySelector('.portfolio-review-dateline');
-  expect(dateline).not.toHaveClass('has-period');
+  expect(dateline).toHaveTextContent('Sep 4, 2026 13:05 PDT');
   expect(dateline).toHaveTextContent('Previous positioning: Sep 2, 2026 07:30 PDT');
-  expect(dateline).not.toHaveTextContent(/Current positioning|Compared with|·/);
-  expect(within(section).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Exposure', 'Current', 'Previous']);
-  expect(within(section).getAllByRole('rowheader').map(cell => cell.textContent)).toEqual(['Gross', 'Long', 'Short', 'Net', 'Interest']);
-  expect(section).toHaveTextContent('130.00%');
-  expect(section).not.toHaveTextContent(/pp|Change/);
-  expect(section).toHaveTextContent('07:30 PDT');
-  expect(section).not.toHaveTextContent(/AM|PM|211,000/);
+  expect(within(section).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Exposure', 'Value', 'Current', 'Δ', 'Previous']);
+  expect(within(section).getAllByRole('rowheader').map(cell => cell.textContent)).toEqual(['Gross', 'Long', 'Short', 'Net']);
+  expect(within(section).getByRole('row', { name: 'Gross $210,429 123% -666 bp 130%' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Net $109,262 64% +404 bp 60%' })).toBeInTheDocument();
+  expect(section).not.toHaveTextContent(/AM|PM|211,000|\.\d+%/);
   expect(JSON.stringify(data)).toBe(original);
 });
 
 test('comparison uses captured dollar pairs only when percentage pairs are unavailable', () => {
   const data = brief(); data.metrics = {}; data.comparison = { status: 'available', metrics: { grossExposure: { previous: 200000, current: 201000 }, netExposure: { previous: null, current: 5000 } } };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const section = screen.getByRole('region', { name: 'Since previous close' });
-  expect(within(section).getAllByRole('rowheader')).toHaveLength(5);
-  expect(within(section).getByRole('row', { name: 'Net $5,000.00 —' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Gross $201,000.00 $200,000.00' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Long — —' })).toBeInTheDocument();
+  const section = screen.getByRole('region', { name: 'Exposure and risk' });
+  expect(within(section).getAllByRole('rowheader')).toHaveLength(4);
+  expect(within(section).getByRole('row', { name: 'Net — $5,000 — —' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Gross — $201,000 +$1,000 $200,000' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Long — — — —' })).toBeInTheDocument();
 });
 
 test('an unavailable previous close preserves independently verified current exposures without inventing a change', () => {
   const data = brief(); data.comparison = { status: 'unavailable', baselineKind: 'previous-session-close', baselineSessionDate: '2026-09-03' };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const section = screen.getByRole('region', { name: 'Since previous close' });
-  expect(within(section).getByRole('row', { name: 'Gross 123.34% —' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Net 64.04% —' })).toBeInTheDocument();
-  expect(section).toHaveTextContent('Previous: Sep 3, 2026');
+  const section = screen.getByRole('region', { name: 'Exposure and risk' });
+  expect(within(section).getByRole('row', { name: 'Gross $210,429 123% — —' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Net $109,262 64% — —' })).toBeInTheDocument();
+  expect(section).toHaveTextContent('Sep 3, 2026');
   expect(section).toHaveTextContent('Previous close unavailable');
 });
 
@@ -571,11 +638,12 @@ test('previous-close comparison renders original account observation times and b
   };
   const original = JSON.stringify(data);
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const section = screen.getByRole('region', { name: 'Since previous close' });
+  const section = screen.getByRole('region', { name: 'Exposure and risk' });
   expect(section).toHaveTextContent('Previous: Oct 7, 2026 14:27 PDT');
   expect(section).not.toHaveTextContent('Current positioning:');
-  expect(within(section).getByRole('row', { name: 'Gross 170.48% 169.51%' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Net 29.04% 37.12%' })).toBeInTheDocument();
+  // Both sides round to 170%; the Δ keeps the 97 bp move visible.
+  expect(within(section).getByRole('row', { name: 'Gross $210,429 170% +97 bp 170%' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Net $109,262 29% -808 bp 37%' })).toBeInTheDocument();
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -591,51 +659,33 @@ test('current and previous exposure use their own captured NLV and directional c
   } };
   const original = JSON.stringify(data);
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const table = screen.getByRole('table', { name: 'Exposure changes since previous close' });
+  const table = screen.getByRole('table', { name: 'Portfolio exposure' });
   const rows = within(table).getAllByRole('row').slice(1);
-  expect(rows.map(position => within(position).getAllByRole('cell').map(cell => cell.textContent))).toEqual([
-    ['200.00%', '100.00%'], ['50.00%', '75.00%'], ['150.00%', '25.00%'], ['100.00%', '50.00%'], ['—', '—'],
+  // Short grows by magnitude; Net keeps its sign.
+  expect(rows.map(position => within(position).getAllByRole('cell').slice(1).map(cell => cell.textContent))).toEqual([
+    ['200%', '+10,000 bp', '100%'], ['50%', '-2,500 bp', '75%'], ['150%', '+12,500 bp', '25%'], ['100%', '-15,000 bp', '50%'],
   ]);
-  within(rows[1]).getAllByRole('cell').forEach(cell => expect(cell).toHaveClass('signal-bullish'));
-  within(rows[2]).getAllByRole('cell').forEach(cell => expect(cell).toHaveClass('signal-bearish'));
-  expect(within(rows[3]).getAllByRole('cell')[0]).toHaveClass('signal-bearish');
-  expect(within(rows[3]).getAllByRole('cell')[1]).toHaveClass('signal-bullish');
+  const weights = position => [1, 3].map(index => within(position).getAllByRole('cell')[index]);
+  weights(rows[1]).forEach(cell => expect(cell).toHaveClass('signal-bullish'));
+  weights(rows[2]).forEach(cell => expect(cell).toHaveClass('signal-bearish'));
+  expect(weights(rows[3])[0]).toHaveClass('signal-bearish');
+  expect(weights(rows[3])[1]).toHaveClass('signal-bullish');
+  // Δ colors follow the displayed sign: green up, red down.
+  expect(rows.map(position => within(position).getAllByRole('cell')[2].className)).toEqual([
+    'portfolio-exposure-change signal-bullish', 'portfolio-exposure-change signal-bearish', 'portfolio-exposure-change signal-bullish',
+    'portfolio-exposure-change signal-bearish',
+  ]);
   expect(JSON.stringify(data)).toBe(original);
 });
 
-test('Interest ends Exposure & risk and compares current with previous close in captured dollars', () => {
+test('captured interest stays out of Exposure & risk', () => {
   const data = brief();
   data.metrics = { ...data.metrics, netLiquidation: 100000, netAccruedInterest: -412.37 };
-  data.comparison = { status: 'available', metrics: {
-    grossExposure: { previous: 200000, current: 210428.82 }, netExposure: { previous: 100000, current: 109261.52 },
-    netAccruedInterest: { previous: -388.05, current: -412.37 },
-  } };
-  const original = JSON.stringify(data);
+  data.comparison = { status: 'available', metrics: { netAccruedInterest: { previous: -388.05, current: -412.37 } } };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const exposure = screen.getByRole('table', { name: 'Portfolio exposure' });
-  const interest = within(exposure).getAllByRole('row').at(-1);
-  expect(within(interest).getByRole('rowheader')).toHaveTextContent('Interest');
-  expect(within(interest).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['-$412.37', '']);
-  expect(interest).toHaveClass('is-net-negative');
-  const comparison = screen.getByRole('table', { name: 'Exposure changes since previous close' });
-  const previous = within(comparison).getAllByRole('row').at(-1);
-  expect(within(previous).getByRole('rowheader')).toHaveTextContent('Interest');
-  expect(within(previous).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['-$412.37', '-$388.05']);
-  within(previous).getAllByRole('cell').forEach(cell => expect(cell).toHaveClass('signal-bearish'));
-  expect(JSON.stringify(data)).toBe(original);
-});
-
-test('a missing captured interest reading stays unavailable instead of being treated as zero', () => {
-  const data = brief();
-  data.comparison = { status: 'available', metrics: { netAccruedInterest: { previous: null, current: 12.5 } } };
-  render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const comparison = screen.getByRole('table', { name: 'Exposure changes since previous close' });
-  const row = within(comparison).getAllByRole('row').at(-1);
-  const [current, previous] = within(row).getAllByRole('cell');
-  expect(current).toHaveTextContent('$12.50');
-  expect(current).toHaveClass('signal-bullish');
-  expect(previous).toHaveTextContent('—');
-  expect(previous).toHaveClass('signal-unavailable');
+  const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
+  expect(within(exposure).queryByRole('rowheader', { name: 'Interest' })).not.toBeInTheDocument();
+  expect(exposure).not.toHaveTextContent(/\$412|\$388/);
 });
 
 test('legacy missing prior side totals stay unavailable instead of borrowing the current denominator', () => {
@@ -645,18 +695,19 @@ test('legacy missing prior side totals stay unavailable instead of borrowing the
     netLiquidation: { previous: null, current: 100000 },
   } };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const table = screen.getByRole('table', { name: 'Exposure changes since previous close' });
-  expect(within(table).getByRole('row', { name: 'Long $159,845.17 $200,000.00' })).toBeInTheDocument();
-  const previousShort = within(within(table).getByRole('row', { name: 'Short 50.58% —' })).getAllByRole('cell')[1];
-  expect(previousShort).toHaveClass('signal-unavailable');
+  const table = screen.getByRole('table', { name: 'Portfolio exposure' });
+  expect(within(table).getByRole('row', { name: 'Long $159,845 $159,845 -$40,155 $200,000' })).toBeInTheDocument();
+  const short = within(table).getAllByRole('row')[3];
+  expect(within(short).getAllByRole('cell').slice(1).map(cell => cell.textContent)).toEqual(['51%', '—', '—']);
+  expect(within(short).getAllByRole('cell')[3]).toHaveClass('signal-unavailable');
 });
 
 test('unsupported comparisons and factor totals stay out of the report', () => {
   const data = brief(); data.comparison = { status: 'unavailable', metrics: { grossExposure: { previous: 1, current: 2 } } };
   data.factorExposure = { status: 'unavailable', label: 'Factor exposure', rows: [{ label: 'Growth', longPct: 40 }] };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  expect(screen.getByRole('region', { name: 'Since previous close' })).toHaveTextContent('Previous close unavailable');
-  expect(screen.queryByText('$2.00')).not.toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Previous close unavailable');
+  expect(screen.queryByText('$2')).not.toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Unavailable');
   expect(screen.queryByText('Growth')).not.toBeInTheDocument();
 });
@@ -700,7 +751,7 @@ test('saved unavailable holdings do not prevent the cited research rollup from r
   data.dailyRollup = { version: 1, sections: [{ id: 'day', title: 'The day ahead', blocks: [{ type: 'paragraph', text: 'Published research remains available.' }] }] };
   const { rerender } = render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Unavailable');
-  expect(screen.queryByText('$210,428.82')).not.toBeInTheDocument();
+  expect(screen.queryByText('$210,429')).not.toBeInTheDocument();
   expect(screen.getByText('Published research remains available.')).toBeVisible();
   expect(screen.getByText('Unavailable — connect to IB Gateway.')).toBeVisible();
   expect(screen.queryByText(/Verified portfolio evidence|Last verified holdings/)).not.toBeInTheDocument();
@@ -768,7 +819,6 @@ test('loading, partial, ready and rejected captures keep account sections and co
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
   const exceptions = screen.getByRole('region', { name: 'Position exceptions' });
-  const comparison = screen.getByRole('region', { name: 'Since previous close' });
   const exposureRows = within(exposure).getAllByRole('row');
   const exposureColumns = within(exposure).getAllByRole('columnheader');
   const sectionOrder = [...report.querySelectorAll('.portfolio-review-section')].map(section => section.getAttribute('aria-label'));
@@ -781,25 +831,24 @@ test('loading, partial, ready and rejected captures keep account sections and co
   expect(screen.getByRole('article', { name: 'Portfolio Review summary' })).toBe(report);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBe(exposure);
   expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
-  expect(screen.queryByText('$210,428.82')).not.toBeInTheDocument();
+  expect(screen.queryByText('$210,429')).not.toBeInTheDocument();
   expect(screen.queryByRole('row', { name: /IGV/ })).not.toBeInTheDocument();
   expect(screen.getByText('Captured partial research.')).toBeVisible();
   const ready = { ...brief(), dailyRollup: partial.dailyRollup };
   rerender(<AnalystPortfolioBrief message={{ ...base, state: 'complete', portfolioBrief: ready }} />);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBe(exposure);
-  expect(screen.getByRole('region', { name: 'Since previous close' })).toBe(comparison);
   expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
   expect(within(exposure).getAllByRole('row')).toEqual(exposureRows);
   expect(within(exposure).getAllByRole('columnheader')).toEqual(exposureColumns);
-  expect(screen.getByText('$210,428.82')).toBeVisible();
+  expect(screen.getByText('$210,429')).toBeVisible();
   rerender(<AnalystPortfolioBrief message={{ ...base, state: 'failed', portfolioBrief: { ...ready, available: false } }} />);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBe(exposure);
   expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
   expect(exceptions).toHaveTextContent('Unavailable');
-  expect(screen.queryByText('$210,428.82')).not.toBeInTheDocument();
+  expect(screen.queryByText('$210,429')).not.toBeInTheDocument();
   expect(screen.queryByRole('row', { name: /IGV/ })).not.toBeInTheDocument();
   expect([...report.querySelectorAll('.portfolio-review-section')].map(section => section.getAttribute('aria-label'))).toEqual(sectionOrder);
-  for (const section of [exposure, comparison, exceptions]) {
+  for (const section of [exposure, exceptions]) {
     expect(section).toHaveClass('portfolio-review-section');
     expect(section.querySelector('.portfolio-review-section-body')).toBeInTheDocument();
   }
@@ -818,7 +867,7 @@ test('a failure after a published partial revision keeps that report in place, s
   expect(report).not.toHaveAttribute('aria-busy');
   expect(report).not.toHaveTextContent('Loading…');
   expect(screen.getByText('Captured partial research.')).toBeVisible();
-  expect(screen.getByText('$210,428.82')).toBeVisible();
+  expect(screen.getByText('$210,429')).toBeVisible();
   expect(screen.getByRole('note')).toHaveTextContent(status);
   expect(report.lastElementChild).toBe(screen.getByRole('note'));
 });
@@ -828,13 +877,13 @@ test('the launch and deferred-history placeholder keeps the full report without 
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveClass('analyst-captured-report-placeholder', 'analyst-historical-report');
   expect(report).toHaveAttribute('data-message-id', 'deferred-post');
-  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(17);
+  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(16);
   expect(report).not.toHaveTextContent('$');
   expect(screen.getByRole('table', { name: 'Portfolio exposure' })).toBeVisible();
   expect(screen.getByRole('table', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
 });
 
-test('Portfolio Review sections use content height and right-aligned datelines in loading, unavailable and saved captures', () => {
+test('Portfolio Review sections use content height and centered titles with datelines beneath in loading, unavailable and saved captures', () => {
   const style = document.createElement('style');
   style.textContent = ['AnalystPortfolioBrief.css', 'AnalystDailyRollup.css', 'PortfolioReviewDateline.css'].map(filename => {
     const css = require('postcss').parse(require('fs').readFileSync(require('path').join(__dirname, filename), 'utf8'));
@@ -847,21 +896,19 @@ test('Portfolio Review sections use content height and right-aligned datelines i
     const assertCompact = () => {
       const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
       const exposureTable = screen.getByRole('table', { name: 'Portfolio exposure' });
-      const comparisonTable = screen.getByRole('table', { name: 'Exposure changes since previous close' });
-      expect(window.getComputedStyle(comparisonTable).width).toBe(window.getComputedStyle(exposureTable).width);
-      expect(comparisonTable.querySelectorAll('col')).toHaveLength(3);
-      expect([...comparisonTable.querySelectorAll('col')].map(col => window.getComputedStyle(col).width))
-        .toEqual([...exposureTable.querySelectorAll('col')].map(col => window.getComputedStyle(col).width));
-      expect(within(comparisonTable).getAllByRole('rowheader').map(cell => cell.textContent))
-        .toEqual(within(exposureTable).getAllByRole('rowheader').map(cell => cell.textContent));
+      expect(screen.queryByRole('table', { name: 'Exposure changes since previous close' })).not.toBeInTheDocument();
+      expect(exposureTable.querySelectorAll('col')).toHaveLength(5);
+      expect(within(exposureTable).getAllByRole('rowheader').map(cell => cell.textContent)).toEqual(['Gross', 'Long', 'Short', 'Net']);
       report.querySelectorAll('.portfolio-review-section').forEach(section => {
         expect(window.getComputedStyle(section).minHeight).toBe('0');
         expect(window.getComputedStyle(section).height).toBe('auto');
-        expect(window.getComputedStyle(section).display).toBe('grid');
+        expect(window.getComputedStyle(section).display).toBe('flex');
+        expect(window.getComputedStyle(section).flexDirection).toBe('column');
+        expect(window.getComputedStyle(section).alignItems).toBe('center');
         expect(window.getComputedStyle(section).overflow).toBe('visible');
         const dates = section.querySelector('.portfolio-review-dateline');
-        expect(window.getComputedStyle(dates).textAlign).toBe('right');
-        expect(window.getComputedStyle(dates).gridColumn).toBe('2');
+        expect(window.getComputedStyle(dates).textAlign).toBe('center');
+        expect(dates.previousElementSibling.tagName).toBe('H2');
         expect(window.getComputedStyle(dates).height).not.toBe('18px');
       });
       expect(report.querySelector('.portfolio-review-section-controls')).toBeNull();

@@ -491,7 +491,12 @@ def _review_sources(run, store, research_products, prediction_universe):
             observed = row.get("observedAt") or row.get("publishedAt") or publication
             # ``state`` stays the run state; the settled reasons depend on it.
             coverage_state = str(row.get("status") or "")
-            if coverage_state == "late" and publication_matches_expected(product, publication, row.get("expectedPublicationDate")):
+            if coverage_state == "late" and (
+                publication_matches_expected(product, publication, row.get("expectedPublicationDate"))
+                # Older reviews aged the event-driven Inflation Nowcast as a
+                # weekly report; with no newer publication recorded it was current.
+                or (product.get("cadence") == "event_driven" and publication and not row.get("expectedPublicationDate"))
+            ):
                 # Re-evaluate the original captured dates for older reviews
                 # affected by release-date/report-date comparisons. All source
                 # validation below still applies; never consult today's index.

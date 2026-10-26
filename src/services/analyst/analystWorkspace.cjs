@@ -5,10 +5,9 @@ const { reviewNarrativePrompt } = require('./analystReviewPrompt.cjs');
 const { buildAnalystInbox } = require('../../utils/analystInboxAlerts.cjs');
 const { createReviewSources } = require('./analystReviewSources.cjs');
 const { isPortfolioRefreshRequest } = require('./portfolioRefreshRequest.cjs');
-const { OPERATION: MANUAL_VERIFICATION, createManualVerificationWorkflow } = require('./analystManualVerification.cjs');
 const { collectCitations, liveRequirementsForPrompt, projectHistory, reconcileLiveTurnHistory, sanitizeCitationText } = require('./analystGatewayProxy.cjs');
 // Match the isolated Hermes gateway's finite 30-minute generation budget.
-// Full-book verification and maximum-effort reasoning can exceed ten minutes.
+// Maximum-effort reasoning can exceed ten minutes.
 const RESPONSE_TIMEOUT_MS = 1_800_000;
 const RESPONSE_TIMEOUT_ERROR = 'The response exceeded its time limit. Retry is available.';
 const EVENT_WRITES = new Set(['accept', 'frame', 'recover', 'reconcile-response', 'import', 'delete', 'archive', 'daily', 'append', 'finding', 'finding-read', 'attention-publish']);
@@ -21,10 +20,13 @@ const INBOX_HISTORY_STATES = ['superseded', 'resolved', 'unavailable'];
 const REQUEST_IDENTITY_MAX = 512;
 // Scalar read timings only; enough recent conversations to compare a session.
 const READ_DIAGNOSTIC_CONVERSATIONS = 50;
+const INBOX_THREADS_KEY = 'inbox-threads-v1';
+// Marks the alert text that opens an Inbox discussion; the Inbox hides it.
+const INBOX_THREAD_PREFIX = 'About this Inbox alert:';
 const requestIdentity = value => typeof value === 'string' && value.trim()
   ? value.replace(/\p{Cc}/gu, ' ').trim().slice(0, REQUEST_IDENTITY_MAX) : null;
 
-function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001, WebSocketImpl = WebSocket, canGenerate = () => true, sourceDiagnostics, logRun }) {
+function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001, WebSocketImpl = WebSocket, canGenerate = () => true, sourceDiagnostics }) {
   const router = express.Router();
   const active = new Map();
   let portfolioRefreshHandler;
@@ -47,7 +49,6 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
     return result;
   };
   const reviewSources = createReviewSources({ request, call });
-  const manualVerification = createManualVerificationWorkflow({ call, generate, active, canGenerate, log: logRun });
   let diagnostics = sourceDiagnostics;
   let initialized = false;
   let initializing;
@@ -84,6 +85,28 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
     try { const result = await operation(span?.entry); span?.finish('completed'); return result; }
     catch (error) { span?.finish('failed'); throw error; }
   }
+  // Alert id → conversation id. Writes are serialized so two threads opened at
+  // once cannot overwrite each other's link.
+  let inboxThreadWrites = Promise.resolve();
+  const readInboxThreads = async () => {
+    const value = (await call('setting', { key: INBOX_THREADS_KEY })).value;
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  };
+  const updateInboxThreads = change => {
+    const write = inboxThreadWrites.then(async () => {
+      const next = change(await readInboxThreads());
+      await call('setting', { key: INBOX_THREADS_KEY, value: next });
+      return next;
+    });
+    inboxThreadWrites = write.catch(() => {});
+    return write;
+  };
+  const closeInboxThread = async findingId => {
+    const conversationId = (await readInboxThreads())[findingId];
+    if (!conversationId) return;
+    await call('delete', { conversationId, requestedBy: { userAgent: 'inbox-dismiss', origin: 'inbox-dismiss' } });
+    await updateInboxThreads(({ [findingId]: _closed, ...rest }) => rest);
+  };
   const importHistory = () => {
     if (!importing) importing = call('import').catch(() => {
       // Saved local chats remain usable during an archive/provider outage.
@@ -153,7 +176,6 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
     if (active.has(turn.id)) return;
     const reviewMessage = conversation.messages.findLast(message => message.reviewRunId || message.portfolioBrief?.runId);
     const reviewRunId = conversation.referenceReview?.runId || reviewMessage?.reviewRunId || reviewMessage?.portfolioBrief?.runId;
-    const manual = accepted.manualVerification;
     const ws = new WebSocketImpl(`ws://127.0.0.1:${port()}/ws/analyst`, { origin: `http://localhost:${port()}` });
     let finished = false;
     let terminalRequested = false;
@@ -216,10 +238,7 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
       },
     });
     const text = accepted.narrative || conversation.messages.find(m => m.turn_id === turn.id && m.role === 'user').text;
-    ws.on('open', () => send(manual
-      ? { action: 'manual_verification_prompt', text, ...manual, requestId: turn.id,
-          sessionId: conversation.hermes_id || null, conversationTitle: `[workspace:${conversation.id}] ${conversation.title}` }
-      : conversation.hermes_id
+    ws.on('open', () => send(conversation.hermes_id
       ? { action: 'resume', sessionId: conversation.hermes_id, requestId: turn.id }
       : reviewRunId
         ? { action: 'new_chat', requestId: turn.id }
@@ -257,7 +276,16 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
     ws.on('close', () => complete('interrupted', { error: 'Hermes disconnected. The saved response can be retried.' }));
   }
 
-  router.get('/conversations', route(async (req, res) => res.json(await call('list', { query: req.query.q, archived: req.query.archived === 'true' }))));
+  router.get('/conversations', route(async (req, res) => {
+    const [result, threads] = await Promise.all([
+      call('list', { query: req.query.q, archived: req.query.archived === 'true' }),
+      readInboxThreads().catch(() => ({})),
+    ]);
+    // Alert discussions live under their alert, not in Chats.
+    const hidden = new Set(Object.values(threads));
+    res.json(hidden.size && Array.isArray(result?.conversations)
+      ? { ...result, conversations: result.conversations.filter(row => !hidden.has(row.id)) } : result);
+  }));
   router.get('/requests/:requestId', route(async (req, res) => {
     const requestId = String(req.params.requestId || '').trim();
     if (!requestId || requestId.length > 200) return res.status(400).json({ error: 'Request identity is invalid.' });
@@ -316,12 +344,11 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
     res.json(sources);
     // Investigate in the background; acquisition never waits for the Inbox.
     diagnostics ||= require('./analystSourceDiagnostics.cjs').createSourceDiagnostics({ call });
-    if (sources.basis !== 'manual') void diagnostics.inspect(sources).catch(() => {});
+    void diagnostics.inspect(sources).catch(() => {});
   }));
   router.post('/messages', route(async (req, res) => {
-    const operation = req.body?.operation;
-    if (operation !== undefined && operation !== MANUAL_VERIFICATION) return res.status(400).json({ error: 'Message operation is invalid.' });
-    if (!operation && portfolioRefreshHandler && isPortfolioRefreshRequest(req.body.text)) {
+    if (req.body?.operation !== undefined) return res.status(400).json({ error: 'Message operation is invalid.' });
+    if (portfolioRefreshHandler && isPortfolioRefreshRequest(req.body.text)) {
       const text = String(req.body.text || '').trim();
       const requestId = String(req.body.requestId || '').trim();
       if (!requestId || !text || text.length > 20_000) return res.status(400).json({ error: 'A stable request ID and 1–20,000 character message are required.' });
@@ -330,11 +357,8 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
     }
     if (!canGenerate()) return res.status(503).json({ code: 'ANALYST_STARTING', error: 'The Analyst is connecting. Your draft is saved; try again shortly.' });
     const result = await call('accept', { requestId: req.body.requestId, conversationId: req.body.conversationId,
-      text: req.body.text, ...(operation ? { operation } : {}) });
-    if (result.created) {
-      if (operation) void manualVerification.start(result);
-      else generate(result);
-    }
+      text: req.body.text });
+    if (result.created) generate(result);
     res.status(202).json(result);
   }));
   // The user's one-click trash button is the only caller: a permanent delete
@@ -359,11 +383,8 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
     if (!canGenerate()) return res.status(503).json({ code: 'ANALYST_STARTING', error: 'The Analyst is connecting. Your saved report remains available; try again shortly.' });
     const data = await call('retry-data', { conversationId: req.params.id, turnId: req.params.turnId });
     const accepted = await call('accept', { conversationId: req.params.id, requestId: req.body.requestId, text: data.text,
-      internalPrompt: data.internalPrompt, reviewPostId: data.reviewPostId, ...(data.operation ? { operation: data.operation } : {}) });
-    if (accepted.created) {
-      if (data.operation === MANUAL_VERIFICATION) void manualVerification.start(accepted);
-      else generate(data.internalPrompt ? { ...accepted, narrative: reviewNarrativePrompt(accepted.conversation.kind, data.report) } : accepted);
-    }
+      internalPrompt: data.internalPrompt, reviewPostId: data.reviewPostId });
+    if (accepted.created) generate(data.internalPrompt ? { ...accepted, narrative: reviewNarrativePrompt(accepted.conversation.kind, data.report) } : accepted);
     res.status(202).json(accepted);
   }));
   router.post('/conversations/:id/turns/:turnId/stop', route(async (req, res) => {
@@ -413,7 +434,36 @@ function createAnalystWorkspace({ request, port = () => process.env.PORT || 3001
   }
   // Build per request: evidence freshness is evaluated at each reader's time.
   router.get('/inbox', route(async (_req, res) => res.json(buildAnalystInbox(await readInbox()))));
-  router.post('/inbox/:id/read', route(async (req, res) => res.json(await call('finding-read', { id: req.params.id, acknowledge: req.body.acknowledge, fingerprint: req.body.fingerprint, materialRevision: req.body.materialRevision, keptReason: req.body.keptReason }))));
+  router.post('/inbox/:id/read', route(async (req, res) => {
+    const result = await call('finding-read', { id: req.params.id, acknowledge: req.body.acknowledge, fingerprint: req.body.fingerprint, materialRevision: req.body.materialRevision, keptReason: req.body.keptReason });
+    res.json(result);
+    // A dismissed alert takes its discussion with it.
+    if (req.body.acknowledge) void closeInboxThread(req.params.id).catch(() => {});
+  }));
+  // Each alert can carry one Analyst conversation. The first message carries
+  // the alert as the user saw it, so the Analyst discusses that exact card.
+  router.get('/inbox-threads', route(async (_req, res) => res.json({ threads: await readInboxThreads() })));
+  router.post('/inbox-threads/:findingId', route(async (req, res) => {
+    const findingId = String(req.params.findingId || '');
+    const text = String(req.body?.text || '').trim();
+    const requestId = String(req.body?.requestId || '').trim();
+    const alert = String(req.body?.alert || '').trim();
+    if (!findingId || findingId.length > 256 || !requestId || !text || text.length > 20_000 || alert.length > 8_000) {
+      return res.status(400).json({ error: 'A stable request ID, an alert, and a 1–20,000 character message are required.' });
+    }
+    if (!canGenerate()) return res.status(503).json({ code: 'ANALYST_STARTING', error: 'The Analyst is connecting. Your draft is saved; try again shortly.' });
+    let conversationId = (await readInboxThreads())[findingId];
+    // A thread deleted elsewhere starts over rather than failing every reply.
+    if (conversationId && await call('get', { conversationId, includeBriefs: false }).then(() => false,
+      error => ['ANALYST_CONVERSATION_DELETED', 'ANALYST_CONVERSATION_NOT_FOUND'].includes(error?.code) || [404, 410].includes(error?.statusCode))) {
+      conversationId = undefined;
+    }
+    const result = await call('accept', { requestId, conversationId,
+      text: conversationId ? text : `${INBOX_THREAD_PREFIX}\n${alert}\n\n${text}` });
+    if (result.created) generate(result);
+    if (!conversationId && result.conversation?.id) await updateInboxThreads(threads => ({ ...threads, [findingId]: result.conversation.id }));
+    res.status(202).json(result);
+  }));
   router.get('/process', route(async (_req, res) => res.json(await call('process'))));
   router.put('/process', route(async (req, res) => res.json(await call('process', { document: req.body.document }))));
   router.get('/events', route(async (req, res) => {

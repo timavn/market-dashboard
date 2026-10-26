@@ -98,7 +98,7 @@ test('successful partial import surfaces the exact source discrepancy while keep
   assert.equal(finding.sourceDiscrepancy, true);
   assert.deepEqual(finding.sourceQuality.issues[0].observed, { lrr: 2834, hrr: 2825, trend: 'BULLISH' });
   assert.match(JSON.stringify(finding.presentation.rows), /published lower 2,834 exceeds upper 2,825/);
-  assert.match(JSON.stringify(finding.presentation.rows), /unaffected research are available/);
+  assert.match(JSON.stringify(finding.presentation.rows), /the rest is usable/);
   assert.doesNotMatch(JSON.stringify(finding.presentation.rows), /report was rejected|could not be.*loaded|corrected/);
   assert.equal(finding.presentation.sourceLinks[1].citation.sourceUri, 'https://app.hedgeye.com/feed_items/187503');
   assert.equal((await run(data)).findings[0].fingerprint, finding.fingerprint);
@@ -145,7 +145,7 @@ test('yesterday cannot satisfy today; weekly and event-driven products are not m
   Object.assign(data.product('the-call'), { status: 'missing', stages: {} });
   const result = await run(data);
   assert.equal(result.findings.length, 1);
-  assert.match(result.findings[0].presentation.rows[0].text, /not been received for 2026-09-22/);
+  assert.match(result.findings[0].presentation.rows[0].text, /missing for 2026-09-22/);
 });
 
 test('Gmail delivery failures remain diagnostics without generic inbox warnings', async () => {
@@ -177,7 +177,7 @@ test('received explicit processing failure alerts before scheduled deadline', as
   Object.assign(data.product('risk-ranges'), { status: 'failed', stages: { received: true }, errorCode: 'PARSER_FAILED', counts: { failures: 1 } });
   const result = await run(data, now);
   assert.equal(result.findings.length, 1);
-  assert.match(result.findings[0].presentation.rows[0].text, /arrived.*could not be fully loaded/);
+  assert.match(result.findings[0].presentation.rows[0].text, /failed to load/);
 });
 
 test('an ordinary import gets processing grace while a stalled import becomes an incident', async () => {
@@ -185,7 +185,7 @@ test('an ordinary import gets processing grace while a stalled import becomes an
   Object.assign(data.product('the-call'), { status: 'received', stages: { received: true } });
   assert.equal((await run(data)).findings.length, 0);
   data.product('the-call').observedAt = '2026-09-22T14:40:00Z';
-  assert.match((await run(data)).findings[0].presentation.rows[0].text, /update has not completed/);
+  assert.match((await run(data)).findings[0].presentation.rows[0].text, /import stalled/);
 });
 
 test('indexed publication with an unavailable individual consumer cannot be hidden by its sibling', async () => {
@@ -214,16 +214,16 @@ test('range consumer must independently serve the verified edition and manifest'
   }
 });
 
-test('Gateway failure groups holdings, account and dependent prediction failures', async () => {
+test('Gateway failure groups holdings, account and dependent failures', async () => {
   const data = fixture();
   for (const id of ['ibkr.gateway', 'ibkr.accounts', 'ibkr.portfolio']) Object.assign(data.check(id), {
     status: 'fail', errorCode: id === 'ibkr.gateway' ? 'IBKR_GATEWAY_NOT_AUTHENTICATED' : 'IBKR_PORTFOLIO_UNAVAILABLE', impact: 'No portfolio data.',
   });
-  data.report.groups[0].checks.push({ id: 'prediction.ibkrExecution', status: 'fail', dependsOn: ['ibkr.gateway'], capabilityIds: [], impact: 'Execution unavailable' });
+  data.report.groups[0].checks.push({ id: 'ibkr.quotes', status: 'fail', dependsOn: ['ibkr.gateway'], capabilityIds: [], impact: 'Quotes unavailable' });
   const result = await run(data);
   assert.equal(result.findings.length, 1);
   assert.equal(result.findings[0].symbol, 'IB Gateway');
-  assert.match(result.findings[0].presentation.rows[1].text, /holdings and balances cannot refresh/);
+  assert.match(result.findings[0].presentation.rows[1].text, /Holdings and balances frozen/);
 });
 
 test('connection recovery alone and partial accounts do not establish portfolio recovery', async () => {
@@ -233,7 +233,7 @@ test('connection recovery alone and partial accounts do not establish portfolio 
   const result = await run(data);
   assert.equal(result.findings.length, 1);
   assert.equal(result.findings[0].symbol, 'Portfolio updates');
-  assert.match(result.findings[0].presentation.rows[0].text, /every expected account/);
+  assert.match(result.findings[0].presentation.rows[0].text, /Not all accounts connected/);
 });
 
 test('a new lightweight Gateway disconnect overrides a healthy cached deep probe', async () => {
@@ -314,7 +314,7 @@ test('every registry snapshot consumer is compared to the observed publication w
   const behind = await run(data);
   assert.equal(behind.findings.length, 1);
   assert.equal(behind.findings[0].symbol, 'MOMO Tracker');
-  assert.match(behind.findings[0].presentation.rows[0].text, /still serves 2026-09-21/);
+  assert.match(behind.findings[0].presentation.rows[0].text, /shows 2026-09-21, not 2026-09-22/);
 });
 
 const hedgaiCountIssue = (date = '2026-10-06') => ({
@@ -342,10 +342,10 @@ test('HedgAI count discrepancy is a durable sourced incident independent of revi
   assert.equal(item.sourceReportDate, '2026-10-06');
   assert.equal(item.publicationTime, new Date(issue.source.publishedAt).toISOString());
   assert.deepEqual(item.sourceQuality.issues, [issue]);
-  assert.match(item.presentation.rows[0].text, /5 Longs and 7 Shorts.*8 Buy and 7 Short/);
-  assert.match(item.presentation.rows[1].text, /parsing is recovered/);
-  assert.match(item.presentation.rows[2].text, /no unreported closes are assumed/);
-  assert.match(item.presentation.rows[3].text, /47 instrument readings remain available.*PDF verification is pending/);
+  assert.match(item.presentation.rows[0].text, /Headline 5L\/7S ≠ recorded 8L\/7S/);
+  assert.match(item.presentation.rows[1].text, /Parsing recovered/);
+  assert.match(item.presentation.rows[2].text, /full-book PDF/);
+  assert.match(item.presentation.rows[3].text, /47 readings usable; totals unreconciled/);
   assert.equal(item.presentation.sourceLinks.at(-1).citation.sourceUri, issue.source.url);
   assert.equal(item.presentation.sourceLinks.at(-1).citation.publicationDate, '2026-10-06');
   assert.equal(JSON.stringify(data.hedgai), before);
@@ -425,7 +425,7 @@ test('new verified position status supersedes a cached disconnection without dec
   const result = await run(data, '2026-09-22T15:01:00Z');
   assert.equal(result.complete, false);
   assert.equal(result.findings.length, 1);
-  assert.match(result.findings[0].presentation.rows[0].text, /full account recovery is not yet verified/);
+  assert.match(result.findings[0].presentation.rows[0].text, /full recovery unverified/);
   assert.doesNotMatch(JSON.stringify(result.findings), /Gateway is disconnected/);
   data.status.services[1].details.pop();
   const socketOnly = await run(data, '2026-09-22T15:01:00Z');
@@ -467,6 +467,6 @@ test('deep collection completion cannot overrule a fresh successful UI probe or 
   dashboard.details[0].status = 'offline';
   const outage = await run(data, '2026-09-22T15:01:05Z');
   assert.equal(outage.findings.length, 1);
-  assert.match(outage.findings[0].presentation.rows[0].text, /failed both current availability checks/);
+  assert.match(outage.findings[0].presentation.rows[0].text, /Dashboard page down/);
   assert.doesNotMatch(JSON.stringify(outage.findings), /cannot be opened/);
 });

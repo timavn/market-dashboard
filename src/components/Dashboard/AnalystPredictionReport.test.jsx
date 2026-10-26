@@ -1,9 +1,12 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import ReactMarkdown from 'react-markdown';
 import AnalystPredictionReport from './AnalystPredictionReport';
 import { remarkAnalystProcessColors } from './analystProcessColors';
+import { analystWorkspaceApi } from '../../services/analyst/analystClient';
+
+jest.mock('../../services/analyst/analystClient', () => ({ analystWorkspaceApi: { request: jest.fn() } }));
 
 jest.mock('remark-gfm', () => function mockGfm() {});
 jest.mock('react-markdown', () => {
@@ -230,14 +233,51 @@ test('Alpha Code cells stack Trade and Trend with the price above or below each,
   expect(container).not.toHaveTextContent(/ALPHA\(/);
 });
 
-test('analyst-research blocks list one row per mention, its context, time and source, and each quiet market', () => {
+test('Structure cells stack today’s range moves, run counts with each session, and the all-time high', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Oil" />);
+  const { td: Cell, table: Table } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const cell = value => <Cell node={{ children: [{ type: 'text', value }] }}>{value}</Cell>;
+  const headers = ['Market', 'Tick', 'Trade', 'Trend', 'Alpha Code', 'Price and Risk Range', 'Structure (10d)', 'As of (PT)'];
+  const node = { children: [{ tagName: 'thead', children: [{ tagName: 'tr', children: headers.map(value => ({ tagName: 'th', children: [{ type: 'text', value }] })) }] }] };
+  const { container } = render(<Table node={node}><tbody><tr>
+    {cell('STRUCT(+-++++++++;+8;--+++-++--;-2;147.27;Jul 11, 2008;-34;0;)')}{cell('STRUCT(+-;+1;+-;-1;7,845;Oct 6, 2026;-1;1;)')}
+    {cell('STRUCT(=-;-1;+=;+1;;;;0;%)')}
+  </tr></tbody></Table>);
+  expect(container.querySelector('.analyst-table-frame')).toHaveClass('is-range-board', 'has-alpha', 'has-structure');
+  const [wti, spx, ust2y] = container.querySelectorAll('td');
+  expect([...wti.children].map(span => span.textContent)).toEqual(['HLLHATH', 'LH 2', 'HL 8', 'ATH 147.27 : 34%']);
+  expect(within(wti).getByText('HL')).toHaveClass('is-on');
+  expect(within(wti).getByText('LH', { selector: '.analyst-prediction-structure-move' })).toHaveClass('is-against');
+  expect(within(wti).getByText('HL 8')).toHaveClass('analyst-process--positive');
+  // The level reads blue; the colon and how far price sits below it read black.
+  expect(within(wti).getByText('ATH 147.27')).toHaveClass('analyst-prediction-structure-record');
+  expect(within(wti).getByText(': 34%', { exact: false })).toHaveClass('analyst-prediction-structure-distance');
+  // Clicking the ATH line shows the record's date beneath it; leaving it closes the note.
+  fireEvent.click(within(wti).getByRole('button', { name: 'ATH 147.27 : 34%' }));
+  expect(within(wti).getByRole('tooltip')).toHaveTextContent('ATH on Jul 11, 2008');
+  fireEvent.blur(within(wti).getByRole('button', { name: 'ATH 147.27 : 34%' }));
+  expect(within(wti).queryByRole('tooltip')).toBeNull();
+  expect(wti.querySelectorAll('.analyst-prediction-structure-steps i.is-higher')).toHaveLength(9 + 5);
+  expect(within(wti).getByLabelText(/^Highs, oldest to today: lower, lower, higher/)).toBeInTheDocument();
+  expect(wti).toHaveAttribute('title', 'Today HL LH ATH · LH 2 · HL 8 · Price 34% below the all-time high of 147.27 (Jul 11, 2008)');
+  // A range top above the all-time high reads blue.
+  expect(within(spx).getByText('ATH', { selector: '.analyst-prediction-structure-move' })).toHaveClass('is-record');
+  expect(within(spx).getByText('Top > ATH 7,845')).toHaveClass('analyst-prediction-structure-record');
+  expect(spx.getAttribute('title')).toMatch(/Range top above the all-time high of 7,845 \(Oct 6, 2026\)$/);
+  expect([...ust2y.children].map(span => span.textContent)).toEqual(['LL=HATH', 'HH 1', 'LL 1', 'ATH N/A']);
+  expect(container).not.toHaveTextContent(/STRUCT\(/);
+});
+
+test('analyst-research blocks list one row per mention, its context and source, and each quiet market', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Crypto" />);
   const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
   const research = { markets: [
     { market: 'Bitcoin', entries: [
-      { product: 'The Macro Show', time: '07:55', context: 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend',
+      { product: 'The Macro Show', time: '07:55', date: 'Oct 22', context: 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend',
         source: 'Cooper noted that Keith sold all Ethereum on Tuesday. Bitcoin remained a minimum-sized long with bearish trade but bullish trend' },
+      // An entry saved before dates keeps its Pacific time.
       { product: 'The Macro Show', time: '07:55', context: 'Long Bitcoin (BTC)' }] },
     { market: 'Ethereum', entries: [] },
     // Reports saved before entries keep their facts and quotes.
@@ -249,12 +289,15 @@ test('analyst-research blocks list one row per mention, its context, time and so
   const table = within(screen.getByRole('region', { name: 'Morning research' })).getByRole('table');
   const rows = within(table).getAllByRole('row').map(row => [...row.cells].map(cell => cell.textContent));
   expect(rows).toEqual([
-    ['Market', 'Product', 'Context', 'PT', ''],
-    ['Bitcoin', 'The Macro Show', 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend', '07:55', 'Source'],
-    ['The Macro Show', 'Long Bitcoin (BTC)', '07:55', ''],
+    ['Market', 'Product', 'Context', ''],
+    ['Bitcoin', 'The Macro Show', 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend', 'Source'],
+    ['The Macro Show', 'Long Bitcoin (BTC)', ''],
     ['Ethereum', 'Not mentioned'],
-    ['Solana', 'Crypto Quant', 'Trend Bullish', '—', 'Source'],
+    ['Solana', 'Crypto Quant', 'Trend Bullish', 'Source'],
   ]);
+  // The publication time reads on the product; a block saved without its section and date has no day picker.
+  expect(within(table).getAllByText('The Macro Show')[0]).toHaveAttribute('title', 'Oct 22 07:55 PT');
+  expect(within(table).queryByRole('button', { name: /choose another day/ })).not.toBeInTheDocument();
   expect(within(table).getByText('bearish')).toHaveClass('analyst-process--negative');
   expect(within(table).getByText('Long')).toHaveClass('analyst-process--positive');
   const [source] = within(table).getAllByRole('button', { name: 'Source' });
@@ -263,6 +306,38 @@ test('analyst-research blocks list one row per mention, its context, time and so
   expect(source).toHaveAttribute('aria-expanded', 'true');
   expect(table.querySelector('blockquote')).toHaveTextContent(/sold all Ethereum/);
   expect(within(table.querySelector('blockquote')).getByText('Ethereum')).toHaveClass('analyst-process--ticker');
+});
+
+test('the research title is its market day; the four before it open above and read what was said that day', async () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Crypto" />);
+  const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const block = (context) => ({ markets: [{ market: 'Bitcoin', entries: [{ product: 'Early Look', time: '04:28', context }] }] });
+  const research = { section: 'crypto', marketDate: '2026-10-23', ...block('Bitcoin held its TREND support') };
+  analystWorkspaceApi.request.mockResolvedValueOnce({ ok: true, sections: { crypto: block('Bitcoin broke its TRADE line') } })
+    .mockRejectedValueOnce(new Error('down'));
+  const node = { children: [{ tagName: 'code', properties: { className: ['language-analyst-research'] },
+    children: [{ type: 'text', value: JSON.stringify(research) }] }] };
+  render(<Pre node={node}><code>ignored</code></Pre>);
+  const table = within(screen.getByRole('region', { name: 'Morning research' })).getByRole('table');
+  const title = within(table).getByRole('button', { name: 'Research for Oct 23; choose another day' });
+  fireEvent.click(title);
+  // Oct 23 is a Friday: the four market days before it, skipping the weekend.
+  expect(within(table).getAllByRole('option').map(option => option.textContent)).toEqual(['Oct 22', 'Oct 21', 'Oct 20', 'Oct 19']);
+  fireEvent.click(within(table).getByRole('button', { name: 'Oct 21' }));
+  expect(analystWorkspaceApi.request).toHaveBeenCalledWith('/prediction-research?date=2026-10-21');
+  expect(within(table).queryByRole('listbox')).not.toBeInTheDocument();
+  await waitFor(() => expect(table).toHaveTextContent('Bitcoin broke its TRADE line'));
+  expect(within(table).getByRole('button', { name: 'Research for Oct 21; choose another day' })).toBeInTheDocument();
+  // The report's own day is back in the list, and a failed read says so.
+  fireEvent.click(within(table).getByRole('button', { name: /Oct 21; choose another day/ }));
+  expect(within(table).getAllByRole('option').map(option => option.textContent)).toEqual(['Oct 23', 'Oct 22', 'Oct 20', 'Oct 19']);
+  fireEvent.click(within(table).getByRole('button', { name: 'Oct 20' }));
+  await waitFor(() => expect(table).toHaveTextContent('Research for Oct 20 is unavailable.'));
+  fireEvent.click(within(table).getByRole('button', { name: /Oct 20; choose another day/ }));
+  fireEvent.click(within(table).getByRole('button', { name: 'Oct 23' }));
+  expect(table).toHaveTextContent('Bitcoin held its TREND support');
+  expect(analystWorkspaceApi.request).toHaveBeenCalledTimes(2);
 });
 
 test('research excerpts color securities, quads, directions and signed moves as the other reports do', () => {
@@ -310,4 +385,94 @@ test('reported data lists one fact per line, including saved reports that joined
   // A sentence with a colon stays a sentence.
   const sentence = screen.getByText(/Immediate-term @Hedgeye Risk Ranges:/);
   expect(sentence.closest('ul')).toBeNull();
+});
+
+test('CPI nowcast reads Low · Base · High, Low red and High green on the values only', () => {
+  const markdown = ['## CPI', '', '| Market | Kalshi | Nowcast low | Base | High | Published |', '| --- | --- | --- | --- | --- | --- |',
+    '| CPI YoY · Oct 2026 | N/A | 3.77% | 3.88% | 3.99% | Oct 16 13:11 PDT |', ''].join('\n');
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown={markdown} />);
+  // Saved reports titled the first column "Nowcast low".
+  expect(ReactMarkdown.renderSpy.mock.calls[0][0].children).toContain('| Market | Kalshi | Low | Base | High | Published |');
+  const { td: Cell, table: Table } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const cell = value => <Cell node={{ children: [{ type: 'text', value }] }}>{value}</Cell>;
+  const headers = ['Market', 'Kalshi', 'Low', 'Base', 'High', 'Published'];
+  const node = { children: [{ tagName: 'thead', children: [{ tagName: 'tr', children: headers.map(value => ({ tagName: 'th', children: [{ type: 'text', value }] })) }] }] };
+  const { container } = render(<Table node={node}><tbody><tr>{cell('CPI')}{cell('N/A')}{cell('3.77%')}</tr></tbody></Table>);
+  expect(container.querySelector('.analyst-table-frame')).toHaveClass('is-nowcast');
+  // N/A keeps its plain color in a colored column.
+  expect(container.querySelectorAll('td')[1]).toHaveClass('is-na');
+});
+
+test('volume draws under Tick, Trade and Trend as one shaded cell per window, and Structure adds DV or AV', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Crypto" />);
+  const { td: Cell, tr: Row, table: Table } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const text = value => ({ type: 'text', value });
+  const headers = ['Market', 'Tick', 'Trade', 'Trend', 'Volume', 'Price and Risk Range', 'Structure (10d)', 'Status'];
+  const values = ['Bitcoin', 'BIAS(Neutral;;)', 'BIAS(Bullish;;)', 'BIAS(Bullish;;)', 'VOL(+54;+35;+35;+8;2026-10-21;IBIT)',
+    'RR(80796;83995;84271;0;)', 'STRUCT(+;+1;+;+1;126,198;Oct 2025;-33;0;;AV;)', 'ASOF(Oct 21 16:29;,;,;,)'];
+  const headNode = { tagName: 'tr', children: headers.map(value => ({ tagName: 'th', children: [text(value)] })) };
+  const rowNode = { tagName: 'tr', children: values.map(value => ({ tagName: 'td', children: [text(value)] })) };
+  const table = { children: [{ tagName: 'thead', children: [headNode] }, { tagName: 'tbody', children: [rowNode] }] };
+  const { container } = render(<Table node={table}>
+    <thead><Row node={headNode}>{headers.map(value => <th key={value}>{value}</th>)}</Row></thead>
+    <tbody><Row node={rowNode}>{rowNode.children.map((node, index) => <Cell key={index} node={node}>{values[index]}</Cell>)}</Row></tbody>
+  </Table>);
+  // The volume column has no header or column of its own.
+  expect([...container.querySelectorAll('th')].map(th => th.textContent)).toEqual(headers.filter(value => value !== 'Volume'));
+  expect(container.querySelectorAll('col')).toHaveLength(7);
+  const [top, under] = container.querySelectorAll('tbody tr');
+  // Market, the range, Structure and Status run the full height; Tick, Trade and Trend take the top half.
+  expect([...top.children].map(cell => cell.rowSpan)).toEqual([2, 1, 1, 1, 2, 2, 2]);
+  const volume = under.querySelector('td');
+  expect(volume.colSpan).toBe(3);
+  expect([...volume.querySelectorAll('.analyst-prediction-volume__window')].map(cell => cell.textContent))
+    .toEqual(['vs prior day+54%', 'vs 15D avg+35%', 'vs 30D avg+35%', 'vs 90D avg+8%']);
+  expect(volume.querySelector('.analyst-prediction-volume__window')).toHaveClass('is-heavier');
+  expect(volume).toHaveAttribute('title', 'IBIT volume on 2026-10-21 vs the prior session and its 15-, 30- and 90-day averages');
+  // A saved board without the day's direction shows AV with the plain outline when it isn't against the Trend.
+  expect(within(top).getByText('AV', { selector: '.analyst-prediction-structure-move' })).toHaveClass('analyst-prediction-structure-move', { exact: true });
+  expect(container).not.toHaveTextContent(/VOL\(|STRUCT\(/);
+});
+
+test.each([
+  ['-', 'DV', 'supports', '↓DV', 'is-on', 'Down day on volume below its 30-day average (against the Trend: setup)'],
+  ['+', 'AV', 'warns', '↑AV', 'is-against', 'Up day on volume above its 30-day average (against the Trend: warning)'],
+  ['+', 'DV', '', '↑DV', null, 'Up day on volume below its 30-day average (not against the Trend)'],
+  ['+', 'AV', '', '↑AV', null, 'Up day on volume above its 30-day average (not against the Trend)'],
+])('a %s day on %s against the Trend reads as a setup (green), warning (red) or neither (outline)', (direction, volume, tone, text, tint, sentence) => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Crypto" />);
+  const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const value = `STRUCT(+;+1;+;+1;126,198;Oct 2025;-33;0;;${volume};${tone};${direction})`;
+  const { container } = render(<table><tbody><tr><Cell node={{ tagName: 'td', children: [{ type: 'text', value }] }}>{value}</Cell></tr></tbody></table>);
+  const badge = within(container).getByText(text, { selector: '.analyst-prediction-structure-move' });
+  expect(badge.className).toBe(`analyst-prediction-structure-move${tint ? ` ${tint}` : ''}`);
+  expect(container.querySelector('td').title).toContain(sentence);
+});
+
+test('an unavailable volume reads N/A in each window, and saved boards title As of (PT) as Status', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown={'| Market | Tick | Trade | Trend | Price and Risk Range | As of (PT) |\n| --- | --- | --- | --- | --- | --- |'} />);
+  expect(ReactMarkdown.renderSpy.mock.calls[0][0].children).toContain('| Price and Risk Range | Status |');
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown={'| Market | Tick | Trade | Trend | Price and Risk Range | Structure (10d) | Status |\n| --- | --- | --- | --- | --- | --- | --- |'} />);
+  expect(ReactMarkdown.renderSpy.mock.calls[0][0].children).toContain('| Price and Risk Range | Structure | Status |');
+  const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const { container } = render(<table><tbody><tr><Cell node={{ children: [{ type: 'text', value: 'VOL(;;;-12;;)' }] }} /></tr></tbody></table>);
+  expect([...container.querySelectorAll('.analyst-prediction-volume__value')].map(cell => cell.textContent)).toEqual(['N/A', 'N/A', 'N/A', '−12%']);
+  expect(container.querySelectorAll('.is-lighter')).toHaveLength(1);
+});
+
+test('a market whose only mention reads under another market names it instead of Not mentioned', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Metals" />);
+  const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const research = { markets: [{ market: 'Palladium', entries: [], mentionedWith: ['Gold'] }, { market: 'Copper', entries: [] }] };
+  const node = { children: [{ tagName: 'code', properties: { className: ['language-analyst-research'] },
+    children: [{ type: 'text', value: JSON.stringify(research) }] }] };
+  render(<Pre node={node}><code>ignored</code></Pre>);
+  const rows = within(screen.getByRole('region', { name: 'Morning research' })).getAllByRole('row').map(row => [...row.cells].map(cell => cell.textContent));
+  expect(rows.slice(1)).toEqual([['Palladium', 'Mentioned with Gold'], ['Copper', 'Not mentioned']]);
 });

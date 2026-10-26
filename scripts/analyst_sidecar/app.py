@@ -179,37 +179,28 @@ REGISTRY_PATH = Path(
     )
 )
 REGISTRY = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-INFLATION_PRODUCT = {
-    "id": "inflation-nowcast",
-    "label": "Monthly Inflation Nowcast",
-    # "Monthly" is the forecast horizon; the newsletter publishes weekly.
-    "cadence": "weekly",
-    "maxPublicationAgeDays": 7,
-}
 
 
 def research_product_definitions() -> list:
-    """Registry products, with the Analyst's weekly Inflation Nowcast freshness.
+    """Registry products, judged by the cadence the registry gives them.
 
-    The shared registry lists inflation-nowcast as event-driven for the
-    dashboard's publication-day coverage. The Analyst judges it by its weekly
-    newsletter cadence, so its definition overrides the registry entry once
-    instead of appearing twice.
+    The Inflation Nowcast publishes on no fixed schedule, so it stays
+    event-driven: its latest publication date is shown, and it is late only
+    when the feed reports a newer one this index has not captured.
     """
-    products = []
-    for product in REGISTRY.get("products", []):
-        if isinstance(product, dict) and product.get("id") == INFLATION_PRODUCT["id"]:
-            continue
-        products.append(product)
-    registry_entry = next((product for product in REGISTRY.get("products", [])
-                           if isinstance(product, dict) and product.get("id") == INFLATION_PRODUCT["id"]), {})
-    return [*products, {**registry_entry, **INFLATION_PRODUCT}]
+    return [product for product in REGISTRY.get("products", []) if isinstance(product, dict)]
+
+
 SERVICE_TOKEN = os.environ.get("ANALYST_SERVICE_TOKEN", "")
 API_BASE_URL = os.environ.get(
     "MARKET_DASHBOARD_API_BASE", "http://127.0.0.1:3001"
 ).rstrip("/")
 INDEX_INTERVAL_SECONDS = max(
     30, int(os.environ.get("ANALYST_INDEX_INTERVAL_SEC", "300"))
+)
+FEED_RECONCILE_INTERVAL_SECONDS = max(
+    INDEX_INTERVAL_SECONDS,
+    int(os.environ.get("ANALYST_FEED_RECONCILE_INTERVAL_SEC", "21600")),
 )
 SYNC_PAGE_LIMIT = min(
     250, max(10, int(os.environ.get("ANALYST_SYNC_PAGE_LIMIT", "25")))
@@ -424,8 +415,6 @@ def _latest_friday(now_ny: datetime) -> str:
 def _product_due(
     product: dict[str, Any], now_ny: datetime
 ) -> tuple[bool, Optional[str]]:
-    if product.get("maxPublicationAgeDays") is not None:
-        return False, None
     cadence = product.get("cadence")
     deadline_total = int(product.get("deadlineHourET", 16 if cadence == "weekly" else 8)) * 60 + int(product.get("deadlineMinuteET", 0)) + max(0, int(product.get("graceMinutes", 0)))
     if product.get("id") == "risk-ranges":
@@ -482,17 +471,6 @@ def research_coverage(
         upstream_status = str(upstream.get("status") or "")
         if upstream_status in {"indexing", "failed"}:
             status = upstream_status
-        elif product.get("maxPublicationAgeDays") is not None:
-            if not latest_date:
-                status = "missing"
-            else:
-                try:
-                    age = (
-                        now_ny.date() - datetime.fromisoformat(latest_date).date()
-                    ).days
-                except ValueError:
-                    age = 999
-                status = "available" if 0 <= age <= product["maxPublicationAgeDays"] else "late"
         elif due:
             status = (
                 "available"
@@ -501,6 +479,13 @@ def research_coverage(
                 if latest_date
                 else "missing"
             )
+        elif (row and (upstream.get("stages") or {}).get("received")
+              and str(upstream.get("latestPublicationDate") or "") > str(latest_date or "")):
+            # Event-driven sources have no due date. They are late only when
+            # the feed received a newer publication than the one indexed here;
+            # an unreceived feed row carries only the date it checked.
+            status = "late"
+            expected_date = upstream["latestPublicationDate"]
         elif row or latest_date:
             status = "available"
         else:
@@ -654,11 +639,37 @@ async def sync_research_feed() -> dict[str, Any]:
             return {"status": "failed", "error": str(exc), **totals}
 
 
+def feed_sweep_due(index: Optional[ResearchIndex] = None, now: Optional[datetime] = None) -> bool:
+    """Whether the full research feed must be swept again.
+
+    After bootstrap the change journal carries new research, but a publication
+    written without a journal entry, or a sweep cut short at its page limit,
+    is found only by a sweep. Finish a parked sweep and reconcile periodically.
+    """
+    active_index = index or research_index
+    if active_index.get_sync_state("research_feed_cursor", ""):
+        return True
+    completed = active_index.get_sync_state("research_bootstrap_complete", "")
+    try:
+        completed_at = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if completed_at.tzinfo is None:
+        return True
+    elapsed = (now or datetime.now(timezone.utc)) - completed_at
+    return elapsed.total_seconds() >= FEED_RECONCILE_INTERVAL_SECONDS
+
+
 async def indexing_loop() -> None:
     await asyncio.sleep(2)
     while True:
-        if not research_index.get_sync_state("research_bootstrap_complete", ""):
-            await sync_research_feed()
+        if feed_sweep_due():
+            cursor = research_index.get_sync_state("research_feed_cursor", "")
+            result = await sync_research_feed()
+            advanced = research_index.get_sync_state("research_feed_cursor", "")
+            # Keep sweeping while each call advances; a stuck cursor waits.
+            if result.get("status") == "ready" and advanced and advanced != cursor:
+                continue
         await asyncio.sleep(INDEX_INTERVAL_SECONDS)
 
 
@@ -1194,7 +1205,7 @@ def _coverage_result(
         str(row.get("id"))
         for row in REGISTRY.get("products", [])
         if isinstance(row, dict) and row.get("id")
-    } | {INFLATION_PRODUCT["id"]}
+    }
     observed_product_ids = {row["product"] for row in products if row.get("product")}
     missing_product_ids = sorted(expected_product_ids - observed_product_ids)
     sync_ready = (coverage.get("sync") or {}).get("status") == "ready"
@@ -3698,7 +3709,6 @@ async def get_process_context() -> dict[str, Any]:
         latest.setdefault(row["document_id"], row)
     return compact_json_tool_result(envelope(status="available", source_system="dashboard", provider="versioned_process", freshness="archival", data={
         "documents": list(latest.values()),
-        "portfolioSizingPolicies": json.loads((Path(__file__).resolve().parents[2] / "src/constants/portfolioSizingPolicies.json").read_text()),
         "canonicalSource": {"path": "src/constants/processDocuments.js", "version": hashlib.sha256((Path(__file__).resolve().parents[2] / "src/constants/processDocuments.js").read_bytes()).hexdigest(), "author": "Dashboard Process", "text": (Path(__file__).resolve().parents[2] / "src/constants/processDocuments.js").read_text()[:65000]}, "author": "Tim", "setupMaxLossPctNlv": 5, "cpiReleaseMaxLossPctNlv": 15,
         "policy": "Maximum loss across existing plus proposed contracts sharing the underlying event and settlement; CPI groups the release. Fresh verified NLV, native book, complete existing exposure, and funding/capacity are required. Limits are caps, not allocation targets. No invented probability or expected return from risk-range location."
     }))
@@ -4457,6 +4467,26 @@ async def link_review_conversation_hermes_session_route(request: Request) -> JSO
         )
     except Exception as exc:
         return _review_v2_error_response(exc)
+
+
+@mcp.custom_route("/internal/prediction-research", methods=["GET"])
+async def prediction_research_route(request: Request) -> JSONResponse:
+    """An earlier market day's morning research, per setup-board section, for the report's date picker."""
+    date = str(request.query_params.get("date") or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        return JSONResponse({"ok": False, "code": "INVALID_DATE", "error": "date must be YYYY-MM-DD"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(f"{API_BASE_URL}/api/prediction-markets/setup-board", params={"date": date})
+            response.raise_for_status()
+            board = response.json()
+    except Exception as exc:
+        LOGGER.warning("Prediction research for %s unavailable (%s)", date, type(exc).__name__)
+        return JSONResponse({"ok": False, "code": "PREDICTION_RESEARCH_UNAVAILABLE",
+                             "error": "Research for that day is unavailable."}, status_code=503)
+    from prediction_setup_board import research_by_section
+    return JSONResponse({"ok": True, "marketDate": date, "sections": research_by_section(board)},
+                        headers={"Cache-Control": "no-store"})
 
 
 @mcp.custom_route("/internal/reviews", methods=["GET"])

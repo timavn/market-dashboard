@@ -1,5 +1,5 @@
 const { createHash } = require('crypto');
-const { isTradingDateKey } = require('../../utils/usEquityMarketCalendar.cjs');
+const { isTradingDateKey, previousTradingDateKey } = require('../../utils/usEquityMarketCalendar.cjs');
 const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js');
 const { describeAnalystFinding, typedAnalystSignal: typedSignalEvent } = require('../../utils/analystFindingPresentation.cjs');
 const { automatedSourceReadiness, sourceLibraryRows } = require('./analystSourceReadiness.cjs');
@@ -34,6 +34,20 @@ function portfolioCaptureWindow(now = new Date()) {
   const marketDay = isTradingDateKey(date);
   const captureMinute = marketCloseMinutes(date) + 30;
   return { date, marketDay, due: marketDay && easternMinutes(now) >= captureMinute, captureMinute,
+    scheduledTime: `${String(Math.floor(captureMinute / 60)).padStart(2, '0')}:${String(captureMinute % 60).padStart(2, '0')}`,
+    timeZone: 'America/New_York' };
+}
+// Holdings cannot change between a session's close and the next session's
+// 4:00am ET pre-market open. A capture anywhere in that span is that close's
+// holdings, so a missed 4:30pm capture can still be taken that night, over the
+// weekend, or across a holiday.
+const PREMARKET_OPEN_MINUTE = 240;
+function portfolioCaptureSession(now = new Date()) {
+  const today = easternDate(now);
+  const minutes = easternMinutes(now);
+  const date = isTradingDateKey(today) && minutes >= PREMARKET_OPEN_MINUTE ? today : previousTradingDateKey(today);
+  const captureMinute = marketCloseMinutes(date) + 30;
+  return { date, marketDay: true, due: date !== today || minutes >= captureMinute, captureMinute,
     scheduledTime: `${String(Math.floor(captureMinute / 60)).padStart(2, '0')}:${String(captureMinute % 60).padStart(2, '0')}`,
     timeZone: 'America/New_York' };
 }
@@ -147,4 +161,4 @@ function costDecision({ projectedMonthly, monthToDate, complete }) {
   const safe = complete === true && Number.isFinite(projectedMonthly) && Number.isFinite(monthToDate) && projectedMonthly < 15 && monthToDate < 15;
   return { cadenceMinutes: safe ? 1 : 15, safe, threshold: 15, budget: 20, reason: safe ? 'Conservative incremental AWS projection is below $15/month.' : 'Cost evidence is incomplete or the $15 guard threshold was reached.' };
 }
-module.exports = { REQUIRED_PRODUCTS, dailyReadiness, marketSession, easternDate, pacificDate, portfolioCaptureWindow, setupCapacity, actionFor, evaluateFinding, costDecision, fingerprint };
+module.exports = { REQUIRED_PRODUCTS, dailyReadiness, marketSession, easternDate, pacificDate, portfolioCaptureWindow, portfolioCaptureSession, setupCapacity, actionFor, evaluateFinding, costDecision, fingerprint };

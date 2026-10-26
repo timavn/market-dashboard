@@ -6,6 +6,8 @@ import { useSurfaceActivity } from '../common/PersistentSurface';
 import { verificationSourceDate } from './analystVerificationSources';
 import { pendingReviewSourceItems } from '../../services/analyst/analystReviewSourceCatalog.cjs';
 import { reviewSourceDisplayItems } from '../../services/analyst/analystReviewSourcePresentation.cjs';
+import AnalystSpinner from './AnalystSpinner';
+import LoadingIndicator from '../common/LoadingIndicator';
 import './AnalystReviewSources.css';
 
 const statuses = {
@@ -117,7 +119,7 @@ function SourceStatus({ item, status, label, Icon, indexed, open, onToggle, onCl
       aria-controls={open ? popupId : undefined}
       onClick={event => { event.stopPropagation(); onToggle(); }}>
       <Icon size={12} aria-hidden="true" /><span>{label}</span>
-    </button> : <span className="analyst-review-source-status-content"><Icon size={12} aria-hidden="true" /><span>{label}</span></span>}
+    </button> : <span className="analyst-review-source-status-content">{status === 'checking' ? <AnalystSpinner size={12} text={label} /> : <><Icon size={12} aria-hidden="true" /><span>{label}</span></>}</span>}
     {open && <span ref={popup} id={popupId} role="dialog" tabIndex={-1}
       aria-labelledby={`${popupId}-heading`} aria-describedby={`${popupId}-detail ${popupId}-remedy`}
       className="analyst-review-source-explanation" onClick={event => event.stopPropagation()}>
@@ -167,10 +169,10 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
   // Model work continues after its sources settle; a failed read replaces the
   // acquisition phase with its own short notice while rows keep their state.
   const showPhase = Boolean(phase) && (settled ? modelPhase : !reconnecting && !readFailed);
-  // Reviews count from their run's creation and manual updates from their
-  // request, through any model phase that follows settled sources. The clock
-  // is decorative; the polite region must not announce it.
-  const elapsed = useElapsedSince(sources?.basis === 'manual' ? sources?.startedAt : sources?.capturedAt,
+  // Reviews count from their run's creation, through any model phase that
+  // follows settled sources. The clock is decorative; the polite region must
+  // not announce it.
+  const elapsed = useElapsedSince(sources?.capturedAt,
     (checking && activeStates.has(sources?.state)) || (settled && showPhase));
   const notice = !settled && (reconnecting ? 'Reconnecting…' : readFailed ? 'Unavailable' : '');
   const openItem = surfaceActive && openSource?.captureKey === captureKey && items.find(item => item.id === openSource.id
@@ -184,7 +186,7 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
     <section className="analyst-review-sources" aria-label="Review sources" aria-busy={checking} title={presentAnalystReportDates(sources?.detail) || undefined}>
       <header className="analyst-review-sources-heading">
         <span className="analyst-review-sources-progress">
-          {showPhase ? <span role="status" aria-label="Response running">{phase}</span> : notice && <span>{notice}</span>}
+          {showPhase ? <span role="status" aria-label="Response running"><AnalystSpinner size={12} text={phase} /></span> : notice && <span>{notice}</span>}
           {elapsed && <span className="analyst-review-sources-elapsed" aria-hidden="true">{elapsed}</span>}
         </span>
         <h3>Sources</h3>
@@ -196,8 +198,7 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
             const status = sourceStatus(item);
             const reason = status === 'missing' ? missingReasons[item.diagnostic?.code] || statuses.missing : statuses[status];
             const { Icon } = reason;
-            const label = item.id === 'ibGateway' && status === 'ready' ? 'Connected'
-              : item.id === 'ibGateway' && item.connectionState === 'disconnected' ? 'Disconnected'
+            const label = item.id === 'ibGateway' && item.connectionState === 'disconnected' ? 'Disconnected'
                 : item.id === 'ibGateway' && status === 'unavailable' && item.connectionState === 'unverified' ? 'Unverified' : reason.label;
             // A settled check's duration belongs in secondary hover detail only.
             const title = [presentAnalystReportDates(item.detail || (indexed ? item.publicationLabel : '')),
@@ -226,7 +227,7 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
             );
           })}
         </ul>
-      ) : <p className="analyst-review-sources-empty" role="status">{checking ? 'Checking sources…' : 'UNAVAILABLE'}</p>}
+      ) : <p className="analyst-review-sources-empty" role="status">{checking ? <LoadingIndicator label="Checking sources…" size="sm" announce={false} /> : 'UNAVAILABLE'}</p>}
     </section>
   );
 }

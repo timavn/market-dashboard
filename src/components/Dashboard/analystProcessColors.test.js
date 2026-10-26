@@ -373,7 +373,7 @@ test('Portfolio Review company typography leaves captured sources, URLs, code an
   expect(tree.children[5].children[0].type).toBe('inlineCode');
 });
 
-test.each(['prediction-markets-review', 'portfolio-cross-verification', 'balance-review', 'daily-chat'])(
+test.each(['prediction-markets-review', 'balance-review', 'daily-chat'])(
   '%s keeps its existing topic and company presentation', reviewKind => {
     const sentence = 'Retail — Helen of Troy Limited (HELE) remains Bullish.';
     const tree = apply([paragraph(text(sentence))], '# Saved', { reviewKind });
@@ -492,7 +492,7 @@ test('prediction reading tables retain Tick direction and explicit underlying fu
   ]);
 });
 
-test.each(['portfolio-review', 'prediction-markets-review', 'balance-review', 'portfolio-cross-verification', 'session-outlook'])(
+test.each(['portfolio-review', 'prediction-markets-review', 'balance-review', 'session-outlook'])(
   '%s presents saved priority facts and Pacific dates while preserving citations and code', reviewKind => {
     const source = 'Account: IBKR Account123. Fresh 71-position book; engine scan of 1,829 publications. Oct 5, 2026 at 14:17 UTC.';
     const account = { type: 'inlineCode', value: 'Account123' };
@@ -534,30 +534,10 @@ test('prediction ticker typography preserves citation labels, source footers, UR
   expect(tree.children[1]).toBe(block);
 });
 
-test('manual portfolio verification retains the complete captured ticker roster and semantic colors', () => {
-  const symbols = Array.from({ length: 73 }, (_value, index) => `BOOK${index}`);
-  const table = { type: 'table', children: [
-    ['Ticker', 'Security', 'Check result'],
-    ...symbols.map(ticker => [ticker, `${ticker} (STK; name unavailable)`, 'Unknown']),
-  ].map(row => ({ type: 'tableRow', children: row.map(value => ({ type: 'tableCell', children: [text(value)] })) })) };
-  const sentence = `${symbols.join(', ')}; AAPL and $NEWCO remain Bullish in Quad 1. USD/JPY is Bearish; GDP, CPI, NLV and STK stay plain.`;
-  const tree = apply([paragraph(text(sentence)), table], '# Captured manual check', { reviewKind: 'portfolio-cross-verification' });
-  expect(content(tree)).toBe(sentence + content(table));
-  const ranges = colored(tree);
-  for (const ticker of symbols) expect(ranges.filter(range => range.text === ticker)).toHaveLength(3);
-  expect(ranges).toEqual(expect.arrayContaining([
-    { text: 'AAPL', tone: 'analyst-process--ticker' }, { text: '$NEWCO', tone: 'analyst-process--ticker' },
-    { text: 'Bullish', tone: 'analyst-process--positive' }, { text: 'Quad 1', tone: 'analyst-process--quad-1' },
-    { text: 'USD/JPY', tone: 'analyst-process--ticker' }, { text: 'Bearish', tone: 'analyst-process--negative' },
-  ]));
-  expect(ranges.some(range => ['GDP', 'CPI', 'NLV', 'STK'].includes(range.text))).toBe(false);
-  expect(JSON.stringify(tree)).not.toContain('analyst-company-name');
-});
-
-test('manual section rendering uses only validated captured ticker options', () => {
+test('Portfolio Review uses only validated captured ticker options', () => {
   const sentence = 'UNLISTED remains Bullish, while GDP, MOCK TOKEN, XYZ? and arbitrary WORD stay plain.';
-  const options = { reviewKind: 'portfolio-cross-verification', securityTickers: ['UNLISTED', 'MOCK TOKEN', 'XYZ?', null, 42] };
-  const tree = apply([paragraph(text(sentence))], '# Manual section', options);
+  const options = { reviewKind: 'portfolio-review', securityTickers: ['UNLISTED', 'MOCK TOKEN', 'XYZ?', null, 42] };
+  const tree = apply([paragraph(text(sentence))], '# Portfolio section', options);
   expect(colored(tree)).toEqual([
     { text: 'UNLISTED', tone: 'analyst-process--ticker' }, { text: 'Bullish', tone: 'analyst-process--positive' },
   ]);
@@ -565,89 +545,15 @@ test('manual section rendering uses only validated captured ticker options', () 
   expect(colored(chat)).toEqual([{ text: 'Bullish', tone: 'analyst-process--positive' }]);
 });
 
-test('manual sections emphasize exact names captured elsewhere in the same report without supplying missing names', () => {
-  const sentence = 'Acme Corporation and NAMEX (STK; name unavailable) remain in the captured book; UNNAMED has no company label.';
-  const options = { reviewKind: 'portfolio-cross-verification', securityNames: [
-    { name: 'Acme Corporation (ACMEX)', ticker: 'ACMEX' },
-    { name: 'NAMEX (STK; name unavailable)', ticker: 'NAMEX' }, { name: 'UNNAMED', ticker: 'UNNAMED' },
-    { name: null, ticker: 'MISSING' }, null,
-  ] };
-  const tree = apply([paragraph(text(sentence))], '# Manual section', options);
-  const names = node => node.type === 'analystCompanyText' ? [content(node)] : (node.children || []).flatMap(names);
-  expect(names(tree)).toEqual(['Acme Corporation']);
-  expect(content(tree)).toBe(sentence);
-  const chat = apply([paragraph(text(sentence))], '# Chat', { ...options, reviewKind: 'chat' });
-  expect(names(chat)).toEqual([]);
-});
-
-test('manual verification bolds only captured real security names and protects source, URL and code text', () => {
-  const table = { type: 'table', children: [
-    ['Ticker', 'Company', 'Trend'],
-    ['ACMEX', 'Acme Corporation', 'Bullish'],
-    ['BTX', 'Bullish Technologies', 'Neutral'],
-    ['MISSINGX', 'MISSINGX (STK; name unavailable)', 'Unknown'],
-    ['UNNAMED', 'UNNAMED', 'Unknown'],
-  ].map(row => ({ type: 'tableRow', children: row.map(value => ({ type: 'tableCell', children: [text(value)] })) })) };
-  const citation = { type: 'link', url: 'citation://ACMEX-report', children: [text('Acme Corporation (ACMEX)')] };
-  const source = { type: 'link', url: 'https://example.com/ACMEX', children: [text('Acme Corporation source')] };
-  const code = { type: 'inlineCode', value: 'Acme Corporation ACMEX' };
-  const block = { type: 'code', lang: 'text', value: 'Acme Corporation ACMEX' };
-  const sentence = 'Acme Corporation and Bullish Technologies hold Long ACMEX in Quad 4; Acme Corporations is different.';
-  const tree = apply([
-    paragraph(text(sentence)), table,
-    paragraph(citation, text(' '), source, text(' '), code), block,
-    paragraph(text('Sources: Acme Corporation, ACMEX research')),
-  ], '# Saved manual report', { reviewKind: 'portfolio-cross-verification' });
-  const names = node => node.type === 'analystCompanyText' ? [content(node)] : (node.children || []).flatMap(names);
-  expect(names(tree)).toEqual(['Acme Corporation', 'Bullish', ' Technologies', 'Acme Corporation', 'Bullish', ' Technologies']);
-  expect(tree.children[0].children[0].data.hProperties.title).toBe('Acme Corporation');
-  expect(colored(tree)).toEqual(expect.arrayContaining([
-    { text: 'Bullish', tone: 'analyst-process--positive' }, { text: 'Long', tone: 'analyst-process--positive' },
-    { text: 'ACMEX', tone: 'analyst-process--ticker' }, { text: 'Quad 4', tone: 'analyst-process--quad-4' },
-  ]));
-  expect(content(tree.children[0])).toBe(sentence);
-  expect(tree.children[2].children).toContain(citation);
-  expect(tree.children[2].children).toContain(source);
-  expect(tree.children[2].children).toContain(code);
-  expect(tree.children[3]).toBe(block);
-  expect(tree.children[4].children).toEqual([text('Sources: Acme Corporation, ACMEX research')]);
-});
-
 test('captured ticker and numeric quantity labels color their held side without coloring time horizons', () => {
   const labels = ['CVI, long 75:', 'CHH, short 35:', 'BRK.B, Long 1,250.5:'];
   const nodes = labels.map(label => paragraph({ type: 'strong', children: [text(label)] }, text(' Dated research action.')));
   nodes.push(paragraph(text('CVI, short-term history and CHH, long-term thesis remain unchanged.')));
-  const tree = apply(nodes, '# Manual exceptions', { reviewKind: 'portfolio-cross-verification', securityTickers: ['CVI', 'CHH', 'BRK.B'] });
+  const tree = apply(nodes, '# Portfolio exceptions', { reviewKind: 'portfolio-review', securityTickers: ['CVI', 'CHH', 'BRK.B'] });
   expect(colored(tree).filter(range => range.tone !== 'analyst-process--ticker')).toEqual([
     { text: 'long', tone: 'analyst-process--positive' }, { text: 'short', tone: 'analyst-process--negative' },
     { text: 'Long', tone: 'analyst-process--positive' },
   ]);
   labels.forEach((label, index) => expect(content(tree.children[index])).toBe(`${label} Dated research action.`));
   expect(content(tree.children[3])).toBe('CVI, short-term history and CHH, long-term thesis remain unchanged.');
-});
-
-test('manual source-action quotes color validated tickers while retaining code elements and exact text', () => {
-  const values = ['Sold 100bps HGER', 'Sold 50bps IBIT', 'Buys Closed: Energy XLE'];
-  const quotes = values.map(value => ({ type: 'inlineCode', value }));
-  const protectedValues = ['HGER IBIT XLE', 'const ticker = "HGER"', 'https://example.com/HGER', 'Sold 100bps UNREGISTERED', 'Buys Closed: Energy OTHERX'];
-  const protectedQuotes = protectedValues.map(value => ({ type: 'inlineCode', value }));
-  const footerQuote = { type: 'inlineCode', value: values[0] };
-  const linkedQuote = { type: 'inlineCode', value: values[1] };
-  const block = { type: 'code', lang: 'text', value: values[2] };
-  const tree = apply([
-    paragraph(...quotes), paragraph(...protectedQuotes), paragraph(text('Sources: '), footerQuote),
-    paragraph({ type: 'link', url: 'citation://report', children: [linkedQuote] }), block,
-  ], '# Manual source actions', { reviewKind: 'portfolio-cross-verification', securityTickers: ['HGER', 'IBIT', 'XLE'] });
-  quotes.forEach((quote, index) => {
-    expect(tree.children[0].children[index]).toBe(quote);
-    expect(quote).toMatchObject({ type: 'inlineCode', value: values[index] });
-    expect(quote.data.hChildren.map(child => child.value || child.children.map(content).join('')).join('')).toBe(values[index]);
-    expect(quote.data.hChildren.find(child => child.type === 'element')).toMatchObject({
-      tagName: 'span', properties: { className: ['analyst-process--ticker'] },
-    });
-  });
-  [...protectedQuotes, footerQuote, linkedQuote, block].forEach(node => expect(node.data).toBeUndefined());
-  const chatQuote = { type: 'inlineCode', value: values[0] };
-  apply([paragraph(chatQuote)], '# Chat', { reviewKind: 'chat', securityTickers: ['HGER'] });
-  expect(chatQuote.data).toBeUndefined();
 });

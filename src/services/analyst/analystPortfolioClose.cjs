@@ -1,5 +1,5 @@
-const { portfolioCaptureWindow, easternDate } = require('./analystPolicy.cjs');
-const { previousTradingDateKey } = require('../../utils/usEquityMarketCalendar.cjs');
+const { portfolioCaptureSession, easternDate } = require('./analystPolicy.cjs');
+const { nextTradingDateKey, previousTradingDateKey } = require('../../utils/usEquityMarketCalendar.cjs');
 
 const REVIEW_KIND = 'portfolio-review';
 const RETRY_INTERVAL_MS = 30 * 60_000;
@@ -11,6 +11,8 @@ const badEvidence = value => value && (
 
 /**
  * One verified post-close capture per exchange session, scheduled by Hermes.
+ * Holdings are frozen until the next pre-market open, so a missed capture can
+ * be retried any time before then and still describes that close.
  * The run is headless: it stores the next session's "Since previous close"
  * baseline without creating or reopening an Analyst conversation.
  */
@@ -23,16 +25,15 @@ function createPortfolioCloseReview({ workspace, request, now = () => new Date()
   const inCaptureWindow = (value, window, observed) => {
     const stamp = Date.parse(value || '');
     if (!Number.isFinite(stamp) || stamp > observed.getTime()) return false;
-    const capture = portfolioCaptureWindow(new Date(stamp));
-    return capture.date === window.date && capture.marketDay && capture.due;
+    const capture = portfolioCaptureSession(new Date(stamp));
+    return capture.date === window.date && capture.due;
   };
 
   async function status({ at } = {}) {
     await workspace.initialize();
     const observed = at || now();
-    const window = portfolioCaptureWindow(observed);
+    const window = portfolioCaptureSession(observed);
     const result = base(window);
-    if (!window.marketDay) return { ...result, status: 'skipped', reason: 'non_trading_day' };
     if (!window.due) return { ...result, status: 'scheduled', reason: 'before_capture_time' };
     const saved = (await workspace.call('setting', { key: key(window.date) })).value;
     if (!saved?.runId) return { ...result, status: saved?.lastError ? 'failed' : 'pending',
@@ -84,7 +85,7 @@ function createPortfolioCloseReview({ workspace, request, now = () => new Date()
       await workspace.call('setting', { key: savedKey, value: { ...attempt, lastError: 'review_start_failed' } });
       return status();
     }
-    const window = portfolioCaptureWindow(now());
+    const window = portfolioCaptureSession(now());
     if (!run?.runId || run.reviewKind !== REVIEW_KIND || window.date !== current.date
       || !inCaptureWindow(run.createdAt, window, now())) {
       await workspace.call('setting', { key: savedKey, value: { ...attempt, lastError: 'current_capture_not_started' } });
@@ -96,11 +97,11 @@ function createPortfolioCloseReview({ workspace, request, now = () => new Date()
 
   // The capture today's "Since previous close" compares against: the
   // preceding exchange session (Friday on a Monday; holidays skipped). It is
-  // evaluated as of 23:00 New York time that day (22:00 in winter), after any
-  // capture window and still on the same Eastern date.
+  // evaluated as of 03:59 New York time before the next session (02:59 in
+  // winter), the end of that close's capture span.
   async function baseline() {
     const sessionDate = previousTradingDateKey(easternDate(now()));
-    const result = await status({ at: new Date(`${sessionDate}T23:00:00-04:00`) });
+    const result = await status({ at: new Date(`${nextTradingDateKey(sessionDate)}T03:59:00-04:00`) });
     return { ...result, sessionDate };
   }
 

@@ -235,22 +235,6 @@ function collectTableCompanyNames(node, names) {
   }
 }
 
-function companyNameRanges(text, names, protectedRanges) {
-  const ranges = [];
-  const urls = [...text.matchAll(/(?:[a-z][a-z\d+.-]*:\/\/|www\.)[^\s<>]+/gi)]
-    .map(match => ({ start: match.index, end: match.index + match[0].length }));
-  for (const name of [...names].sort((a, b) => b.length - a.length)) {
-    let start = text.indexOf(name);
-    while (start >= 0) {
-      const end = start + name.length;
-      if (!/[\p{L}\p{N}_]/u.test(text[start - 1] || '') && !/[\p{L}\p{N}_]/u.test(text[end] || '')
-        && ![...protectedRanges, ...urls, ...ranges].some(range => start < range.end && end > range.start)) ranges.push({ start, end, name });
-      start = text.indexOf(name, end);
-    }
-  }
-  return ranges.sort((a, b) => a.start - b.start);
-}
-
 const PREDICTION_NON_TICKERS = new Set('AI API ATR BLS CEO CPI CME EBITDA EBIT EPS ET ETF ETFS FED FOMC FY GDP IBKR IPO LIVE NAV NLV NO PCA PCE PT Q1 Q2 Q3 Q4 SEC TTM UK US USA W L YES YOY YTD'.split(' '));
 const SOURCE_LABEL = /^Sources?:\s/i;
 const sourceLink = node => (node.type === 'link' && (/^citation:\/\//i.test(node.url || '') || /\bsources?\b/i.test(textOf(node))))
@@ -350,32 +334,6 @@ function collectPredictionTickers(node, tickers, context = '') {
   }
 }
 
-function annotateQuotedPortfolioActions(node, tickers) {
-  if (['code', 'html', 'footnoteDefinition'].includes(node.type) || sourceLink(node)
-    || (node.type === 'paragraph' && SOURCE_LABEL.test(textOf(node)))) return;
-  if (node.type === 'inlineCode') {
-    const value = node.value;
-    // Older answers used backticks for short, exact publisher action quotes.
-    // Keep their code element and wording; annotate only a validated ticker in
-    // these bounded natural-language forms, never arbitrary code literals.
-    if (!/^(?:(?:Sold|Bought)\s+\d+(?:\.\d+)?\s*(?:bps|basis points)\s+\$?\^?[A-Z][A-Z\d]*(?:[./-][A-Z\d]+)*|(?:Buys|Sells)\s+Closed:\s+[A-Za-z][A-Za-z &/.-]{0,80}\s+\$?\^?[A-Z][A-Z\d]*(?:[./-][A-Z\d]+)*)$/.test(value)) return;
-    const ranges = portfolioTickerRanges(value, tickers).filter(range => tickers.has(value.slice(range.start, range.end).replace(/^\$/, '')));
-    if (!ranges.length) return;
-    const children = [];
-    let cursor = 0;
-    ranges.forEach(({ start, end }) => {
-      if (start > cursor) children.push({ type: 'text', value: value.slice(cursor, start) });
-      children.push({ type: 'element', tagName: 'span', properties: { className: ['analyst-process--ticker'] },
-        children: [{ type: 'text', value: value.slice(start, end) }] });
-      cursor = end;
-    });
-    if (cursor < value.length) children.push({ type: 'text', value: value.slice(cursor) });
-    node.data = { ...node.data, hChildren: children };
-  } else {
-    (node.children || []).forEach(child => annotateQuotedPortfolioActions(child, tickers));
-  }
-}
-
 export function remarkAnalystProcessColors({ reviewKind, securityTickers = [], securityNames = [] } = {}) {
   return (tree, file) => {
     function presentDates(node, context = '') {
@@ -396,13 +354,12 @@ export function remarkAnalystProcessColors({ reviewKind, securityTickers = [], s
     const portfolio = reviewKind ? reviewKind === 'portfolio-review'
       : /^#{1,2} Portfolio Review(?:[ \t]+[—–-][ \t]+(?:Ready|Partial|Blocked))?[ \t]*$/m.test(String(file?.value));
     const prediction = reviewKind === 'prediction-markets-review';
-    const verification = reviewKind === 'portfolio-cross-verification';
-    const identities = prediction || verification;
-    const tickers = portfolio || identities ? portfolioReviewTickers(portfolio || verification ? { rollup: { securityTickers } } : undefined) : null;
+    const identities = prediction;
+    const tickers = portfolio || identities ? portfolioReviewTickers(portfolio ? { rollup: { securityTickers } } : undefined) : null;
     const companyNames = new Set();
     if (tickers) collectTableTickers(tree, tickers);
     if (identities) collectPredictionTickers(tree, tickers);
-    if (portfolio || verification) {
+    if (portfolio) {
       if (Array.isArray(securityNames)) securityNames.forEach(captured => addCapturedCompanyName(companyNames, captured));
       collectTableCompanyNames(tree, companyNames);
     }
@@ -448,10 +405,6 @@ export function remarkAnalystProcessColors({ reviewKind, securityTickers = [], s
         });
         if (names.length) node.children = highlight(node.children, names, { offset: 0 }, 'portfolio');
         if (ranges.length) node.children = highlight(node.children, ranges.sort((a, b) => a.start - b.start));
-        if (verification && !SOURCE_LABEL.test(text)) {
-          const names = companyNameRanges(text, companyNames, tickerProtectedRanges(node));
-          if (names.length) node.children = highlight(node.children, names, { offset: 0 }, true);
-        }
       } else if (node.type === 'table') {
         const headings = (node.children?.[0]?.children || []).map(textOf);
         (node.children || []).forEach(row => (row.children || []).forEach((cell, index) =>
@@ -465,6 +418,5 @@ export function remarkAnalystProcessColors({ reviewKind, securityTickers = [], s
       }
     }
     visit(tree);
-    if (verification) annotateQuotedPortfolioActions(tree, tickers);
   };
 }

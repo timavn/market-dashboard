@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { analystSemanticRanges } from './analystProcessColors';
 import { portfolioReviewTickers, portfolioTickerRanges } from '../../utils/portfolioReviewTypography';
+import { previousTradingDateKey } from '../../utils/usEquityMarketCalendar.cjs';
+import { analystWorkspaceApi } from '../../services/analyst/analystClient';
 
 // What this morning's Hedgeye products say about each market in a setup-board
 // section, emitted by the renderer as an ```analyst-research JSON block: one
@@ -28,17 +30,22 @@ export function parsePredictionResearch(raw) {
     const value = JSON.parse(String(raw || ''));
     const markets = Array.isArray(value?.markets) ? value.markets.filter(row => row && typeof row.market === 'string') : [];
     return markets.length ? {
+      // Reports saved before blocks named their section and date have no date picker.
+      section: text(value.section), marketDate: /^\d{4}-\d{2}-\d{2}$/.test(String(value.marketDate)) ? value.marketDate : null,
       markets: markets.map(row => ({
         market: row.market,
+        // Markets whose only mentions already read under another market name it instead of Not mentioned.
+        mentionedWith: Array.isArray(row.mentionedWith) ? row.mentionedWith.filter(text) : [],
         entries: Array.isArray(row.entries)
           ? row.entries.filter(entry => entry && text(entry.product) && text(entry.context)).map(entry => ({
-            product: entry.product, time: text(entry.time), context: entry.context, source: text(entry.source),
+            product: entry.product, time: text(entry.time), date: text(entry.date), context: entry.context, source: text(entry.source),
             facts: factsOf(entry),
           }))
           // Reports saved before entries listed each product's facts and quotes.
           : (Array.isArray(row.items) ? row.items : []).filter(item => item && text(item.product)).map(item => ({
             product: item.product,
             time: text(item.time),
+            date: null,
             context: (Array.isArray(item.facts) ? item.facts : []).map(fact => fact?.text).filter(text).join(' · '),
             source: (Array.isArray(item.quotes) ? item.quotes : []).filter(text).join(' ') || null,
             facts: null,
@@ -119,36 +126,99 @@ function Entry({ entry, market, first, span }) {
   const names = [market];
   return <tr className={first ? 'analyst-research__first' : undefined}>
     {first && <td className="analyst-research__market" rowSpan={span}>{market}</td>}
-    <td className="analyst-research__product">{entry.product}</td>
+    <td className="analyst-research__product" title={entry.time ? `${entry.date ? `${entry.date} ` : ''}${entry.time} PT` : undefined}>{entry.product}</td>
     <td className="analyst-research__context">
       {entry.facts ? <Facts facts={entry.facts} names={names} /> : <ResearchText value={entry.context} names={names} />}
       {open && <blockquote className="analyst-research__quote"><ResearchText value={entry.source} names={names} /></blockquote>}
     </td>
-    <td className="analyst-research__time">{entry.time || '—'}</td>
     <td className="analyst-research__source">
       {entry.source && <button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>Source</button>}
     </td>
   </tr>;
 }
 
-export default function AnalystPredictionResearch({ research }) {
-  return <section className="analyst-table-frame analyst-research" aria-label="Morning research">
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dayLabel = date => `${MONTHS[Number(date.slice(5, 7)) - 1]} ${Number(date.slice(8, 10))}`;
+// The report's market day and the four before it.
+export function researchDays(marketDate) {
+  const days = [marketDate];
+  while (days.length < 5) days.push(previousTradingDateKey(days.at(-1)));
+  return days;
+}
+
+// The research table's title: the market day it shows. Clicking it opens the other four of the last five
+// market days in a list flush above the cell; picking one reads what was said that day.
+function DayPicker({ days, shown, onPick }) {
+  const [open, setOpen] = useState(false);
+  const cell = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = event => { if (event.type === 'keydown' ? event.key === 'Escape' : !cell.current?.contains(event.target)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
+  }, [open]);
+  return <th ref={cell} className="analyst-research__day">
+    <button type="button" className="analyst-research__day-button" aria-haspopup="listbox" aria-expanded={open}
+      aria-label={`Research for ${dayLabel(shown)}; choose another day`} onClick={() => setOpen(value => !value)}>
+      {dayLabel(shown)} <span aria-hidden="true">▾</span>
+    </button>
+    {open && <ul className="analyst-research__days" role="listbox" aria-label="Earlier market days">
+      {days.filter(day => day !== shown).map(day => <li key={day} role="option" aria-selected="false">
+        <button type="button" onClick={() => { setOpen(false); onPick(day); }}>{dayLabel(day)}</button>
+      </li>)}
+    </ul>}
+  </th>;
+}
+
+export default function AnalystPredictionResearch({ research: saved }) {
+  const [shown, setShown] = useState(saved.marketDate);
+  const [earlier, setEarlier] = useState({});
+  const days = saved.marketDate && saved.section ? researchDays(saved.marketDate) : null;
+  const reading = shown && shown !== saved.marketDate ? earlier[shown] || { status: 'loading' } : null;
+  const research = reading?.status === 'ready' ? reading.research : saved;
+  const pick = day => {
+    setShown(day);
+    if (day === saved.marketDate || earlier[day]?.status === 'ready') return;
+    setEarlier(current => ({ ...current, [day]: { status: 'loading' } }));
+    analystWorkspaceApi.request(`/prediction-research?date=${day}`).then(result => {
+      const block = parsePredictionResearch(JSON.stringify(result?.sections?.[saved.section] || null));
+      setEarlier(current => ({ ...current, [day]: block ? { status: 'ready', research: block } : { status: 'empty' } }));
+    }, () => setEarlier(current => ({ ...current, [day]: { status: 'failed' } })));
+  };
+  // Every fact list in the table shares the widest label's column, so values line up across entries
+  // (Market Structure's signals and its levels read as one column of values).
+  const frame = useRef(null);
+  useLayoutEffect(() => {
+    if (!frame.current) return;
+    // Measure each list at its own width first, so a narrower update can shrink the shared column.
+    frame.current.style.removeProperty('--analyst-fact-label-width');
+    const labels = [...frame.current.querySelectorAll('.analyst-research__fact-label')];
+    const width = Math.max(0, ...labels.map(label => label.getBoundingClientRect().width));
+    if (width > 0) frame.current.style.setProperty('--analyst-fact-label-width', `${Math.ceil(width)}px`);
+  }, [research]);
+  return <section ref={frame} className="analyst-table-frame analyst-research" aria-label="Morning research">
     <table>
       <colgroup>
         <col className="analyst-research__market-col" />
         <col className="analyst-research__product-col" />
         <col />
-        <col className="analyst-research__time-col" />
         <col className="analyst-research__source-col" />
       </colgroup>
-      <thead><tr><th>Market</th><th>Product</th><th>Context</th><th>PT</th><th aria-label="Source" /></tr></thead>
+      <thead><tr><th>Market</th><th>Product</th>
+        <th>Context</th>{days ? <DayPicker days={days} shown={shown} onPick={pick} /> : <th aria-label="Source" />}</tr></thead>
       <tbody>
-        {research.markets.map(row => (row.entries.length
+        {reading && reading.status !== 'ready' ? <tr className="analyst-research__first">
+          <td className="analyst-research__quiet" colSpan={4}>{reading.status === 'loading' ? `Reading ${dayLabel(shown)}…`
+            : reading.status === 'empty' ? `No research read for ${dayLabel(shown)}.` : `Research for ${dayLabel(shown)} is unavailable.`}</td>
+        </tr> : research.markets.map(row => (row.entries.length
           ? row.entries.map((entry, index) => <Entry key={`${row.market}-${index}`} entry={entry} market={row.market}
             first={index === 0} span={row.entries.length} />)
           : <tr key={row.market} className="analyst-research__first">
             <td className="analyst-research__market">{row.market}</td>
-            <td className="analyst-research__quiet" colSpan={4}>Not mentioned</td>
+            <td className="analyst-research__quiet" colSpan={3}>
+              {row.mentionedWith.length ? `Mentioned with ${row.mentionedWith.join(', ')}` : 'Not mentioned'}
+            </td>
           </tr>))}
       </tbody>
     </table>

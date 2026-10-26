@@ -261,9 +261,9 @@ def _level(value: Any, unit: str | None) -> str:
 def _structure_cell(row: dict[str, Any]) -> str:
     """Token the report UI stacks as today's range moves, the run counts and the all-time high check.
 
-    STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone]) — steps oldest first as
-    + (higher), - (lower) or = (unchanged); runs signed (+8 = eight higher in a row ending today). Boards with
-    volume add DV/AV and whether the move against the Trend is supported or warned by it.
+    STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone;direction]) — steps oldest
+    first as + (higher), - (lower) or = (unchanged); runs signed (+8 = eight higher in a row ending today). Boards with
+    volume add DV/AV, whether the move against the Trend is supported or warned by it, and the day's direction (+/-).
     """
     structure = row.get("structure")
     if not isinstance(structure, dict):
@@ -285,7 +285,8 @@ def _structure_cell(row: dict[str, Any]) -> str:
             ath_pct = f"{round((price / record['value'] - 1) * 100):+d}"
         top_above = "1" if record.get("rangeTopAbove") else "0"
     signal = ((row.get("volume") or {}).get("signal") or {}) if "volume" in row else None
-    volume = "" if signal is None else f";{signal.get('move') or ''};{signal.get('tone') or ''}"
+    direction = {"up": "+", "down": "-"}.get((signal or {}).get("direction"), "")
+    volume = "" if signal is None else f";{signal.get('move') or ''};{signal.get('tone') or ''};{direction}"
     return (f"STRUCT({low.get('steps', '')};{run(low)};{high.get('steps', '')};{run(high)};"
             f"{ath};{ath_date};{ath_pct};{top_above};{unit}{volume})")
 
@@ -373,16 +374,19 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
     published = {product.get("label"): product.get("publishedAt") for product in products}
     order = {product.get("label"): index for index, product in enumerate(products)}
     clock = lambda value: (lambda when: when.rsplit(" ", 1)[-1] if ":" in when else None)(_pacific(value)) if value else None
+    # The Pacific date the product was published, e.g. Oct 22.
+    day = lambda value: (lambda when: (re.match(r"^[A-Z][a-z]{2} \d{1,2}", when) or [None])[0])(_pacific(value)) if value else None
     markets = []
     for row in rows:
         entries: dict[tuple[str, str], dict[str, Any]] = {}
         for finding in (row.get("research") or {}).get("findings") or []:
             label = finding.get("productLabel") or finding.get("product") or "Research"
-            time = clock(finding.get("eventTime") or published.get(label))
+            when = finding.get("eventTime") or published.get(label)
+            time, date = clock(when), day(when)
             excerpt = finding.get("excerpt")
             if excerpt:
                 context = finding.get("context") or excerpt
-                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context, "source": excerpt})
+                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context, "source": excerpt, "date": date})
                 continue
             facts = _fact_text(finding, row)
             if not facts:
@@ -398,7 +402,7 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
                 context = f"{verb} {finding['name']}" + (" (inverse to yield)" if finding.get("inverse") else "")
             else:
                 context = " · ".join(fact["text"] for fact in facts)
-            entry = {"product": label, "time": time, "context": context, "source": finding.get("sourceText")}
+            entry = {"product": label, "time": time, "context": context, "source": finding.get("sourceText"), "date": date}
             # Reported data ("Label: value" readings) lists as one line per fact rather than a sentence.
             if finding.get("kind") != "position" and all(": " in fact["text"] for fact in facts):
                 entry["facts"] = [fact["text"] for fact in facts]
@@ -426,6 +430,25 @@ def _section_rows(board: dict[str, Any], rows: list[dict[str, Any]]) -> list[tup
     return [(section["id"], section["label"], [row for row in rows if group(row) == section["id"]]) for section in sections]
 
 
+def research_by_section(board: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Each section's research block, keyed by section id, stamped with the section and the research market date
+    so the report can ask for the same section on an earlier market day. The US Dollar's research appears once,
+    with the first section that shows its row."""
+    research = board.get("research")
+    if not isinstance(research, dict):
+        return {}
+    rows = [row for row in board.get("rows") or [] if isinstance(row, dict) and row.get("id") != "cpi"]
+    dollar = _dollar_row(board.get("usd"))
+    blocks: dict[str, dict[str, Any]] = {}
+    for section_id, _label, members in _section_rows(board, rows):
+        if not members or section_id == "inflation":
+            continue
+        block = _research_block(board, ([dollar] if dollar and not blocks else []) + members)
+        if block:
+            blocks[section_id] = {"section": section_id, "marketDate": research.get("marketDate"), **block}
+    return blocks
+
+
 def render_setup_board(board: dict[str, Any]) -> str:
     rows = [row for row in board.get("rows") or [] if isinstance(row, dict)]
     priced = [row for row in rows if row.get("id") != "cpi"]
@@ -436,7 +459,7 @@ def render_setup_board(board: dict[str, Any]) -> str:
     sessions = board.get("structureSessions")
     # Boards captured with ETF volume add it after Trend; the report draws it under Tick, Trade and Trend.
     with_volume = isinstance(board.get("volumeWindows"), dict)
-    dollar_research_shown = False
+    research_blocks = research_by_section(board) if with_research else {}
     lines = []
     for section_id, label, members in _section_rows(board, rows):
         if not members:
@@ -494,10 +517,7 @@ def render_setup_board(board: dict[str, Any]) -> str:
             notes.append("Kalshi yield contracts pay if the daily Treasury yield reaches the line on any business day this month.")
         if notes:
             lines += [" ".join(notes), ""]
-        # The US Dollar's research appears once, with the first section that shows its row.
-        research_rows = ([dollar] if dollar and not dollar_research_shown else []) + members
-        dollar_research_shown = dollar_research_shown or bool(dollar)
-        block = _research_block(board, research_rows) if with_research else None
+        block = research_blocks.get(section_id)
         if block:
             lines += ["```analyst-research", json.dumps(block, ensure_ascii=False, separators=(",", ":")), "```", ""]
 

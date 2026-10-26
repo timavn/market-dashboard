@@ -626,19 +626,6 @@ function createAnalystRoutes({
       res.status(error.statusCode || 503).json({ error: error.message || 'Portfolio research archive unavailable.' });
     }
   });
-  internalRouter.post('/prediction-analysis', async (req, res) => {
-    try {
-      const facts = { ...req.body };
-      const cpi = facts.markets?.find(m => m.marketId === 'cpi');
-      if (cpi?.snapshot?.forecastComparison?.hedgeye?.status === 'available') {
-        const get = async path => { const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3001}${path}`, { signal: AbortSignal.timeout(6000) }); if (!response.ok) throw new Error('CPI evidence unavailable'); return response.json(); };
-        const [history, finals] = await Promise.allSettled([get('/api/hedgeye/inflation-nowcast/history'), get('/api/prediction-markets/cpi/finals')]);
-        facts.cpi = { history: history.status === 'fulfilled' ? history.value : [], finals: finals.status === 'fulfilled' ? finals.value : [] };
-      }
-      res.json(await require('../services/analyst/analystPredictions.cjs').buildPredictionAnalysis(facts));
-    }
-    catch (e) { res.status(503).json({ error: e.message }); }
-  });
 
   let changeCoverage = null;
   let changeCoverageAt = 0;
@@ -870,6 +857,20 @@ function createAnalystRoutes({
         ok: false,
         code: error.code || 'REVIEW_REQUEST_FAILED',
         error: error.message || 'The review service could not start the review.',
+      });
+    }
+  });
+
+  // An earlier market day's Predictive Markets research, per section, for the report's date picker.
+  router.get('/prediction-research', async (req, res) => {
+    const date = String(req.query?.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ ok: false, code: 'INVALID_DATE', error: 'date must be YYYY-MM-DD' });
+    try {
+      res.set('Cache-Control', 'no-store');
+      return res.json(await sidecarRequest(`/internal/prediction-research?date=${date}`, { timeoutMs: 60_000 }));
+    } catch (error) {
+      return res.status(error.statusCode || 503).json(error.payload || {
+        ok: false, code: error.code || 'PREDICTION_RESEARCH_UNAVAILABLE', error: 'Research for that day is unavailable.',
       });
     }
   });

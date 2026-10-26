@@ -1,13 +1,13 @@
 ---
 name: portfolio-review
-description: Explain a captured Portfolio Review, its holdings changes and portfolio implications, or direct a formal review refresh to the dashboard. Use portfolio-cross-verification for a new manual complete-book audit.
+description: Explain a captured Portfolio Review, its holdings changes and portfolio implications, or direct a formal review refresh to the dashboard, including any request for a new complete-book check.
 ---
 
 # Portfolio review
 
 Use the saved review's captured evidence to explain that review. A request for current holdings requires `get_portfolio_context`; interpreting the current process also requires `get_process_context`. Use `get_dashboard_context` only when the question or review narrative needs broader context. Targeted new research uses `research-questions`.
 
-The dashboard owns the ReviewRunV2 report and its calculations. Preserve its compact daily rollup, dated Trade/Trend readings, source actions, captured exceptions, Sources, and saved history. Do not recreate the report or orchestrate a new report with Hermes tools. A new formal review uses the dashboard's existing Portfolio Review action; a chat request for a complete manual check uses `portfolio-cross-verification`.
+The dashboard owns the ReviewRunV2 report and its calculations. Preserve its compact daily rollup, dated Trade/Trend readings, source actions, captured exceptions, Sources, and saved history. Do not recreate the report or orchestrate a new report with Hermes tools. A new formal review, including a chat request for a complete check of every holding against research, uses the dashboard's existing Portfolio Review action, which regenerates the latest evidence each time it runs.
 
 ## Captured full-book refresh
 

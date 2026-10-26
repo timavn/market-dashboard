@@ -279,6 +279,20 @@ test('recognizes an archived original PDF as source provenance without requiring
   assert.equal(result.diagnostics.some(row => row.code === 'source-provenance-missing'), false);
 });
 
+test('recognizes the source messages of a multi-email history backfill as provenance, but not an empty list', async () => {
+  const backfill = { snapshotType: 'inflation-nowcast', reportType: 'inflation-nowcast', date: '2026-08-09',
+    source: 'canonical-history-backfill', sourceKind: 'manual-history-backfill',
+    sourceMessageIds: ['1987515dc62fdf60', '19933d8124065424'], data: { forecasts: [] } };
+  const result = await capture(paged([{ Items: [backfill] }]));
+  assert.equal(coverage(result, 'inflation-nowcast').status, 'checked');
+  assert.equal(coverage(result, 'inflation-nowcast').documentCount, 1);
+
+  for (const sourceMessageIds of [[], [''], [null]]) {
+    const empty = await capture(paged([{ Items: [{ ...backfill, sourceMessageIds }] }]));
+    assert.deepEqual(coverage(empty, 'inflation-nowcast').reasons, ['source-provenance-missing']);
+  }
+});
+
 test('operational and unregistered rows cannot fabricate product failures, while genuine missing provenance remains partial', async () => {
   const result = await capture(paged([{ Items: [
     { snapshotType: 'global-quads', date: 'LATEST', data: { groups: {} } },

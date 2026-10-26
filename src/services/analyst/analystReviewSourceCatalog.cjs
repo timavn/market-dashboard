@@ -15,10 +15,6 @@ const source = (id, label, status) => ({ id, label, status, observedAt: null,
 // The pending display and server acquisition projection use the same roster.
 // These rows reserve presentation space, without supplying source evidence.
 function pendingReviewSourceItems(kind, status = 'checking') {
-  if (kind === 'portfolio-cross-verification') return [source('ibGateway', 'IB Gateway', status),
-    source('portfolioRefreshResearch', 'Portfolio research archive', status),
-    ...registry.products.map(row => source(row.id, row.label, status)),
-    ...(!registry.products.some(row => row.id === 'inflation-nowcast') ? [source('inflation-nowcast', 'Monthly Inflation Nowcast', status)] : [])];
   if (kind === 'prediction-markets-review') return predictionBoardSources.map(([id, label]) => source(id, label, status));
   if (!['portfolio-review', 'balance-review'].includes(kind)) return [];
   const items = [source('portfolio', 'IBKR holdings', status)];
@@ -26,7 +22,7 @@ function pendingReviewSourceItems(kind, status = 'checking') {
     source('portfolioOpenOrders', 'IBKR open orders', status),
     source('portfolioRefreshResearch', 'Portfolio research archive', status),
     ...registry.products.map(row => source(row.id, row.label, status)), source('inflation-nowcast', 'Monthly Inflation Nowcast', status),
-    source('marketSituation', 'Market data', status), source('portfolioPca', 'PCA model', status));
+    source('marketSituation', 'Market data', status));
   if (kind === 'balance-review') items.unshift(source('balance', 'IBKR balances', status));
   if (kind === 'balance-review') items.push(source('interestStatus', 'Interest accruals', status), source('history', 'Interest history', status));
   return items;

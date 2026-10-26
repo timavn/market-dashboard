@@ -11,7 +11,9 @@ try:
         capture_output=True, text=True, timeout=195, check=False,
     )
     output = json.loads(result.stdout)
-    if output.get("status") not in {"scheduled", "skipped"}:
+    # Hourly retries are no-ops once the close is captured; Hermes delivers
+    # only non-empty stdout, so only an unfinished capture reports.
+    if output.get("status") not in {"ready", "running", "scheduled", "skipped"}:
         print(json.dumps(output))
     sys.exit(result.returncode)
 except (OSError, ValueError, subprocess.TimeoutExpired):

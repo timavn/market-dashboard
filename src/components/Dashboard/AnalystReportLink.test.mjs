@@ -32,15 +32,6 @@ function loadProductionModule(filename) {
   return module.exports;
 }
 const AnalystReportLink = loadProductionModule(fileURLToPath(new URL('./AnalystReportLink.jsx', import.meta.url))).default;
-const { analystChatSources } = loadProductionModule(fileURLToPath(new URL('./analystChatSources.js', import.meta.url)));
-
-const odfl = Object.freeze({
-  id: 'cite_6a07b74285f35189c94bb5e83a921e2d', product: 'real-time-alert', productLabel: 'Real Time Alert',
-  documentId: 'odfl-2026-10-05', title: 'Real-Time Alerts', publicationDate: '2026-10-05',
-  sourceUri: 's3://market-dashboard-csv-data/hedgeye-email/messages/2026-10-05/real-time-alert/message-body.html',
-  excerpt: 'ODFL Cover-SOME.',
-});
-const odflBody = Object.freeze({ ...odfl, id: 'cite_fd3bf26bfd18ad239705cf5cd3f76095', excerpt: 'Captured ODFL publication body.' });
 
 function renderMarkdown(markdown, links = new Map()) {
   const parsedHrefs = [];
@@ -64,30 +55,6 @@ test('real Markdown parser turns malformed saved date destinations into text, ne
   assert.doesNotMatch(html, /<a\b|href=/);
   assert.match(html, /<td><span>Oct 5, 2026<\/span><\/td>/);
   assert.match(html, /<td><span>Sep 30, 2026<\/span><\/td>/);
-});
-
-test('saved ODFL table survives source projection and actual Markdown parsing without empty links', () => {
-  const original = `### All holdings checked\n| Ticker | Security | Held side | Dated support |\n| --- | --- | --- | --- |\n| ODFL | Old Dominion Freight Line | Short | [Oct 5, 2026]([1]) |\n| CVI | CVR Energy | Long | [Sep 30, 2026]([31]) |\n| CHH | Choice Hotels | Long | [Oct 5, 2026]([${odfl.id}]) |`;
-  const captured = [odfl, odflBody];
-  const projected = analystChatSources(original, captured);
-  const { html } = renderMarkdown(projected.sections.map(section => section.markdown).join('\n\n'), projected.links);
-  assert.doesNotMatch(html, /<a\b|href=/);
-  assert.match(html, /Oct 5, 2026/);
-  assert.match(html, /Sep 30, 2026/);
-  assert.ok(projected.sections.some(section => section.sources.some(group => group.source.id === odfl.id)), 'keep known references in their captured section footer');
-  assert.equal(original.includes('[Oct 5, 2026]([1])'), true);
-  assert.deepEqual(captured, [odfl, odflBody]);
-});
-
-test('real GFM source cells resolve exact captured citation hrefs to local buttons', () => {
-  const original = `### Highest-priority realignment\n| Ticker | Security | Held side | Action | Source |\n| --- | --- | --- | --- | --- |\n| ODFL | Old Dominion Freight Line | Short | Cover some | [Real Time Alert · Oct 5, 2026](citation://${odfl.id}) |`;
-  const projected = analystChatSources(original, [odfl, odflBody]);
-  const { html, parsedHrefs } = renderMarkdown(projected.sections[0].markdown, projected.links);
-  assert.deepEqual(parsedHrefs, [`citation://${odfl.id}`]);
-  assert.match(html, /<button type="button" class="analyst-section-source analyst-action-source">Real Time Alert · Oct 5, 2026<\/button>/);
-  assert.doesNotMatch(html, /<a\b|href=/);
-  assert.equal(projected.links.get(`citation://${odfl.id}`).source, odfl);
-  assert.deepEqual(projected.links.get(`citation://${odfl.id}`).context.relatedSources, [odfl, odflBody]);
 });
 
 test('only legitimate original report URLs remain links and open a separate tab', () => {

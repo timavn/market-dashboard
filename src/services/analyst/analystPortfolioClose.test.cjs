@@ -64,16 +64,44 @@ test('starts at 16:30 ET, forces fresh acquisition, and deduplicates concurrent 
   assert.ok(f.settings.has('hermes-portfolio-close:2026-09-17'));
 });
 
-test('before the close-plus-30-minute window, holidays, and weekends never acquire a review', async () => {
-  for (const [date, expected] of [
-    ['2026-09-17T19:59:00Z', 'scheduled'], ['2026-09-17T20:00:00Z', 'scheduled'],
-    ['2026-09-17T20:29:59Z', 'scheduled'], ['2026-09-19T20:30:00Z', 'skipped'],
-    ['2026-09-07T20:30:00Z', 'skipped'],
-  ]) {
+test('before the close-plus-30-minute window and after the next pre-market open no review is acquired', async () => {
+  for (const date of ['2026-09-17T19:59:00Z', '2026-09-17T20:00:00Z', '2026-09-17T20:29:59Z', '2026-09-18T08:00:00Z']) {
     const f = fixture({ date });
-    assert.equal((await f.service.start()).status, expected);
+    assert.equal((await f.service.start()).status, 'scheduled');
     assert.equal(f.starts(), 0);
   }
+});
+
+test('holdings are frozen until the next 4:00am ET open, so a missed close is captured over a weekend or holiday', async () => {
+  for (const [date, session] of [
+    ['2026-09-19T20:30:00Z', '2026-09-18'], ['2026-09-07T20:30:00Z', '2026-09-04'], ['2026-09-21T07:59:00Z', '2026-09-18'],
+  ]) {
+    const f = fixture({ date });
+    const result = await f.service.start();
+    assert.equal(result.status, 'running');
+    assert.equal(result.date, session);
+    assert.equal(f.starts(), 1);
+    f.complete();
+    assert.equal((await f.service.status()).status, 'ready');
+    assert.ok(f.settings.has(`hermes-portfolio-close:${session}`));
+  }
+});
+
+test('a failed Friday capture retried on Saturday becomes Monday\'s verified baseline', async () => {
+  const f = fixture({ date: '2026-10-16T20:30:00Z' });
+  await f.service.start();
+  Object.assign(f.run, { state: 'failed' });
+  assert.equal((await f.service.status()).reason, 'review_failed');
+  f.advance(17 * 60 * 60_000);
+  const retried = await f.service.start();
+  assert.equal(retried.date, '2026-10-16');
+  assert.equal(f.starts(), 2);
+  f.complete();
+  f.advance(2 * 24 * 60 * 60_000);
+  const baseline = await f.make().baseline();
+  assert.equal(baseline.sessionDate, '2026-10-16');
+  assert.equal(baseline.status, 'ready');
+  assert.equal(baseline.capturedAt, '2026-10-17T13:30:00.000Z');
 });
 
 test('early-close sessions capture at 13:30 ET and normal winter sessions at 16:30 ET', async () => {

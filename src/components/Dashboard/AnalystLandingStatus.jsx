@@ -83,15 +83,6 @@ const Item = ({ label, children, tone, title }) => <span className="analyst-land
   {label} <span className={tone ? `is-${tone}` : undefined}>{children}</span>
 </span>;
 
-export function AnalystLandingClock() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  return <time className="analyst-landing-clock" dateTime={now.toISOString()}>{clockLabel(now)}</time>;
-}
-
 const QuadItem = ({ label, value, missing }) => <Item label={label} title={value?.title || missing} tone={value && `q${value.quad}`}>{value ? `Q${value.quad}` : '—'}</Item>;
 
 export default function AnalystLandingStatus({ holdingsCount }) {
@@ -103,7 +94,8 @@ export default function AnalystLandingStatus({ holdingsCount }) {
   const close = baseline.data;
   const verified = baseline.state === 'ready' && close?.status === 'ready';
   return <div className="analyst-landing-status" role="group" aria-label="Portfolio status">
-    <Item label="GAME" title={`${game.year} season`}>{game.game}/{game.totalGames}</Item>
+    <Item label="SEASON">{game.year}</Item>
+    <Item label="GAME">{game.game}/{game.totalGames}</Item>
     <Item label="HOLDINGS">{Number.isInteger(holdingsCount) ? holdingsCount : '—'}</Item>
     <Item label="CLOSE" tone={verified ? 'positive' : close?.sessionDate ? 'warning' : undefined}
       title={verified ? closeVerifiedNote(close) : closeProblem(close)}>

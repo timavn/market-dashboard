@@ -13,23 +13,6 @@
   background: #fff;
 }
 
-.analyst-inbox-heading {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 3px 12px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--analyst-line, #dfe6ea);
-  background: #f3f5f7;
-}
-
-.analyst-inbox h3 {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 400;
-}
-
-.analyst-inbox-symbol { font-weight: 400; }
 .analyst-inbox-signal--positive { color: #177347; }
 .analyst-inbox-signal--negative { color: #b33434; }
 .analyst-inbox-signal--neutral { color: #64707e; }
@@ -38,13 +21,14 @@
 .analyst-inbox-quad--3 { color: var(--dashboard-quad-3); }
 .analyst-inbox-quad--4 { color: var(--dashboard-quad-4); }
 
-.analyst-inbox-heading time,
+.analyst-inbox-time,
 .analyst-inbox-source {
   color: var(--analyst-muted, #6b7280);
   font-size: 9px;
 }
 
-.analyst-inbox-heading time { white-space: nowrap; text-align: right; }
+.analyst-inbox-time { white-space: nowrap; }
+.analyst-inbox-ticker dd { color: var(--portfolio-review-blue, #2563eb); }
 .analyst-inbox-copy { display: grid; gap: 5px; margin: 0; padding: 8px 10px; text-align: left; overflow-wrap: anywhere; }
 .analyst-inbox-copy dt, .analyst-inbox-copy dd { display: inline; margin: 0; }
 .analyst-inbox-copy dt { color: var(--analyst-muted, #6b7280); font-weight: 500; }
@@ -54,10 +38,10 @@
 
 .analyst-inbox-footer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
   gap: 8px 12px;
-  padding: 7px 10px;
+  padding: 2.5px 10px;
   border-top: 1px solid var(--analyst-line, #dfe6ea);
 }
 
@@ -79,7 +63,7 @@
 
 .analyst-inbox-footer button:hover { background: #f1f3f5; }
 .analyst-inbox-footer button:focus-visible { outline: 2px solid var(--analyst-accent, #087b80); outline-offset: 2px; }
-.analyst-inbox-acknowledge { white-space: nowrap; }
+.analyst-inbox-acknowledge { justify-self: end; white-space: nowrap; }
 .analyst-inbox-empty, .analyst-inbox-error { margin: 8px 0; color: var(--analyst-muted, #6b7280); }
 .analyst-source-publication { color: inherit; text-decoration: none; }
 
@@ -96,5 +80,41 @@
 .analyst-inbox-urgent-heading { color: #a61b1b; }
 .analyst-inbox-ordinary-heading { margin-top: 6px; color: var(--analyst-muted, #6b7280); }
 .analyst-inbox-finding.is-action-required { border-color: #d64545; }
-.analyst-inbox-finding.is-action-required .analyst-inbox-heading { background: #fdecec; border-bottom-color: #f2c4c4; }
-.analyst-inbox-finding.is-action-required .analyst-inbox-symbol { color: #a61b1b; font-weight: 600; }
+
+/* Security alerts: instruction on the left, one centered bias and price-window
+   table on the right. The duration and window columns share widths only. */
+.analyst-inbox-body.has-horizons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.analyst-inbox-body.has-horizons .analyst-inbox-copy { flex: 1 1 260px; min-width: 0; }
+.analyst-inbox-horizons {
+  flex: 1.2 1 300px;
+  margin: 8px 10px 8px 0;
+  padding-left: 12px;
+  border-collapse: collapse;
+  border-left: 1px solid var(--analyst-line, #dfe6ea);
+  /* A definite width lets the fixed layout hold the four columns equal. */
+  width: 100%;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+.analyst-inbox-horizons-label { width: 28%; }
+.analyst-inbox-horizons-column { width: 18%; }
+.analyst-inbox-horizons th,
+.analyst-inbox-horizons td { padding: 3px 2px; text-align: center; vertical-align: middle; }
+.analyst-inbox-horizons thead th,
+.analyst-inbox-horizon-head th { color: var(--analyst-muted, #6b7280); font-size: 9px; font-weight: 500; }
+.analyst-inbox-horizons tbody th[scope='row'] { padding-left: 12px; color: var(--analyst-muted, #6b7280); font-weight: 500; text-align: left; }
+.analyst-inbox-horizons tbody tr + tr td,
+.analyst-inbox-horizons tbody tr + tr th[scope='row'] { border-top: 1px solid #eef0f3; }
+.analyst-inbox-horizons tr.analyst-inbox-horizon-head > * { padding-top: 10px; border-top: 0; border-bottom: 1px solid #d1d5db; }
+.analyst-inbox-horizons tr.analyst-inbox-horizon-head + tr td,
+.analyst-inbox-horizons tr.analyst-inbox-horizon-head + tr th { border-top: 0; }
+.analyst-inbox-horizons td.analyst-inbox-signal--muted { color: #9ca3af; }
+.analyst-inbox-bias-cell { display: block; padding: 2px 0; border: 1px solid transparent; border-radius: 3px; }
+.analyst-inbox-bias-cell.is-positive { background: #e7f4e8; color: #1e6b23; }
+.analyst-inbox-bias-cell.is-negative { background: #fbe4e2; color: #a32d2d; }
+.analyst-inbox-bias-cell.is-neutral { background: #f3f4f6; color: #4b5563; }
+.analyst-inbox-bias-cell.is-unavailable { background: #f3f4f6; color: #9ca3af; }

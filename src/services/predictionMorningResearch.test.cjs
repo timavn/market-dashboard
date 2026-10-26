@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildMorningResearch, extractFromText, positionFindings, structuredFindings } = require('./predictionMorningResearch.cjs');
+const { PROXY_TICKERS, buildMorningResearch, extractFromText, positionFindings, structuredFindings } = require('./predictionMorningResearch.cjs');
 
 const references = { gold: 4190, silver: 57.5, copper: 6.6, wti: 92, bitcoin: 81300, ethereum: 2430, sp500: 7700, nasdaq100: 29500,
   compq: 26400, ust2y: 4.8, ust10y: 5.08, ust30y: 5.42, usd: 101.7, QQQ: 718, SPY: 770 };
@@ -49,8 +49,10 @@ test('reads a roster of codes after "TRADE first, then TREND"', () => {
 });
 
 test('never credits another instrument’s code to a tracked market', () => {
-  // Brent is not WTI; KOSPI and NVDA are not the S&P; an ETF needs its own price to check.
-  assert.deepEqual(codes('Brent, meanwhile, is still Bullish TRADE and TREND with an Alpha Code = 99/93 ($99 = TRADE, $93 = TREND)'), []);
+  // Brent is its own market, never WTI; KOSPI and NVDA are not the S&P; an ETF needs its own price to check.
+  assert.deepEqual(codes('Brent, meanwhile, is still Bullish TRADE and TREND with an Alpha Code = 99/93 ($99 = TRADE, $93 = TREND)'),
+    [{ market: 'brent', instrument: null, trade: 99, trend: 93 }]);
+  assert.deepEqual(kinds('Brent Oil is still Bullish TRADE and TREND', 'signal').map(({ market }) => market), ['brent']);
   assert.deepEqual(codes('Dr. KOSPI failed its TRADE (Alpha Code for KOSPI = 68/71)'), []);
   assert.deepEqual(codes('NVDA lifted SPY’s +0.7% return, breaking out to Bullish TRADE and TREND with an Alpha Code = 217208'), []);
   assert.deepEqual(codes('Alpha Code for QQQ = 720705 (TRADE = 720, TREND = 705)', { ...references, QQQ: undefined }), []);
@@ -79,10 +81,12 @@ test('keeps single TRADE or TREND levels, prose Risk Ranges and stated direction
 test('maps published positions and structured product data to markets', () => {
   const macro = positionFindings({ data: { longs: ['U.S. Dollar (USD)', 'Bitcoin (BTC)', 'Invesco QQQ Trust (QQQ)', 'Japan (JPXN)'],
     shorts: ['British Pound versus U.S. Dollar (GBP/USD)'] } }, 'the-macro-show');
-  assert.deepEqual(macro.map(({ market, side, instrument }) => ({ market, side, instrument })), [
-    { market: 'usd', side: 'Long', instrument: null },
-    { market: 'bitcoin', side: 'Long', instrument: null },
-    { market: 'nasdaq100', side: 'Long', instrument: 'QQQ' },
+  assert.deepEqual(macro.map(({ market, side, instrument, inverse }) => ({ market, side, instrument, inverse })), [
+    { market: 'usd', side: 'Long', instrument: null, inverse: false },
+    { market: 'bitcoin', side: 'Long', instrument: null, inverse: false },
+    { market: 'nasdaq100', side: 'Long', instrument: 'QQQ', inverse: false },
+    // A short pound against the dollar is a dollar position that moves opposite to the dollar.
+    { market: 'usd', side: 'Short', instrument: 'GBP/USD', inverse: true },
   ]);
   const early = structuredFindings({ data: { 'GOLD SPOT PRICE (GOLD)': { lrr: 4090, hrr: 4216, trend: 'BEARISH' },
     'NASDAQ COMPOSITE (COMPQ)': { lrr: 26514, hrr: 27621, trend: 'BULLISH' }, HYG: { lrr: 79, hrr: 80 } } }, 'early-look');
@@ -171,4 +175,41 @@ test('Market Structure carries its chart levels, and its note as the signals sou
     instrument: null, instrumentLabel: null, sourceText: undefined });
   assert.equal(levels.sourceText, 'Read from the SPX Probable Volatility / Gamma By Strike (Intrinio/Tier1Alpha.com, chart 2026-10-15) and '
     + 'SPX Gamma Volatility Throttle (Tier1Alpha.com, chart 2026-10-15) charts');
+});
+
+test('the dollar is the currency: a bare "dollar" is not, and currency pairs are dollar instruments', () => {
+  const findings = extractFromText([
+    'CRYPTO QUANT | ₿TC (+0.7%), MSTR=BULLISH, ETH/CRCL=NEUTRAL, "The Always-On Dollar", Project Shutdowns ↑',
+    'He is going to consider merging Tesla with SpaceX, trillion dollar caps.',
+    'Bitcoin quoted as BTC/USD keeps its own market.',
+    'EUR/USD is Bearish TRADE and TREND.',
+    'USD/JPY = Bullish TREND',
+    'A stronger dollar weighs on Gold.',
+  ].join('\n'), { product: 'top-3-things', references });
+  const usd = findings.filter((item) => item.market === 'usd');
+  // Neither "The Always-On Dollar", "trillion dollar caps" nor BTC/USD is the dollar.
+  assert.deepEqual(usd.map(({ kind, instrumentLabel, context }) => ({ kind, instrumentLabel, context })), [
+    { kind: 'signal', instrumentLabel: 'EUR/USD', context: 'EUR/USD is Bearish TRADE and TREND.' },
+    { kind: 'signal', instrumentLabel: 'USD/JPY', context: 'USD/JPY = Bullish TREND' },
+    { kind: 'mention', instrumentLabel: null, context: 'A stronger dollar weighs on Gold.' },
+  ]);
+  // Pairs are never quoted; only ETFs are.
+  assert.equal(PROXY_TICKERS.includes('UUP'), true);
+  assert.equal(PROXY_TICKERS.some((ticker) => ticker.includes('/') || ticker.endsWith('USD')), false);
+  // EUR/USD moves opposite to the dollar, so its bearish call is a bullish dollar call.
+  assert.deepEqual([usd[0].trade, usd[0].trend], ['Bullish', 'Bullish']);
+  assert.deepEqual([usd[1].trade, usd[1].trend], [null, 'Bullish']);
+});
+
+test('a long statement is shown in full and keeps the clauses between mentions', () => {
+  const long = 'With plenty of AI Bubble Stocks and their Factor Exposures imploding, the mainline of US Equity Vol has, once again, '
+    + 'survived a potential trip to what we call The Chop Bucket (VIX > 19) and still has a wicked wide Risk Range Signal = 14.32-19.95, '
+    + 'so trade it and remember what happens to dealer Gamma if SPX breaks out of its range to the downside, because that is where the fun starts';
+  const [spx] = extractFromText(long, { product: 'top-3-things', references }).filter((item) => item.market === 'sp500');
+  assert.equal(spx.excerpt, long);
+  assert.equal(spx.context.endsWith('because that is where the fun starts'), true);
+  const [qqq] = extractFromText('QQQ – Selling the bounce in QQQ; we keep buying the dips in Healthcare; QQQ TRADE Momentum Resistance Signal = 737',
+    { product: 'top-3-things', references }).filter((item) => item.market === 'nasdaq100');
+  assert.equal(qqq.context.includes('…'), false);
+  assert.equal(qqq.context.includes('we keep buying the dips in Healthcare'), true);
 });

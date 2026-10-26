@@ -1,4 +1,4 @@
-import { predictionReportTables } from './analystPredictionTables';
+import { foldPredictionAlphaCode, onceAcrossPredictionResearch, pinPredictionDollar, predictionReportTables } from './analystPredictionTables';
 import { predictionReportSources } from './analystPredictionSources';
 
 test('CPI readings retain lower/base/upper together with publication and release dates at the right', () => {
@@ -174,4 +174,71 @@ test('display projection is idempotent and keeps unknown table date text as capt
 | Gamma | Positive | exact date unknown |`);
   expect(report).toContain('| Gamma | Positive | exact date unknown |');
   expect(predictionReportTables(report)).toBe(report);
+});
+
+test('the US Dollar row shows once above the first section with its research; section boards keep their markets', () => {
+  const header = '| Market | Tick | Trade | Trend | Alpha Code | Price and Risk Range | As of (PT) |\n| --- | --- | --- | --- | --- | --- | --- |';
+  const dollar = '| REF(US Dollar;DXY) | BIAS(Bearish;;) | BIAS(Bullish;;) | BIAS(Bullish;;) | N/A | RR(100;103;101.9;2;) | ASOF(Oct 19 06:50;,;,;,) |';
+  const research = { markets: [{ market: 'US Dollar', entries: [{ product: 'Early Look', context: 'We bought more USD via UUP' }] },
+    { market: 'Gold', entries: [] }] };
+  const markdown = ['## Metals', '', header, dollar, '| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | N/A | 4,100 | ASOF(;,;,;,) |', '',
+    '```analyst-research', JSON.stringify(research), '```', '', '## Oil', '', header, dollar, '| WTI | x | x | x | x | x | x |', ''].join('\n');
+  const pinned = pinPredictionDollar(markdown);
+  const lines = pinned.split('\n');
+  expect(lines.filter(line => line.startsWith('| REF(US Dollar'))).toHaveLength(1);
+  expect(lines.slice(0, 4)).toEqual([...header.split('\n'), dollar, '']);
+  expect(lines.slice(4, 7)).toEqual(['```analyst-research', JSON.stringify({ markets: [research.markets[0]] }), '```']);
+  expect(pinned.split('## Metals')[1]).toContain(JSON.stringify({ markets: [{ market: 'Gold', entries: [] }] }));
+  expect(pinned.split('## Oil')[1]).toContain('| WTI |');
+  // Reports without a Dollar row are unchanged.
+  expect(pinPredictionDollar('## Oil\n\nText')).toBe('## Oil\n\nText');
+});
+
+test('boards saved with an Alpha Code column carry the code in the range cell, with dots only on the range’s own instrument', () => {
+  const saved = [
+    '## Indices',
+    '',
+    '| Market | Tick | Trade | Trend | Alpha Code | Price and Risk Range | Structure (10d) | As of (PT) |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | ALPHA(4,180;4,120;above;above;;1;The Macro Show) | RR(4085;4199;4145;0;) | STRUCT(+;+1;-;-1;;;;0;) | ASOF(x) |',
+    '| MKT(Nasdaq-100;COMPQ range) | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(N/A;;) | ALPHA(29,500;;below;;;0;Top 3 Things) | RR(25979;26667;26703;0;) | N/A | ASOF(x) |',
+    '| UST 2Y | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(N/A;;) | N/A | RR(4.71;4.87;4.81;2;%) | N/A | ASOF(x) |',
+    '',
+  ].join('\n');
+  expect(foldPredictionAlphaCode(saved).split('\n').slice(2, 7)).toEqual([
+    '| Market | Tick | Trade | Trend | Price and Risk Range | Structure (10d) | As of (PT) |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    '| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | RR(4085;4199;4145;0;;4180;4120;1;1;The Macro Show) | STRUCT(+;+1;-;-1;;;;0;) | ASOF(x) |',
+    '| MKT(Nasdaq-100;COMPQ range) | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(N/A;;) | RR(25979;26667;26703;0;;29500;;0;0;Top 3 Things) | N/A | ASOF(x) |',
+    '| UST 2Y | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(N/A;;) | RR(4.71;4.87;4.81;2;%) | N/A | ASOF(x) |',
+  ]);
+  // A code whose market has no range bar keeps the captured layout.
+  const unranged = saved.replace('RR(4085;4199;4145;0;)', '4,145');
+  expect(foldPredictionAlphaCode(unranged)).toBe(unranged);
+});
+
+test('a sentence naming several markets reads once, under the first market that shows it in the review', () => {
+  const happy = 'You should see how happy our subscribers who identify as Gold Bugs are with me about Bearish Gold & Silver!';
+  const block = markets => ['```analyst-research', JSON.stringify({ markets }), '```'];
+  const report = [
+    '## Metals', ...block([
+      { market: 'Gold', entries: [{ product: 'Early Look', time: '04:36', context: happy }, { product: 'Top 3 Things', time: '05:30', context: 'Gold still sucks' }] },
+      { market: 'Silver', entries: [{ product: 'Early Look', time: '04:36', context: 'Don’t send them my Silver (SLV) shorts.' },
+        { product: 'Early Look', time: '04:36', context: happy }] },
+    ]),
+    '## Crypto', ...block([
+      // Only the shared sentence: the market says where it reads instead of Not mentioned.
+      { market: 'Palladium', entries: [{ product: 'Early Look', time: '04:36', context: 'about Bearish Gold & Silver', source: happy }] },
+      { market: 'Ethereum', entries: [] },
+    ]),
+  ].join('\n');
+  const [metals, crypto] = onceAcrossPredictionResearch(report).split('\n').filter(line => line.startsWith('{')).map(JSON.parse);
+  expect(metals.markets.map(row => row.entries.map(entry => entry.context))).toEqual([
+    [happy, 'Gold still sucks'], ['Don’t send them my Silver (SLV) shorts.']]);
+  // The same full sentence under a later section counts as a repeat even when its trimmed context differs.
+  expect(crypto.markets).toEqual([{ market: 'Palladium', entries: [], mentionedWith: ['Gold'] }, { market: 'Ethereum', entries: [] }]);
+  // The same words in another product or at another time are a separate mention.
+  const other = block([{ market: 'Gold', entries: [{ product: 'Early Look', time: '04:36', context: happy }] },
+    { market: 'Silver', entries: [{ product: 'The Call', time: '07:04', context: happy }] }]).join('\n');
+  expect(onceAcrossPredictionResearch(other)).toBe(other.replace(/\n/g, '\n'));
 });

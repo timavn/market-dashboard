@@ -45,7 +45,7 @@ test('the status line shows the game, holdings, the verified close, and the thre
     : { status: 'ready', sessionDate: '2026-10-15', capturedAt: '2026-10-15T20:31:00Z' }) }));
   render(<AnalystLandingStatus holdingsCount={42} />);
   const status = screen.getByRole('group', { name: 'Portfolio status' });
-  await waitFor(() => expect(status).toHaveTextContent('GAME 199/251HOLDINGS 42CLOSE 10/15 VERIFIEDGLOBAL QUAD Q3QUARTERLY QUAD Q2MONTHLY QUAD Q2'));
+  await waitFor(() => expect(status).toHaveTextContent('SEASON 2026GAME 199/251HOLDINGS 42CLOSE 10/15 VERIFIEDGLOBAL QUAD Q3QUARTERLY QUAD Q2MONTHLY QUAD Q2'));
   expect(screen.getByText('10/15 VERIFIED')).toHaveClass('is-positive');
   expect(screen.getByText('Q3')).toHaveClass('is-q3');
   expect(screen.getAllByText('Q2').map(node => node.className)).toEqual(['is-q2', 'is-q2']);

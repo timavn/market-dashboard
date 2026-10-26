@@ -3,7 +3,7 @@ import json
 import unittest
 
 from analyst_review_sources import review_sources
-from prediction_setup_board import render_setup_board
+from prediction_setup_board import render_setup_board, research_by_section
 from review_runs_v2 import ReviewRunError, render_prediction_review
 
 AT = "2026-10-10T17:00:00Z"
@@ -154,18 +154,18 @@ class SetupBoardRenderTests(unittest.TestCase):
         # One entry per mention in time order: the part of the sentence about the market, with the sentence as its source;
         # published data carries the line or list it was printed in.
         self.assertEqual(metals["markets"][0], {"market": "US Dollar", "entries": [
-            {"product": "The Macro Show", "time": "07:55", "context": "Long U.S. Dollar (USD)", "source": "Longs: U.S. Dollar (USD), Software (IGV)"},
-            {"product": "Real-Time Alerts", "time": "08:39", "context": "BUY SIGNAL UUP", "source": "BUY SIGNAL UUP"}]})
+            {"product": "The Macro Show", "time": "07:55", "context": "Long U.S. Dollar (USD)", "source": "Longs: U.S. Dollar (USD), Software (IGV)", "date": "Oct 16"},
+            {"product": "Real-Time Alerts", "time": "08:39", "context": "BUY SIGNAL UUP", "source": "BUY SIGNAL UUP", "date": "Oct 16"}]})
         self.assertEqual(metals["markets"][1]["entries"], [
             {"product": "The Macro Show", "time": "07:55", "context": "Gold Alpha Code 4180/4120",
-             "source": "Gold Alpha Code 4180/4120; Silver at 57"},
+             "source": "Gold Alpha Code 4180/4120; Silver at 57", "date": "Oct 16"},
             {"product": "ETF Pro", "context": "Long GLD"}])
         self.assertIn('{"market":"Ethereum","entries":[]}', report)
         # Published data reads "Label: value", with the line it was printed in as its source.
         self.assertIn('{"market":"WTI","entries":[{"product":"Risk Ranges","time":"04:28","context":"Trend: Neutral → Bullish",'
-                      '"source":"Trend change: COPPER changed from Neutral to Bullish","facts":["Trend: Neutral → Bullish"]}]}', report)
+                      '"source":"Trend change: COPPER changed from Neutral to Bullish","date":"Oct 16","facts":["Trend: Neutral → Bullish"]}]}', report)
         self.assertIn('{"product":"Market Structure","time":"03:30","context":"SPX Gamma Exposure: Neutral",'
-                      '"source":"Market makers remain broadly neutral.","facts":["SPX Gamma Exposure: Neutral"]}', report)
+                      '"source":"Market makers remain broadly neutral.","date":"Oct 16","facts":["SPX Gamma Exposure: Neutral"]}', report)
         self.assertIn('"context":"Zero gamma: 7,736 · PV band: 7,660–7,886 · Strikes in play: 7,700, 7,750 · Gamma throttle: 0.64 · '
                       '10D realized vol: 9.63%"', report)
         # Reported data also lists one line per fact, so it reads as data rather than a sentence.
@@ -174,7 +174,11 @@ class SetupBoardRenderTests(unittest.TestCase):
         rates = json.loads(report.split("## Rates", 1)[1].split("```analyst-research\n", 1)[1].split("\n```", 1)[0])
         # Two findings from one sentence are one mention; the board's own Risk Range is not one.
         self.assertEqual(rates["markets"], [{"market": "UST 2Y", "entries": [
-            {"product": "Top 3 Things", "time": "05:31", "context": excerpt, "source": excerpt}]}])
+            {"product": "Top 3 Things", "time": "05:31", "context": excerpt, "source": excerpt, "date": "Oct 16"}]}])
+        # Each block names its section and market date, so the report can ask for the same section on another day.
+        self.assertEqual((metals["section"], metals["marketDate"]), ("metals", "2026-10-16"))
+        self.assertEqual(research_by_section(data)["rates"], rates)
+        self.assertEqual(research_by_section({**data, "research": None}), {})
         # The US Dollar's research appears with the first section only.
         self.assertNotIn('"market":"US Dollar"', report.split("## Crypto", 1)[1])
         self.assertIn("Research read for Oct 16: Top 3 Things 05:31, The Macro Show 07:55, Risk Ranges 04:28, Market Structure 03:30, "
@@ -211,13 +215,13 @@ class SetupBoardRenderTests(unittest.TestCase):
         data["structureSessions"] = 10
         gold = next(row for row in data["rows"] if row["id"] == "gold")
         gold["volume"] = {"symbol": "GLD", "date": "2026-10-09", "d1": 13.6, "d15": -4.6, "d30": -15.2, "d90": -21.4,
-                          "changePct": 0.3, "signal": {"move": "DV", "tone": None}}
+                          "changePct": 0.3, "signal": {"move": "DV", "tone": None, "direction": "up"}}
         gold["structure"] = {"sessions": 1, "low": {"steps": "+", "direction": 1, "run": 1},
                              "high": {"steps": "-", "direction": -1, "run": 1}, "allTimeHigh": None}
         report = render_setup_board(data)
         self.assertIn("| Market | Tick | Trade | Trend | Volume | Price and Risk Range | Structure | Status |", report)
         self.assertIn("| BIAS(Bearish;;) | VOL(+14;-5;-15;-21;2026-10-09;GLD) | RR(", report)
-        self.assertIn("STRUCT(+;+1;-;-1;;;;0;;DV;) |", report)
+        self.assertIn("STRUCT(+;+1;-;-1;;;;0;;DV;;+) |", report)
         # A market whose volume could not be read keeps an empty token, so its row still splits.
         self.assertIn("| BIAS(Bullish;;) | VOL(;;;;;) | RR(", report)
         self.assertNotIn("Volume", render_setup_board(board()))

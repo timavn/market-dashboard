@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader, Upload, X } from 'lucide-react';
+import { Upload, X } from 'lucide-react';
+import AnalystSpinner from './AnalystSpinner';
 import { useSurfaceActivity } from '../common/PersistentSurface';
 import AnalystSemanticText from './AnalystSemanticText';
 import { formatAnalystReportDate, presentAnalystReportDates } from '../../utils/analystReportDates';
@@ -9,9 +10,18 @@ import {
   loadAnalystSourceReadiness,
   normalizeAnalystSourceReadiness,
 } from '../../services/analyst/analystSourceReadiness';
+import LoadingIndicator from '../common/LoadingIndicator';
 import './AnalystSourceLibrary.css';
 
 const SOURCE_SECTIONS = ['manual', 'automated'];
+const uploadDay = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', year: 'numeric',
+});
+// A committed import shows the day it was uploaded, in California.
+const uploadedOn = (value) => {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? uploadDay.format(time) : null;
+};
 
 // Embedded in the Analyst home tabs, the library has no header of its own.
 export default function AnalystSourceLibrary({ onClose, embedded = false }) {
@@ -138,7 +148,7 @@ export default function AnalystSourceLibrary({ onClose, embedded = false }) {
         {section === 'manual' ? (
           <>
             <button type="button" className="analyst-source-upload" disabled={Boolean(busy)} onClick={() => fileRef.current?.click()}>
-              {busy ? <Loader className="analyst-spin" size={16} /> : <Upload size={16} />}
+              {busy ? <AnalystSpinner size={16} elapsed /> : <Upload size={16} />}
               <span>{busy ? `${busy}…` : 'Upload & index a PDF'}</span>
               <small>PDF only · 50 MB max</small>
             </button>
@@ -150,7 +160,12 @@ export default function AnalystSourceLibrary({ onClose, embedded = false }) {
               {!imports.length && importStatus === 'ready' && <p>No manual PDFs yet.</p>}
               {imports.map((job) => (
                 <article key={job.import_id}>
-                  <div><span>{job.filename}</span><span>{String(job.status || '').replaceAll('_', ' ')}</span></div>
+                  <div>
+                    <span>{job.filename}</span>
+                    {job.status === 'committed' && uploadedOn(job.created_at)
+                      ? <time dateTime={job.created_at}>{uploadedOn(job.created_at)}</time>
+                      : <span>{String(job.status || '').replaceAll('_', ' ')}</span>}
+                  </div>
                   {job.failure_reason && <p className="analyst-source-error">{job.failure_reason}</p>}
                 </article>
               ))}
@@ -166,10 +181,10 @@ export default function AnalystSourceLibrary({ onClose, embedded = false }) {
                   <tr key={row.id}>
                     <td>{row.label}</td>
                     <td>{row.updatedAt ? <time className="analyst-process--key" dateTime={row.updatedAt} title={`${formatAnalystReportDate(row.updatedAt)} · Publication ${formatAnalystReportDate(row.publicationDate)}`}>{formatAnalystReportDate(row.updatedAt, { year: false })}</time> : '—'}</td>
-                    <td className={row.usableForDay ? 'is-usable' : 'is-unavailable'} title={presentAnalystReportDates(row.reason) || undefined}>{row.usableForDay ? 'Ready' : 'Unavailable'}</td>
+                    <td className={row.usableForDay ? 'is-usable' : 'is-unavailable'} title={presentAnalystReportDates(row.reason) || undefined}>{row.usableForDay ? 'Ready' : row.notReceived ? 'Not received' : 'Unavailable'}</td>
                   </tr>
                 ))}
-                {!sources.rows.length && <tr><td colSpan={3} className="analyst-source-empty">{loadingSources ? 'Checking sources…' : 'UNAVAILABLE'}</td></tr>}
+                {!sources.rows.length && <tr><td colSpan={3} className="analyst-source-empty">{loadingSources ? <LoadingIndicator label="Checking sources…" size="sm" /> : 'UNAVAILABLE'}</td></tr>}
               </tbody>
             </table>
           </section>

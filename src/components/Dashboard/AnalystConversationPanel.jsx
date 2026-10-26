@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Archive,
@@ -30,11 +30,6 @@ import { prepareAnalystMarkdown } from './analystMarkdown';
 import { presentPredictionMarkdown } from './analystPredictionMarkdown';
 import { remarkAnalystProcessColors } from './analystProcessColors';
 import { remarkAnalystAccountComparison } from './analystAccountComparison';
-import { remarkAnalystVerificationTables } from './analystVerificationTables';
-import { remarkAnalystWatchList } from './analystWatchList';
-import { analystChatSources } from './analystChatSources';
-import { presentVerificationMarkdown, remarkAnalystVerificationCopy, verificationHoldings } from './analystVerificationPresentation';
-import usePortfolioSecurityNames from '../../hooks/usePortfolioSecurityNames';
 import './AnalystReportText.css';
 import './AnalystPanel.css';
 import './AnalystAccountComparison.css';
@@ -43,8 +38,6 @@ import AnalystPredictionReport from './AnalystPredictionReport';
 import SourceLibrary from './AnalystSourceLibrary';
 import AnalystSemanticText from './AnalystSemanticText';
 import { formatAnalystReportDate } from '../../utils/analystReportDates';
-import AnalystReviewSources from './AnalystReviewSources';
-import { analystVerificationSources } from './analystVerificationSources';
 import AnalystReportLink from './AnalystReportLink';
 
 const STREAM_COMMIT_INTERVAL_MS = 150;
@@ -366,40 +359,26 @@ const MARKDOWN_COMPONENTS = { table: MarkdownTable };
 // Transcript refreshes can replace message records without changing the answer.
 // Keep completed Markdown independent of those updates so old answers are not
 // parsed again while the user types or the next response is streaming.
-const CompletedMarkdown = memo(function CompletedMarkdown({ markdown, reviewKind, securityTickers, securityNames, sourceLinks, onCitation }) {
+const COMPLETED_COMPONENTS = {
+  ...MARKDOWN_COMPONENTS,
+  a: ({ href, children }) => <AnalystReportLink href={href}>{children}</AnalystReportLink>,
+};
+const CompletedMarkdown = memo(function CompletedMarkdown({ markdown, reviewKind }) {
   const remarkPlugins = useMemo(() => [remarkGfm, remarkAnalystAccountComparison,
-    [remarkAnalystVerificationTables, { reviewKind }],
-    [remarkAnalystWatchList, { reviewKind }],
-    [remarkAnalystVerificationCopy, { reviewKind }],
-    [remarkAnalystProcessColors, securityTickers ? { reviewKind, securityTickers, securityNames } : { reviewKind }]], [reviewKind, securityTickers, securityNames]);
-  const components = useMemo(() => ({
-    ...MARKDOWN_COMPONENTS,
-    a: ({ href, children }) => <AnalystReportLink href={href} {...sourceLinks?.get(href)} onCitation={onCitation}>{children}</AnalystReportLink>,
-  }), [sourceLinks, onCitation]);
+    [remarkAnalystProcessColors, { reviewKind }]], [reviewKind]);
   return (
-    <ReactMarkdown remarkPlugins={remarkPlugins} components={components}
-      urlTransform={url => sourceLinks?.has(url) ? url : defaultUrlTransform(url)}>
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={COMPLETED_COMPONENTS}>
       {markdown.replace(/<!-- analyst-(?:details|daily-rollup|prediction-research-rollup) -->/g, '\n\n')}
     </ReactMarkdown>
   );
 });
-
-const SectionSources = ({ sources, onCitation }) => sources.length > 0 && (
-  <p className="analyst-section-sources" aria-label="Sources">
-    <span>Sources: </span>{sources.map((group, index) => <React.Fragment key={group.source.id}>
-      {index > 0 && ', '}<button type="button" className="analyst-section-source"
-        title={group.source.title || group.label}
-        onClick={() => onCitation?.(group.source, group.context)}>{`[${group.numbers.join(', ')}] ${group.label}`}</button>
-    </React.Fragment>)}
-  </p>
-);
 
 // Name a source by its publication title; a product ID is a fallback, and an
 // unclassified publication's "unknown" product is never a name.
 const citationLabel = citation => citation.title
   || (/^unknown$/i.test(citation.product || '') ? '' : citation.product) || 'Source';
 
-const Message = memo(function Message({ message, onCitation, reviewKind, historical = false, captureUnavailable = false, showCapturedSources = true }) {
+const Message = memo(function Message({ message, onCitation, reviewKind, historical = false, captureUnavailable = false }) {
   const deferredPortfolio = reviewKind === 'portfolio-review' && message.role === 'assistant'
     && (message.portfolioBriefIncluded === false || message.reviewBodyIncluded === false) && !message.portfolioBrief;
   const pendingPortfolio = reviewKind === 'portfolio-review' && message.role === 'assistant' && !message.portfolioBrief
@@ -409,17 +388,6 @@ const Message = memo(function Message({ message, onCitation, reviewKind, histori
       ? prepareAnalystMarkdown(message.text, { reviewKind })
       : ''
   ), [message.role, message.streaming, message.text, message.portfolioBrief, deferredPortfolio, reviewKind]);
-  const identityHoldings = useMemo(() => reviewKind === 'portfolio-cross-verification'
-    ? verificationHoldings(terminalMarkdown) : [], [reviewKind, terminalMarkdown]);
-  const securityIdentities = usePortfolioSecurityNames(identityHoldings);
-  const verificationMarkdown = useMemo(() => reviewKind === 'portfolio-cross-verification'
-    ? presentVerificationMarkdown(terminalMarkdown, securityIdentities, message.citations) : terminalMarkdown,
-  [reviewKind, terminalMarkdown, securityIdentities, message.citations]);
-  const capturedCoverage = useMemo(() => reviewKind === 'portfolio-cross-verification'
-    ? analystVerificationSources(verificationMarkdown) : { markdown: verificationMarkdown, sources: null },
-  [reviewKind, verificationMarkdown]);
-  const sectioned = useMemo(() => reviewKind === 'portfolio-cross-verification' && message.role === 'assistant' && !message.streaming
-    ? analystChatSources(capturedCoverage.markdown, message.citations) : null, [reviewKind, message.role, message.streaming, capturedCoverage.markdown, message.citations]);
   if (pendingPortfolio) return <AnalystPortfolioBrief message={message} deferred={deferredPortfolio} historical={historical}
     unavailableText={captureUnavailable ? 'Unavailable — saved review could not be loaded.' : undefined}
     loading={!captureUnavailable && (deferredPortfolio || ['queued', 'accepted', 'starting', 'running', 'reviewing'].includes(message.reviewState || message.state))} />;
@@ -438,19 +406,10 @@ const Message = memo(function Message({ message, onCitation, reviewKind, histori
   return (
     <article data-message-id={message.id} className={`analyst-message analyst-message--${message.role}${reviewKind === 'portfolio-review' && message.role === 'assistant' ? ' analyst-portfolio-markdown' : ''}${message.error ? ' is-error' : ''}`}>
       <span className="analyst-message-role">{message.role === 'user' ? 'You' : 'The Analyst'}</span>
-      {showCapturedSources && message.role === 'assistant' && !message.streaming && capturedCoverage.sources && <AnalystReviewSources sources={capturedCoverage.sources} />}
       <div className="analyst-markdown">
-        {message.role === 'assistant' && !message.streaming ? (
-          sectioned ? <>{sectioned.sections.map((section, index) => <section className="analyst-report-section" key={index}>
-            <CompletedMarkdown markdown={section.markdown} reviewKind={reviewKind}
-              securityTickers={sectioned.securityTickers} securityNames={sectioned.securityNames}
-              sourceLinks={sectioned.links} onCitation={onCitation} />
-            <SectionSources sources={section.sources} onCitation={onCitation} />
-          </section>)}<SectionSources sources={sectioned.remaining} onCitation={onCitation} /></>
-            : <CompletedMarkdown markdown={terminalMarkdown} reviewKind={reviewKind} />
-        ) : <p className={message.streaming ? 'analyst-streaming-text' : undefined}>{message.role === 'assistant' ? <AnalystSemanticText>{presentPredictionMarkdown(message.text, { reviewKind })}</AnalystSemanticText> : message.text}</p>}
+        {message.role === 'assistant' && !message.streaming ? <CompletedMarkdown markdown={terminalMarkdown} reviewKind={reviewKind} /> : <p className={message.streaming ? 'analyst-streaming-text' : undefined}>{message.role === 'assistant' ? <AnalystSemanticText>{presentPredictionMarkdown(message.text, { reviewKind })}</AnalystSemanticText> : message.text}</p>}
       </div>
-      {!sectioned && Array.isArray(message.citations) && message.citations.length > 0 && (
+      {Array.isArray(message.citations) && message.citations.length > 0 && (
         <div className="analyst-message-citations" aria-label="Sources">
           {message.citations.slice(0, 30).map((citation, index) => (
             <button key={citation.id || index} type="button" className="analyst-citation-chip" title={citationLabel(citation)} onClick={() => onCitation(citation)}>

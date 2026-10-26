@@ -148,6 +148,41 @@
 .analyst-prediction-report .is-range-board.has-alpha col:nth-child(5) { width: 12%; }
 .analyst-prediction-report .is-range-board.has-alpha col:nth-child(6) { width: 32%; }
 .analyst-prediction-report .is-range-board.has-alpha col:nth-child(7) { width: 21%; }
+/* Boards with Risk Range history add Structure before As of; the Alpha Code sits in the range cell. */
+.analyst-prediction-report .is-range-board.has-structure col:nth-child(1) { width: 10.5%; }
+.analyst-prediction-report .is-range-board.has-structure col:nth-child(2),
+.analyst-prediction-report .is-range-board.has-structure col:nth-child(3),
+.analyst-prediction-report .is-range-board.has-structure col:nth-child(4) { width: 7%; }
+.analyst-prediction-report .is-range-board.has-structure col:nth-child(5) { width: 34%; }
+.analyst-prediction-report .is-range-board.has-structure col:nth-child(6) { width: 17%; }
+.analyst-prediction-report .is-range-board.has-structure col:nth-child(7) { width: 17.5%; }
+/* Column labels read centered; Market stays left-aligned with its rows. */
+.analyst-panel-v2 .analyst-prediction-report .is-range-board th:not(:first-child) { text-align: center; }
+/* Structure: today's moves, then each run count with its sessions oldest to today, then the all-time high, all centered. */
+.analyst-panel-v2 .analyst-prediction-report td.analyst-prediction-structure-cell { text-align: center; }
+.analyst-prediction-stack.analyst-prediction-structure-moves { display: flex; justify-content: center; gap: 3px; margin-bottom: 2px; }
+.analyst-prediction-structure-move { padding: 0 3px; border: 1px solid var(--analyst-border, #d1d5db); border-radius: 3px; color: var(--dashboard-muted-text, #667085); line-height: 1.3; }
+.analyst-prediction-structure-move.is-on { border-color: #6ee7b7; color: var(--dashboard-positive, #059669); }
+/* A range top above the all-time high reads blue, apart from the green and red moves. */
+.analyst-prediction-structure-move.is-record { border-color: #93c5fd; background: #eff6ff; color: var(--portfolio-review-blue, #2563eb); }
+.analyst-prediction-structure-record { color: var(--portfolio-review-blue, #2563eb); }
+.analyst-prediction-structure-distance { color: var(--analyst-ink, #172033); white-space: pre; }
+/* Clicking the ATH line shows the record's date just beneath it. */
+.analyst-prediction-structure-ath { position: relative; display: block; }
+.analyst-prediction-structure-ath__toggle { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; white-space: nowrap; }
+.analyst-prediction-structure-ath__toggle:focus-visible { outline: 1px solid var(--portfolio-review-blue, #2563eb); outline-offset: 1px; }
+.analyst-prediction-structure-ath__date {
+  position: absolute; top: calc(100% + 2px); left: 50%; z-index: 2; transform: translateX(-50%);
+  padding: 1px 6px; border: 1px solid var(--analyst-border, #dbe1e8); border-radius: 3px;
+  background: #fff; color: var(--analyst-ink, #172033); white-space: nowrap; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+.analyst-prediction-structure-move.is-against { border-color: #fca5a5; color: var(--dashboard-negative, #dc2626); }
+.analyst-prediction-stack.analyst-prediction-structure-leg { display: flex; justify-content: center; align-items: center; gap: 4px; }
+.analyst-prediction-structure-count { flex: 0 0 30px; text-align: left; }
+.analyst-prediction-structure-steps { display: inline-flex; gap: 1.5px; }
+.analyst-prediction-structure-steps i { flex: none; width: 4px; height: 10px; border-radius: 1px; background: #d1d5db; }
+.analyst-prediction-structure-steps i.is-higher { background: #10b981; }
+.analyst-prediction-structure-steps i.is-lower { background: #ef4444; }
 .analyst-prediction-alpha-line { display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
 .analyst-prediction-alpha-line__value { font-weight: 500; }
 .analyst-prediction-alpha-line__relation { font-size: 9px; }
@@ -164,15 +199,31 @@
   outline: 1px solid var(--analyst-money-green, #2e7d32);
   outline-offset: -1px;
 }
+/* With volume the Dollar takes two rows, so the outline goes round the pinned board's body instead. */
+.analyst-panel-v2 .analyst-prediction-report .is-range-board.is-pinned-dollar tr:has(.analyst-prediction-reference-cell):has(+ .analyst-prediction-volume-row) { outline: none; }
+.analyst-panel-v2 .analyst-prediction-report .is-range-board.is-pinned-dollar tbody:has(.analyst-prediction-volume-row) {
+  outline: 1px solid var(--analyst-money-green, #2e7d32);
+  outline-offset: -1px;
+}
+/* Volume under Tick, Trade and Trend: one cell per window, the window above its reading. */
+.analyst-panel-v2 .analyst-prediction-report .is-range-board td.analyst-prediction-volume-cell { padding: 0; vertical-align: middle; }
+.analyst-prediction-volume { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; line-height: 13px; }
+.analyst-prediction-volume__window { display: flex; flex-direction: column; padding: 2px 0; border-left: 1px solid var(--analyst-border, #dbe1e8); }
+.analyst-prediction-volume__window:first-child { border-left: 0; }
+.analyst-prediction-volume__key { color: var(--dashboard-muted-text, #667085); }
+.analyst-prediction-volume__value { color: var(--analyst-ink, #172033); white-space: nowrap; }
+/* Heavier than the window reads green and lighter red, as signed readings do elsewhere on the board. */
+.analyst-prediction-volume__window.is-heavier .analyst-prediction-volume__value { color: var(--dashboard-positive, #059669); }
+.analyst-prediction-volume__window.is-lighter .analyst-prediction-volume__value { color: var(--dashboard-negative, #dc2626); }
 .analyst-prediction-stack--muted { color: var(--dashboard-muted-text, #667085); }
 .analyst-panel-v2 .analyst-prediction-report .is-setup-board :is(td, th) { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: break-word; vertical-align: middle; }
-.analyst-panel-v2 .analyst-prediction-report .is-setup-board td.analyst-prediction-range-cell { padding: 5px 6px 7px; }
+.analyst-panel-v2 .analyst-prediction-report .is-setup-board td.analyst-prediction-range-cell { padding: 5px 6px 6px; vertical-align: bottom; }
 
 /* One-line price-in-range bar (AnalystPredictionRangeBar). */
 .analyst-range-bar {
   display: grid;
   grid-template-columns: auto minmax(24px, 1fr) auto auto;
-  grid-template-rows: 13px 12px 14px;
+  grid-template-rows: 13px 12px 14px 13px;
   column-gap: 5px;
   align-items: center;
   font-variant-numeric: tabular-nums;
@@ -202,6 +253,14 @@
   position: absolute; top: 19px; width: 8px; height: 8px; border-radius: 50%;
   transform: translate(-50%, -50%);
   background: var(--portfolio-review-blue, #2563eb);
+}
+/* The Alpha Code takes the bar's last row: with the cell's content at the bottom, it sits in the bottom-left
+   corner as far from the bottom as the cell's left padding. Its levels are black dots on the line. */
+.analyst-range-bar__alpha-code { grid-row: 4; grid-column: 1 / -1; justify-self: start; color: var(--analyst-ink, #172033); line-height: 13px; }
+.analyst-range-bar__alpha-code.is-na { color: var(--dashboard-muted-text, #667085); }
+.analyst-range-bar__alpha-dot {
+  position: absolute; top: 19px; width: 6px; height: 6px; border-radius: 50%;
+  transform: translate(-50%, -50%); background: #000;
 }
 .analyst-range-bar__dot.is-below { background: var(--dashboard-negative, #dc2626); }
 .analyst-range-bar__dot.is-above { background: var(--dashboard-positive, #059669); }
@@ -256,24 +315,36 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 /* Morning research ledger: one row per mention, under the setup board it explains. */
 .analyst-research__market-col { width: 13%; }
 .analyst-research__product-col { width: 15%; }
-.analyst-research__time-col { width: 7%; }
 .analyst-research__source-col { width: 9%; }
+/* The table's title is the market day it shows; the other four of the last five open flush above it. */
+.analyst-panel-v2 .analyst-prediction-report .analyst-research th.analyst-research__day { position: relative; padding: 0; text-align: center; }
+.analyst-research__day-button {
+  width: 100%; padding: 4px 6px; border: 0; background: none; font: inherit; font-weight: 500;
+  color: var(--portfolio-review-blue, #2563eb); white-space: nowrap; cursor: pointer;
+}
+.analyst-research__day-button:focus-visible { outline: 1px solid var(--portfolio-review-blue, #2563eb); outline-offset: -2px; }
+.analyst-research__days {
+  position: absolute; bottom: 100%; left: -1px; right: -1px; z-index: 3; margin: 0; padding: 0; list-style: none;
+  border: 1px solid var(--analyst-border, #dbe1e8); border-bottom: 0; background: #fff;
+}
+.analyst-research__days button {
+  width: 100%; padding: 4px 6px; border: 0; border-bottom: 1px solid #eef0f3; background: none; font: inherit;
+  color: var(--analyst-ink, #172033); text-align: center; cursor: pointer;
+}
+.analyst-research__days button:hover, .analyst-research__days button:focus-visible { background: #f3f5f7; outline: none; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research :is(th, td) { border-width: 0 0 1px; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research table :is(th, td):last-child { border-right: 0; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research table { border: 1px solid var(--analyst-border, #dbe1e8); }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research td.analyst-research__market { color: var(--analyst-ink, #172033); font-weight: 500; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research tbody tr:has(+ tr:not(.analyst-research__first)) td:not(.analyst-research__market) { border-bottom-color: #eef0f3; }
 .analyst-research__product,
-.analyst-research__time,
 .analyst-research__quiet { color: var(--dashboard-muted-text, #667085); }
-.analyst-research__time { font-variant-numeric: tabular-nums; }
-/* Reported data (Market Structure signals and levels, Alpha Codes) lists one fact per line, values aligned. */
+/* Reported data (Market Structure signals and levels, Alpha Codes) lists one fact per line, values aligned, no bullets. */
 .analyst-panel-v2 .analyst-prediction-report .analyst-research__facts {
-  display: grid; grid-template-columns: fit-content(55%) minmax(0, 1fr); column-gap: 10px; margin: 0; padding: 0; list-style: none;
+  display: grid; grid-template-columns: var(--analyst-fact-label-width, fit-content(55%)) minmax(0, 1fr); column-gap: 10px; margin: 0; padding: 0; list-style: none;
 }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research__facts > li { display: contents; }
-.analyst-research__fact-label { color: var(--dashboard-muted-text, #667085); }
-.analyst-research__fact-label::before { content: '•'; margin-right: 5px; color: var(--analyst-border, #c9d1db); }
+.analyst-research__fact-label,
 .analyst-research__fact-value { color: var(--analyst-ink, #172033); font-variant-numeric: tabular-nums; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research td.analyst-research__source { text-align: right; }
 .analyst-research__source button {
@@ -287,7 +358,19 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 @media (max-width: 640px) {
   .analyst-research__market-col { width: 18%; }
   .analyst-research__product-col { width: 20%; }
-  .analyst-research__time-col { width: 11%; }
   .analyst-research__source-col { width: 13%; }
 }
 
+
+/* The US Dollar reference row shows once above the sections and stays pinned while the report scrolls. */
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame.is-pinned-dollar {
+  position: sticky; top: 0; z-index: 3; margin-top: 0; padding-bottom: 4px; background: var(--analyst-surface, #fff);
+}
+.analyst-pinned-marker { height: 0; }
+/* Stuck: a white strip above it covers the transcript's top padding (clipped at the transcript's edge). */
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame.is-pinned-dollar.is-stuck::before {
+  content: ''; position: absolute; left: -12px; right: -12px; bottom: 100%; height: 64px; background: var(--analyst-surface, #fff);
+}
+/* CPI nowcast values (not headings): Low red, Base as is, High green. */
+.analyst-panel-v2 .analyst-prediction-report .is-nowcast td:nth-child(3):not(.is-na) { color: var(--dashboard-negative, #dc2626); }
+.analyst-panel-v2 .analyst-prediction-report .is-nowcast td:nth-child(5):not(.is-na) { color: var(--dashboard-positive, #059669); }

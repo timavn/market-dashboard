@@ -1,0 +1,22 @@
+/* A ring that turns while the Analyst works. It keeps turning under reduced motion:
+   a fading icon read as blinking rather than loading. */
+.analyst-spinner {
+  display: inline-block;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: var(--analyst-spinner-size, 14px);
+  height: var(--analyst-spinner-size, 14px);
+  border: 2px solid #dfe5ea;
+  border-top-color: #087b80;
+  border-radius: 50%;
+  vertical-align: middle;
+  animation: analyst-spinner-turn 0.8s linear infinite;
+}
+
+@keyframes analyst-spinner-turn {
+  to { transform: rotate(360deg); }
+}
+
+.analyst-spinner-group { display: inline-flex; align-items: center; gap: 6px; }
+.analyst-spinner-elapsed { color: var(--portfolio-review-blue, #2563eb); }
+.analyst-spinner-elapsed { font-variant-numeric: tabular-nums; }

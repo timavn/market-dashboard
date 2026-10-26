@@ -30,6 +30,9 @@ function volatilityRegime(row) {
   return ranges.find(range => value >= range.min && (range.max == null || value < range.max)) || null;
 }
 
+// The band the reading sits in, on the metric's own scale: "< 24", "24–36", "≥ 36".
+const regimeBand = range => (range.max == null ? `≥ ${range.min}` : range.min === 0 ? `< ${range.max}` : `${range.min}–${range.max}`);
+
 function Change({ value }) {
   const number = Number(value);
   if (value === null || value === undefined || !Number.isFinite(number)) return <span className="is-muted">N/A</span>;
@@ -75,6 +78,7 @@ function VolatilityTable({ rows }) {
         <td className="is-number"><Change value={row.m1} /></td>
         {/* A reading from an earlier session (e.g. MOVE's last verified close) keeps its date under its regime. */}
         <td>{regime ? <><span className={`analyst-driver__stack ${REGIME_CLASS[regime.color] || ''}`}>{regime.label}</span>
+          <span className="analyst-driver__stack analyst-driver__muted">{regimeBand(regime)}</span>
           {row.note && <span className="analyst-driver__stack analyst-driver__muted">{row.note}</span>}</>
           : <span className="analyst-driver__muted">{row.note || 'N/A'}</span>}</td>
         {implied && <td>{row.implied

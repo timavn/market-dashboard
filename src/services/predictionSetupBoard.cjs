@@ -168,6 +168,107 @@ function usdCorrelationReading(market, usdCorrelations) {
   return { key: market.usdCorrelationKey, d15, d30, d60, d90, calculationDate: usdCorrelations?.calculationDate || null };
 }
 
+// Higher highs and higher lows are counted over this many session-to-session comparisons.
+const STRUCTURE_SESSIONS = 10;
+const STEP = { 1: '+', '-1': '-', 0: '=' };
+
+/**
+ * Same-direction run ending at the latest value. An unchanged session neither
+ * adds to nor ends a run: published ranges often repeat at their rounding.
+ */
+function structureLeg(values) {
+  const steps = values.slice(1).map((value, index) => Math.sign(value - values[index]));
+  let direction = 0;
+  let run = 0;
+  for (const step of [...steps].reverse()) {
+    if (step === 0) continue;
+    if (direction === 0) direction = step;
+    if (step !== direction) break;
+    run += 1;
+  }
+  return { steps: steps.map((step) => STEP[step]).join(''), direction, run };
+}
+
+/** Prior publications of a market's own range, oldest first, as { date, low, high }. */
+function rangeHistory(market, { riskRangeHistory, cryptoQuantHistory }) {
+  const spec = market.hedgeye.riskRange;
+  if (spec?.product === 'crypto-quant') {
+    return (cryptoQuantHistory || []).map((snapshot) => {
+      const slot = snapshot?.data?.cryptos?.[spec.ticker];
+      return { date: snapshot?.date, low: finite(slot?.buyTrade), high: finite(slot?.sellTrade) };
+    });
+  }
+  return (riskRangeHistory || []).map((publication) => {
+    const row = publication?.ranges?.[spec?.ticker];
+    return { date: publication?.date, low: finite(row?.lrr), high: finite(row?.hrr) };
+  });
+}
+
+/**
+ * Today's Risk Range against its previous publications: consecutive higher/lower
+ * highs and lows, and whether the range top clears the instrument's all-time high.
+ */
+function structureReading(range, history, allTimeHigh) {
+  const today = String(range?.date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
+  // One reading per earlier weekday publication (weekends are not traded); a malformed or inverted range is skipped.
+  const prior = [...new Map((history || [])
+    .map((item) => ({ ...item, date: String(item?.date || '').slice(0, 10) }))
+    .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.date) && item.date < today
+      && new Date(`${item.date}T12:00:00Z`).getUTCDay() % 6 !== 0
+      && item.low !== null && item.high !== null && item.low < item.high)
+    .map((item) => [item.date, item])).values()]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-STRUCTURE_SESSIONS);
+  if (!prior.length) return null;
+  const sessions = [...prior, { date: today, low: range.low, high: range.high }];
+  const ath = finite(allTimeHigh?.value);
+  return {
+    sessions: sessions.length - 1,
+    since: sessions[0].date,
+    high: structureLeg(sessions.map((item) => item.high)),
+    low: structureLeg(sessions.map((item) => item.low)),
+    allTimeHigh: ath === null ? null : { value: ath, date: allTimeHigh.date || null, symbol: allTimeHigh.symbol || null,
+      rangeTopAbove: range.high > ath },
+  };
+}
+
+// The latest session's volume against the prior session and the sessions in the 15, 30 and 90 calendar
+// days before it: about 10, 21 and 62 sessions, Hedgeye's 10-day, 1-month and 3-month averages.
+const VOLUME_WINDOWS = { d15: 15, d30: 30, d90: 90 };
+
+/** Volume of the latest completed session of the market's ETF; a session without a close is still trading. */
+function volumeReading(symbol, bars) {
+  const sessions = (bars || [])
+    .filter((bar) => /^\d{4}-\d{2}-\d{2}$/.test(String(bar?.date || '')) && finite(bar.volume) > 0 && finite(bar.rawClose) !== null)
+    .sort((left, right) => left.date.localeCompare(right.date));
+  if (sessions.length < 2) return null;
+  const latest = sessions.at(-1);
+  const prior = sessions.at(-2);
+  const versus = (volume) => (volume > 0 ? ((latest.volume / volume) - 1) * 100 : null);
+  const windowed = Object.fromEntries(Object.entries(VOLUME_WINDOWS).map(([key, days]) => {
+    const start = new Date(`${latest.date}T00:00:00Z`);
+    start.setUTCDate(start.getUTCDate() - days);
+    const window = sessions.slice(0, -1).filter((bar) => bar.date > start.toISOString().slice(0, 10));
+    return [key, window.length ? versus(window.reduce((sum, bar) => sum + bar.volume, 0) / window.length) : null];
+  }));
+  return { symbol, date: latest.date, volume: latest.volume, d1: versus(prior.volume), ...windowed,
+    changePct: ((latest.rawClose / prior.rawClose) - 1) * 100 };
+}
+
+/**
+ * DV when the session's volume is below its 30-day (1-month) average, AV above it. A move against the Trend
+ * (a down day in a Bullish Trend, an up day in a Bearish one) on DV supports adding; on AV it warns.
+ * The direction is the day's move in what the Trend describes (a yield for bond ETFs).
+ */
+function volumeSignal(volume, trend) {
+  if (!volume || volume.d30 === null) return null;
+  const move = volume.d30 < 0 ? 'DV' : 'AV';
+  const against = (trend === 'BULLISH' && volume.changePct < 0) || (trend === 'BEARISH' && volume.changePct > 0);
+  const direction = volume.changePct > 0 ? 'up' : volume.changePct < 0 ? 'down' : null;
+  return { move, tone: against ? (move === 'DV' ? 'supports' : 'warns') : null, direction };
+}
+
 /** Position of price within [low, high]: 0 = low end, 1 = high end. */
 function rangePosition(price, range) {
   if (!price || !range) return null;
@@ -203,7 +304,7 @@ const EVENT_FILTERS = {
 };
 
 function eventFilter(market) {
-  if (['gold', 'silver', 'copper', 'bitcoin', 'ethereum'].includes(market.id)) return EVENT_FILTERS['5pm'];
+  if (['gold', 'silver', 'copper', 'brent', 'bitcoin', 'ethereum'].includes(market.id)) return EVENT_FILTERS['5pm'];
   if (['sp500', 'nasdaq100'].includes(market.id)) return EVENT_FILTERS.close;
   if (market.id === 'wti') return EVENT_FILTERS.daily;
   return EVENT_FILTERS.any;
@@ -291,9 +392,24 @@ function morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, mar
     marketDate, references, prices, riskRangeTickers, publishedAt: readAt });
 }
 
+// The instrument a market's range is drawn against, whose all-time high the range top is checked with.
+const allTimeHighSymbol = (market) => market.hedgeye.riskRange?.priceSymbol || market.price?.symbol || null;
+
 function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations,
-  usdPeriods, eventsBySeries, morningSnapshots,
+  usdPeriods, eventsBySeries, morningSnapshots, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory,
   marketDate, asOf = new Date().toISOString() } = {}) {
+  // Saved boards from before volume keep their original shape.
+  // Bond ETFs (SHY, IEF, TLT) move opposite to the yield their Trend describes.
+  const volumeFor = ({ symbol, inverse } = {}, trend) => {
+    const reading = symbol ? volumeReading(symbol, volumeHistory[symbol]) : null;
+    if (!reading) return null;
+    const signal = volumeSignal({ ...reading, changePct: inverse ? -reading.changePct : reading.changePct }, trend);
+    return { ...reading, ...(inverse ? { inverse: true } : {}), signal };
+  };
+  // Saved boards from before range history keep their original shape.
+  const withStructure = Boolean(riskRangeHistory || cryptoQuantHistory);
+  const structureFor = (market, range) => (withStructure && range ? structureReading(range,
+    rangeHistory(market, { riskRangeHistory, cryptoQuantHistory }), allTimeHighs?.[allTimeHighSymbol(market)]) : null);
   const rows = UNIVERSE.markets.map((market) => {
     const events = selectEvents(market, eventsBySeries);
     if (market.id === 'cpi') {
@@ -322,16 +438,26 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       volatility: volatilityReading(market, { volatility, quotes, riskRanges }),
       usdCorrelation: usdCorrelationReading(market, usdCorrelations),
       tick, trade, trend, setup: evaluateSetup({ trend, tick, trade, position }),
+      ...(withStructure ? { structure: structureFor(market, range) } : {}),
+      ...(volumeHistory ? { volume: volumeFor(market.volume, trend) } : {}),
     };
   });
   const usd = usdReading({ quotes, riskRanges, securityIntelligence, usdPeriods, hedgai, marketDate });
+  if (usd && volumeHistory) usd.volume = volumeFor({ symbol: UNIVERSE.usd.volumeSymbol }, usd.trend);
+  if (usd && withStructure) {
+    usd.structure = usd.low !== null && usd.high !== null
+      ? structureFor({ hedgeye: { riskRange: { product: 'risk-ranges', ticker: UNIVERSE.usd.riskRangeTicker } }, price: UNIVERSE.usd },
+        { low: usd.low, high: usd.high, date: usd.rangeDate || riskRanges?.manifest?.publicationDate || null })
+      : null;
+  }
   const research = morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, marketDate });
   if (research) {
     for (const row of rows) row.research = research.markets[row.id] || { findings: [] };
     if (usd) usd.research = research.markets.usd || { findings: [] };
   }
   return { version: 1, asOf, marketDate: marketDate || null, rule: UNIVERSE.setupRule, sizing: UNIVERSE.sizing,
-    sections: UNIVERSE.sections,
+    sections: UNIVERSE.sections, ...(withStructure ? { structureSessions: STRUCTURE_SESSIONS } : {}),
+    ...(volumeHistory ? { volumeWindows: VOLUME_WINDOWS } : {}),
     usd,
     ...(research ? { research: { version: research.version, marketDate: research.marketDate, products: research.products } } : {}),
     sources: {
@@ -348,41 +474,66 @@ const seriesNames = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
 // ETF prices check levels the research prints for a market's proxy (QQQ, GLD, SPY …).
 const priceSymbols = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
   [market.price?.symbol, market.hedgeye.riskRange?.priceSymbol]).concat(UNIVERSE.usd.symbol, PROXY_TICKERS).filter(Boolean))];
+const volumeSymbols = () => [...new Set(UNIVERSE.markets.map((market) => market.volume?.symbol)
+  .concat(UNIVERSE.usd.volumeSymbol).filter(Boolean))];
+const allTimeHighSymbols = () => [...new Set(UNIVERSE.markets.filter((market) => market.hedgeye.riskRange)
+  .map(allTimeHighSymbol).concat(UNIVERSE.usd.symbol).filter(Boolean))];
 const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.hedgeye.trade?.ticker)
   .concat(UNIVERSE.usd.tradeTicker).filter(Boolean))];
 
-/** Load every input independently; one failed source leaves its cells empty. */
+/**
+ * Load every input independently; one failed source leaves its cells empty. With a researchDate, only what an
+ * earlier market day's morning research needs: that day's products, read against the current ranges and prices.
+ */
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
-  loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts, marketDateFor }) {
-  return async function loadSetupBoard({ now = new Date() } = {}) {
-    const marketDate = marketDateFor(now);
+  loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts,
+  loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, marketDateFor }) {
+  return async function loadSetupBoard({ now = new Date(), researchDate = null } = {}) {
+    const marketDate = researchDate || marketDateFor(now);
     const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
+    const full = (load) => (researchDate ? Promise.resolve(null) : Promise.resolve().then(load));
+    const loadedRanges = settle(loadRiskRanges({ now }));
+    const optional = (load, args) => (load && !researchDate ? settle(Promise.resolve().then(() => load(args))) : Promise.resolve(null));
+    // An earlier day reads its own Crypto Quant; the current one would put today's call on that date.
+    const products = MORNING_PRODUCTS.map((product) => product.key).filter((key) => researchDate || key !== 'crypto-quant');
     const [riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations, usdPeriods,
-      events, morning] = await Promise.all([
-      settle(loadRiskRanges({ now })),
+      events, morning, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory] = await Promise.all([
+      loadedRanges,
       settle(loadCryptoQuant()),
-      settle(loadHedgai({ now })),
-      settle(loadSecurityIntelligence({ symbols: tradeTickers(), now })),
-      settle(loadNowcast()),
+      settle(full(() => loadHedgai({ now }))),
+      settle(full(() => loadSecurityIntelligence({ symbols: tradeTickers(), now }))),
+      settle(full(() => loadNowcast())),
       settle(loadQuotes(priceSymbols())),
-      settle(loadVolatility()),
-      settle(loadUsdCorrelations()),
-      settle(loadPeriodReturns ? loadPeriodReturns(UNIVERSE.usd.symbol) : Promise.resolve(null)),
-      settle(Promise.all(seriesNames().map((name) => loadKalshiEvents(name)
-        .then((list) => [name, list], () => [name, []])))),
-      settle(loadMorningProducts
-        ? loadMorningProducts({ marketDate, products: MORNING_PRODUCTS.map((product) => product.key).filter((key) => key !== 'crypto-quant') })
-        : Promise.resolve(null)),
+      settle(full(() => loadVolatility())),
+      settle(full(() => loadUsdCorrelations())),
+      settle(full(() => (loadPeriodReturns ? loadPeriodReturns(UNIVERSE.usd.symbol) : null))),
+      settle(full(() => Promise.all(seriesNames().map((name) => loadKalshiEvents(name)
+        .then((list) => [name, list], () => [name, []]))))),
+      settle(loadMorningProducts ? loadMorningProducts({ marketDate, products }) : Promise.resolve(null)),
+      // Earlier publications than the one on the board, oldest first.
+      loadedRanges.then((ranges) => optional(loadRiskRangeHistory, { before: ranges.value?.manifest?.publicationDate || null,
+        sessions: STRUCTURE_SESSIONS, now })),
+      optional(loadCryptoQuantHistory, { sessions: STRUCTURE_SESSIONS + 1 }),
+      optional(loadAllTimeHighs, allTimeHighSymbols()),
+      optional(loadVolumeHistory, volumeSymbols()),
     ]);
+    if (researchDate && morning.value) morning.value = { 'crypto-quant': {}, ...morning.value };
     const board = buildSetupBoard({
       riskRanges: riskRanges.value, cryptoQuant: cryptoQuant.value, hedgai: hedgai.value,
       securityIntelligence: securityIntelligence.value, nowcast: nowcast.value, quotes: quotes.value,
       volatility: volatility.value, usdCorrelations: usdCorrelations.value, usdPeriods: usdPeriods.value,
       eventsBySeries: Object.fromEntries(events.value || []), marketDate, asOf: now.toISOString(),
       morningSnapshots: loadMorningProducts ? (morning.value || {}) : undefined,
+      // With a history loader, a failed load still yields a board with structure marked unavailable.
+      ...(riskRangeHistory ? { riskRangeHistory: riskRangeHistory.value || [], cryptoQuantHistory: cryptoQuantHistory?.value || [],
+        allTimeHighs: allTimeHighs?.value || {} } : {}),
+      // A failed volume load still yields a board whose volume reads unavailable.
+      ...(volumeHistory ? { volumeHistory: volumeHistory.value || {} } : {}),
     });
     board.sourceStatus = Object.fromEntries(Object.entries({ riskRanges, cryptoQuant, hedgai, securityIntelligence,
-      nowcast, quotes, volatility, usdCorrelations, kalshi: events, ...(loadMorningProducts ? { morningResearch: morning } : {}) })
+      nowcast, quotes, volatility, usdCorrelations, kalshi: events, ...(loadMorningProducts ? { morningResearch: morning } : {}),
+      ...(riskRangeHistory ? { riskRangeHistory } : {}), ...(cryptoQuantHistory ? { cryptoQuantHistory } : {}),
+      ...(allTimeHighs ? { allTimeHighs } : {}), ...(volumeHistory ? { volumeHistory } : {}) })
       .map(([key, result]) => [key, result.error ? 'failed' : 'ready']));
     return board;
   };
@@ -392,5 +543,5 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
 const extraCboeSeries = () => UNIVERSE.markets.map((market) => market.volatility)
   .filter((spec) => spec?.cboeSymbol).map((spec) => ({ name: spec.key, symbol: spec.cboeSymbol }));
 
-module.exports = { buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents,
+module.exports = { allTimeHighSymbols, volumeSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents,
   priceSymbols, seriesNames, tradeTickers };

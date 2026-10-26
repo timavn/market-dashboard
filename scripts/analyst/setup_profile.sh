@@ -25,6 +25,7 @@ python3 "$SCRIPT_DIR/sync_profile_assets.py" \
   --source "$REPO_ROOT/config/analyst" --target "$ANALYST_HOME" \
   --retire skills/the-analyst \
   --retire skills/portfolio-refresh \
+  --retire skills/portfolio-cross-verification \
   --retire skills/autonomous-ai-agents/hermes-agent \
   --archive-root "$DEFAULT_HERMES_HOME/backups/analyst-retired-skills"
 

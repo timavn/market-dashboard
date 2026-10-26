@@ -22,8 +22,10 @@ test('Predictive Sources keeps label, date and status aligned through queued, re
         ]);
         expect(getComputedStyle(row).alignItems).toBe('center');
         const status = row.querySelector('.analyst-review-source-status-content');
-        expect(status.children[0].tagName.toLowerCase()).toBe('svg');
-        expect(status.children[1].tagName).toBe('SPAN');
+        // A checking row leads with the spinner group; a settled row with its icon and label.
+        const [first, second] = status.children;
+        const content = first.classList.contains('analyst-spinner-group') ? 'spinner' : `${first.tagName.toLowerCase()}+${second?.tagName}`;
+        expect(content).toBe(row.classList.contains('is-checking') ? 'spinner' : 'svg+SPAN');
         expect(getComputedStyle(status).display).toBe('grid');
         expect(getComputedStyle(status).gridTemplateColumns).toBe('12px minmax(0, 1fr)');
         expect(getComputedStyle(status).alignItems).toBe('center');
@@ -101,7 +103,7 @@ test('partial acquisition fills reserved rows in place and preserves explicit fa
   const captured = JSON.stringify(sources);
   view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={sources} />);
   expect(screen.getAllByRole('listitem')).toEqual(rows);
-  expect(within(rows[0]).getByText('Connected')).toBeVisible();
+  expect(within(rows[0]).getByText('Ready')).toBeVisible();
   expect(screen.queryByText('IBKR account exposure')).not.toBeInTheDocument();
   expect(screen.getAllByText('Checking')).toHaveLength(items.length - 1);
   expect(screen.getByText('Portfolio research archive').closest('li')).toHaveTextContent('Checking');
@@ -109,8 +111,7 @@ test('partial acquisition fills reserved rows in place and preserves explicit fa
   view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={{ ...sources, state: 'complete',
     items: items.map(item => ({ ...item, status: 'ready', observedAt: '2026-10-08T16:05:00Z' })) }} />);
   expect(screen.getAllByRole('listitem')).toEqual(rows);
-  expect(screen.getAllByText('Ready')).toHaveLength(items.length - 1);
-  expect(screen.getByText('Connected')).toBeVisible();
+  expect(screen.getAllByText('Ready')).toHaveLength(items.length);
   expect(screen.getByRole('region', { name: 'Review sources' })).toHaveAttribute('aria-busy', 'false');
 });
 
@@ -212,7 +213,7 @@ test('a transient read failure keeps unfinished rows checking and shows Reconnec
     expect(section).toHaveAttribute('aria-busy', 'true');
     expect(row).toHaveTextContent('Checking');
     expect(row).toHaveClass('is-checking');
-    expect(getComputedStyle(row.querySelector('svg')).animation).toMatch(/analyst-spin/);
+    expect(row.querySelector('.analyst-spinner')).not.toBeNull();
     expect(section.querySelector('header')).toHaveTextContent('Reconnecting…');
     expect(screen.queryByText(/Unavailable|Gathering sources…/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Show explanation/ })).not.toBeInTheDocument();
@@ -400,7 +401,7 @@ test('does not infer a disconnected Gateway from a failed saved balance capture'
   ];
   render(<AnalystReviewSources sources={{ basis: 'review', items }} />);
   expect(screen.getByText('1/2 ready')).toBeVisible();
-  expect(within(screen.getAllByRole('listitem')[0]).getByText('Connected')).toBeVisible();
+  expect(within(screen.getAllByRole('listitem')[0]).getByText('Ready')).toBeVisible();
   expect(within(screen.getAllByRole('listitem')[1]).getByText('Unavailable')).toBeVisible();
   expect(screen.queryByText(/connect to IB Gateway/)).not.toBeInTheDocument();
 });
@@ -418,7 +419,7 @@ test('one captured Gateway connection replaces account categories while keeping 
   render(<AnalystReviewSources reviewKind="portfolio-review" sources={sources} />);
   expect(screen.getAllByRole('listitem')).toHaveLength(3);
   const gateway = screen.getByText('IB Gateway').closest('li');
-  expect(within(gateway).getByText('Connected')).toBeVisible();
+  expect(within(gateway).getByText('Ready')).toBeVisible();
   expect(within(gateway).getByText('Oct 8 09:00 PDT')).toHaveAttribute('datetime', '2026-10-08T16:00:00Z');
   expect(screen.queryByText(/IBKR holdings|IBKR account exposure|IBKR open orders/)).not.toBeInTheDocument();
   expect(screen.getByText('Gold · ForecastEx').closest('li')).toHaveTextContent('Unavailable');
@@ -846,13 +847,13 @@ describe('Sources header clock', () => {
     } finally { interval.mockRestore(); }
   });
 
-  test('manual Sources count from their request start and saved or failed reads show no clock', () => {
-    const manual = { basis: 'manual', runId: 'capture', turnId: 'turn', state: 'acquiring', startedAt: '2026-10-09T14:59:00Z',
-      capturedAt: '2026-10-09T15:00:20Z', items: [{ id: 'risk-ranges', label: 'Risk Ranges', status: 'checking' }] };
-    const view = render(<AnalystReviewSources reviewKind="portfolio-cross-verification" sources={manual} />);
+  test('a running capture counts from its capture start and failed or loading reads show no clock', () => {
+    const running = { basis: 'review', runId: 'run', state: 'acquiring', capturedAt: '2026-10-09T14:59:00Z',
+      items: [{ id: 'risk-ranges', label: 'Risk Ranges', status: 'checking' }] };
+    const view = render(<AnalystReviewSources reviewKind="portfolio-review" sources={running} />);
     const header = screen.getByRole('region', { name: 'Review sources' }).querySelector('header');
     expect(header.querySelector('.analyst-review-sources-elapsed')).toHaveTextContent('1m 21s');
-    view.rerender(<AnalystReviewSources reviewKind="portfolio-cross-verification" sources={manual} readFailed />);
+    view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={running} readFailed />);
     expect(header.querySelector('.analyst-review-sources-elapsed')).toBeNull();
     view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={{ basis: 'review', state: 'running', items: [] }} loading />);
     expect(header.querySelector('.analyst-review-sources-elapsed')).toBeNull();
@@ -863,10 +864,10 @@ test('the header clock keeps counting through a model phase after Sources settle
   jest.useFakeTimers();
   try {
     jest.setSystemTime(new Date('2026-10-09T15:02:10.000Z'));
-    const manual = { basis: 'manual', runId: 'capture', turnId: 'turn', state: 'ready', startedAt: '2026-10-09T15:00:00Z',
-      items: [{ id: 'risk-ranges', label: 'Risk Ranges', status: 'ready', publishedAt: '2026-10-09' }] };
-    const view = render(<AnalystReviewSources reviewKind="portfolio-cross-verification" sources={manual}
-      phase="Writing verification…" modelPhase />);
+    const sources = { basis: 'review', runId: 'run', state: 'succeeded', capturedAt: '2026-10-09T15:00:00Z',
+      items: [{ id: 'balance', label: 'IBKR balances', status: 'ready', observedAt: '2026-10-09T15:00:00Z' }] };
+    const view = render(<AnalystReviewSources reviewKind="balance-review" sources={sources}
+      phase="Summarizing…" modelPhase />);
     const header = screen.getByRole('region', { name: 'Review sources' }).querySelector('header');
     const clock = () => header.querySelector('.analyst-review-sources-elapsed');
     expect(clock()).toHaveTextContent('2m 10s');
@@ -874,7 +875,7 @@ test('the header clock keeps counting through a model phase after Sources settle
     expect(clock()).toHaveTextContent('2m 15s');
     expect(screen.getAllByRole('status', { name: 'Response running' })).toHaveLength(1);
     // The written response ends the model phase and its clock.
-    view.rerender(<AnalystReviewSources reviewKind="portfolio-cross-verification" sources={manual} phase="Writing verification…" />);
+    view.rerender(<AnalystReviewSources reviewKind="balance-review" sources={sources} phase="Summarizing…" />);
     expect(clock()).toBeNull();
   } finally { jest.useRealTimers(); }
 });

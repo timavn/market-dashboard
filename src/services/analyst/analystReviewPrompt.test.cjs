@@ -12,7 +12,8 @@ test('supporting dashboard reads avoid duplicate live acquisition while required
     assert.ok(prompt.endsWith('Captured evidence'));
   }
   const prediction = reviewNarrativePrompt('prediction-markets-review', '');
-  assert.match(prediction, /get_prediction_market_snapshot with review_universe=true/);
+  assert.doesNotMatch(prediction, /get_prediction_market_snapshot/);
+  assert.match(prediction, /when a contract quote is unavailable, say it is unavailable/);
   assert.match(prediction, /get_balance_context/);
   assert.doesNotMatch(reviewNarrativePrompt('balance-review', ''), /get_dashboard_context/);
 });
@@ -81,7 +82,6 @@ test('prediction narrative is analytical and keeps diagnostics out of the manage
 
 test('prediction daily research follows the requested venues and preserves product and asset authority', () => {
   const prompt = reviewNarrativePrompt('prediction-markets-review', '');
-  assert.match(prompt, /same seven pinned monitors/);
   assert.match(prompt, /Interactive Brokers with CPI and S&P 500 on ForecastEx, then Kalshi with Nasdaq-100, Gold, Silver, Bitcoin, and Ethereum/);
   assert.match(prompt, /same dated research approach as Portfolio Review/);
   assert.match(prompt, /forward scenarios as distinct from current signals/);
@@ -95,8 +95,7 @@ test('prediction daily research follows the requested venues and preserves produ
 
 test('prediction interpretation retains verification and distinguishes quoted odds from an estimated probability', () => {
   const prompt = reviewNarrativePrompt('prediction-markets-review', '');
-  for (const tool of ['get_prediction_market_snapshot', 'get_portfolio_context', 'get_balance_context', 'get_dashboard_context', 'get_process_context']) assert.ok(prompt.includes(tool));
-  assert.match(prompt, /review_universe=true and no other selectors/);
+  for (const tool of ['get_portfolio_context', 'get_balance_context', 'get_dashboard_context', 'get_process_context']) assert.ok(prompt.includes(tool));
   assert.match(prompt, /withhold sizing when required evidence is unavailable/);
   assert.match(prompt, /Disconnected, stale, cache-only, seeded, or mock inputs cannot support current quotes/);
   assert.match(prompt, /never invent a substitute/);

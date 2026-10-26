@@ -25,7 +25,8 @@ test('shows volatility with regime and implied move, and USD correlations as a 1
   expect(within(volatility).getAllByRole('columnheader').map(cell => cell.textContent))
     .toEqual(['Volatility', 'Level', '1D', '15D', '1M', 'Regime', 'Implied 1D']);
   const [gvz, vix, vxslv] = within(volatility).getAllByRole('row').slice(1);
-  expect(gvz).toHaveTextContent('GVZGold22.01-2.1%-6.7%-17.1%Investable±1.4%±58');
+  // The regime shows the band it sits in on GVZ's own scale.
+  expect(gvz).toHaveTextContent('GVZGold22.01-2.1%-6.7%-17.1%Investable< 24±1.4%±58');
   expect(within(vix).getByText('Trend Bearish')).toHaveClass('is-negative');
   // No history or published band for VXSLV: N/A and its own close date rather than an invented regime.
   expect(vxslv).toHaveTextContent('VXSLVSilver36.33-3.7%N/AN/AOct 9 close±2.3%±1.38');
@@ -41,7 +42,7 @@ test('a reading from an earlier session keeps its date under its regime', () => 
     { symbol: 'MOVE', market: 'Rates', level: '101.10', d1: -1.35, d15: -3.32, m1: 25.24, regimeKey: 'MOVE', regimeValue: 101.103,
       implied: '±6.4 bp', note: 'Oct 16 close' }] }))} />);
   const [move] = within(screen.getByRole('table', { name: 'Volatility' })).getAllByRole('row').slice(1);
-  expect(move.cells[5].textContent).toMatch(/Oct 16 close$/);
+  expect(move.cells[5].textContent).toBe('Chop100–120Oct 16 close');
   expect(move).toHaveTextContent('MOVERates101.10-1.4%-3.3%+25.2%');
 });
 
@@ -60,4 +61,13 @@ test('vs USD values use the dashboard correlation heat: red negative, green posi
   expect(correlationHeatClass('+0.70')).toBe('analyst-corr--pos-light');
   expect(correlationHeatClass('+0.75')).toBe('analyst-corr--pos-strong');
   expect(correlationHeatClass('N/A')).toBe('analyst-driver__muted');
+});
+
+test('each regime shows its band on the metric\'s scale', () => {
+  render(<AnalystPredictionDrivers drivers={parsePredictionDrivers(JSON.stringify({ volatility: [
+    { symbol: 'VIX', market: 'S&P 500', level: '24.10', regimeKey: 'VIX', regimeValue: 24.1 },
+    { symbol: 'OVX', market: 'Oil', level: '61.00', regimeKey: 'OVX', regimeValue: 61 }] }))} />);
+  const [vix, ovx] = within(screen.getByRole('table', { name: 'Volatility' })).getAllByRole('row').slice(1);
+  expect(vix.cells[5].textContent).toBe('Chop20–29');
+  expect(ovx.cells[5].textContent).toBe('Uninvestable≥ 55');
 });

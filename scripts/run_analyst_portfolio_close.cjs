@@ -2,22 +2,20 @@
 'use strict';
 
 const { setTimeout: pause } = require('node:timers/promises');
-const { newYorkDateKey } = require('../src/services/momoTrackerSnapshot.cjs');
-const { isTradingDateKey } = require('../src/utils/usEquityMarketCalendar.cjs');
+const { portfolioCaptureSession } = require('../src/services/analyst/analystPolicy.cjs');
 
 const TIME_ZONE = 'America/New_York';
-const marketTime = value => new Intl.DateTimeFormat('en-GB', {
-  timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-}).format(new Date(value));
 
 async function runAnalystPortfolioClose({
   apiBase = process.env.MARKET_DASHBOARD_API_BASE || 'http://127.0.0.1:3001',
   fetchImpl = global.fetch, now = Date.now, sleep = pause, timeoutMs = 180_000,
 } = {}) {
-  const date = newYorkDateKey(now());
+  // Holdings are frozen from a session's close until the next 4:00am ET
+  // pre-market open, so nights, weekends and holidays still capture that close.
+  const session = portfolioCaptureSession(new Date(now()));
+  const { date } = session;
   const base = { date, timeZone: TIME_ZONE };
   const failed = reason => ({ ...base, status: 'failed', reason });
-  if (!isTradingDateKey(date)) return { ...base, status: 'skipped', reason: 'non_trading_day' };
   const endpoint = `${apiBase.replace(/\/$/, '')}/api/analyst/automation/portfolio-close`;
   const deadline = now() + Math.min(180_000, Math.max(1, timeoutMs));
   let method = 'GET';
@@ -59,18 +57,20 @@ async function runAnalystPortfolioClose({
       && !(Date.parse(result.retryAt) > now())) {
       method = 'POST';
       started = true;
+      // The retry is a new run; only that run's identity is followed from here.
+      identity = undefined;
       continue;
     }
     if (['scheduled', 'skipped', 'blocked', 'failed'].includes(result.status)) return result;
     if (result.status === 'ready') {
       const captured = Date.parse(result.capturedAt);
-      if (!Number.isFinite(captured) || newYorkDateKey(captured) !== date
-        || captured > now() + 5_000 || marketTime(captured) < result.scheduledTime
-        || result.fallback === true || result.verifiedAtCapture === false) return failed('capture_not_verified');
+      const capturedSession = Number.isFinite(captured) && portfolioCaptureSession(new Date(captured));
+      if (!capturedSession || capturedSession.date !== date || !capturedSession.due
+        || captured > now() + 5_000 || result.fallback === true || result.verifiedAtCapture === false) return failed('capture_not_verified');
       return result;
     }
     if (result.status === 'pending' && !started) {
-      if (marketTime(now()) < result.scheduledTime) return failed('capture_not_due');
+      if (!session.due) return failed('capture_not_due');
       method = 'POST';
       started = true;
       continue;

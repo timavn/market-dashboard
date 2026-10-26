@@ -23,7 +23,8 @@ test('saved chats and cursor load while archive import remains pending', async t
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { conversations: [{ id: 'saved-chat' }], cursor: 9000 });
   await workspace.initialize();
-  assert.deepEqual(calls, ['recover', 'import', 'list']);
+  // Listing chats also reads the inbox-thread links so alert discussions stay out of Chats.
+  assert.deepEqual(calls, ['recover', 'import', 'list', 'setting']);
 });
 
 test('failed archive import retries without repeating recovery', async () => {

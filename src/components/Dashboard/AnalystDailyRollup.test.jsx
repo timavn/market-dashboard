@@ -44,7 +44,7 @@ test('saved high-priority realignment uses compact separate columns and retains 
   });
   const dateline = screen.getByRole('region', { name: 'Highest-priority realignment' }).querySelector('.portfolio-review-dateline');
   expect(dateline).toHaveClass('has-period');
-  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Positioning: Sep 30, 2026 10:53 PDT');
+  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 30, 2026 10:53 PDT');
   expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Sep 30, 2026');
   expect(dateline).not.toHaveTextContent(/·|Research:/);
   expect(within(table).getByText('CVR Energy').closest('.analyst-security-name')).toHaveAttribute('title', 'CVR Energy');
@@ -84,7 +84,7 @@ test('all portfolio alignment sections separate their captured holdings date fro
     const region = screen.getByRole('region', { name: id });
     const dateline = region.querySelector('.portfolio-review-dateline');
     expect(dateline).toHaveClass('has-period');
-    expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Positioning: Sep 30, 2026 10:53 PDT');
+    expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 30, 2026 10:53 PDT');
     expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Sep 27, 2026 – Sep 29, 2026');
     expect(dateline).not.toHaveTextContent(/·|Research:/);
     expect(within(region).getAllByRole('cell').map(cell => cell.textContent)).toEqual(cells);
@@ -107,10 +107,10 @@ test('research comparisons retain the latest publication at left and the full so
   const region = screen.getByRole('region', { name: 'Trend/Ranges/Coverage/Outbucket' });
   const dateline = region.querySelector('.portfolio-review-dateline');
   expect(dateline).toHaveClass('has-period');
-  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Published: Sep 4, 2026 07:30 PDT');
+  expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 4, 2026 07:30 PDT');
   expect(dateline.querySelector('.portfolio-review-period')).toHaveTextContent('Period: Aug 31, 2026 – Sep 4, 2026');
   expect(dateline).not.toHaveTextContent(/Sep 30|·|Compared with/);
-  expect(within(region).getAllByRole('cell').map(cell => cell.textContent)).toEqual(cells);
+  expect(within(region).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['SPY', 'SPDR S&P 500 ETF Trust', 'Bullish → Neutral']);
   expect(JSON.stringify(data)).toBe(captured);
 });
 
@@ -132,7 +132,8 @@ test('statistics and model datelines keep their meanings without becoming public
   for (const [title, expected] of [['Tick', tickDates], ['Factor exposure', modelDates]]) {
     const region = screen.getByRole('region', { name: title });
     const dateline = region.querySelector('.portfolio-review-dateline');
-    expect(dateline).toHaveTextContent(expected);
+    expect(dateline).toHaveTextContent(expected.replace('Positioning: ', ''));
+    expect(dateline).toHaveAttribute('title', expected);
     expect(dateline).not.toHaveClass('has-period');
     expect(region.querySelector('.portfolio-review-period')).toBeNull();
     expect(dateline).not.toHaveTextContent('Oct 1');
@@ -153,7 +154,7 @@ test.each(['Report: Sep 28, 2026', 'Published Sep 28, 2026 · Data as of Sep 25,
     const captured = JSON.stringify(data);
     const onCitation = jest.fn();
     render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
-    expect(screen.getByText(wholeText('Published: Sep 28, 2026 · Data as of: Sep 25, 2026'))).toBeVisible();
+    expect(screen.getByText(wholeText('Sep 28, 2026 · Data as of: Sep 25, 2026'))).toBeVisible();
     expect(screen.getByRole('columnheader', { name: 'Data as of' })).toBeVisible();
     expect(screen.getAllByRole('cell', { name: 'Sep 25, 2026' })).toHaveLength(2);
     expect(screen.getByRole('cell', { name: '6.82' })).toBeVisible();
@@ -171,7 +172,7 @@ test.each(['Sep 24, 2026', '—'])('market structure does not claim a shared dat
       { cells: ['Zero-gamma level', '7,659', otherDate] },
     ] },
   ] }] }} />);
-  expect(screen.getByText(wholeText('Published: Sep 28, 2026'))).toBeVisible();
+  expect(screen.getByText(wholeText('Sep 28, 2026'))).toBeVisible();
   expect(screen.queryByText(/· Data as of/)).not.toBeInTheDocument();
   expect(screen.getByRole('cell', { name: 'Sep 25, 2026' })).toBeVisible();
   expect(screen.getByRole('cell', { name: otherDate })).toBeVisible();
@@ -243,7 +244,7 @@ test('position tables show uncited products as text and preserve an unavailable 
   expect(screen.queryByText(/\d+\.\d+%/)).not.toBeInTheDocument();
 });
 
-test.each(['position-confirmations', 'refresh-realignment', 'refresh-watch-list', 'refresh-aligned'])('%s resolves missing descriptive names while captured names and research stay immutable', id => {
+test.each(['position-confirmations', 'refresh-realignment', 'refresh-watch-list', 'refresh-aligned'])('%s and other research tables resolve missing descriptive names while captured names stay immutable', id => {
   usePortfolioSecurityNames.mockReturnValueOnce({
     DBMF: { name: 'iMGP DBi Managed Futures Strategy ETF', source: 'Verified security catalog' },
     MSFT: { name: 'Current Microsoft name', source: 'Verified security catalog' },
@@ -258,13 +259,13 @@ test.each(['position-confirmations', 'refresh-realignment', 'refresh-watch-list'
   const before = JSON.stringify(data);
   render(<AnalystDailyRollup rollup={data} />);
   expect(usePortfolioSecurityNames).toHaveBeenLastCalledWith([
-    { holding: 'DBMF', securityName: '' }, { holding: 'MSFT', securityName: 'Captured Microsoft name' },
+    { holding: 'DBMF', securityName: '' }, { holding: 'MSFT', securityName: 'Captured Microsoft name' }, { holding: 'DBMF', securityName: '' },
   ]);
   const region = screen.getByRole('region', { name: 'Position confirmations' });
   expect(within(region).getByText('iMGP DBi Managed Futures Strategy ETF').closest('.analyst-security-name')).toHaveAttribute('title', 'iMGP DBi Managed Futures Strategy ETF · Current security name · Verified security catalog');
   expect(within(region).getByText('Captured Microsoft name').closest('.analyst-security-name')).toHaveAttribute('title', 'Captured Microsoft name');
   expect(screen.queryByText('Current Microsoft name')).not.toBeInTheDocument();
-  expect(within(screen.getByRole('region', { name: 'Other research' })).getByText('—')).toBeVisible();
+  expect(within(screen.getByRole('region', { name: 'Other research' })).getByText('iMGP DBi Managed Futures Strategy ETF')).toBeVisible();
   expect(JSON.stringify(data)).toBe(before);
 });
 
@@ -749,7 +750,8 @@ test.each([
     const table = within(region).getByRole('table', { name: label, exact: true });
     expect(table.querySelector('caption')).toHaveTextContent(label);
     expect(table.firstElementChild.tagName).toBe('CAPTION');
-    expect(within(table).getAllByRole('cell').map(cell => cell.textContent)).toEqual(blocks[index].rows[0].cells);
+    expect(within(table).getAllByRole('cell').map(cell => cell.textContent)).toEqual(index === 0
+      ? ['VIX', 'Volatility Index', 'Neutral → Bearish'] : blocks[index].rows[0].cells);
   });
   const macroTable = screen.getByRole('table', { name: 'Macro outlook' });
   expect(macroTable.querySelector('caption')).toBeNull();
@@ -787,9 +789,10 @@ test('ticker and security precede unchanged signals and ranges with source evide
   const onCitation = jest.fn();
   render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
   const tables = screen.getAllByRole('table');
-  expect(within(tables[0]).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Ticker', 'Security', 'Prior Trend', 'Trend']);
+  expect(within(tables[0]).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Ticker', 'Security', 'Trend']);
   expect(within(tables[1]).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Ticker', 'Security', 'Prior range', 'Published range', 'Trend']);
-  expect(screen.getByRole('row', { name: 'VIX Volatility Index Neutral Bearish' })).toBeVisible();
+  expect(screen.getByRole('row', { name: 'VIX Volatility Index Neutral → Bearish' })).toBeVisible();
+  expect(within(tables[0]).getByText('Neutral')).toHaveClass('analyst-process--muted');
   expect(screen.getByRole('row', { name: `BRENT ${security} 97–111 97–110 Bullish` })).toBeVisible();
   expect(screen.getByTitle(security)).toHaveClass('analyst-security-name');
   expect(screen.getByText('Bearish')).toHaveClass('analyst-process--negative');
@@ -851,7 +854,7 @@ test('LOW and HIGH show independent published-boundary changes with aligned comp
   expect(tables[1]).toHaveClass('analyst-range-boundary-comparison');
   expect(within(tables[1]).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(data.sections[0].blocks[1].columns);
   expect(tables[1].querySelectorAll('col')).toHaveLength(7);
-  expect([...tables[0].querySelectorAll('col')].map(col => col.className)).toEqual([...tables[1].querySelectorAll('col')].slice(0, 4).map(col => col.className));
+  expect([...tables[0].querySelectorAll('col')].slice(0, 2).map(col => col.className)).toEqual([...tables[1].querySelectorAll('col')].slice(0, 2).map(col => col.className));
   for (const label of ['Higher low', 'Higher high']) for (const node of within(tables[1]).getAllByText(label)) expect(node).toHaveClass('analyst-process--positive');
   for (const label of ['Lower low', 'Lower high']) for (const node of within(tables[1]).getAllByText(label)) expect(node).toHaveClass('analyst-process--negative');
   for (const label of ['Unchanged', '—']) expect(within(tables[1]).getByText(label)).toHaveClass('analyst-process--muted');
@@ -1173,7 +1176,7 @@ test('wide Portfolio Review research tables fit their report width with visible 
   } finally { style.remove(); }
 });
 
-test('Factor and Tick identities stay on one compact line while captured readings and hover evidence stay complete', () => {
+test('Factor and Tick readings stay on one compact line, security names wrap in full, and hover evidence stays complete', () => {
   const style = document.createElement('style');
   style.textContent = require('fs').readFileSync(require('path').join(__dirname, 'AnalystDailyRollup.css'), 'utf8');
   document.head.append(style);
@@ -1195,7 +1198,9 @@ test('Factor and Tick identities stay on one compact line while captured reading
     const factorName = screen.getByText(factor).closest('.analyst-factor-name');
     const securityName = screen.getByText(security).closest('.analyst-security-name');
     const reading = document.querySelector('.analyst-tick-reading');
-    for (const identity of [factorName, securityName, reading]) {
+    expect(window.getComputedStyle(securityName).whiteSpace).toBe('normal');
+    expect(window.getComputedStyle(securityName).textOverflow).not.toBe('ellipsis');
+    for (const identity of [factorName, reading]) {
       expect(window.getComputedStyle(identity).whiteSpace).toBe('nowrap');
       expect(window.getComputedStyle(identity).overflow).toBe('hidden');
       expect(window.getComputedStyle(identity).textOverflow).toBe('ellipsis');

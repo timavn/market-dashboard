@@ -74,7 +74,10 @@ function eligible(snapshot, marketDate, asOf) {
   for (const value of [snapshot.article?.publishedAt, ...['publishedAt', 'receivedAt', 'scrapedAt', 'retrievedAt', 'createdAt'].map(field => snapshot[field])]) {
     if (value && instant(value) !== null && instant(value) > instant(asOf)) return 'future-source-observation';
   }
-  if (!snapshot.article?.feedUrl && !snapshot.sourceUrl && !snapshot.sourceMessageId && !snapshot.gmailMessageId
+  // A history backfill assembled from several emails names each source message.
+  const sourceMessages = Array.isArray(snapshot.sourceMessageIds)
+    && snapshot.sourceMessageIds.length && snapshot.sourceMessageIds.every(id => typeof id === 'string' && id.trim());
+  if (!snapshot.article?.feedUrl && !snapshot.sourceUrl && !snapshot.sourceMessageId && !snapshot.gmailMessageId && !sourceMessages
     && !snapshot.htmlSource && !snapshot.pdfSource && !snapshot.pdfS3Key && !snapshot.sourceArtifact) return 'source-provenance-missing';
   if (!productFor(snapshot)) return 'source-product-missing';
   return null;

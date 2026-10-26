@@ -18,7 +18,7 @@
 .analyst-research-disclosure > summary { cursor: pointer; color: var(--portfolio-review-blue, #2563eb); font-weight: 400; }
 .analyst-research-disclosure[open] > summary { margin-bottom: 6px; }
 .analyst-daily-rollup .portfolio-brief-table caption { color: var(--portfolio-review-blue, #2563eb); font-size: inherit; font-weight: 400; text-align: left; text-transform: uppercase; }
-.analyst-daily-rollup-citations { margin-top: 6px; color: var(--analyst-muted, #667085); font-size: 9px; font-weight: 400; text-align: left; }
+.analyst-daily-rollup-citations { margin-top: 6px; color: var(--analyst-muted, #667085); font-size: 9px; font-weight: 400; }
 .portfolio-brief .analyst-daily-rollup-citations button { padding: 0; border: 0; background: none; color: var(--analyst-muted, #667085); font-size: 9px; font-weight: 400; }
 .analyst-security-table { table-layout: fixed; min-width: 560px; }
 .analyst-ticker-column { width: 12%; }
@@ -28,7 +28,7 @@
 .analyst-context-column { width: 18%; }
 .analyst-trend-comparison .analyst-current-column { width: 40%; }
 .analyst-security-table td:first-child { white-space: nowrap; }
-.analyst-security-name,
+.analyst-security-name { display: block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .analyst-factor-name { display: block; max-width: 21ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .analyst-tick-reading { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .analyst-factor-table :is(th, td):first-child { width: 22%; }
@@ -44,7 +44,6 @@
 .analyst-refresh-realignment th, .analyst-refresh-realignment td { white-space: normal; overflow-wrap: anywhere; }
 .analyst-security-table.analyst-refresh-realignment td:first-child { white-space: normal; }
 .portfolio-brief-table.analyst-refresh-realignment thead th { font-weight: 400; }
-.analyst-refresh-realignment .analyst-security-name { max-width: 100%; }
 .has-range-boundaries .analyst-security-comparison { min-width: 680px; }
 .has-range-boundaries .analyst-security-comparison .analyst-ticker-column { width: 10%; }
 .has-range-boundaries .analyst-security-comparison .analyst-security-column { width: 22%; }
@@ -53,7 +52,8 @@
 .has-range-boundaries .analyst-security-comparison .analyst-boundary-column,
 .has-range-boundaries .analyst-security-comparison .analyst-context-column { width: 11%; }
 .has-range-boundaries .analyst-trend-comparison .analyst-current-column { width: 51%; }
-.analyst-range-boundary { white-space: nowrap; }
+.analyst-range-boundary,
+.analyst-trend-shift-value { white-space: nowrap; }
 .portfolio-brief-table .analyst-research-group th { background: transparent; color: var(--portfolio-review-blue, #2563eb); font-weight: 400; padding-top: 9px; }
 .analyst-hedgai-table col:nth-child(1) { width: 9%; }
 .analyst-hedgai-table col:nth-child(2) { width: 18%; }
@@ -61,7 +61,6 @@
 .analyst-hedgai-summary col:nth-child(4) { width: 18%; }
 .analyst-hedgai-summary col:nth-child(5) { width: 17%; }
 .analyst-hedgai-summary col:nth-child(6) { width: 20%; }
-.analyst-hedgai-table .analyst-security-name { max-width: 100%; }
 .analyst-hedgai-full-book { min-width: 1200px; }
 .portfolio-brief-table.analyst-position-alignment { min-width: 700px; font-size: inherit; line-height: inherit; }
 .analyst-position-alignment col:nth-child(1) { width: 7%; }
@@ -79,3 +78,9 @@
 .analyst-daily-rollup--stable .portfolio-brief-table td,
 .analyst-daily-rollup--stable .portfolio-brief-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
 .analyst-daily-rollup--stable .analyst-range-boundary { white-space: normal; overflow-wrap: anywhere; }
+/* Portfolio Review tables size to their content and sit centered; Tick keeps its fixed grid. */
+.analyst-daily-rollup .portfolio-brief-table:not(.analyst-hedgai-table) { width: auto; min-width: 0; max-width: 100%; margin-inline: auto; table-layout: auto; }
+.analyst-daily-rollup .portfolio-brief-table:not(.analyst-hedgai-table) col { width: auto; }
+.analyst-daily-rollup .portfolio-brief-table:not(.analyst-hedgai-table) :is(th, td, caption) { text-align: center; }
+/* Words wrap whole so short tickers and readings keep their width beside long security names. */
+.analyst-daily-rollup .portfolio-brief-table:not(.analyst-hedgai-table) :is(th, td, .analyst-security-name, .analyst-range-boundary) { overflow-wrap: break-word; }
