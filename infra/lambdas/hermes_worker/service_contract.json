@@ -4,8 +4,6 @@
     "automation.hermes",
     "dashboard.core",
     "portfolio.live",
-    "prediction.display",
-    "prediction.ibkrExecution",
     "research.current"
   ],
   "functionName": "market-dashboard-hermes-worker-v2",

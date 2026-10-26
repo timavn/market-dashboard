@@ -23,8 +23,8 @@ DDB_TABLES=(
   CalendarNotes DailyNotes HedgeyeCallNotes HedgeyeDailySnapshot HedgeyeMacroNotes
   HedgeyeRiskRanges HedgeyeSignalStrength HermesAgentRuns HermesAlerts
   HermesEmailIngestLedger HermesInputSnapshots ResearchEventLedgerV2 Holdings MarketPriceHistory PerformanceHistory
-  PerformanceMetrics PortfolioSnapshots PositionPerformance PredictionMarketSettings
-  PredictionMarkets ProcessingLogs RealizedGainLoss RiskRangeData USDCorrelations
+  PerformanceMetrics PortfolioSnapshots PositionPerformance
+  ProcessingLogs RealizedGainLoss RiskRangeData USDCorrelations
 )
 
 DDB_READ_UNITS=0

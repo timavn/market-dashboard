@@ -4,8 +4,6 @@
     "automation.hermes",
     "dashboard.core",
     "portfolio.live",
-    "prediction.display",
-    "prediction.ibkrExecution",
     "research.current"
   ],
   "owners": [
@@ -31,8 +29,6 @@
     "resources": {
       "serviceHeartbeatTable": "MarketDashboardServiceHeartbeats",
       "hermesInputSnapshotTable": "HermesInputSnapshots",
-      "predictionCatalogTable": "PredictionMarketCatalogV2",
-      "predictionPerformanceTable": "PredictionMarketPerformanceLedger",
       "researchEventLedgerTable": "ResearchEventLedgerV2",
       "researchEntityEventsTable": "ResearchEntityEventsV1",
       "researchProductManifestTable": "ResearchProductManifestsV1",
@@ -75,11 +71,6 @@
       "text": "Require a fresh typed poll heartbeat. OAuth grants are manual; incremental poll retries are safe only after authorization is valid."
     },
     {
-      "id": "prediction-catalog",
-      "label": "Prediction catalog",
-      "text": "Reconcile only the server-owned current release with venue-native discovery; never promote guessed identifiers or persisted quotes as live."
-    },
-    {
       "id": "research-projections",
       "label": "Research projections",
       "text": "Replay immutable artifacts and events into deterministic projections, reconcile against authoritative checkpoints, and fail closed on conflicts."
@@ -108,18 +99,6 @@
       "id": "automation.readiness",
       "label": "Readiness automation",
       "description": "Gmail ingestion and deterministic readiness automation are completing on cadence.",
-      "blocking": false
-    },
-    {
-      "id": "prediction.display",
-      "label": "Prediction display",
-      "description": "Current prediction-market events are available for display with explicit provenance and freshness.",
-      "blocking": false
-    },
-    {
-      "id": "prediction.ibkrExecution",
-      "label": "Prediction IBKR execution",
-      "description": "Current native IBKR contracts have verified live executable quotes.",
       "blocking": false
     },
     {
@@ -456,47 +435,6 @@
       "automatic": true
     },
     {
-      "id": "prediction.display",
-      "label": "Prediction-market live display",
-      "owner": "research-operations",
-      "runbookId": "prediction-catalog",
-      "capabilityIds": ["prediction.display"],
-      "dependsOn": ["dashboard.api"],
-      "blocking": false,
-      "automatic": true,
-      "aws": {
-        "catalogTable": "PredictionMarketCatalogV2"
-      },
-      "recoveryActionId": "reconcile-prediction-catalog"
-    },
-    {
-      "id": "prediction.ibkrExecution",
-      "label": "Prediction-market IBKR execution catalog",
-      "owner": "brokerage-operations",
-      "runbookId": "prediction-catalog",
-      "capabilityIds": ["prediction.ibkrExecution"],
-      "dependsOn": ["ibkr.sidecar", "ibkr.gateway"],
-      "blocking": false,
-      "automatic": true,
-      "aws": {
-        "catalogTable": "PredictionMarketCatalogV2"
-      },
-      "recoveryActionId": "reconcile-prediction-catalog"
-    },
-    {
-      "id": "prediction.performanceLedger",
-      "label": "Prediction-market performance ledger",
-      "owner": "brokerage-operations",
-      "runbookId": "prediction-catalog",
-      "capabilityIds": ["prediction.ibkrExecution"],
-      "dependsOn": ["dashboard.api", "ibkr.sidecar"],
-      "blocking": false,
-      "automatic": true,
-      "aws": {
-        "ledgerTable": "PredictionMarketPerformanceLedger"
-      }
-    },
-    {
       "id": "research.rta",
       "label": "RTA positions",
       "owner": "research-operations",
@@ -773,60 +711,6 @@
       ],
       "verificationChecks": ["research.rta"],
       "settleTimeoutMs": 5000,
-      "cooldownMs": 600000,
-      "attemptWindowMs": 3600000,
-      "maxAttempts": 2,
-      "circuitDurationMs": 3600000,
-      "escalationOwner": "research-operations"
-    },
-    {
-      "id": "reconcile-prediction-catalog",
-      "label": "Reconcile the current CPI contract catalog",
-      "description": "Runs the fixed server-owned current-release reconciliation. Historical UI selections and caller-supplied contract identifiers are ignored.",
-      "executor": "prediction-catalog-reconcile",
-      "command": "Reconcile the server-owned current CPI release",
-      "automatic": true,
-      "loopbackOnly": true,
-      "controllerExecutor": "loopback-readiness-api",
-      "authority": "automatic",
-      "triggeringCheckIds": [
-        "prediction.ibkrExecution"
-      ],
-      "triggeringErrorCodes": [
-        "CATALOG_NOT_PROMOTED",
-        "NO_CURRENT_EXECUTABLE_IBKR_CONTRACT"
-      ],
-      "scope": "prediction-catalog",
-      "riskClass": "low",
-      "prerequisites": [
-        {
-          "checkId": "ibkr.sidecar",
-          "statuses": ["pass"],
-          "maxAgeMs": 300000
-        },
-        {
-          "checkId": "ibkr.gateway",
-          "statuses": ["pass"],
-          "maxAgeMs": 300000
-        },
-        {
-          "checkId": "prediction.display",
-          "statuses": ["pass", "fail"],
-          "allowedErrorCodes": [
-            null,
-            "CATALOG_NOT_PROMOTED",
-            "NO_CURRENT_NATIVE_LIVE_QUOTE"
-          ],
-          "maxAgeMs": 180000
-        }
-      ],
-      "verificationChecks": [
-        "ibkr.sidecar",
-        "ibkr.gateway",
-        "prediction.display",
-        "prediction.ibkrExecution"
-      ],
-      "settleTimeoutMs": 15000,
       "cooldownMs": 600000,
       "attemptWindowMs": 3600000,
       "maxAttempts": 2,

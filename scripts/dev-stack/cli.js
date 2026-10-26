@@ -9,6 +9,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { randomBytes } = require('crypto');
+const net = require('net');
 const { spawn, execFileSync, execFile } = require('child_process');
 const { analystHealthFailureRequiresInvalidation, createAnalystVerificationController } = require('./analystLifecycle.cjs');
 const { CONTRACT_MESSAGE, CONTRACT_READY_MESSAGE } = require('../../src/services/analyst/analystRuntimeGate.cjs');
@@ -72,6 +73,16 @@ const sidecarHealthTimeoutMs = Math.max(
   5_000,
   Number(process.env.MARKET_DASHBOARD_SIDECAR_HEALTH_TIMEOUT_MS) || 10_000,
 );
+// Hermes answers status from Python and slows sharply when the host is
+// saturated (a full test run, indexing). Three 1.5-second misses used to
+// restart a healthy gateway and drop the chat turn it was serving.
+const analystHermesHealthTimeoutMs = Math.max(
+  5_000,
+  Number(process.env.MARKET_DASHBOARD_ANALYST_HERMES_HEALTH_TIMEOUT_MS) || 10_000,
+);
+// `lsof` and `ps` slow down under the same load. Bound them so one inspection
+// cannot stall the monitor, and treat an unanswered inspection as unknown.
+const processInspectionTimeoutMs = 10_000;
 const awsPreflightRetryMs = Math.max(
   30_000,
   Number(process.env.MARKET_DASHBOARD_AWS_PREFLIGHT_RETRY_MS) || 60_000,
@@ -91,8 +102,6 @@ function expectedCapabilityIdsForEnv(env = process.env) {
   automationCapability,
   'dashboard.core',
   'portfolio.live',
-  'prediction.display',
-  'prediction.ibkrExecution',
   'research.current',
   ]);
 }
@@ -102,7 +111,7 @@ const services = {
   ui: { port: 3000, health: 'http://127.0.0.1:3000/', args: [path.join(root, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', '3000', '--strictPort'], env: { HOST: '127.0.0.1', PORT: '3000', CI: 'true', BROWSER: 'none', NODE_OPTIONS: '--max-old-space-size=3072' }, critical: true },
   sidecar: { port: 8765, health: 'http://127.0.0.1:8765/livez', healthTimeoutMs: sidecarHealthTimeoutMs, shell: true, args: ['scripts/ibkr_sidecar/start.sh'], env: {}, critical: false },
   analystSidecar: { port: 6951, health: 'http://127.0.0.1:6951/livez', healthTimeoutMs: sidecarHealthTimeoutMs, shell: true, args: ['scripts/analyst_sidecar/start.sh'], env: {}, critical: false },
-  analystHermes: { port: 9121, health: 'http://127.0.0.1:9121/api/status', shell: true, args: ['scripts/analyst/start_hermes.sh'], env: {}, critical: false },
+  analystHermes: { port: 9121, health: 'http://127.0.0.1:9121/api/status', healthTimeoutMs: analystHermesHealthTimeoutMs, shell: true, args: ['scripts/analyst/start_hermes.sh'], env: {}, critical: false },
   bridge: {
     processOnly: true,
     args: [path.join(root, 'scripts/ops/hermes_snapshot_bridge.js')],
@@ -619,6 +628,28 @@ function launchAgentIsLoaded() {
 function listenerPid(port) {
   try { return Number(execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' }).trim().split(/\s+/)[0]); } catch { return null; }
 }
+// `lsof -t` exits 1 with no output when nothing listens. A timeout, signal or
+// any other failure is an unknown answer, never proof the port is free.
+function listenerLookup(port, { run = execFileSync, timeoutMs = processInspectionTimeoutMs } = {}) {
+  try {
+    const pid = Number(String(run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {
+      encoding: 'utf8', timeout: timeoutMs,
+    })).trim().split(/\s+/)[0]);
+    return { pid: validProcessId(pid) ? pid : null, failed: false };
+  } catch (error) {
+    const nothingListening = error?.status === 1 && !error?.signal && !String(error?.stdout || '').trim();
+    return { pid: null, failed: !nothingListening };
+  }
+}
+function portAcceptsConnections(port, timeoutMs = 2_000) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port });
+    const finish = (accepted) => { socket.destroy(); resolve(accepted); };
+    socket.setTimeout(timeoutMs, () => finish(false));
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+  });
+}
 function validProcessId(pid) {
   const numericPid = Number(pid);
   return Number.isInteger(numericPid) && numericPid > 0;
@@ -814,11 +845,37 @@ function hasExpectedDashboardSignature(commandText, cwd) {
       && (tokens.includes('scripts/analyst/start_hermes.sh') || tokens.includes(analystHermesStartPath))) return true;
   return false;
 }
+function ownershipLookup(pid, {
+  cwdFor = processCwd,
+  commandFor = processCommand,
+  alive = isAlive,
+} = {}) {
+  if (!validProcessId(pid)) return { owned: false, inconclusive: false };
+  const cwd = cwdFor(pid);
+  const cmd = commandFor(pid);
+  const owned = pathIsInRoot(cwd) && hasExpectedDashboardSignature(cmd, cwd);
+  // A live process whose `ps`/`lsof` answer came back empty has an unknown
+  // owner, not a foreign one.
+  return { owned, inconclusive: !owned && (!cwd || !cmd) && alive(pid) };
+}
 function isOwned(pid) {
-  if (!validProcessId(pid)) return false;
-  const cwd = processCwd(pid);
-  const cmd = processCommand(pid);
-  return pathIsInRoot(cwd) && hasExpectedDashboardSignature(cmd, cwd);
+  return ownershipLookup(pid).owned;
+}
+// Decides whether a monitor tick learned anything about a port service. An
+// unknown answer must hold the last observation: counting it as a failure is
+// how a saturated host restarts a gateway that is still serving.
+async function inspectServiceListener(port, previousPid, {
+  lookup = listenerLookup,
+  ownership = ownershipLookup,
+  accepts = portAcceptsConnections,
+} = {}) {
+  const { pid, failed } = lookup(port);
+  if (!pid) {
+    const inconclusive = failed || await accepts(port);
+    return { pid: null, owned: false, inconclusive };
+  }
+  const { owned, inconclusive } = ownership(pid);
+  return { pid, owned, inconclusive: inconclusive && pid === Number(previousPid) };
 }
 function isAlive(pid) {
   if (!validProcessId(pid)) return false;
@@ -2003,8 +2060,14 @@ async function runMonitor() {
           item.healthFailures = staleOrDead ? Number(item.healthFailures || 0) + 1 : 0;
           if (snapshot.ready) item.lastHealthyAt = new Date().toISOString();
         } else {
-          const pid = listenerPid(service.port);
-          const owned = Boolean(pid && isOwned(pid));
+          const inspection = await inspectServiceListener(service.port, item.pid);
+          if (inspection.inconclusive) {
+            item.inconclusiveInspections = Number(item.inconclusiveInspections || 0) + 1;
+            observeServiceNotification(name, item);
+            continue;
+          }
+          item.inconclusiveInspections = 0;
+          const { pid, owned } = inspection;
           const analystDependency = ['analystSidecar', 'analystHermes'].includes(name);
           const probe = owned && analystDependency
             ? await httpHealthProbe(service.health, service.healthTimeoutMs)
@@ -2836,7 +2899,7 @@ function unavailableSystemGroup(message, recoveryCommand = 'npm run morning') {
       detail: readinessUrl,
       observedAt: new Date().toISOString(),
       ageSeconds: null,
-      impact: 'Gateway, portfolio, Hermes, Gmail, research, and prediction-market readiness could not be verified.',
+      impact: 'Gateway, portfolio, Hermes, Gmail, and research readiness could not be verified.',
       recovery: {
         kind: 'command',
         label: 'Restore the local API and rerun the full morning checklist.',
@@ -3292,7 +3355,10 @@ module.exports = {
   httpOk,
   httpHealthProbe,
   hermesBridgeEnabled,
+  inspectServiceListener,
   isRecoverableOrphanedAnalystHermes,
+  listenerLookup,
+  ownershipLookup,
   authenticationGroup,
   fetchLoginStatus,
   launchAgentIsLoaded,

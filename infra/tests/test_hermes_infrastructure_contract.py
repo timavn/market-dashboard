@@ -72,8 +72,6 @@ EXACT_CAPABILITY_IDS = {
     "automation.hermes",
     "dashboard.core",
     "portfolio.live",
-    "prediction.display",
-    "prediction.ibkrExecution",
     "research.current",
 }
 
@@ -211,10 +209,6 @@ class HermesInfrastructureContractTests(unittest.TestCase):
         self.assertEqual(
             resources["ResearchEventLedgerV2"]["Properties"]["TableName"],
             manifest_resources["researchEventLedgerTable"],
-        )
-        self.assertEqual(
-            resources["PredictionMarketCatalogV2"]["Properties"]["TableName"],
-            manifest_resources["predictionCatalogTable"],
         )
         self.assertEqual(
             resources["RiskRangePublicationManifestsV2"]["Properties"]["TableName"],

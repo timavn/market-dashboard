@@ -1,10 +1,11 @@
+import asyncio
 import json
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from ib_insync import Contract
+from ib_insync import CommissionReport, Contract, Execution, Fill
 
 import app
 
@@ -1040,6 +1041,84 @@ class InterestObservationTests(unittest.IsolatedAsyncioTestCase):
             busy_payload["errorCode"],
             "INTEREST_OBSERVATION_BUSY",
         )
+
+
+class AccountExecutionEvidenceTests(unittest.TestCase):
+    def execution_fill(self, commission_report):
+        execution_time = datetime(2026, 9, 14, 18, 8, 36, tzinfo=timezone.utc)
+        return Fill(
+            Contract(
+                conId=9002,
+                secType="FOP",
+                symbol="ES",
+                tradingClass="FES",
+                localSymbol="FES_091426_7625_NO",
+            ),
+            Execution(
+                execId="E-FES-1",
+                acctNumber="U123",
+                side="BOT",
+                shares=5000,
+                price=0.14,
+                time=execution_time,
+            ),
+            commission_report,
+            execution_time,
+        )
+
+    def test_does_not_turn_an_absent_or_unmatched_commission_report_into_zero_fees(self):
+        for report in (
+            CommissionReport(),
+            CommissionReport(execId="other-execution", commission=5, currency="USD", realizedPNL=10),
+        ):
+            with self.subTest(report_execution_id=report.execId):
+                session = SimpleNamespace(
+                    reqExecutionsAsync=AsyncMock(return_value=[self.execution_fill(report)]),
+                )
+                result = asyncio.run(app.request_fresh_account_execution_evidence(session, "U123"))
+                row = result["rows"][0]
+                self.assertEqual(row["execId"], "E-FES-1")
+                self.assertNotIn("commission", row)
+                self.assertNotIn("commissionCurrency", row)
+                self.assertNotIn("realizedPNL", row)
+
+    def test_keeps_matched_commission_reports_including_verified_zero(self):
+        for commission, realized_pnl in ((0, 0), (50, 125)):
+            with self.subTest(commission=commission):
+                session = SimpleNamespace(reqExecutionsAsync=AsyncMock(return_value=[
+                    self.execution_fill(CommissionReport(
+                        execId="E-FES-1",
+                        commission=commission,
+                        currency="USD",
+                        realizedPNL=realized_pnl,
+                    )),
+                ]))
+                result = asyncio.run(app.request_fresh_account_execution_evidence(session, "U123"))
+                row = result["rows"][0]
+                self.assertEqual(row["commission"], commission)
+                self.assertEqual(row["commissionCurrency"], "USD")
+                self.assertEqual(row["realizedPNL"], realized_pnl)
+
+    def test_repeated_execution_reads_keep_fee_evidence_pending_until_matched(self):
+        session = SimpleNamespace(reqExecutionsAsync=AsyncMock(side_effect=[
+            [self.execution_fill(CommissionReport())],
+            [self.execution_fill(CommissionReport(
+                execId="E-FES-1", commission=50, currency="USD",
+            ))],
+            [self.execution_fill(CommissionReport())],
+        ]))
+
+        async def run():
+            return [
+                await app.request_fresh_account_execution_evidence(session, "U123")
+                for _ in range(3)
+            ]
+
+        pending, verified, repeated = asyncio.run(run())
+        self.assertNotIn("commission", pending["rows"][0])
+        self.assertEqual(verified["rows"][0]["commission"], 50)
+        self.assertNotIn("commission", repeated["rows"][0])
+        self.assertEqual([result["count"] for result in (pending, verified, repeated)], [1, 1, 1])
 
 
 if __name__ == "__main__":

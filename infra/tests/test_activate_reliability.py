@@ -381,8 +381,6 @@ class ReliabilityActivationTests(unittest.TestCase):
                 "automation.hermes",
                 "dashboard.core",
                 "portfolio.live",
-                "prediction.display",
-                "prediction.ibkrExecution",
                 "research.current",
             }
         }

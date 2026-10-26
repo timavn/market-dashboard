@@ -49,8 +49,6 @@ function inputs(overrides = {}) {
         'automation.hermes': { status: 'degraded', ready: false },
         'dashboard.core': { status: 'ready', ready: true },
         'portfolio.live': { status: 'pass', ready: true },
-        'prediction.display': { status: 'degraded', ready: false },
-        'prediction.ibkrExecution': { status: 'degraded', ready: false },
         'research.current': { status: 'degraded', ready: false },
       },
       rootCauses: [],
@@ -409,21 +407,21 @@ test('missing dedicated profile credentials have a distinct actionable code', ()
 test('operations snapshots carry bounded readiness root causes without portfolio data', () => {
   const candidate = inputs();
   candidate.readiness.rootCauses = [{
-    id: 'prediction-catalog',
-    errorCode: 'PREDICTION_CATALOG_ACCESS_DENIED',
-    summary: 'Catalog access denied.',
+    id: 'research-projections',
+    errorCode: 'RTA_PROJECTION_UNAVAILABLE',
+    summary: 'RTA projection unavailable.',
     owner: 'automation-operations',
-    affectedCheckIds: ['prediction.display', 'prediction.ibkrExecution'],
+    affectedCheckIds: ['research.rta', 'research.current'],
     credentials: 'must-not-be-copied',
   }];
   const snapshot = buildOperationsSnapshot(candidate);
 
   assert.deepEqual(snapshot.rootCauses, [{
-    id: 'prediction-catalog',
-    errorCode: 'PREDICTION_CATALOG_ACCESS_DENIED',
-    summary: 'Catalog access denied.',
+    id: 'research-projections',
+    errorCode: 'RTA_PROJECTION_UNAVAILABLE',
+    summary: 'RTA projection unavailable.',
     owner: 'automation-operations',
-    affectedCheckIds: ['prediction.display', 'prediction.ibkrExecution'],
+    affectedCheckIds: ['research.rta', 'research.current'],
     suppressionReason: null,
     nextRetryAt: null,
   }]);

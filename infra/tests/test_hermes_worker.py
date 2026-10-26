@@ -373,10 +373,10 @@ class HermesWorkerTests(unittest.TestCase):
         now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
         snapshot = operations_snapshot(now)
         snapshot["capabilities"] = {
-            "prediction.display": {
+            "automation.readiness": {
                 "status": "fail",
                 "ready": False,
-                "errorCode": "PREDICTION_CATALOG_ACCESS_DENIED",
+                "errorCode": "RISK_RANGE_MANIFEST_ACCESS_DENIED",
             },
             "portfolio.live": {
                 "status": "blocked",
@@ -386,9 +386,9 @@ class HermesWorkerTests(unittest.TestCase):
         }
         snapshot["rootCauses"] = [
             {
-                "errorCode": "PREDICTION_CATALOG_ACCESS_DENIED",
-                "summary": "Prediction catalog access is denied.",
-                "affectedCheckIds": ["prediction.display"],
+                "errorCode": "RISK_RANGE_MANIFEST_ACCESS_DENIED",
+                "summary": "Risk range manifest access is denied.",
+                "affectedCheckIds": ["automation.readiness"],
             },
             {
                 "errorCode": "IBKR_GATEWAY_NOT_AUTHENTICATED",
@@ -448,9 +448,9 @@ class HermesWorkerTests(unittest.TestCase):
                 "affectedCheckIds": ["ibkr.gateway", "ibkr.portfolio"],
             },
             {
-                "errorCode": "PREDICTION_CATALOG_ACCESS_DENIED",
-                "summary": "Prediction catalog access is denied.",
-                "affectedCheckIds": ["prediction.display"],
+                "errorCode": "RISK_RANGE_MANIFEST_ACCESS_DENIED",
+                "summary": "Risk range manifest access is denied.",
+                "affectedCheckIds": ["automation.readiness"],
             },
             {
                 "errorCode": "GMAIL_RESEARCH_MATERIALIZATION_ERROR",
@@ -464,8 +464,8 @@ class HermesWorkerTests(unittest.TestCase):
                 "rootCauseIds": ["IBKR_GATEWAY_NOT_AUTHENTICATED"],
             },
             {
-                "id": "manual:PREDICTION_CATALOG_ACCESS_DENIED",
-                "rootCauseIds": ["PREDICTION_CATALOG_ACCESS_DENIED"],
+                "id": "manual:RISK_RANGE_MANIFEST_ACCESS_DENIED",
+                "rootCauseIds": ["RISK_RANGE_MANIFEST_ACCESS_DENIED"],
             },
         ]
         database = FakeDynamo(snapshot)
@@ -496,9 +496,9 @@ class HermesWorkerTests(unittest.TestCase):
         snapshot = operations_snapshot(now)
         snapshot["rootCauses"] = [
             {
-                "errorCode": "PREDICTION_CATALOG_ACCESS_DENIED",
-                "summary": "Prediction catalog access is denied.",
-                "affectedCheckIds": ["prediction.display"],
+                "errorCode": "RISK_RANGE_MANIFEST_ACCESS_DENIED",
+                "summary": "Risk range manifest access is denied.",
+                "affectedCheckIds": ["automation.readiness"],
             },
             {
                 "errorCode": "DASHBOARD_RUNTIME_MISMATCH",
@@ -678,10 +678,10 @@ class HermesWorkerTests(unittest.TestCase):
         now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
         database = FakeDynamo(None)
         notifications = FakeSns()
-        error_code = "PREDICTION_CATALOG_ACCESS_DENIED"
+        error_code = "RISK_RANGE_MANIFEST_ACCESS_DENIED"
         finding = {
             "errorCode": error_code,
-            "detail": "Prediction catalog access is denied.",
+            "detail": "Risk range manifest access is denied.",
         }
 
         with (

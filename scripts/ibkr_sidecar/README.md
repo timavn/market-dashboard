@@ -68,10 +68,6 @@ See [docs/IBKR_READ_ONLY_BOUNDARIES.md](../../docs/IBKR_READ_ONLY_BOUNDARIES.md)
 - `GET /livez`: process liveness plus invoked and real Python interpreter,
   environment prefix, app, and dependency provenance (`RUNTIME_DRIFT` if the
   managed workspace runtime is not in use)
-- `GET /events`: last sidecar snapshot for diagnostics/readiness only; active
-  trading routes must use `POST /refresh`
-- `POST /refresh`: quote the exact metadata generation supplied by Express from `PredictionMarketCatalogV2` for the server-owned current release
-- `POST /discover`: query IB ContractDetails for the server-owned current release and return a candidate generation; it never promotes local state
 - `GET /accounts`: managed account IDs
 - `GET /portfolio/live-positions`: verify the current IB socket and return identity/quantity for every managed account without cache, prices, or fallback
 - `GET /portfolio/live-account-summary?account=`: verify the current IB socket and fetch a native account summary including NLV without cache or fallback
@@ -90,12 +86,3 @@ npm run verify:ibkr-providers
 ```
 
 Gateway install steps: [GATEWAY_SETUP.md](./GATEWAY_SETUP.md)
-
-Run `npm run ibkr-sidecar:discover` after Gateway is connected. The command goes
-through Express, which supplies the current CPI release, validates fresh native
-ContractDetails coverage, and atomically promotes the generation and current
-release pointer in `PredictionMarketCatalogV2`. The sidecar's ignored JSON files
-are legacy diagnostics only and are never read by `/refresh` or written by
-`/discover`. A failed or partial discovery leaves the prior V2 generation
-untouched. Live event serialization carries the native conId, exchange, trading
-class, expiry, catalog source, and YES/NO side used by the shared execution gate.

@@ -102,7 +102,7 @@ if [[ -n "$CONTROLLER_ENABLED_ACTIONS" ]]; then
   IFS=',' read -r -a controller_action_ids <<< "$CONTROLLER_ENABLED_ACTIONS"
   for controller_action_id in "${controller_action_ids[@]}"; do
     case "$controller_action_id" in
-      start-local-stack|restart-local-stack|restart-ibkr-sidecar|rebuild-sidecar-runtime|retry-gmail-poll|rebuild-research-projections|reconcile-prediction-catalog|prune-dashboard-logs)
+      start-local-stack|restart-local-stack|restart-ibkr-sidecar|rebuild-sidecar-runtime|retry-gmail-poll|rebuild-research-projections|prune-dashboard-logs)
         ;;
       *)
         echo "Unknown readiness controller action ID: ${controller_action_id}" >&2

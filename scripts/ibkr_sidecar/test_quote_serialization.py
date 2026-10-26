@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from stream_manager import raw_quote_is_ready, ticker_to_raw_quote
-from app import finite_float, money_cents, normalize_seeded_event, request_live_short_quotes, FundingEvidenceError
+from app import finite_float, money_cents, request_live_short_quotes, FundingEvidenceError
 
 
 def contract(symbol="SPX"):
@@ -53,12 +53,6 @@ class QuoteSerializationTests(unittest.TestCase):
                 self.assertFalse(raw_quote_is_ready(raw))
         for value, expected in ((1, "live"), (2, "frozen"), (3, "delayed"), (4, "delayed_frozen")):
             self.assertEqual(ticker_to_raw_quote(ticker(last=100, marketDataType=value), contract())["dataType"], expected)
-
-    def test_prediction_quote_serialization_does_not_promote_boolean_or_float_enum(self):
-        seed = {"conId": 416904, "side": "YES", "lastTradeDateOrContractMonth": "20300918"}
-        for value in (True, 1.0, "1", [], {}):
-            candidate = ticker(contract=contract(), bid=0.3, ask=0.4, last=0.35, marketDataType=value)
-            self.assertIsNone(normalize_seeded_event(seed, candidate)["dataType"])
 
     def test_python_number_boundary_rejects_coercible_non_numeric_values(self):
         class Floatable:

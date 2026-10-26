@@ -142,7 +142,7 @@ test('a removed or renamed scoped owner requires an explicit policy update rathe
   assert.deepEqual(check({}), [{ file: helper, rule: 'missing-scoped-module', target: helper }]);
 });
 
-test('the installed extracted portfolio, monitor, dashboard and route modules preserve their ownership boundaries', () => {
+test('the installed extracted portfolio, dashboard and route modules preserve their ownership boundaries', () => {
   const root = path.resolve(__dirname, '../..');
   const sources = {};
   for (const filename of Object.keys(policy.roles)) {

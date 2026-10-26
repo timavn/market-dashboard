@@ -29,8 +29,11 @@ const {
   hasStartupReadinessMismatch,
   hasUnknownListener,
   hermesBridgeEnabled,
+  inspectServiceListener,
   isRecoverableOrphanedAnalystHermes,
+  listenerLookup,
   mergedMorningReport,
+  ownershipLookup,
   morningExitCode,
   localNotificationsEnabled,
   loginStatusUrl,
@@ -117,8 +120,6 @@ const capabilityIds = [
   'automation.readiness',
   'dashboard.core',
   'portfolio.live',
-  'prediction.display',
-  'prediction.ibkrExecution',
   'research.current',
 ];
 
@@ -830,6 +831,51 @@ test('the API health probe tolerates a busy verified quote refresh without slowi
   assert.equal(services.ui.healthTimeoutMs, undefined);
   assert.ok(services.sidecar.healthTimeoutMs >= 5_000);
   assert.ok(services.analystSidecar.healthTimeoutMs >= 5_000);
+  assert.ok(services.analystHermes.healthTimeoutMs >= 5_000);
+});
+
+test('a listener lookup that times out is unknown, not an empty port', () => {
+  const lookup = (outcome) => listenerLookup(9121, {
+    run: () => { if (outcome instanceof Error) throw outcome; return outcome; },
+  });
+  assert.deepEqual(lookup('4242\n'), { pid: 4242, failed: false });
+  assert.deepEqual(lookup(Object.assign(new Error('no match'), { status: 1, stdout: '' })),
+    { pid: null, failed: false });
+  assert.deepEqual(lookup(Object.assign(new Error('spawnSync lsof ETIMEDOUT'), {
+    code: 'ETIMEDOUT', signal: 'SIGTERM', status: null, stdout: '',
+  })), { pid: null, failed: true });
+  assert.deepEqual(lookup(Object.assign(new Error('spawnSync lsof ENOENT'), { code: 'ENOENT' })),
+    { pid: null, failed: true });
+});
+
+test('an empty ps answer for a live process is an unknown owner, not a foreign one', () => {
+  const lookup = ({ cwd = '', cmd = '', alive = true }) => ownershipLookup(4242, {
+    cwdFor: () => cwd, commandFor: () => cmd, alive: () => alive,
+  });
+  assert.deepEqual(lookup({}), { owned: false, inconclusive: true });
+  assert.deepEqual(lookup({ alive: false }), { owned: false, inconclusive: false });
+  assert.deepEqual(lookup({ cwd: '/tmp', cmd: 'python -m http.server 9121' }),
+    { owned: false, inconclusive: false });
+});
+
+test('a saturated host holds the last Hermes observation instead of restarting it', async () => {
+  const inspect = (lookupResult, { ownership = { owned: true, inconclusive: false }, accepts = false, previousPid = 4242 } = {}) =>
+    inspectServiceListener(9121, previousPid, {
+      lookup: () => lookupResult,
+      ownership: () => ownership,
+      accepts: async () => accepts,
+    });
+  assert.deepEqual(await inspect({ pid: 4242, failed: false }),
+    { pid: 4242, owned: true, inconclusive: false });
+  assert.equal((await inspect({ pid: null, failed: true })).inconclusive, true);
+  assert.equal((await inspect({ pid: null, failed: false }, { accepts: true })).inconclusive, true,
+    'something still accepts connections on the port');
+  assert.deepEqual(await inspect({ pid: null, failed: false }),
+    { pid: null, owned: false, inconclusive: false }, 'a refused, empty port is really down');
+  const unknownOwner = { owned: false, inconclusive: true };
+  assert.equal((await inspect({ pid: 4242, failed: false }, { ownership: unknownOwner })).inconclusive, true);
+  assert.equal((await inspect({ pid: 9999, failed: false }, { ownership: unknownOwner })).inconclusive, false,
+    'a different listener is never trusted as the supervised one');
 });
 
 test('the longer API health budget still fails a refused connection immediately', async t => {
@@ -1325,8 +1371,6 @@ test('read-only consolidation expects the generic readiness capability', () => {
       'automation.readiness',
       'dashboard.core',
       'portfolio.live',
-      'prediction.display',
-      'prediction.ibkrExecution',
       'research.current',
     ],
   );

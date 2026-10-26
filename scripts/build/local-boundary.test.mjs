@@ -51,7 +51,7 @@ test('real Vite HTTP and WS proxy preserve Origin and deny hostile authorities b
   await once(api, 'listening');
   const apiPort = api.address().port;
   const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'dashboard-vite-test-'));
-  const config = dashboardConfig({ mode: 'test', command: 'serve' });
+  const config = await dashboardConfig({ mode: 'test', command: 'serve' });
   const proxy = Object.fromEntries(Object.entries(config.server.proxy).map(([prefix, options]) => [prefix, { ...options, target: `http://127.0.0.1:${apiPort}` }]));
   const vite = await createServer({ ...config, configFile: false, cacheDir, logLevel: 'silent',
     optimizeDeps: { noDiscovery: true, include: [] }, server: { ...config.server, port: 0, proxy } });

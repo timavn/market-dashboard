@@ -183,7 +183,7 @@ function controllerHarness({
 test('controller policy manifest is complete, low risk, and exact-code allowlisted', () => {
   assert.deepEqual(policyValidationErrors(manifest), []);
   const policies = compilePolicies(manifest);
-  assert.equal(policies.length, 8);
+  assert.equal(policies.length, 7);
   assert.ok(policies.every((policy) => policy.maxAttempts === 2));
   assert.ok(policies.every((policy) => policy.attemptWindowMs === 3_600_000));
   assert.ok(policies.every((policy) => policy.circuitDurationMs === 3_600_000));
@@ -267,21 +267,6 @@ test('controller policy manifest is complete, low risk, and exact-code allowlist
 
   const everyTrigger = policies.flatMap((policy) => policy.triggeringErrorCodes);
   assert.equal(everyTrigger.some((code) => /IAM|OAUTH|DEPLOY|LOGIN|ORDER|TRADING/.test(code)), false);
-
-  const catalog = policies.find(
-    (policy) => policy.id === 'reconcile-prediction-catalog',
-  );
-  assert.deepEqual(catalog.triggeringCheckIds, ['prediction.ibkrExecution']);
-  assert.deepEqual(catalog.triggeringErrorCodes.sort(), [
-    'CATALOG_NOT_PROMOTED',
-    'NO_CURRENT_EXECUTABLE_IBKR_CONTRACT',
-  ]);
-  assert.deepEqual(
-    catalog.prerequisites.find(
-      (item) => item.checkId === 'prediction.display',
-    ).allowedErrorCodes,
-    [null, 'CATALOG_NOT_PROMOTED', 'NO_CURRENT_NATIVE_LIVE_QUOTE'],
-  );
 });
 
 test('supervisor source drift becomes eligible for the bounded local restart', () => {
@@ -1249,43 +1234,6 @@ test('Gmail retry requires fresh genuine Scheduler provenance', () => {
   );
 });
 
-test('catalog IAM denial is suppressed without making display health circular', () => {
-  const policy = compilePolicies(manifest)
-    .find((item) => item.id === 'reconcile-prediction-catalog');
-  const baseChecks = [
-    check('ibkr.sidecar', 'pass', BASE_TIME),
-    check('ibkr.gateway', 'pass', BASE_TIME),
-  ];
-  const unpromotedDisplay = check('prediction.display', 'fail', BASE_TIME, {
-    errorCode: 'NO_CURRENT_NATIVE_LIVE_QUOTE',
-  });
-  assert.equal(
-    evaluatePrerequisites(
-      policy,
-      new Map([...baseChecks, unpromotedDisplay].map((item) => [item.id, item])),
-      BASE_TIME,
-    ).ok,
-    true,
-  );
-
-  const deniedDisplay = {
-    ...unpromotedDisplay,
-    errorCode: 'PREDICTION_CATALOG_ACCESS_DENIED',
-  };
-  assert.deepEqual(
-    evaluatePrerequisites(
-      policy,
-      new Map([...baseChecks, deniedDisplay].map((item) => [item.id, item])),
-      BASE_TIME,
-    ),
-    {
-      ok: false,
-      reason: 'PREREQUISITE_ERROR_CODE_NOT_ALLOWED',
-      detail: 'prediction.display:PREDICTION_CATALOG_ACCESS_DENIED',
-    },
-  );
-});
-
 test('fresh report is required even when a cause is otherwise actionable', async () => {
   const nowRef = { value: BASE_TIME + 10 * 60_000 };
   const stale = report({
@@ -1639,12 +1587,12 @@ test('an error code on an unrelated check cannot select a check-scoped action', 
   observeReport(state, report({
     now: BASE_TIME,
     checks: [
-      check('prediction.display', 'fail', BASE_TIME, {
-        errorCode: 'CATALOG_NOT_PROMOTED',
+      check('gmail.ingestion', 'fail', BASE_TIME, {
+        errorCode: 'IBKR_SIDECAR_UNREACHABLE',
       }),
     ],
     rootCauses: [
-      cause('CATALOG_NOT_PROMOTED', 'prediction.display'),
+      cause('IBKR_SIDECAR_UNREACHABLE', 'gmail.ingestion'),
     ],
   }), { policies, now: BASE_TIME });
 

@@ -652,11 +652,16 @@ def journal_analyst_change(snapshot: Mapping[str, Any], dynamodb: Any) -> bool:
 
     The snapshot is already the source of truth, so a journal failure is logged
     rather than failing the run; the Analyst's full research scan still finds it.
+    Every daily verification calls this: the journal's receipt makes a report
+    already journaled a no-op, while one created before journaling was enabled,
+    or whose journal write failed, is journaled on the next verification. The
+    retrieval time changes daily, so it stays out of the journaled revision.
     """
     try:
         from analyst_change_journal import emit_change
 
-        emit_change(dict(snapshot), dynamodb, {"marketDate": snapshot.get("date"), "productKey": SNAPSHOT_TYPE}, [])
+        revision = {key: value for key, value in snapshot.items() if key != "retrievedAt"}
+        emit_change(revision, dynamodb, {"marketDate": snapshot.get("date"), "productKey": SNAPSHOT_TYPE}, [])
         return True
     except Exception as exc:
         print(f"[cftc] Analyst change journal unavailable: {type(exc).__name__}")
@@ -745,9 +750,9 @@ def lambda_handler(event: Mapping[str, Any] | None, _context: Any) -> dict[str, 
             table_name = os.environ.get("HEDGEYE_DAILY_SNAPSHOT_TABLE", "HedgeyeDailySnapshot")
             dynamodb = boto3.resource("dynamodb")
             result = persist_snapshot(snapshot, dynamodb.Table(table_name))
-            # Daily re-verifications of the same report are not new research.
-            if result in {"created", "revised"}:
-                journal_analyst_change(snapshot, dynamodb)
+            # Daily re-verifications of the same report are not new research;
+            # the journal receipt keeps them from repeating its change.
+            journal_analyst_change(snapshot, dynamodb)
         # The staged calculation canary is read-only: no snapshot, heartbeat,
         # or readiness metric is written before activation.
         if not dry_run:

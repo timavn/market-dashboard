@@ -12,7 +12,7 @@ import sys
 import unittest
 import urllib.error
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -397,6 +397,48 @@ class CftcCalculationTests(unittest.TestCase):
         with patch.object(cftc, "_source_hash", return_value="b" * 64):
             self.assertEqual(run(later)["result"], "revised")
         self.assertEqual(len(changes()), 2)
+
+    def test_report_created_before_journaling_reaches_the_feed_on_its_next_verification(self):
+        class Ledger:
+            def __init__(self):
+                self.items = {}
+
+            def get_item(self, *, Key, **_kwargs):
+                item = self.items.get((Key["productKey"], Key["eventKey"]))
+                return {"Item": item} if item else {}
+
+            def put_item(self, *, Item):
+                self.items[(Item["productKey"], Item["eventKey"])] = Item
+
+        snapshots, ledger = FakeTable(), Ledger()
+
+        def run(source, journal, now):
+            with patch.object(cftc, "_utc_now", return_value=now), \
+                    patch.object(cftc, "fetch_official_source", return_value=source), \
+                    patch.object(cftc, "boto3") as aws, \
+                    patch.object(cftc, "_heartbeat"), \
+                    patch.dict(os.environ, {"ANALYST_CHANGE_JOURNAL_ENABLED": journal}):
+                aws.resource.return_value.Table.side_effect = (
+                    lambda name: ledger if name == "ResearchEventLedgerV2" else snapshots)
+                return cftc.lambda_handler({"source": "aws-scheduler", "scheduleId": cftc.SCHEDULE_ID}, None)
+
+        def changes():
+            return [item for (product, _), item in ledger.items.items() if product == "analyst-change"]
+
+        source = synthetic_source()
+        first = datetime(2026, 8, 15, 20, 15, tzinfo=timezone.utc)
+        # The report is published by a build that does not journal yet.
+        self.assertEqual(run(source, "0", first)["result"], "created")
+        self.assertEqual(changes(), [])
+
+        # The next daily verification finds the same report and journals it once.
+        for day in (1, 2):
+            later = copy.deepcopy(source)
+            later["retrievedAt"] = (first + timedelta(days=day)).isoformat()
+            self.assertEqual(run(later, "1", first + timedelta(days=day))["result"], "unchanged")
+        [change] = changes()
+        self.assertEqual(change["snapshot"]["sourceContentHash"], snapshots.puts[0]["sourceContentHash"])
+        self.assertNotIn("retrievedAt", change["snapshot"])
 
     def test_journal_failure_keeps_the_published_report(self):
         snapshots = FakeTable()

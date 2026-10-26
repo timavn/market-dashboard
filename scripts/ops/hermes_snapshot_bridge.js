@@ -37,8 +37,6 @@ const EXPECTED_CAPABILITY_IDS = Object.freeze([
   'automation.hermes',
   'dashboard.core',
   'portfolio.live',
-  'prediction.display',
-  'prediction.ibkrExecution',
   'research.current',
 ]);
 

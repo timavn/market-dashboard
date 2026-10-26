@@ -21,7 +21,6 @@ export function startBrowserPerformanceProbe() {
   const category = (name) => {
     const pathname = new URL(name, location.href).pathname;
     if (!pathname.startsWith('/api/')) return null;
-    if (/prediction.*performance/.test(pathname)) return 'contract-pnl';
     if (/prediction/.test(pathname)) return 'prediction';
     if (/portfolio|positions|nav-history/.test(pathname)) return 'portfolio';
     if (/historical|history|period-return/.test(pathname)) return 'history';

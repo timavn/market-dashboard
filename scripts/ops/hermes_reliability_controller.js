@@ -69,7 +69,6 @@ const ALLOWED_SCOPES = new Set([
   'sidecar-runtime',
   'gmail-incremental-poll',
   'research-projections',
-  'prediction-catalog',
   'dashboard-logs',
 ]);
 const ACTION_EXECUTORS = Object.freeze({
@@ -95,10 +94,6 @@ const ACTION_EXECUTORS = Object.freeze({
   },
   'rebuild-research-projections': {
     manifestExecutor: 'research-projections-rebuild',
-    controllerExecutor: 'loopback-readiness-api',
-  },
-  'reconcile-prediction-catalog': {
-    manifestExecutor: 'prediction-catalog-reconcile',
     controllerExecutor: 'loopback-readiness-api',
   },
   'prune-dashboard-logs': {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify IBKR sidecar + Express provider status (run from repo root).
+# Verify IBKR sidecar + Express backend health (run from repo root).
 set -euo pipefail
 
 SIDECAR="${IBKR_SIDECAR_URL:-http://localhost:8765}"
@@ -36,12 +36,12 @@ print('  last_tick_at:', s.get('last_tick_at'))
 "
 
 echo ""
-echo "=== 2. Sidecar POST /refresh ==="
-curl -sf --max-time 10 -X POST "${SIDECAR%/}/refresh" | python3 -m json.tool
+echo "=== 2. Sidecar GET /status ==="
+curl -sf --max-time 10 "${SIDECAR%/}/status" | python3 -m json.tool
 
 echo ""
-echo "=== 3. Express GET /api/prediction-markets/providers/status ==="
-if curl -sf --max-time 12 "${BACKEND%/}/api/prediction-markets/providers/status" | python3 -m json.tool; then
+echo "=== 3. Express GET /api/health ==="
+if curl -sf --max-time 12 "${BACKEND%/}/api/health" | python3 -m json.tool; then
   echo "OK"
 else
   echo "WARN: backend not reachable at ${BACKEND} (run npm run server)"
