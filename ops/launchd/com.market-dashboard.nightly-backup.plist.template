@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.market-dashboard.nightly-backup</string>
+  <key>ProgramArguments</key>
+  <!-- Launched through Node because macOS grants Desktop-folder access per
+       launchd program: Node already holds it for the stack agent, /bin/bash
+       does not, and child processes inherit Node's grant. -->
+  <array>
+    <string>__NODE_PATH__</string>
+    <string>-e</string>
+    <string>const r = require('child_process').spawnSync('/bin/bash', [process.argv[1]], { stdio: 'inherit' }); process.exit(r.status === null ? 1 : r.status);</string>
+    <string>__REPO_PATH__/scripts/ops/nightly_backup.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO_PATH__</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>23</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__/nightly-backup.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_PATH__/nightly-backup.launchd.log</string>
+</dict>
+</plist>
