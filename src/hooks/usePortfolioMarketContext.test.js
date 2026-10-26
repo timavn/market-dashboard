@@ -37,25 +37,30 @@ const pending = () => {
 };
 // Source-attributed completed-history fixtures stay inside tests. No executable
 // positions or prices are used to manufacture these independent risk estimates.
-const riskRow = (symbol, { now = NOW, annualizationFactor = 252 } = {}) => {
-  const asOf = expectedSizingSession(now, annualizationFactor);
+// Row shape follows buildSecurityRiskMetrics: ATR14 and the completed adjusted
+// close are dated metrics from the same source. ATR 4.5 on a 300 close is 1.5%.
+const SOURCE = 'Yahoo Finance chart API';
+const riskRow = (symbol, { now = NOW, instrumentType = 'ETF', atr = 4.5, close = 300 } = {}) => {
+  const asOf = expectedSizingSession(now, instrumentType === 'CRYPTOCURRENCY' ? 365 : 252);
   return {
-    symbol, historicalOnly: true, executable: false, source: 'Yahoo Finance chart API', asOf,
+    symbol, historicalOnly: true, executable: false, source: SOURCE, asOf, instrumentType,
+    observations: 500,
     provenance: {
       provider: 'Yahoo Finance', dataset: 'chart', interval: '1d', adjustedCloseRequired: true,
       security: { requestedSymbol: symbol, fetchedAt: new Date(now).toISOString() },
     },
-    beta: { status: 'available', value: 0.42, benchmark: 'SPY', asOf },
-    atr14: { status: 'available', value: 4.5, asOf },
-    zScore20: { status: 'available', value: 1.25, asOf },
-    realizedVolatility: {
-      status: 'available', rv63: 0.18, rv252: 0.15, sizingVol: 0.18,
-      annualizationFactor, observationCount: 500, asOf, limitedHistory: false,
+    referencePrice: {
+      status: 'available', value: close, source: SOURCE, asOf, observations: 1,
+      timestamp: Date.parse(`${asOf}T13:30:00.000Z`), priceBasis: 'adjusted completed daily close',
+      historicalOnly: true, executable: false,
     },
+    beta: { status: 'available', value: 0.42, benchmark: 'SPY', source: SOURCE, asOf, observations: 252 },
+    atr14: { status: 'available', value: atr, source: SOURCE, asOf, observations: 14 },
+    zScore20: { status: 'available', value: 1.25, source: SOURCE, asOf, observations: 20 },
   };
 };
 const riskPayload = (symbols = ['GLD'], options = {}) => ({
-  status: 'available', historicalOnly: true, executable: false,
+  status: 'available', source: SOURCE, historicalOnly: true, executable: false,
   generatedAt: new Date(options.now ?? NOW).toISOString(),
   rows: Object.fromEntries(symbols.map((symbol) => [symbol, riskRow(symbol, options)])),
 });
@@ -107,13 +112,56 @@ test('loads volatility and USD independently while historical metrics are still 
   const usdData = { sourceStatus: 'current', calculationDate: '2026-09-10', correlations: { GOLD: { '30D': -0.72 } } };
   await act(async () => usd.resolve(usdData));
   expect(result.current.marketContextState.usdCorrelations).toBe(usdData);
-  expect(result.current.getPositionSizeReference('GLD')).toMatchObject({ available: false, loading: true });
+  expect(result.current.getPositionSizeReference('GLD')).toMatchObject({
+    available: false, loading: true, value: null, reason: 'Refreshing ATR inputs.',
+  });
   await act(async () => risk.resolve(riskPayload()));
   expect(result.current.marketContextState.status).toBe('ready');
-  expect(result.current.getPositionSizeReference(' gld ')).toMatchObject({
-    available: true, value: '2.2–6.7%', loading: false,
+  // ATR % = 4.5 / 300 = 1.5%; stop = 3%. MIN = 0.125 / 0.03 = 4.17 → 4.25 (up);
+  // MAX = 0.25 / 0.03 = 8.33 → 8.25 (down).
+  const reference = result.current.getPositionSizeReference(' gld ');
+  expect(reference).toMatchObject({
+    available: true, reason: null, value: '4.25–8.25%', minWeight: 4.25, maxWeight: 8.25,
+    floorApplied: false, loading: false, asOf: expectedSizingSession(NOW, 252), source: SOURCE,
+    atr14: { value: 4.5, observations: 14 }, referencePrice: { value: 300 },
     verification: { symbol: 'GLD', metric: 'Position size' },
     beta: { value: 0.42 },
+  });
+  expect(reference.relativeAtr).toBeCloseTo(0.015, 12);
+  expect(reference.stopDistance).toBeCloseTo(0.03, 12);
+});
+
+test('applies the 1.25% ATR floor to the band while reporting the measured ATR and stop distance', async () => {
+  // ATR % = 2 / 400 = 0.5% < 1.25%. Band uses 2 × 1.25% = 2.5%: MIN = 0.125 / 0.025 = 5,
+  // MAX = 0.25 / 0.025 = 10. The stop distance stays 2 × 0.5% = 1%.
+  MarketDataService.getSecurityRiskMetrics.mockResolvedValue({
+    ...riskPayload([]), rows: { GLD: riskRow('GLD', { atr: 2, close: 400 }) },
+  });
+  const { result } = renderHook(usePortfolioMarketContext, { initialProps: props() });
+  await flush();
+  const reference = result.current.getPositionSizeReference('GLD');
+  expect(reference).toMatchObject({
+    available: true, value: '5.0–10.0%', minWeight: 5, maxWeight: 10, floorApplied: true,
+  });
+  expect(reference.relativeAtr).toBeCloseTo(0.005, 12);
+  expect(reference.stopDistance).toBeCloseTo(0.01, 12);
+});
+
+test('sizes from ATR only and never substitutes beta when ATR or the close is missing', async () => {
+  const payload = riskPayload(['GLD', 'IAK']);
+  payload.rows.GLD.atr14 = { status: 'unavailable', value: null, source: SOURCE, asOf: null, observations: 9 };
+  payload.rows.IAK.referencePrice = { ...payload.rows.IAK.referencePrice, status: 'unavailable', value: null };
+  MarketDataService.getSecurityRiskMetrics.mockResolvedValue(payload);
+  const { result } = renderHook(usePortfolioMarketContext, { initialProps: props({
+    symbolsKey: 'GLD,IAK', holdings: [{ symbol: 'GLD', securityType: 'STK' }, { symbol: 'IAK', securityType: 'STK' }],
+  }) });
+  await flush();
+  expect(result.current.getPositionSizeReference('GLD')).toMatchObject({
+    available: false, value: null, minWeight: null, maxWeight: null,
+    reason: 'ATR needs 14 completed sessions', beta: { value: 0.42 },
+  });
+  expect(result.current.getPositionSizeReference('IAK')).toMatchObject({
+    available: false, value: null, minWeight: null, maxWeight: null, reason: 'Verified closing price needed',
   });
 });
 
@@ -159,7 +207,7 @@ test('keeps successful historical rows after a later batch fails but rejects siz
     status: 'partial', sourceStatus: { riskMetrics: 'partial' }, errors: { riskMetrics: 'Last batch unavailable' },
   });
   expect(result.current.marketContextState.riskMetrics.rows.GLD.beta.value).toBe(0.42);
-  expect(result.current.getPositionSizeReference('GLD')).toMatchObject({ available: false, band: null, value: null, reason: 'The volatility provider is unavailable.' });
+  expect(result.current.getPositionSizeReference('GLD')).toMatchObject({ available: false, minWeight: null, maxWeight: null, value: null, reason: 'The ATR provider is unavailable.' });
   expect(result.current.marketContextState.riskMetrics.rows).not.toHaveProperty('XLF');
 });
 
@@ -195,7 +243,7 @@ test.each(['stale', 'cacheOnly', 'mock', 'seeded', 'disconnected'])('the real va
   MarketDataService.getSecurityRiskMetrics.mockResolvedValue(payload);
   const { result } = renderHook(usePortfolioMarketContext, { initialProps: props() });
   await flush();
-  expect(result.current.getPositionSizeReference('GLD')).toMatchObject({ available: false, band: null, value: null, reason: 'Verified volatility inputs are unavailable.' });
+  expect(result.current.getPositionSizeReference('GLD')).toMatchObject({ available: false, minWeight: null, maxWeight: null, value: null, reason: 'Verified daily history unavailable' });
 });
 
 test('rejects a stale outer source contract instead of accepting its risk rows', async () => {
@@ -322,8 +370,11 @@ test('revalidates at call time after response expiry without needing a new paylo
   await flush();
   const getReference = result.current.getPositionSizeReference;
   expect(getReference('GLD').available).toBe(true);
-  jest.setSystemTime(NOW + 600_001);
-  expect(getReference('GLD')).toMatchObject({ available: false, band: null, value: null, reason: 'Current, sourced adjusted daily history is required.' });
+  // Daily history is accepted for one hour after its fetch, as in Exposure Lab.
+  jest.setSystemTime(NOW + 3_600_000);
+  expect(getReference('GLD').available).toBe(true);
+  jest.setSystemTime(NOW + 3_600_001);
+  expect(getReference('GLD')).toMatchObject({ available: false, minWeight: null, maxWeight: null, value: null, reason: 'Refresh daily history' });
   expect(riskCalls()).toHaveLength(1);
 });
 
@@ -334,7 +385,7 @@ test('rejects sizing for any unsupported duplicate instrument even when a valid 
   expect(result.current.getPositionSizeReference('GLD').available).toBe(true);
   rerender({ ...initial, holdings: [...initial.holdings, { symbol: 'gld', contract: { secType: 'OPT' } }] });
   expect(result.current.getPositionSizeReference('GLD')).toMatchObject({
-    available: false, band: null, value: null, reason: 'This instrument requires contract-specific risk sizing.',
+    available: false, minWeight: null, maxWeight: null, value: null, reason: 'This instrument requires contract-specific risk sizing.',
   });
   expect(riskCalls()).toHaveLength(1);
 });

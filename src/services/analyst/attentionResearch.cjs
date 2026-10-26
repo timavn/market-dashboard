@@ -15,12 +15,12 @@ const linked = citation => citation && (citation.id || citation.sourceUri || cit
 const row = (label, value) => ({ label, text: value });
 const pct = value => `${value.toFixed(2)}%`;
 // Each security has its own MIN / MAX, so a sizing alert states them rather
-// than relying on the reader to remember the band.
-function processLimits(rule) {
-  if (number(rule.minWeight) === null) return null;
-  const basis = rule.sizingBasis === 'Beta sizing' ? number(rule.beta) !== null && `beta ${rule.beta.toFixed(2)}` : rule.sizingBasis;
-  return [`MIN ${pct(rule.minWeight)}`, number(rule.maxWeight) !== null ? `MAX ${pct(rule.maxWeight)}` : 'MAX unavailable', basis,
-    number(rule.atrCapWeight) !== null && `ATR cap ${pct(rule.atrCapWeight)}`].filter(Boolean).join(' · ');
+// than relying on the reader to remember the band. ATR and the stop get their own lines.
+function processLimitRows(rule) {
+  if (number(rule.minWeight) === null) return [];
+  return [row('Process limits', `MIN ${pct(rule.minWeight)} / ${number(rule.maxWeight) !== null ? `MAX ${pct(rule.maxWeight)}` : 'MAX unavailable'}`),
+    ...(number(rule.atrPct) !== null ? [row('ATR', `${pct(rule.atrPct)} of price${rule.atrFloorApplied ? ' (1.25% floor sets the band)' : ''}`)] : []),
+    ...(number(rule.stopPrice) !== null ? [row('Stop', `${rule.stopPrice.toFixed(2)} · 2 × ATR from last close${number(rule.stopLossPctNlv) !== null ? ` · ${pct(rule.stopLossPctNlv)} of NLV at this weight` : ''}`)] : [])];
 }
 function freshBook(book, now) {
   return book?.liveVerified === true && book.complete === true && !invalid(book)
@@ -37,6 +37,17 @@ function holdingState(book, symbol, verified, now) {
     && number(weight.weightPct) !== null && weight.weightPct >= 0 && dated(weight.asOf, new Date(now.getTime() + 30000))
     && now.getTime() - time(weight.asOf) <= 60000 ? weight : null;
   return { holdingsVerified: true, holdingsVerifiedAt: book.asOf, quantity, currentHolding };
+}
+const shares = value => Number.isInteger(value) ? String(value) : value.toFixed(2);
+// Shares scale with weight at one price, so the order needs no quote: a market
+// order sized from the verified quantity and the target / current weight ratio.
+function orderText(quantity, keepRatio) {
+  if (!number(quantity) || number(keepRatio) === null || keepRatio < 0 || keepRatio >= 1) return null;
+  const held = Math.abs(quantity);
+  const remaining = Math.round(held * keepRatio * 100) / 100;
+  const trade = Math.round((held - remaining) * 100) / 100;
+  if (trade <= 0) return null;
+  return `${quantity > 0 ? 'Sell' : 'Buy'} ${shares(trade)} / ${shares(held)} → ${shares(remaining)}`;
 }
 function positionRows(state) {
   if (!state.holdingsVerified) return [];
@@ -95,7 +106,8 @@ function portfolioFindings(context, now, verified) {
     let publishedAt = candidate.sources?.[field]?.publishedAt;
     const sources = ['trade', 'trend'].filter(key => signalEvidence(candidate, key, now)).map(key => ({ label: `${key === 'trade' ? 'Trade' : 'Trend'} source`, citation: candidate.sources[key].citation }));
     if (['RISK_CAP', 'ABOVE_MAX'].includes(rule.rule)) {
-      const metrics = Object.entries(candidate.sizingInputs || {}).filter(([, value]) => value && !invalid(value) && dated(value.asOf, now) && value.source && number(value.value) !== null);
+      // Only ATR and the reference close size a position; a captured beta is not evidence.
+      const metrics = Object.entries(candidate.sizingInputs || {}).filter(([key, value]) => ['atr14', 'referencePrice'].includes(key) && value && !invalid(value) && dated(value.asOf, now) && value.source && number(value.value) !== null);
       publishedAt = metrics.map(([, value]) => value.asOf).sort().at(-1);
       for (const [metric, value] of metrics) sources.push({ label: `${metric} evidence`, citation: { id: `cite_${hash([symbol, metric, value.source, value.asOf]).slice(0, 28)}`,
         title: `${symbol} ${metric}`, product: 'process-sizing', publicationDate: String(value.asOf).slice(0, 10), sourceUri: `/api/security-risk-metrics?symbols=${encodeURIComponent(symbol)}&sizingOnly=1`, excerpt: `${metric}: ${value.value}. Source: ${value.source}. Observed: ${value.asOf}.` } });
@@ -105,15 +117,16 @@ function portfolioFindings(context, now, verified) {
     let explanation;
     if (rule.rule === 'TRADE_BREAK') explanation = `Trade turned ${rule.trade[0]}${rule.trade.slice(1).toLowerCase()} vs ${side} → exit.`;
     else if (rule.rule === 'TREND_BREAK') explanation = 'Trend broke → reduce to MIN.';
-    else if (rule.rule === 'RISK_CAP') explanation = 'ATR cap below MIN → exit.';
+    else if (rule.rule === 'RISK_CAP') explanation = 'Too volatile to size → exit.';
     else explanation = 'Above MAX → trim to MAX.';
-    const limits = processLimits(rule);
     const target = rule.action === 'REDUCE' && number(rule.targetWeight) !== null ? rule.targetWeight : null;
-    const rows = [...positionRows(state), ...(limits ? [row('Process limits', limits)] : []),
+    const order = orderText(state.quantity, rule.action === 'EXIT' ? 0 : target !== null && rule.weightPct > 0 ? target / rule.weightPct : null);
+    const rows = [...positionRows(state), ...processLimitRows(rule),
       row('Action', rule.action === 'EXIT' ? `Exit ${side}` : target !== null ? `Reduce to ${rule.targetLabel} ${pct(target)}` : 'Reduce size'),
       // The trim is measured from the holding weight, so it is shown only while holdings are current.
       ...(target !== null && number(rule.weightPct) !== null && number(rule.reduction) !== null
         ? [{ ...row('Trim', `${rule.reduction.toFixed(2)} pts (${pct(rule.weightPct)} → ${pct(target)})`), requiresFreshHoldings: true }] : []),
+      ...(order ? [{ ...row('Order', order), requiresFreshHoldings: true }] : []),
       row('Context', explanation)];
     rows.push(...durationRows(context, symbol, now));
     // A published Trade or Trend against the held side contradicts the position.
@@ -165,8 +178,21 @@ function publishedRange(event) {
   const high = Number(value.hrr ?? value.riskRangeHigh);
   return Number.isFinite(low) && Number.isFinite(high) && low > 0 && low < high ? `${low}–${high}` : null;
 }
+// Exits and removals published while holdings could not be read wait for the
+// Analyst's own holdings check, even after the market date rolls over.
+const PENDING_CHECK_STATES = ['resolved', 'superseded'];
+function awaitingHoldingsCheck(context) {
+  const awaiting = new Set();
+  for (const item of context.previousAttention || []) {
+    const pending = item.pendingHoldingsCheck;
+    if (!pending || PENDING_CHECK_STATES.includes(item.state)) continue;
+    for (const symbol of pending.symbols || []) awaiting.add(`${pending.marketDate}\u0000${symbol}`);
+  }
+  return awaiting;
+}
 function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
   if (!verified) return [];
+  const awaiting = awaitingHoldingsCheck(context);
   // The latest instruction per security and product decides; a later re-add
   // from the same product supersedes its earlier removal.
   const latest = new Map();
@@ -178,7 +204,8 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
     const { symbol, actionKey } = instruction;
     const conditionId = `attention:portfolio:${hash([symbol, 'source-action', event.productKey, actionKey]).slice(0, 28)}`;
     const existing = (context.previousAttention || []).find(item => item.id === conditionId && !['resolved', 'superseded'].includes(item.state));
-    if (String(event.marketDate || event.publishedAt).slice(0, 10) !== context.marketDate && !existing) continue;
+    const date = String(event.marketDate || event.publishedAt).slice(0, 10);
+    if (date !== context.marketDate && !existing && !awaiting.has(`${date}\u0000${symbol}`)) continue;
     const slot = `${symbol}\u0000${event.productKey}`;
     const previous = latest.get(slot);
     if (!previous || time(previous.event.publishedAt) < time(event.publishedAt)) latest.set(slot, instruction);
@@ -216,13 +243,22 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
   return output;
 }
 // Without verified holdings, today's exits and removals cannot be matched to the
-// book. Surface them as one urgent check instead of silently waiting.
-function unverifiedInstructionFindings(context, now, verified) {
+// book. An Alert needs a position the Analyst confirmed, so this is only a
+// notice that the check is waiting; the user is never asked to confirm holdings.
+// It resolves when a verified scan completes, and those symbols are not raised
+// again for the same date when holdings drop out later.
+function pendingCheckFindings(context, now, verified) {
   if (verified || !context.marketDate) return [];
+  const key = ['unverified-instructions', context.marketDate];
+  const previous = (context.previousAttention || []).find(item => item.id === `attention:operational:${hash(key).slice(0, 28)}`);
+  // A resolved notice from before pendingHoldingsCheck was recorded was checked in full.
+  if (previous?.state === 'resolved' && !previous.pendingHoldingsCheck) return [];
+  const recorded = previous?.pendingHoldingsCheck || {};
+  const checked = new Set([...(recorded.checked || []), ...(previous?.state === 'resolved' ? recorded.symbols || [] : [])]);
   const pending = new Map();
   for (const event of context.events || []) {
     const instruction = sourceInstruction(event, now);
-    if (!instruction || instruction.change?.action === 'OPEN'
+    if (!instruction || instruction.change?.action === 'OPEN' || checked.has(instruction.symbol)
       || String(event.marketDate || event.publishedAt).slice(0, 10) !== context.marketDate) continue;
     if (!pending.has(instruction.symbol)) pending.set(instruction.symbol, instruction);
   }
@@ -232,10 +268,10 @@ function unverifiedInstructionFindings(context, now, verified) {
   const publishedAt = events.map(event => event.publishedAt).sort((a, b) => time(a) - time(b)).at(-1);
   const sourceLinks = events.map(event => ({ label: event.productLabel || 'Source', citation: { id: `cite_${hash(event.sourceMessageId).slice(0, 24)}`, title: event.productLabel,
     product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`, excerpt: event.excerpt } }));
-  return [finding({ key: ['unverified-instructions', context.marketDate], material: symbols, symbol: 'Holdings check', kind: 'operational', priority: 0, severity: ACTION_REQUIRED,
-    action: 'verify holdings', publishedAt, sourceLinks, state: { assessmentChannel: 'research' },
-    rows: [row('Action', `Confirm holdings: ${symbols.join(', ')}`),
-      row('Context', 'Exit/removal published, holdings unverified → confirm before acting.')] })];
+  return [finding({ key, material: symbols, symbol: 'Holdings check', kind: 'operational', action: 'pending holdings check', publishedAt, sourceLinks,
+    state: { assessmentChannel: 'research', pendingHoldingsCheck: { marketDate: context.marketDate, symbols, checked: [...checked].sort() } },
+    rows: [row('Pending', symbols.join(', ')),
+      row('Context', 'Exit/removal published, IB Gateway holdings unreadable → Analyst checks when holdings return.')] })];
 }
 const DIRECT = new Set(['direct', 'direct_alias']);
 const validReference = (reference, now) => reference && !invalid(reference) && reference.qualityStatus === 'indexed' && DIRECT.has(reference.matchType) && dated(reference.publishedAt || reference.marketDate, now) && reference.sourceUrl;
@@ -393,7 +429,7 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   const diagnostics = [...(context.diagnostics || [])];
   if (!verified) diagnostics.push({ component: 'holdings', status: 'unavailable' });
   const portfolio = portfolioFindings(context, now, verified);
-  const actions = [...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...unverifiedInstructionFindings(context, now, verified)];
+  const actions = [...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...pendingCheckFindings(context, now, verified)];
   const opportunities = opportunityFindings(context, now, verified, portfolio, sentenceMemo);
   const accounts = accountFindings(context, now);
   const completeKinds = [];

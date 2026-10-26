@@ -34,6 +34,7 @@ import {
 import LeveragedProductModal from './portfolio/LeveragedProductModal';
 import { buildBetaVerification } from './portfolio/betaPresentation';
 import { buildStopLossPresentation } from './portfolio/stopLossPresentation';
+import { calculateStopPrice } from '../../utils/signalWeightedPositionSizing';
 import { buildUsdCorrelationPresentation } from './portfolio/usdCorrelationPresentation';
 import {
   buildSizingVolatilityPresentation,
@@ -1881,7 +1882,7 @@ const PortfolioBreakdown = ({
       && ['ibkr_api', 'ibkr_live_session'].includes(holding?.positionSource)
     );
     const stopReference = stopReferenceEligible
-      ? averageCost + (quantity < 0 ? 1 : -1) * 2 * Number(atr14.value)
+      ? calculateStopPrice({ basis: averageCost, atr14: Number(atr14.value), side: quantity < 0 ? 'SHORT' : 'LONG' })
       : null;
     const holdingReferenceMark = (
       stopReferenceEligible
@@ -2145,9 +2146,7 @@ const PortfolioBreakdown = ({
       symbol,
       reference: positionSizeReference,
       loading: riskMetricsLoading,
-      asOfLabel: positionSizeReference.available && Number.isFinite(positionSizeReference.band.volatility)
-        ? formatResearchDateLabel(positionSizeReference.rv?.asOf)
-        : null,
+      asOfLabel: positionSizeReference.available ? formatResearchDateLabel(positionSizeReference.asOf) : null,
     });
     const marketContextMetrics = {
       zScore: {

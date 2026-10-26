@@ -13,7 +13,7 @@ export default function PortfolioMarketContext({
   return (
     <>
       <div className="pcv2-intel-grid pcv2-intel-header" aria-label="Market context headers">
-        {['Price Z-score · 20D', 'Sizing vol', 'Relevant vol index', 'USD correlation', 'Stop loss'].map((label) => (
+        {['Price Z-score · 20D', 'Sizing ATR', 'Relevant vol index', 'USD correlation', 'Stop loss'].map((label) => (
           <div className="pcv2-intel-cell pcv2-intel-span-4" key={label}>{label}</div>
         ))}
       </div>

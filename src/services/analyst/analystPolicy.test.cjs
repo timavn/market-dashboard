@@ -78,9 +78,15 @@ test('cost guard requires complete evidence and slows at $15', () => {
   assert.equal(costDecision({ projectedMonthly: 2, monthToDate: 1 }).cadenceMinutes, 15);
 });
 
+// ATR 3.125 on a 100 close: a 6.25% stop, so MIN = 0.125 / 0.0625 = 2% and MAX = 4%.
+const atrInputs = {
+  atr14: { value: 3.125, observations: 14, status: 'verified_history', source: 'adjusted daily history', asOf: '2026-09-03' },
+  referencePrice: { value: 100, observations: 1, status: 'verified_history', source: 'adjusted daily history', asOf: '2026-09-03' },
+};
+
 test('typed Trend change reduces to calculated MIN and resolves only from verified position evidence', () => {
   const change = { ...tradeEvent, entityId: 'IGV', productKey: 'risk-ranges', eventType: 'risk_range', signalValue: { trend: 'NEUTRAL', lrr: 100, hrr: 110 }, fieldPath: 'data.ranges.IGV', excerpt: 'IGV Trend NEUTRAL' };
-  const book = weight => ({ ...holdings(10), positions: [{ symbol: 'IGV', quantity: 10 }], ruleHoldings: [{ holding: 'IGV', heldSide: 'LONG', trade: 'BULLISH', trend: 'NEUTRAL', weightPct: weight, sizingInputs: { beta: { value: 1, observations: 252, status: 'verified_history', source: 'adjusted daily history', asOf: '2026-09-03' } } }] });
+  const book = weight => ({ ...holdings(10), positions: [{ symbol: 'IGV', quantity: 10 }], ruleHoldings: [{ holding: 'IGV', heldSide: 'LONG', trade: 'BULLISH', trend: 'NEUTRAL', weightPct: weight, sizingInputs: atrInputs }] });
   const first = evaluateFinding(change, book(4), null, now);
   assert.equal(first.state, 'open');
   assert.equal(first.rule.targetWeight, 2);
@@ -97,7 +103,7 @@ test('typed Trend change reduces to calculated MIN and resolves only from verifi
 
 test('aligned bearish shorts and superseded signals do not become conflicts', () => {
   const change = tradeEvent;
-  const book = { ...holdings(-10), ruleHoldings: [{ holding: 'MSFT', heldSide: 'SHORT', trade: 'BEARISH', trend: 'BULLISH', weightPct: 1, sizingInputs: { beta: { value: 1, observations: 252, status: 'verified_history', source: 'adjusted history', asOf: '2026-09-03' } } }] };
+  const book = { ...holdings(-10), ruleHoldings: [{ holding: 'MSFT', heldSide: 'SHORT', trade: 'BEARISH', trend: 'BULLISH', weightPct: 1, sizingInputs: atrInputs }] };
   assert.equal(evaluateFinding(change, book, null, now), null);
   const revised = { ...book, ruleHoldings: [{ ...book.ruleHoldings[0], trade: 'BULLISH', sources: { trade: { publishedAt: '2026-09-04T15:01:00Z' } } }] };
   assert.equal(evaluateFinding(change, revised, null, now), null);

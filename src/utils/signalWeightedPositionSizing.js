@@ -5,20 +5,17 @@
  * means 50 basis points. The module only returns read-only recommendations;
  * it has no order-routing side effects.
  */
-import { portfolioSizingPolicies } from '../constants/portfolioSizingPolicies.cjs';
-
 export const SIZING_CONSTANTS = Object.freeze({
-  MIN_BETA: 0.5,
-  MAX_BETA: 2,
-  MIN_BETA_OBSERVATIONS: 126,
   MIN_ATR_OBSERVATIONS: 14,
-  MIN_WEIGHT_NUMERATOR: 2,
-  MAX_WEIGHT_NUMERATOR: 6,
-  WEIGHT_INCREMENT: 0.5,
+  // A stop STOP_ATR_MULTIPLE ATRs away costs MIN_/MAX_STOP_LOSS_PCT_NLV of NLV
+  // at MIN and MAX. MAX_POSITION_WEIGHT sets an ATR floor for quiet securities.
+  STOP_ATR_MULTIPLE: 2,
+  MIN_STOP_LOSS_PCT_NLV: 0.125,
+  MAX_STOP_LOSS_PCT_NLV: 0.25,
+  MAX_POSITION_WEIGHT: 10,
+  WEIGHT_INCREMENT: 0.25,
   NORMAL_STEP: 0.5,
   ACCELERATED_STEP: 1,
-  ATR_RISK_BUDGET: 0.5,
-  ATR_MULTIPLIER: 2,
   RANGE_CONVICTION_WEIGHT: 0.2,
   STRUCTURE_CONVICTION_WEIGHT: 0.3,
   RECORD_CONVICTION_WEIGHT: 0.5,
@@ -88,78 +85,79 @@ export function normalizeSignal(value) {
   return null;
 }
 
-/** Calculate the beta-derived executable band in percentage points of NLV. */
-export function calculateBetaBand(
-  beta,
-  { minimumObservations = SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS } = {},
-) {
-  const rawBeta = metricValue(beta);
-  const observations = finite(beta && typeof beta === 'object' ? beta.observations : null);
-  const status = String(beta && typeof beta === 'object' ? beta.status || '' : '').toLowerCase();
-  let reason = null;
-  if (rawBeta == null) reason = 'BETA_UNAVAILABLE';
-  else if (observations != null && observations < minimumObservations) reason = 'INSUFFICIENT_BETA_OBSERVATIONS';
-  else if (['unavailable', 'error', 'insufficient'].includes(status)) reason = 'BETA_UNAVAILABLE';
+/** The ATR floor at which MAX reaches MAX_POSITION_WEIGHT, as a fraction of price. */
+export const ATR_FLOOR = SIZING_CONSTANTS.MAX_STOP_LOSS_PCT_NLV
+  / (SIZING_CONSTANTS.STOP_ATR_MULTIPLE * SIZING_CONSTANTS.MAX_POSITION_WEIGHT);
 
-  if (reason) {
+/** Stop price STOP_ATR_MULTIPLE ATRs against the side from a basis price. */
+export function calculateStopPrice({ basis, atr14, side } = {}) {
+  const price = positive(basis);
+  const atr = positive(metricValue(atr14));
+  const direction = normalizeBias(side);
+  if (price == null || atr == null || !direction) return null;
+  const stop = price + (direction === 'SHORT' ? 1 : -1) * SIZING_CONSTANTS.STOP_ATR_MULTIPLE * atr;
+  return stop > 0 ? stop : null;
+}
+
+/**
+ * Size each security from its own volatility, in percentage points of NLV.
+ * The stop sits STOP_ATR_MULTIPLE ATRs away, so MIN and MAX are the weights
+ * whose stop-out costs MIN_ and MAX_STOP_LOSS_PCT_NLV. Below ATR_FLOOR the
+ * floor sets the band, which caps MAX at MAX_POSITION_WEIGHT; the stop still
+ * uses the measured ATR.
+ */
+export function calculateSizingBand({ atr14, spot } = {}) {
+  const atr = positive(metricValue(atr14));
+  const price = positive(spot);
+  if (atr == null || price == null) {
     return {
       available: false,
-      reason,
-      rawBeta,
-      effectiveBeta: null,
+      reason: atr == null ? 'ATR_UNAVAILABLE' : 'SPOT_UNAVAILABLE',
+      atr14: atr,
+      spot: price,
+      relativeAtr: null,
+      effectiveRelativeAtr: null,
+      floorApplied: false,
+      stopDistance: null,
       rawMinWeight: null,
       rawMaxWeight: null,
       minWeight: null,
-      betaMaxWeight: null,
+      maxWeight: null,
+      riskBlocked: false,
       unit: 'percentage-points',
     };
   }
-
-  const effectiveBeta = clamp(Math.abs(rawBeta), SIZING_CONSTANTS.MIN_BETA, SIZING_CONSTANTS.MAX_BETA);
-  const rawMinWeight = SIZING_CONSTANTS.MIN_WEIGHT_NUMERATOR / effectiveBeta;
-  const rawMaxWeight = SIZING_CONSTANTS.MAX_WEIGHT_NUMERATOR / effectiveBeta;
+  const relativeAtr = atr / price;
+  const effectiveRelativeAtr = Math.max(relativeAtr, ATR_FLOOR);
+  const sizingStopDistance = SIZING_CONSTANTS.STOP_ATR_MULTIPLE * effectiveRelativeAtr;
+  const rawMinWeight = SIZING_CONSTANTS.MIN_STOP_LOSS_PCT_NLV / sizingStopDistance;
+  const rawMaxWeight = SIZING_CONSTANTS.MAX_STOP_LOSS_PCT_NLV / sizingStopDistance;
+  const minWeight = roundWeightUp(rawMinWeight);
+  const maxWeight = roundWeightDown(rawMaxWeight);
   return {
     available: true,
     reason: null,
-    rawBeta,
-    effectiveBeta,
+    atr14: atr,
+    spot: price,
+    relativeAtr,
+    effectiveRelativeAtr,
+    floorApplied: relativeAtr < ATR_FLOOR,
+    stopDistance: SIZING_CONSTANTS.STOP_ATR_MULTIPLE * relativeAtr,
     rawMinWeight,
     rawMaxWeight,
-    minWeight: roundWeightUp(rawMinWeight),
-    betaMaxWeight: roundWeightDown(rawMaxWeight),
+    minWeight,
+    maxWeight,
+    // Only an ATR near half the price leaves no increment between MIN and MAX.
+    riskBlocked: maxWeight < minWeight,
     unit: 'percentage-points',
   };
 }
 
-/** A portfolio process policy does not change the instrument's security type. */
-export function resolveSizingPolicy(symbol) {
-  const key = String(symbol || '').trim().toUpperCase();
-  const policyId = portfolioSizingPolicies.symbols[key];
-  const policy = portfolioSizingPolicies.policies[policyId];
-  return policy ? { ...policy, asOf: portfolioSizingPolicies.asOf, authority: portfolioSizingPolicies.authority } : null;
-}
-
-/** Resolve the policy band before the separate ATR maximum-position cap. */
-export function calculateSizingBand({ symbol, beta } = {}) {
-  const policy = resolveSizingPolicy(symbol);
-  if (!policy) {
-    const band = calculateBetaBand(beta);
-    return { ...band, maxWeight: band.betaMaxWeight, requiresBeta: true, policy: null };
-  }
-  return {
-    available: true,
-    reason: null,
-    rawBeta: null,
-    effectiveBeta: null,
-    rawMinWeight: policy.minWeight,
-    rawMaxWeight: policy.maxWeight,
-    minWeight: policy.minWeight,
-    maxWeight: policy.maxWeight,
-    betaMaxWeight: null,
-    requiresBeta: policy.requiresBeta,
-    policy,
-    unit: 'percentage-points',
-  };
+/** NLV percentage points lost if a position of `weight` reaches its stop. */
+export function stopLossPctNlv(weight, stopDistance) {
+  const size = finite(weight);
+  const distance = finite(stopDistance);
+  return size == null || distance == null ? null : Math.abs(size) * distance;
 }
 
 function hasSource(value) {
@@ -190,12 +188,7 @@ function validateDatedMetric(metric, {
 /** Required research inputs must be attributable before an executable output is allowed. */
 export function validateResearchProvenance(input = {}) {
   const provenance = input.provenance || {};
-  const band = calculateSizingBand({ symbol: input.symbol || input.instrument?.symbol, beta: input.beta });
   const blockers = [
-    ...(band.requiresBeta ? validateDatedMetric(input.beta, {
-      prefix: 'BETA',
-      minimumObservations: SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS,
-    }) : []),
     ...validateDatedMetric(input.atr14, {
       prefix: 'ATR',
       minimumObservations: SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS,
@@ -261,34 +254,6 @@ export function validateInstrumentContext(instrument = {}) {
     currency: currency || null,
     multiplier,
     lotSize,
-  };
-}
-
-/** 50bp-of-NLV risk budget divided by a two-ATR relative stop distance. */
-export function calculateAtrRiskCap({ atr14, spot, netLiquidationValue } = {}) {
-  const atr = positive(metricValue(atr14));
-  const price = positive(spot);
-  if (atr == null || price == null) {
-    return {
-      available: false,
-      reason: atr == null ? 'ATR_UNAVAILABLE' : 'SPOT_UNAVAILABLE',
-      capWeight: null,
-      capNotional: null,
-      unit: 'percentage-points',
-    };
-  }
-  const stopDistance = (SIZING_CONSTANTS.ATR_MULTIPLIER * atr) / price;
-  const capWeight = SIZING_CONSTANTS.ATR_RISK_BUDGET / stopDistance;
-  const nlv = positive(netLiquidationValue);
-  return {
-    available: true,
-    reason: null,
-    atr14: atr,
-    spot: price,
-    stopDistance,
-    capWeight,
-    capNotional: nlv == null ? null : nlv * capWeight / 100,
-    unit: 'percentage-points',
   };
 }
 
@@ -574,12 +539,7 @@ function unique(values) {
  * The function never transmits orders and never substitutes non-live quote data.
  */
 export function calculateSizingDecision(input = {}) {
-  const sizingBand = calculateSizingBand({ symbol: input.symbol || input.instrument?.symbol, beta: input.beta });
-  const atrRiskCap = calculateAtrRiskCap({
-    atr14: input.atr14,
-    spot: input.spot,
-    netLiquidationValue: input.netLiquidationValue,
-  });
+  const sizingBand = calculateSizingBand({ atr14: input.atr14, spot: input.spot });
   const recordsInput = input.records || {};
   const priorAth = input.priorAth ?? recordsInput.priorAllTimeHigh;
   const priorAtl = input.priorAtl ?? recordsInput.priorAllTimeLow;
@@ -597,12 +557,17 @@ export function calculateSizingDecision(input = {}) {
   const record = calculateRecordSignal({ hrr: input.hrr, lrr: input.lrr, priorAth, priorAtl });
   const conviction = calculateConviction({ bias, range, streaks, record });
   const minWeight = sizingBand.minWeight;
-  const betaMaxWeight = sizingBand.betaMaxWeight;
-  const maxWeight = sizingBand.available
-    ? Math.min(sizingBand.maxWeight, atrRiskCap.available ? atrRiskCap.capWeight : sizingBand.maxWeight)
-    : null;
-  const operationalMaxWeight = maxWeight == null ? null : roundWeightDown(maxWeight);
-  const riskBlocked = sizingBand.available && atrRiskCap.available && atrRiskCap.capWeight < minWeight;
+  const maxWeight = sizingBand.maxWeight;
+  const operationalMaxWeight = maxWeight;
+  const riskBlocked = sizingBand.riskBlocked;
+  const stop = {
+    atrMultiple: SIZING_CONSTANTS.STOP_ATR_MULTIPLE,
+    distance: sizingBand.stopDistance,
+    price: calculateStopPrice({ basis: sizingBand.spot, atr14: sizingBand.atr14, side: bias }),
+    lossAtMinPctNlv: stopLossPctNlv(minWeight, sizingBand.stopDistance),
+    lossAtMaxPctNlv: stopLossPctNlv(maxWeight, sizingBand.stopDistance),
+    unit: 'percentage-points',
+  };
   const targetWeight = riskBlocked ? null : calculateTargetWeight({
     minWeight,
     maxWeight,
@@ -629,7 +594,7 @@ export function calculateSizingDecision(input = {}) {
   if (!bias) researchReasons.push('BIAS_UNAVAILABLE');
   if (!signalDataComplete) researchReasons.push('SIGNAL_DATA_INCOMPLETE');
   if (!range.available) researchReasons.push(range.reason);
-  if (riskBlocked) researchReasons.push('ATR_CAP_BELOW_MIN');
+  if (riskBlocked) researchReasons.push('VOLATILITY_TOO_HIGH_TO_SIZE');
 
   if (positionExists && tradeBroken) {
     lifecycleState = 'EXIT';
@@ -707,7 +672,7 @@ export function calculateSizingDecision(input = {}) {
   const actionableReady = live.available
     && researchReady
     && signalDataComplete
-    && atrRiskCap.available
+    && sizingBand.available
     && researchProvenance.available
     && instrument.available;
   const direction = bias === 'SHORT' ? -1 : 1;
@@ -730,7 +695,7 @@ export function calculateSizingDecision(input = {}) {
       ...live.blockers,
       ...(!researchReady ? ['RESEARCH_DECISION_UNAVAILABLE'] : []),
       ...(!signalDataComplete ? ['SIGNAL_DATA_INCOMPLETE'] : []),
-      ...(!atrRiskCap.available ? ['ATR_RISK_CAP_UNAVAILABLE'] : []),
+      ...(!sizingBand.available ? ['ATR_SIZING_UNAVAILABLE'] : []),
       ...researchProvenance.blockers,
       ...instrument.blockers,
     ]),
@@ -741,7 +706,6 @@ export function calculateSizingDecision(input = {}) {
 
   const suppliedProvenance = input.provenance || {};
   const provenance = {
-    beta: metricProvenance(input.beta, suppliedProvenance.beta || null),
     atr: metricProvenance(input.atr14, suppliedProvenance.atr || null),
     signals: suppliedProvenance.signals || { trade: null, trend: null },
     range: suppliedProvenance.range || null,
@@ -767,14 +731,11 @@ export function calculateSizingDecision(input = {}) {
   };
 
   return {
-    rawBeta: sizingBand.rawBeta,
-    effectiveBeta: sizingBand.effectiveBeta,
     rawMinWeight: sizingBand.rawMinWeight,
     rawMaxWeight: sizingBand.rawMaxWeight,
     sizingBand,
     minWeight,
-    betaMaxWeight,
-    atrRiskCap,
+    stop,
     maxWeight,
     operationalMaxWeight,
     riskBlocked,

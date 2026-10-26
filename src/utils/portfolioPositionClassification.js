@@ -7,7 +7,7 @@ export function withPortfolioPositionClassification(row) {
   const classification = getExposureDefinition(profile.primaryExposureId);
   const classificationTitle = [
     profile.classificationNote,
-    row.sizingBasis ? `Current dashboard classification; MIN / MAX use ${row.sizingBasis === 'Beta sizing' ? 'SPY beta' : row.sizingBasis.toLowerCase()}, with a separate ATR cap on MAX.` : 'Current dashboard classification.',
+    row.sizingBasis ? 'Current dashboard classification; MIN / MAX and the stop use the security’s own 14-day ATR.' : 'Current dashboard classification.',
     profile.reviewedAt ? `Classification reviewed ${profile.reviewedAt}.` : null,
   ].filter(Boolean).join(' ');
   return { ...row, classificationLabel: classification?.label || null, classificationTitle };

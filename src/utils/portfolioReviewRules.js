@@ -1,4 +1,4 @@
-import { calculateSizingDecision, SIZING_CONSTANTS } from './signalWeightedPositionSizing.js';
+import { calculateSizingDecision, stopLossPctNlv, SIZING_CONSTANTS } from './signalWeightedPositionSizing.js';
 
 const number = value => value == null || value === '' || typeof value === 'boolean' || !Number.isFinite(Number(value)) ? null : Number(value);
 const signal = value => ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(value) ? value : null;
@@ -46,19 +46,20 @@ export function evaluatePortfolioRule(holding, asOf) {
       || !['available', 'verified_history'].includes(metric.status)) return null;
     return metric;
   };
-  const beta = capturedMetric(inputs.beta, SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS);
   const atr14 = capturedMetric(inputs.atr14, SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS);
   const referencePrice = capturedMetric(inputs.referencePrice, 1);
   const decision = calculateSizingDecision({
     symbol: holding.holding || holding.symbol,
-    beta, atr14, spot: Object.hasOwn(inputs, 'referencePrice') ? number(referencePrice?.value) : number(holding.valuationPrice), netLiquidationValue: number(holding.netLiquidation),
+    atr14, spot: Object.hasOwn(inputs, 'referencePrice') ? number(referencePrice?.value) : number(holding.valuationPrice), netLiquidationValue: number(holding.netLiquidation),
     lrr: number(holding.lrr), hrr: number(holding.hrr), tradeSignal: trade, trendSignal: trend,
     position: { exists: true, side: holding.heldSide, weight },
   });
-  // A policy/beta ceiling alone is not the final MAX: the verified ATR cap may
-  // be lower. Fixed catalog policies can establish MIN without market beta.
+  // MIN, MAX, and the stop all come from the verified ATR and reference price.
   const bandAvailable = decision.sizingBand.available;
-  const maxWeight = bandAvailable && decision.atrRiskCap.available ? decision.operationalMaxWeight : null;
+  // Only an ATR near half the price leaves no band; a held position then exits.
+  const volatilityBlocked = decision.riskBlocked === true;
+  const limitWeight = bandAvailable ? decision.operationalMaxWeight : null;
+  const maxWeight = limitWeight;
   const heldSignal = holding.heldSide === 'LONG' ? 'BULLISH' : holding.heldSide === 'SHORT' ? 'BEARISH' : null;
   let weightStatus = null;
   let weightDeviation = null;
@@ -66,18 +67,20 @@ export function evaluatePortfolioRule(holding, asOf) {
   // research actions. Below MIN is informational, including for BENCH/EXIT.
   if (heldSignal && weight != null && Number.isFinite(Date.parse(asOf))
     && !invalidEvidence(holding) && holding.connected !== false) {
-    if (exceedsWeightLimit(weight, maxWeight)) {
+    if (exceedsWeightLimit(weight, limitWeight)) {
       weightStatus = 'overweight';
-      weightDeviation = weight - maxWeight;
-    } else if (bandAvailable && !(maxWeight != null && maxWeight < decision.minWeight)
+      weightDeviation = weight - limitWeight;
+    } else if (bandAvailable && !volatilityBlocked
       && exceedsWeightLimit(decision.minWeight, weight)) {
       weightStatus = 'underweight';
       weightDeviation = decision.minWeight - weight;
     }
   }
-  const sizingBasis = decision.sizingBand.policy ? `${decision.sizingBand.policy.label} policy` : 'Beta sizing';
-  const base = { ...holding, sizingBasis, beta: decision.sizingBand.effectiveBeta ?? null,
-    atrCapWeight: decision.atrRiskCap.available ? decision.atrRiskCap.capWeight : null,
+  const { sizingBand, stop } = decision;
+  const base = { ...holding, sizingBasis: 'ATR sizing',
+    atrPct: bandAvailable ? sizingBand.relativeAtr * 100 : null, atrFloorApplied: sizingBand.floorApplied, volatilityBlocked,
+    stopDistancePct: bandAvailable ? sizingBand.stopDistance * 100 : null, stopPrice: stop.price,
+    stopLossPctNlv: bandAvailable ? stopLossPctNlv(weight, sizingBand.stopDistance) : null,
     weightPct: weight, trade, trend, minWeight: decision.minWeight, maxWeight, weightStatus, weightDeviation, targetWeight: null, reduction: null };
   if (!heldSignal) return { ...base, status: 'verification', reason: 'Position side unavailable' };
   if (decision.research.action === 'EXIT') return {
@@ -95,16 +98,15 @@ export function evaluatePortfolioRule(holding, asOf) {
   };
   // A known size breach does not depend on entry ranges or complete signals.
   // Trade-break exits and the stricter Trend-break MIN still take priority.
-  if (exceedsWeightLimit(weight, maxWeight)) return {
+  if (exceedsWeightLimit(weight, limitWeight)) return {
     ...base, status: 'conflict', rule: 'ABOVE_MAX', action: 'REDUCE', targetLabel: 'MAX',
-    targetWeight: maxWeight, reduction: weight - maxWeight,
+    targetWeight: limitWeight, reduction: weight - limitWeight,
   };
   if (!trade) return { ...base, status: 'verification', reason: 'Trade signal unavailable' };
   if (!trend) return { ...base, status: 'verification', reason: 'Trend signal unavailable' };
   if (weight == null) return { ...base, status: 'verification', reason: 'Position weight unavailable' };
-  if (!bandAvailable) return { ...base, status: 'verification', reason: decision.lifecycleState === 'BENCH' ? 'Trend changed; MIN comparison needs verified beta' : 'Position limits need verified beta' };
+  if (!bandAvailable) return { ...base, status: 'verification', reason: decision.lifecycleState === 'BENCH' ? 'Trend changed; MIN comparison needs verified ATR and price' : 'Position limits need verified ATR and price' };
   if (decision.lifecycleState === 'BENCH') return { ...base, status: 'aligned', reason: weight > decision.minWeight ? 'Within 10 bp of MIN' : 'At or below MIN' };
-  if (maxWeight == null) return { ...base, status: 'verification', reason: 'Risk cap needs verified ATR and price inputs' };
   if (!decision.range.available) return { ...base, status: 'verification', reason: 'Risk range unavailable' };
   return { ...base, status: 'aligned' };
 }

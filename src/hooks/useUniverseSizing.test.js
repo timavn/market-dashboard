@@ -9,9 +9,9 @@ const source = 'Yahoo Finance chart API';
 const metric = (value, observations) => ({ value, observations, asOf: '2026-09-04', source, status: 'available' });
 const payload = symbols => ({ status: 'available', source, historicalOnly: true, executable: false, rows: Object.fromEntries(symbols.map(symbol => [symbol, {
   symbol, asOf: '2026-09-04', status: 'available', source, historicalOnly: true, executable: false, instrumentType: 'ETF',
-  beta: metric(1.2, 252), atr14: metric(1, 14), referencePrice: metric(100, 1),
+  atr14: metric(2, 14), referencePrice: metric(100, 1),
   provenance: { provider: 'Yahoo Finance', dataset: 'chart', interval: '1d', adjustedCloseRequired: true,
-    security: { requestedSymbol: symbol, fetchedAt: new Date(now).toISOString() }, benchmark: { symbol: 'SPY', fetchedAt: new Date(now).toISOString() } },
+    security: { requestedSymbol: symbol, fetchedAt: new Date(now).toISOString() } },
 }])) });
 
 beforeEach(() => { jest.spyOn(Date, 'now').mockReturnValue(now); jest.clearAllMocks(); });
@@ -31,7 +31,7 @@ test('calculates the full named universe in bounded batches, beyond the configur
   expect(result.current.loading).toBe(false);
   expect(peak).toBeLessThanOrEqual(4);
   expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledWith(expect.any(Array), { forceRefresh: false, sizingOnly: true });
-  expect(Object.values(result.current.bySymbol).every(row => row.available && row.maxWeight === 5)).toBe(true);
+  expect(Object.values(result.current.bySymbol).every(row => row.available && row.minWeight === 3.25 && row.maxWeight === 6.25)).toBe(true);
   expect(result.current.bySymbol.PROSE).toBeUndefined();
 });
 
@@ -39,7 +39,7 @@ test('recalculation clears failed results instead of retaining old limits', asyn
   MarketDataService.getExposureLabUniverse.mockResolvedValue({ status: 'available', historicalOnly: true, executable: false, rows: [] });
   MarketDataService.getSecurityRiskMetrics.mockImplementation(async symbols => payload(symbols));
   const { result } = renderHook(() => useUniverseSizing(true));
-  await waitFor(() => expect(result.current.bySymbol.AMZN?.maxWeight).toBe(5));
+  await waitFor(() => expect(result.current.bySymbol.AMZN?.maxWeight).toBe(6.25));
   MarketDataService.getSecurityRiskMetrics.mockRejectedValue(new Error('history unavailable'));
   act(() => result.current.refresh());
   await waitFor(() => expect(result.current.bySymbol.AMZN?.available).toBe(false));
@@ -66,7 +66,7 @@ test('reopening revalidates recent completed history without repeating the whole
   await waitFor(() => expect(result.current.completed).toBe(2));
   rerender({ active: false }); rerender({ active: true });
   await waitFor(() => expect(result.current.loading).toBe(false));
-  expect(result.current.bySymbol.AMZN.maxWeight).toBe(5);
+  expect(result.current.bySymbol.AMZN.maxWeight).toBe(6.25);
   expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1);
   Date.now.mockReturnValue(now + 3600001);
   rerender({ active: false }); rerender({ active: true });

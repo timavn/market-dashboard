@@ -20,8 +20,8 @@ const POSITION_LIFECYCLE_RULES = [
 ];
 
 const POSITION_SIZING_RULES = [
-  'risk.beta_band',
-  'risk.atr_cap',
+  'risk.atr_band',
+  'risk.atr_stop',
   'sizing.conviction',
   'sizing.target_rounding',
   'lifecycle.open_at_min',
@@ -53,7 +53,7 @@ export const PROCESS_METHOD_IDS = [
 
 const PROCESS_METHOD_DEPENDENCIES = [
   { documentId: 'signals-and-risk-ranges', version: '0.1' },
-  { documentId: 'position-sizing', version: '1.1' },
+  { documentId: 'position-sizing', version: '2.0' },
   { documentId: 'stops-exits-and-reversals', version: '0.1' },
   { documentId: 'macro-regime-and-quad-overlay', version: '0.1' },
   { documentId: 'security-selection-and-pods', version: '0.1' },
@@ -192,7 +192,7 @@ export const PROCESS_DOCUMENTS = [
     editable: true,
     title: 'Position Sizing',
     subtitle: 'Method',
-    version: '1.1',
+    version: '2.0',
     status: 'Canonical',
     asOf: PROCESS_AS_OF,
     published: true,
@@ -276,10 +276,10 @@ export const PROCESS_DOCUMENTS = [
     status: 'Draft',
     asOf: PROCESS_AS_OF,
     published: true,
-    dependencies: [{ documentId: 'position-sizing', version: '1.1' }],
+    dependencies: [{ documentId: 'position-sizing', version: '2.0' }],
     canonicalRuleIds: [],
     researchRuleIds: ['portfolio.limits'],
-    referencedRuleIds: ['risk.beta_band', 'risk.atr_cap', 'portfolio.limits'],
+    referencedRuleIds: ['risk.atr_band', 'risk.atr_stop', 'portfolio.limits'],
   },
   {
     id: 'data-controls-and-execution',
@@ -399,37 +399,36 @@ export const PROCESS_RULES = [
     },
   },
   {
-    id: 'risk.beta_band',
-    title: 'Beta-derived sizing band',
+    id: 'risk.atr_band',
+    title: 'ATR sizing band',
     category: 'position-sizing',
     status: 'canonical',
     ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
-    statement: 'Absolute beta, clamped from 0.5 to 2.0, sets the raw MIN and MAX before executable rounding.',
+    ownerVersion: '2.0',
+    statement: 'Each security is sized from its own 14-day ATR: MIN and MAX are the weights whose 2 × ATR stop costs 0.125% and 0.25% of NLV; an ATR floor of 1.25% of price caps MAX at 10%.',
     parameters: {
-      benchmark: 'SPY',
-      lookbackSessions: 252,
-      minimumAlignedObservations: SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS,
-      effectiveBetaMinimum: SIZING_CONSTANTS.MIN_BETA,
-      effectiveBetaMaximum: SIZING_CONSTANTS.MAX_BETA,
-      rawMinNumeratorPct: SIZING_CONSTANTS.MIN_WEIGHT_NUMERATOR,
-      rawMaxNumeratorPct: SIZING_CONSTANTS.MAX_WEIGHT_NUMERATOR,
+      role: 'sizing-band',
+      atrSessions: SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS,
+      stopAtrMultiple: SIZING_CONSTANTS.STOP_ATR_MULTIPLE,
+      minStopLossPctNlv: SIZING_CONSTANTS.MIN_STOP_LOSS_PCT_NLV,
+      maxStopLossPctNlv: SIZING_CONSTANTS.MAX_STOP_LOSS_PCT_NLV,
+      maxPositionWeightPct: SIZING_CONSTANTS.MAX_POSITION_WEIGHT,
       executableIncrementPct: SIZING_CONSTANTS.WEIGHT_INCREMENT,
+      benchmark: null,
     },
   },
   {
-    id: 'risk.atr_cap',
-    title: 'ATR risk cap',
+    id: 'risk.atr_stop',
+    title: 'ATR reference stop',
     category: 'position-sizing',
     status: 'canonical',
     ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
-    statement: 'The ATR calculation is a maximum-position backstop applied after the beta-derived band.',
+    ownerVersion: '2.0',
+    statement: 'The reference stop sits 2 × ATR against the position from its entry price, the same distance that sets MIN and MAX; it is a planning level, not an order.',
     parameters: {
-      role: 'maximum-position-cap',
-      atrSessions: SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS,
-      riskBudgetPctNlv: SIZING_CONSTANTS.ATR_RISK_BUDGET,
-      atrMultiple: SIZING_CONSTANTS.ATR_MULTIPLIER,
+      atrMultiple: SIZING_CONSTANTS.STOP_ATR_MULTIPLE,
+      basis: 'ENTRY_PRICE',
+      orderTransmissionAllowed: false,
     },
   },
   {
@@ -478,7 +477,7 @@ export const PROCESS_RULES = [
     category: 'position-sizing',
     status: 'canonical',
     ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerVersion: '2.0',
     statement: 'Range proximity, directional structure, and record extension contribute 20%, 30%, and 50% of conviction, respectively.',
     parameters: {
       range: SIZING_CONSTANTS.RANGE_CONVICTION_WEIGHT,
@@ -492,8 +491,8 @@ export const PROCESS_RULES = [
     category: 'position-sizing',
     status: 'canonical',
     ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
-    statement: 'The target is MIN plus conviction times the effective band width, rounded to the nearest 50 basis points and clamped within the band.',
+    ownerVersion: '2.0',
+    statement: 'The target is MIN plus conviction times the effective band width, rounded to the nearest 25 basis points and clamped within the band.',
     parameters: { incrementPct: SIZING_CONSTANTS.WEIGHT_INCREMENT, method: 'NEAREST', clampToBand: true },
   },
   {
@@ -502,7 +501,7 @@ export const PROCESS_RULES = [
     category: 'lifecycle',
     status: 'canonical',
     ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerVersion: '2.0',
     statement: 'A fully eligible new position opens at MIN rather than at its computed target.',
     parameters: { openingWeight: 'MIN' },
   },
@@ -512,7 +511,7 @@ export const PROCESS_RULES = [
     category: 'lifecycle',
     status: 'canonical',
     ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerVersion: '2.0',
     statement: 'Normal edition changes move 50 basis points; record extension or two qualifying three-edition streaks permits a 100-basis-point move.',
     parameters: {
       normalStepPct: SIZING_CONSTANTS.NORMAL_STEP,
@@ -527,7 +526,7 @@ export const PROCESS_RULES = [
     category: 'data-controls',
     status: 'canonical',
     ownerDocumentId: 'position-sizing',
-    ownerVersion: '1.1',
+    ownerVersion: '2.0',
     statement: 'Missing optional structure or record inputs remain visible as unavailable and contribute zero rather than a negative signal.',
     parameters: { contribution: 0, state: 'UNAVAILABLE', negativeSignal: false },
   },
@@ -762,8 +761,8 @@ export const validateProcessRegistry = (
   const tradeBreak = requireRule('lifecycle.trade_break');
   const longEntry = requireRule('entry.long.range_half');
   const shortEntry = requireRule('entry.short.range_half');
-  const betaBand = requireRule('risk.beta_band');
-  const atrCap = requireRule('risk.atr_cap');
+  const atrBand = requireRule('risk.atr_band');
+  const atrStop = requireRule('risk.atr_stop');
   const signalIndependence = requireRule('data.signal_independence');
   const rangeNormalization = requireRule('range.normalization');
   const structure = requireRule('structure.directional_streaks');
@@ -827,18 +826,18 @@ export const validateProcessRegistry = (
     errors.push('Short opens and adds must use the top half of the LRR–HRR.');
   }
   if (
-    betaBand
+    atrBand
     && (
-      betaBand.parameters?.effectiveBetaMinimum !== 0.5
-      || betaBand.parameters?.effectiveBetaMaximum !== 2
-      || betaBand.parameters?.rawMinNumeratorPct !== 2
-      || betaBand.parameters?.rawMaxNumeratorPct !== 6
+      atrBand.parameters?.stopAtrMultiple !== SIZING_CONSTANTS.STOP_ATR_MULTIPLE
+      || atrBand.parameters?.minStopLossPctNlv !== SIZING_CONSTANTS.MIN_STOP_LOSS_PCT_NLV
+      || atrBand.parameters?.maxStopLossPctNlv !== SIZING_CONSTANTS.MAX_STOP_LOSS_PCT_NLV
+      || atrBand.parameters?.maxPositionWeightPct !== SIZING_CONSTANTS.MAX_POSITION_WEIGHT
     )
   ) {
-    errors.push('Beta-band constants must remain the approved 0.5–2.0 clamp with 2%/6% numerators.');
+    errors.push('ATR-band constants must match the production 2 × ATR stop, 0.125%/0.25% stop losses, and 10% ceiling.');
   }
-  if (atrCap && atrCap.parameters?.role !== 'maximum-position-cap') {
-    errors.push('ATR must remain a maximum-position cap, not an entry-size or stop rule.');
+  if (atrStop && atrStop.parameters?.atrMultiple !== atrBand?.parameters?.stopAtrMultiple) {
+    errors.push('The reference stop must use the same ATR multiple as the sizing band.');
   }
   if (signalIndependence && signalIndependence.parameters?.inferenceAllowed !== false) {
     errors.push('Trade and Trend must remain independent published inputs.');
@@ -884,7 +883,7 @@ export const validateProcessRegistry = (
       || targetRounding.parameters?.clampToBand !== true
     )
   ) {
-    errors.push('Target rounding must remain nearest 50 basis points and clamped inside the band.');
+    errors.push('Target rounding must remain nearest 25 basis points and clamped inside the band.');
   }
   if (openAtMin && openAtMin.parameters?.openingWeight !== 'MIN') {
     errors.push('New positions must open at MIN.');

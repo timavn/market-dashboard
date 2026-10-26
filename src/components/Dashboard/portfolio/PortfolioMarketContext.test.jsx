@@ -53,7 +53,7 @@ test('preserves two wrapper-free grids, header order, and five equal-width conte
   expect(headers).toHaveClass('pcv2-intel-grid', 'pcv2-intel-header');
   expect(contextGrid()).toHaveClass('pcv2-intel-grid', 'pcv2-intel-values', 'pcv2-intel-context');
   expect([...headers.children].map((cell) => cell.textContent)).toEqual([
-    'Price Z-score · 20D', 'Sizing vol', 'Relevant vol index', 'USD correlation', 'Stop loss',
+    'Price Z-score · 20D', 'Sizing ATR', 'Relevant vol index', 'USD correlation', 'Stop loss',
   ]);
   expect([...contextGrid().children].map((cell) => cell.textContent)).toEqual([
     '-0.45', '18.0%', 'N/A', '+0.32', '141.55',

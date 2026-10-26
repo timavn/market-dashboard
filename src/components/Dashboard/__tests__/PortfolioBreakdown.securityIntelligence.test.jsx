@@ -446,8 +446,11 @@ beforeEach(() => {
     weightedOverlapPct: null,
     fromCache: false,
   });
+  // GLD sizing: ATR 4.5 on a 200 close = 2.25%; stop = 4.50%.
+  // MIN = 0.125 / 0.045 = 2.78 → 3.00; MAX = 0.25 / 0.045 = 5.56 → 5.50.
   MarketDataService.getSecurityRiskMetrics.mockResolvedValue({
     status: 'available',
+    source: 'Yahoo Finance chart API',
     historicalOnly: true,
     executable: false,
     generatedAt: new Date().toISOString(),
@@ -456,6 +459,18 @@ beforeEach(() => {
         symbol: 'GLD',
         source: 'Yahoo Finance chart API',
         asOf: expectedSizingSession(),
+        instrumentType: 'ETF',
+        referencePrice: {
+          status: 'available',
+          value: 200,
+          source: 'Yahoo Finance chart API',
+          asOf: expectedSizingSession(),
+          observations: 1,
+          timestamp: Date.parse(`${expectedSizingSession()}T13:30:00.000Z`),
+          priceBasis: 'adjusted completed daily close',
+          historicalOnly: true,
+          executable: false,
+        },
         provenance: {
           provider: 'Yahoo Finance', dataset: 'chart', interval: '1d', adjustedCloseRequired: true,
           security: { requestedSymbol: 'GLD', fetchedAt: new Date().toISOString() },
@@ -479,7 +494,9 @@ beforeEach(() => {
         atr14: {
           status: 'available',
           value: 4.5,
-          asOf: marketDate(),
+          source: 'Yahoo Finance chart API',
+          observations: 14,
+          asOf: expectedSizingSession(),
         },
         zScore20: {
           status: 'available',
@@ -1316,7 +1333,7 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   expect(within(firstPanel).getByText('0.42')).toBeInTheDocument();
   await waitFor(() => expect(within(firstExpandedRow).getByRole('button', {
     name: 'Verify GLD position size calculation',
-  })).toHaveTextContent('2.2–6.7%'));
+  })).toHaveTextContent('3.0–5.5%'));
   expect(within(firstPanel).getByText('+1.25')).toBeInTheDocument();
   expect(within(firstPanel).getByText('GVZ 18.25')).toBeInTheDocument();
   expect(within(firstPanel).getByText('-0.72')).toBeInTheDocument();
@@ -1419,7 +1436,7 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   const contextHeaders = within(firstPanel).getByLabelText('Market context headers');
   expect(within(contextHeaders).getAllByText(/.+/).map((node) => node.textContent)).toEqual([
     'Price Z-score · 20D',
-    'Sizing vol',
+    'Sizing ATR',
     'Relevant vol index',
     'USD correlation',
     'Stop loss',
@@ -1852,6 +1869,9 @@ describe('market context presentation callbacks', () => {
     riskPayload.generatedAt = fixedNow;
     riskPayload.rows.GLD.asOf = expectedSizingSession();
     riskPayload.rows.GLD.provenance.security.fetchedAt = fixedNow;
+    riskPayload.rows.GLD.atr14.asOf = expectedSizingSession();
+    riskPayload.rows.GLD.referencePrice.asOf = expectedSizingSession();
+    riskPayload.rows.GLD.referencePrice.timestamp = Date.parse(`${expectedSizingSession()}T13:30:00.000Z`);
     riskPayload.rows.GLD.realizedVolatility.asOf = expectedSizingSession();
     MarketDataService.getSecurityRiskMetrics.mockClear();
     MarketDataService.getSecurityRiskMetrics.mockResolvedValue(riskPayload);
@@ -1865,32 +1885,29 @@ describe('market context presentation callbacks', () => {
     jest.useRealTimers();
   });
 
-  test('prioritizes the sizing-vol spike badge while preserving both warnings and removes its control after refresh failure', async () => {
-    riskPayload.rows.GLD.realizedVolatility = {
-      ...riskPayload.rows.GLD.realizedVolatility,
-      rv252: null,
-      observationCount: 126,
-      limitedHistory: true,
-      spikeWarning: true,
-      warnings: ['Recent volatility increased.', 'Only 126 daily returns available.'],
-    };
+  test('shows the Floor badge for an ATR below 1.25% of price and removes its control after refresh failure', async () => {
+    // ATR 2 on a 200 close = 1.00% < 1.25%: the band uses the floor (stop 2.50% →
+    // MIN 0.125 / 0.025 = 5, MAX 0.25 / 0.025 = 10); the stop uses 2 × 1.00% = 2.00%.
+    riskPayload.rows.GLD.atr14 = { ...riskPayload.rows.GLD.atr14, value: 2 };
     render(<PortfolioBreakdown portfolioData={singlePosition} />);
     await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
     const panel = screen.getByLabelText('Research intelligence for GLD');
     const sizingCell = within(panel).getByLabelText('GLD market context').children[1];
-    const button = await within(sizingCell).findByRole('button', { name: 'Verify GLD sizing volatility' });
-    expect(button).toHaveTextContent('18.0%Spike');
-    expect(within(button).getByText('Spike')).toHaveClass('pcv2-vol-badge', 'is-spike');
-    expect(within(button).queryByText('Limited')).not.toBeInTheDocument();
-    expectCellProvenance(sizingCell, /max\(63d, 1Y\) realized · Sep 9 · Limited history · Spike/);
+    const button = await within(sizingCell).findByRole('button', { name: 'Verify GLD sizing ATR' });
+    expect(button).toHaveTextContent('1.00%Floor');
+    expect(within(button).getByText('Floor')).toHaveClass('pcv2-vol-badge', 'is-limited');
+    expectCellProvenance(sizingCell, /ATR14 ÷ close · Sep 9 · 1\.25% floor/);
     expect(sizingCell).toHaveClass('is-reference');
+    expect(screen.getByRole('button', { name: 'Verify GLD position size calculation' })).toHaveTextContent('5.0–10.0%');
 
     fireEvent.click(button);
-    const dialog = screen.getByRole('dialog', { name: 'Sizing volatility calculation' });
-    expect(dialog).toHaveTextContent('RV₆₃ = 18.00% · RV₂₅₂ = n/a · SizingVol = 18.00% · N = 252 · Observations = 126');
-    expect(dialog).toHaveTextContent('Recent volatility increased.');
-    expect(dialog).toHaveTextContent('Only 126 daily returns available.');
+    const dialog = screen.getByRole('dialog', { name: 'Sizing ATR calculation' });
+    expect(dialog).toHaveTextContent('ATR % = ATR14 ÷ close; stop distance = 2 × ATR %');
+    expect(dialog).toHaveTextContent('ATR14 = 2.00 · Close = 200.00 · ATR % = 1.00% · Stop distance = 2.00%');
+    expect(dialog).toHaveTextContent('1.00% of price');
+    expect(dialog).toHaveTextContent('Below the 1.25% floor: the floor sets MIN / MAX; the stop uses the measured ATR.');
+    expect(dialog).toHaveTextContent('Completed daily bars through 2026-09-09.');
     expect(dialog).toHaveTextContent('Reference-only / non-executable.');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close calculation' }));
 
@@ -1898,20 +1915,21 @@ describe('market context presentation callbacks', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh portfolio and research' }));
     await waitFor(() => expect(sizingCell).toHaveTextContent('Unavailable'));
     expect(within(sizingCell).queryByRole('button')).not.toBeInTheDocument();
-    expect(within(sizingCell).queryByText('Spike')).not.toBeInTheDocument();
+    expect(within(sizingCell).queryByText('Floor')).not.toBeInTheDocument();
     expect(sizingCell).not.toHaveClass('is-reference');
   });
 
-  test('keeps a sizing-volatility explanation snapshot through refresh until it is reopened', async () => {
+  test('keeps a sizing-ATR explanation snapshot through refresh until it is reopened', async () => {
     render(<PortfolioBreakdown portfolioData={singlePosition} />);
     await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Show research intelligence for GLD' }));
     const panel = screen.getByLabelText('Research intelligence for GLD');
     const sizingCell = within(panel).getByLabelText('GLD market context').children[1];
-    const button = await within(sizingCell).findByRole('button', { name: 'Verify GLD sizing volatility' });
-    expect(button).toHaveTextContent('18.0%');
-    expect(within(button).queryByText('Spike')).not.toBeInTheDocument();
-    expectCellProvenance(sizingCell, /max\(63d, 1Y\) realized · Sep 9/);
+    const button = await within(sizingCell).findByRole('button', { name: 'Verify GLD sizing ATR' });
+    // 4.5 / 200 = 2.25%.
+    expect(button).toHaveTextContent('2.25%');
+    expect(within(button).queryByText('Floor')).not.toBeInTheDocument();
+    expectCellProvenance(sizingCell, /ATR14 ÷ close · Sep 9/);
     await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(2));
     await act(async () => { await Promise.resolve(); });
     const providerCalls = () => [
@@ -1923,14 +1941,16 @@ describe('market context presentation callbacks', () => {
     const callsBeforeOpening = providerCalls();
 
     fireEvent.click(button);
-    const initialDialog = screen.getByRole('dialog', { name: 'Sizing volatility calculation' });
+    const initialDialog = screen.getByRole('dialog', { name: 'Sizing ATR calculation' });
     const initialExplanation = initialDialog.textContent;
-    expect(initialDialog).toHaveTextContent('RV₆₃ = 18.00% · RV₂₅₂ = 15.00% · SizingVol = 18.00% · N = 252 · Observations = 500');
+    expect(initialDialog).toHaveTextContent('ATR14 = 4.50 · Close = 200.00 · ATR % = 2.25% · Stop distance = 4.50%');
     expect(initialDialog).toHaveTextContent('Reference-only / non-executable.');
     expect(providerCalls()).toEqual(callsBeforeOpening);
 
+    // After the 16:15 New York allowance the Sep 10 session is complete.
     const refreshedAt = '2026-09-10T21:00:00.000Z';
     jest.setSystemTime(new Date(refreshedAt));
+    const refreshedSession = expectedSizingSession();
     const refreshedRiskPayload = {
       ...riskPayload,
       generatedAt: refreshedAt,
@@ -1938,46 +1958,44 @@ describe('market context presentation callbacks', () => {
         ...riskPayload.rows,
         GLD: {
           ...riskPayload.rows.GLD,
-          asOf: expectedSizingSession(),
+          asOf: refreshedSession,
           provenance: {
             ...riskPayload.rows.GLD.provenance,
             security: { ...riskPayload.rows.GLD.provenance.security, fetchedAt: refreshedAt },
           },
-          realizedVolatility: {
-            ...riskPayload.rows.GLD.realizedVolatility,
-            rv63: 0.3,
-            rv252: 0.2,
-            sizingVol: 0.3,
-            observationCount: 501,
-            asOf: expectedSizingSession(),
-            spikeWarning: true,
-            warnings: ['Recent volatility increased after the latest completed session.'],
+          // 7.2 / 240 = 3.00%; stop = 6.00%.
+          atr14: { ...riskPayload.rows.GLD.atr14, value: 7.2, asOf: refreshedSession },
+          referencePrice: {
+            ...riskPayload.rows.GLD.referencePrice,
+            value: 240,
+            asOf: refreshedSession,
+            timestamp: Date.parse(`${refreshedSession}T13:30:00.000Z`),
           },
         },
       },
     };
     MarketDataService.getSecurityRiskMetrics.mockResolvedValue(refreshedRiskPayload);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh portfolio and research' }));
-    await waitFor(() => expect(sizingCell).toHaveTextContent('30.0%Spike'));
-    expectCellProvenance(sizingCell, /max\(63d, 1Y\) realized · Sep 10 · Spike/);
-    expect(screen.getByRole('dialog', { name: 'Sizing volatility calculation' })).toBe(initialDialog);
+    await waitFor(() => expect(sizingCell).toHaveTextContent('3.00%'));
+    expectCellProvenance(sizingCell, /ATR14 ÷ close · Sep 10/);
+    expect(screen.getByRole('dialog', { name: 'Sizing ATR calculation' })).toBe(initialDialog);
     expect(initialDialog.textContent).toBe(initialExplanation);
-    expect(initialDialog).not.toHaveTextContent('Recent volatility increased after the latest completed session.');
+    expect(initialDialog).not.toHaveTextContent('Completed daily bars through 2026-09-10.');
     await waitFor(() => expect(MarketDataService.getSecurityIntelligence).toHaveBeenCalledTimes(4));
     expect(MarketDataService.getSecurityIntelligence.mock.calls[3][0]).toEqual(expect.objectContaining({ historyDays: 5 }));
     await act(async () => { await Promise.resolve(); });
     const callsAfterRefresh = providerCalls();
 
     fireEvent.click(within(initialDialog).getByRole('button', { name: 'Close calculation' }));
-    fireEvent.click(within(sizingCell).getByRole('button', { name: 'Verify GLD sizing volatility' }));
-    const reopenedDialog = screen.getByRole('dialog', { name: 'Sizing volatility calculation' });
-    expect(reopenedDialog).toHaveTextContent('RV₆₃ = 30.00% · RV₂₅₂ = 20.00% · SizingVol = 30.00% · N = 252 · Observations = 501');
-    expect(reopenedDialog).toHaveTextContent('30.00% annualized');
-    expect(reopenedDialog).toHaveTextContent('Recent volatility increased after the latest completed session.');
+    fireEvent.click(within(sizingCell).getByRole('button', { name: 'Verify GLD sizing ATR' }));
+    const reopenedDialog = screen.getByRole('dialog', { name: 'Sizing ATR calculation' });
+    expect(reopenedDialog).toHaveTextContent('ATR14 = 7.20 · Close = 240.00 · ATR % = 3.00% · Stop distance = 6.00%');
+    expect(reopenedDialog).toHaveTextContent('3.00% of price');
+    expect(reopenedDialog).toHaveTextContent('Completed daily bars through 2026-09-10.');
     expect(reopenedDialog).toHaveTextContent('Reference-only / non-executable.');
-    expect(reopenedDialog).not.toHaveTextContent('18.00%');
+    expect(reopenedDialog).not.toHaveTextContent('2.25%');
     fireEvent.click(within(reopenedDialog).getByRole('button', { name: 'Close calculation' }));
-    expect(screen.queryByRole('dialog', { name: 'Sizing volatility calculation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Sizing ATR calculation' })).not.toBeInTheDocument();
     expect(providerCalls()).toEqual(callsAfterRefresh);
   });
 
@@ -4143,28 +4161,55 @@ test('clears LRR and HRR when the research refresh fails', async () => {
   expect(within(panel).getByLabelText(/High price risk range$/)).toHaveTextContent('—');
 });
 
-test('shows the volatility operating band and a plain-text PM explanation', async () => {
+test('shows the ATR operating band and a plain-text PM explanation', async () => {
   render(<PortfolioBreakdown portfolioData={{ ...portfolioData, holdings: [portfolioData.holdings[0]] }} />);
   const sizeButton = await screen.findByRole('button', { name: 'Verify GLD position size calculation' });
-  await waitFor(() => expect(sizeButton).toHaveTextContent('2.2–6.7%'));
+  await waitFor(() => expect(sizeButton).toHaveTextContent('3.0–5.5%'));
   expect(sizeButton).toHaveAttribute('title', 'Volatility-based operating range; click for method, inputs, and risk limits.');
   fireEvent.click(sizeButton);
   const dialog = screen.getByRole('dialog', { name: 'Position size calculation' });
-  expect(dialog).toHaveTextContent('GLD: 2.2–6.7% of NAV');
-  expect(dialog).toHaveTextContent('Bigger price swings mean a smaller position; steadier prices allow a larger one.');
-  expect(dialog).toHaveTextContent('63-day volatility = 18.00%; 252-day volatility = 15.00%');
-  expect(dialog).toHaveTextContent('2% × (20% ÷ 18.00%) = 2.22%');
-  expect(dialog).toHaveTextContent('6% × (20% ÷ 18.00%) = 6.67%');
-  expect(dialog).toHaveTextContent('At 10% it is 4–12%');
-  expect(dialog).toHaveTextContent('Zero is always allowed');
-  expect(dialog).toHaveTextContent('correlations do not automatically reduce this displayed band');
+  expect(dialog).toHaveTextContent('GLD: 3.0–5.5% of NLV');
+  expect(dialog).toHaveTextContent(`Operating range based on completed daily bars through ${expectedSizingSession()}.`);
+  expect(dialog).toHaveTextContent('Bigger daily moves mean a smaller position; steadier prices allow a larger one.');
+  expect(dialog).toHaveTextContent('ATR % = 14-day ATR ÷ last close, floored at 1.25%. Stop distance = 2 × ATR %.');
+  expect(dialog).toHaveTextContent('MIN = 0.125% ÷ stop distance; MAX = 0.25% ÷ stop distance.');
+  expect(dialog).toHaveTextContent('there is no beta or asset-class adjustment');
+  // 4.5 / 200 = 2.25%; 2 × 2.25% = 4.50%; 0.125 / 4.5% = 2.78 → 3.00; 0.25 / 4.5% = 5.56 → 5.50.
+  expect(dialog).toHaveTextContent('ATR 4.50 ÷ close 200.00 = 2.25%.');
+  expect(dialog).toHaveTextContent('Stop distance = 2 × 2.25% = 4.50%.');
+  expect(dialog).toHaveTextContent('0.125% ÷ 4.50% rounds up to 3.00%; 0.25% ÷ 4.50% rounds down to 5.50%.');
+  expect(dialog).toHaveTextContent('The reference stop is 4.50% from the entry price.');
+  expect(dialog).not.toHaveTextContent('below the 1.25% floor');
+  expect(dialog).toHaveTextContent('At 2% ATR the stop is 4% away and the band is 3.25–6.25%.');
+  expect(dialog).toHaveTextContent('At 4% ATR the stop is 8% away and the band is 1.75–3.00%; at 8% it is 1.00–1.50%.');
+  expect(dialog).toHaveTextContent('caps every band at 5%–10% in very quiet assets');
+  expect(dialog).toHaveTextContent('Method: Position Sizing v2.0 (ATR). Source: Yahoo Finance chart API.');
   expect(dialog.querySelector('table, svg:not(button svg), .pcv2-verification-equation, .pcv2-verification-result')).not.toBeInTheDocument();
   expect(dialog).not.toHaveTextContent('β*');
+  expect(dialog).not.toHaveTextContent('volatility = 18.00%');
   fireEvent.keyDown(document, { key: 'Escape' });
   expect(screen.queryByRole('dialog', { name: 'Position size calculation' })).not.toBeInTheDocument();
 });
 
-test('does not substitute beta when volatility provenance is missing', async () => {
+test('explains the 1.25% ATR floor when it sets the band', async () => {
+  // 2 / 200 = 1.00% < 1.25%: band stop = 2 × 1.25% = 2.50% → 5.00–10.00%; reference stop 2.00%.
+  const payload = await MarketDataService.getSecurityRiskMetrics();
+  MarketDataService.getSecurityRiskMetrics.mockClear();
+  payload.rows.GLD.atr14.value = 2;
+  MarketDataService.getSecurityRiskMetrics.mockResolvedValue(payload);
+  render(<PortfolioBreakdown portfolioData={{ ...portfolioData, holdings: [portfolioData.holdings[0]] }} />);
+  const sizeButton = await screen.findByRole('button', { name: 'Verify GLD position size calculation' });
+  await waitFor(() => expect(sizeButton).toHaveTextContent('5.0–10.0%'));
+  fireEvent.click(sizeButton);
+  const dialog = screen.getByRole('dialog', { name: 'Position size calculation' });
+  expect(dialog).toHaveTextContent('ATR 2.00 ÷ close 200.00 = 1.00%.');
+  expect(dialog).toHaveTextContent('That is below the 1.25% floor, so the floor sets the band.');
+  expect(dialog).toHaveTextContent('Stop distance = 2 × 1.25% = 2.50%.');
+  expect(dialog).toHaveTextContent('0.125% ÷ 2.50% rounds up to 5.00%; 0.25% ÷ 2.50% rounds down to 10.00%.');
+  expect(dialog).toHaveTextContent('The reference stop is 2.00% from the entry price.');
+});
+
+test('does not substitute beta when ATR provenance is missing', async () => {
   const payload = await MarketDataService.getSecurityRiskMetrics();
   MarketDataService.getSecurityRiskMetrics.mockClear();
   delete payload.rows.GLD.provenance;
@@ -4176,7 +4221,23 @@ test('does not substitute beta when volatility provenance is missing', async () 
   fireEvent.click(sizeButton);
   const dialog = screen.getByRole('dialog', { name: 'Position size calculation' });
   expect(dialog).toHaveTextContent('Size unavailable.');
-  expect(dialog).toHaveTextContent('Current, sourced adjusted daily history is required.');
+  expect(dialog).toHaveTextContent('Daily history source needs verification');
+  expect(dialog).not.toHaveTextContent('GLD math.');
+});
+
+test('does not substitute beta when ATR14 is unavailable', async () => {
+  const payload = await MarketDataService.getSecurityRiskMetrics();
+  MarketDataService.getSecurityRiskMetrics.mockClear();
+  payload.rows.GLD.atr14 = { status: 'unavailable', value: null, source: 'Yahoo Finance chart API', observations: 9, asOf: null };
+  MarketDataService.getSecurityRiskMetrics.mockResolvedValue(payload);
+  render(<PortfolioBreakdown portfolioData={{ ...portfolioData, holdings: [portfolioData.holdings[0]] }} />);
+  await waitFor(() => expect(MarketDataService.getSecurityRiskMetrics).toHaveBeenCalledTimes(1));
+  const sizeButton = screen.getByRole('button', { name: 'Verify GLD position size calculation' });
+  await waitFor(() => expect(sizeButton).toHaveTextContent('—'));
+  fireEvent.click(sizeButton);
+  const dialog = screen.getByRole('dialog', { name: 'Position size calculation' });
+  expect(dialog).toHaveTextContent('Size unavailable.');
+  expect(dialog).toHaveTextContent('ATR needs 14 completed sessions');
   expect(dialog).not.toHaveTextContent('GLD math.');
 });
 
@@ -4184,9 +4245,10 @@ test.each([
   ['stale', payload => { payload._cache = { stale: true }; }],
   ['cache-only', payload => { payload.cacheOnly = true; }],
   ['mock', payload => { payload.rows.GLD.mock = true; }],
-  ['seeded', payload => { payload.rows.GLD.realizedVolatility.seeded = true; }],
+  ['seeded', payload => { payload.rows.GLD.atr14.seeded = true; }],
   ['offline', payload => { payload.rows.GLD.provenance.security.connected = false; }],
-])('keeps the Size cell empty for %s volatility inputs', async (_name, mutate) => {
+  ['mock close', payload => { payload.rows.GLD.referencePrice.mock = true; }],
+])('keeps the Size cell empty for %s ATR inputs', async (_name, mutate) => {
   const payload = await MarketDataService.getSecurityRiskMetrics();
   MarketDataService.getSecurityRiskMetrics.mockClear();
   mutate(payload);
@@ -4202,7 +4264,7 @@ test.each([
 test('clears the displayed band and an open explanation after refresh fails', async () => {
   render(<PortfolioBreakdown portfolioData={{ ...portfolioData, holdings: [portfolioData.holdings[0]] }} />);
   const sizeButton = screen.getByRole('button', { name: 'Verify GLD position size calculation' });
-  await waitFor(() => expect(sizeButton).toHaveTextContent('2.2–6.7%'));
+  await waitFor(() => expect(sizeButton).toHaveTextContent('3.0–5.5%'));
   fireEvent.click(sizeButton);
   expect(screen.getByRole('dialog')).toHaveTextContent('GLD math.');
   MarketDataService.getSecurityRiskMetrics.mockRejectedValue(new Error('Provider disconnected'));
@@ -4210,7 +4272,7 @@ test('clears the displayed band and an open explanation after refresh fails', as
   await waitFor(() => expect(sizeButton).toHaveTextContent('—'));
   expect(screen.getByRole('dialog')).toHaveTextContent('Size unavailable.');
   expect(screen.getByRole('dialog')).not.toHaveTextContent('GLD math.');
-  expect(screen.getByRole('dialog')).not.toHaveTextContent('GLD: 2.2–6.7%');
+  expect(screen.getByRole('dialog')).not.toHaveTextContent('GLD: 3.0–5.5%');
 });
 
 test('expires the Size cell and its open explanation without a new API response', async () => {
@@ -4221,7 +4283,7 @@ test('expires the Size cell and its open explanation without a new API response'
     MarketDataService.getSecurityRiskMetrics.mockResolvedValue(payload);
     render(<PortfolioBreakdown portfolioData={{ ...portfolioData, holdings: [portfolioData.holdings[0]] }} />);
     const button = screen.getByRole('button', { name: 'Verify GLD position size calculation' });
-    await waitFor(() => expect(button).toHaveTextContent('2.2–6.7%'));
+    await waitFor(() => expect(button).toHaveTextContent('3.0–5.5%'));
     fireEvent.click(button);
     act(() => { jest.advanceTimersByTime(30_000); });
     expect(button).toHaveTextContent('—');

@@ -1,18 +1,19 @@
 import { withPortfolioPositionClassification } from './portfolioPositionClassification';
 
 test('shows the dashboard classification separately from the actual sizing basis without changing captured values', () => {
-  const captured = { holding: 'DBMF', securityName: 'Captured DBMF name', sizingBasis: 'Beta sizing', minWeight: 4, maxWeight: 12 };
+  const captured = { holding: 'DBMF', securityName: 'Captured DBMF name', sizingBasis: 'ATR sizing', minWeight: 3.25, maxWeight: 6.25, stopPrice: 96 };
   const row = withPortfolioPositionClassification(captured);
   expect(row).toMatchObject({ ...captured, classificationLabel: 'Managed Futures' });
-  expect(row.classificationTitle).toContain('MIN / MAX use SPY beta');
-  expect(row.classificationTitle).toContain('separate ATR cap on MAX');
+  expect(row.classificationTitle).toContain('Current dashboard classification; MIN / MAX and the stop use the security’s own 14-day ATR.');
+  expect(row.classificationTitle).not.toMatch(/beta|ATR cap/i);
   expect(captured).not.toHaveProperty('classificationLabel');
 });
 
-test('preserves the distinction between IBIT cryptocurrency exposure and its commodity sizing policy', () => {
-  const row = withPortfolioPositionClassification({ holding: 'IBIT', sizingBasis: 'Commodity policy' });
+test('keeps IBIT cryptocurrency exposure while sizing it from its own ATR like every security', () => {
+  const row = withPortfolioPositionClassification({ holding: 'IBIT', sizingBasis: 'ATR sizing' });
   expect(row.classificationLabel).toBe('Cryptocurrency');
-  expect(row.classificationTitle).toContain('MIN / MAX use commodity policy');
+  expect(row.classificationTitle).toContain('MIN / MAX and the stop use the security’s own 14-day ATR');
+  expect(row.classificationTitle).not.toMatch(/commodity/i);
 });
 
 test('does not invent a classification or sizing basis for an unmapped security', () => {

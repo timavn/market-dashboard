@@ -1,13 +1,15 @@
 import {
-  calculateAtrRiskCap,
-  calculateBetaBand,
+  ATR_FLOOR,
+  SIZING_CONSTANTS,
   calculateConviction,
   calculateDirectionalStreaks,
   calculateRangePosition,
   calculateRecordSignal,
   calculateSizingBand,
   calculateSizingDecision,
+  calculateStopPrice,
   calculateTargetWeight,
+  stopLossPctNlv,
   validateInstrumentContext,
   validateLiveContext,
   validateResearchProvenance,
@@ -73,7 +75,6 @@ function baseInput(overrides = {}) {
     ? overrides.instrument
     : defaultInstrument;
   return {
-    beta: { value: 1, observations: 252, source: 'adjusted-daily', asOf: '2026-07-16' },
     atr14: { value: 2, observations: 14, source: 'completed-daily-bars', asOf: '2026-07-16' },
     spot,
     netLiquidationValue,
@@ -103,98 +104,99 @@ function baseInput(overrides = {}) {
   };
 }
 
-describe('beta and ATR bands (weights are percentage points)', () => {
+describe('ATR sizing bands (weights are percentage points)', () => {
   test.each([
-    [0.2, 0.5, 4, 12],
-    [-1, 1, 2, 6],
-    [3, 2, 1, 3],
-    [1.3, 1.3, 2, 4.5],
-  ])('clamps and rounds beta %p bands for beta %p', (beta, effective, min, max) => {
-    expect(calculateBetaBand(beta)).toMatchObject({
+    // atr14, spot, MIN, MAX, floorApplied
+    [2, 100, 3.25, 6.25, false],
+    [20, 1000, 3.25, 6.25, false],
+    [3, 100, 2.25, 4, false],
+    [6.6, 100, 1, 1.75, false],
+    [1, 100, 5, 10, true],
+    [0.5, 100, 5, 10, true],
+  ])('sizes ATR %p on spot %p to MIN %p / MAX %p', (atr14, spot, min, max, floorApplied) => {
+    expect(calculateSizingBand({ atr14, spot })).toMatchObject({
       available: true,
-      effectiveBeta: effective,
       minWeight: min,
-      betaMaxWeight: max,
+      maxWeight: max,
+      floorApplied,
+      riskBlocked: false,
       unit: 'percentage-points',
     });
   });
 
-  test('rejects missing beta and object metrics below 126 observations', () => {
-    expect(calculateBetaBand(null).reason).toBe('BETA_UNAVAILABLE');
-    expect(calculateBetaBand({ value: 1, observations: 125 })).toMatchObject({
-      available: false,
-      reason: 'INSUFFICIENT_BETA_OBSERVATIONS',
+  test('sets MIN and MAX so a two-ATR stop costs 12.5bp and 25bp of NLV before 0.25 rounding', () => {
+    expect(SIZING_CONSTANTS).toMatchObject({
+      STOP_ATR_MULTIPLE: 2, MIN_STOP_LOSS_PCT_NLV: 0.125, MAX_STOP_LOSS_PCT_NLV: 0.25,
+      MAX_POSITION_WEIGHT: 10, WEIGHT_INCREMENT: 0.25,
     });
+    expect(ATR_FLOOR).toBeCloseTo(0.0125);
+    const band = calculateSizingBand({ atr14: { value: 3, observations: 14 }, spot: 100 });
+    expect(band.relativeAtr).toBeCloseTo(0.03);
+    expect(band.stopDistance).toBeCloseTo(0.06);
+    expect(band.rawMinWeight).toBeCloseTo(2.0833, 4);
+    expect(band.rawMaxWeight).toBeCloseTo(4.1667, 4);
+    expect(band).toMatchObject({ minWeight: 2.25, maxWeight: 4 });
+    expect(band.minWeight % 0.25).toBe(0);
+    expect(band.maxWeight % 0.25).toBe(0);
   });
 
-  test('applies the 50bp NLV budget at a two-ATR stop distance', () => {
-    expect(calculateAtrRiskCap({ atr14: 2, spot: 100, netLiquidationValue: 1_000_000 })).toMatchObject({
-      available: true,
-      stopDistance: 0.04,
-      capWeight: 12.5,
-      capNotional: 125000,
-    });
+  test('the ATR floor caps MAX at 10% while the stop keeps the measured ATR', () => {
+    const band = calculateSizingBand({ atr14: 0.5, spot: 100 });
+    expect(band.relativeAtr).toBeCloseTo(0.005);
+    expect(band.effectiveRelativeAtr).toBeCloseTo(0.0125);
+    expect(band.stopDistance).toBeCloseTo(0.01);
+    expect(band).toMatchObject({ floorApplied: true, minWeight: 5, maxWeight: 10 });
   });
 
-  test('lets ATR override beta max and blocks when the cap is below MIN', () => {
-    const capped = calculateSizingDecision(baseInput({ atr14: 10 }));
-    expect(capped).toMatchObject({ betaMaxWeight: 6, maxWeight: 2.5, riskBlocked: false });
-
-    const blocked = calculateSizingDecision(baseInput({ atr14: 20, position: { exists: true, side: 'LONG', weight: 2 } }));
-    expect(blocked).toMatchObject({ riskBlocked: true, lifecycleState: 'EXIT' });
-    expect(blocked.research).toMatchObject({ action: 'EXIT', recommendedWeight: 0 });
-  });
-});
-
-describe('portfolio sizing policies', () => {
-  test('IBIT uses the commodity 1–4% policy independently of beta', () => {
-    for (const beta of [null, 0.2, 1, 3]) {
-      expect(calculateSizingBand({ symbol: ' ibit ', beta })).toMatchObject({
-        available: true, requiresBeta: false, minWeight: 1, maxWeight: 4,
-        betaMaxWeight: null, effectiveBeta: null,
-        policy: { id: 'commodity', authority: 'User portfolio process' },
-      });
-    }
-    expect(calculateSizingBand({ symbol: 'SPY', beta: 1 })).toMatchObject({
-      requiresBeta: true, minWeight: 2, maxWeight: 6, policy: null,
-    });
-    expect(calculateSizingBand({ symbol: 'BTC', beta: null }).available).toBe(false);
+  test('blocks sizing only when MAX rounds below MIN at an extreme ATR', () => {
+    expect(calculateSizingBand({ atr14: 50, spot: 100 })).toMatchObject({ minWeight: 0.25, maxWeight: 0.25, riskBlocked: false });
+    expect(calculateSizingBand({ atr14: 60, spot: 100 })).toMatchObject({ minWeight: 0.25, maxWeight: 0, riskBlocked: true });
   });
 
-  test('the commodity band governs opening, MAX trims and Trend-break MIN without changing Trade exits', () => {
-    const input = baseInput({ symbol: 'IBIT', beta: null });
-    const opened = calculateSizingDecision(input);
-    expect(opened).toMatchObject({ minWeight: 1, maxWeight: 4, operationalMaxWeight: 4 });
-    expect(opened.research).toMatchObject({ action: 'OPEN', recommendedWeight: 1 });
-    expect(opened.actionable).toMatchObject({ available: true, recommendedWeight: 1 });
-    expect(opened.researchProvenance).toEqual({ available: true, blockers: [] });
-    const held = { ...input, position: { exists: true, side: 'LONG', weight: 5 } };
-    expect(calculateSizingDecision(held).research).toMatchObject({ action: 'TRIM', recommendedWeight: 4 });
-    expect(calculateSizingDecision({ ...held, trendSignal: 'BEARISH' }).research)
-      .toMatchObject({ action: 'REDUCE_TO_BENCH', recommendedWeight: 1 });
-    expect(calculateSizingDecision({ ...held, tradeSignal: 'BEARISH' }).research)
-      .toMatchObject({ action: 'EXIT', recommendedWeight: 0 });
+  test('requires a positive ATR and spot, and no beta', () => {
+    expect(calculateSizingBand({ atr14: null, spot: 100 })).toMatchObject({ available: false, reason: 'ATR_UNAVAILABLE', minWeight: null, maxWeight: null });
+    expect(calculateSizingBand({ atr14: 0, spot: 100 }).reason).toBe('ATR_UNAVAILABLE');
+    expect(calculateSizingBand({ atr14: 2, spot: null })).toMatchObject({ available: false, reason: 'SPOT_UNAVAILABLE' });
+    expect(calculateSizingBand({ atr14: 2, spot: -1 }).reason).toBe('SPOT_UNAVAILABLE');
+    expect(calculateSizingBand({ atr14: 2, spot: 100, beta: null }).available).toBe(true);
   });
 
-  test('IBIT retains the ATR cap and verified price requirements', () => {
-    const input = baseInput({ symbol: 'IBIT', beta: null, atr14: null });
-    expect(calculateSizingDecision(input).actionable).toMatchObject({ available: false, targetShares: null });
-    const capped = calculateSizingDecision(baseInput({ symbol: 'IBIT', beta: null, atr14: 10 }));
-    expect(capped).toMatchObject({ minWeight: 1, maxWeight: 2.5, riskBlocked: false });
-    const blocked = calculateSizingDecision(baseInput({
-      symbol: 'IBIT', beta: null, atr14: 30, position: { exists: true, side: 'LONG', weight: 2 },
-    }));
-    expect(blocked).toMatchObject({ riskBlocked: true, lifecycleState: 'EXIT' });
+  test('places the stop two ATRs against the side and prices the stop-out in NLV points', () => {
+    expect(calculateStopPrice({ basis: 100, atr14: 2, side: 'LONG' })).toBe(96);
+    expect(calculateStopPrice({ basis: 100, atr14: { value: 2 }, side: 'BEARISH' })).toBe(104);
+    expect(calculateStopPrice({ basis: 100, atr14: 2, side: null })).toBeNull();
+    expect(calculateStopPrice({ basis: 100, atr14: null, side: 'LONG' })).toBeNull();
+    expect(calculateStopPrice({ basis: 10, atr14: 6, side: 'LONG' })).toBeNull();
+    expect(stopLossPctNlv(3.25, 0.04)).toBeCloseTo(0.13);
+    expect(stopLossPctNlv(-6.25, 0.04)).toBeCloseTo(0.25);
+    expect(stopLossPctNlv(null, 0.04)).toBeNull();
   });
 
-  test.each(['offline', 'stale', 'cache-only', 'seeded', 'mock'])(
-    'a fixed commodity policy does not authorize executable sizing from %s quotes', status => {
-      const result = calculateSizingDecision(baseInput({ symbol: 'IBIT', beta: null,
-        liveContext: liveContext({ quote: { status }, accountSummary: { netLiquidationValue: 1_000_000 } }),
-      }));
-      expect(result.actionable).toMatchObject({ available: false, action: null, targetShares: null, targetNotional: null });
-    },
-  );
+  test('reports the decision stop for longs and shorts', () => {
+    const long = calculateSizingDecision(baseInput());
+    expect(long).toMatchObject({ minWeight: 3.25, maxWeight: 6.25, riskBlocked: false });
+    expect(long.stop).toMatchObject({ atrMultiple: 2, price: 96, unit: 'percentage-points' });
+    expect(long.stop.distance).toBeCloseTo(0.04);
+    expect(long.stop.lossAtMinPctNlv).toBeCloseTo(0.13);
+    expect(long.stop.lossAtMaxPctNlv).toBeCloseTo(0.25);
+    expect(long).not.toHaveProperty('effectiveBeta');
+    expect(long).not.toHaveProperty('atrRiskCap');
+
+    const short = calculateSizingDecision(baseInput({ bias: 'SHORT', tradeSignal: 'BEAR', trendSignal: 'SHORT' }));
+    expect(short.stop.price).toBe(104);
+  });
+
+  test('an extreme ATR exits a held position and keeps a candidate on WATCH', () => {
+    const held = calculateSizingDecision(baseInput({ atr14: 60, position: { exists: true, side: 'LONG', weight: 2 } }));
+    expect(held).toMatchObject({ riskBlocked: true, lifecycleState: 'EXIT', targetWeight: null });
+    expect(held.research).toMatchObject({ action: 'EXIT', recommendedWeight: 0 });
+    expect(held.research.reasons).toContain('VOLATILITY_TOO_HIGH_TO_SIZE');
+    expect(held.stop.price).toBeNull();
+
+    const candidate = calculateSizingDecision(baseInput({ atr14: 60 }));
+    expect(candidate.research).toMatchObject({ lifecycleState: 'WATCH', action: 'WATCH', recommendedWeight: null });
+    expect(candidate.actionable).toMatchObject({ available: false, action: null });
+  });
 });
 
 describe('range, structure, record, and conviction', () => {
@@ -272,13 +274,14 @@ describe('range, structure, record, and conviction', () => {
 
 describe('lifecycle and step decisions', () => {
   test.each([
-    ['LONG', 'BULLISH', 'LONG', 'SHORT', 94],
-    ['SHORT', 'BEARISH', 'SHORT', 'LONG', 106],
-  ])('covers the complete %s lifecycle truth table', (side, trade, trend, opposite, spot) => {
+    // ATR 2 / spot 94 → MIN 3; ATR 2 / spot 106 → MIN 3.5.
+    ['LONG', 'BULLISH', 'LONG', 'SHORT', 94, 3],
+    ['SHORT', 'BEARISH', 'SHORT', 'LONG', 106, 3.5],
+  ])('covers the complete %s lifecycle truth table', (side, trade, trend, opposite, spot, min) => {
     const common = { bias: side, tradeSignal: trade, trendSignal: trend, spot };
 
     expect(calculateSizingDecision(baseInput(common)).research).toMatchObject({
-      lifecycleState: 'ACTIVE', action: 'OPEN', recommendedWeight: 2,
+      lifecycleState: 'ACTIVE', action: 'OPEN', recommendedWeight: min,
     });
     expect(calculateSizingDecision(baseInput({
       ...common,
@@ -289,7 +292,7 @@ describe('lifecycle and step decisions', () => {
       trendSignal: opposite,
       position: { exists: true, side, weight: 4 },
     })).research).toMatchObject({
-      lifecycleState: 'BENCH', action: 'REDUCE_TO_BENCH', recommendedWeight: 2,
+      lifecycleState: 'BENCH', action: 'REDUCE_TO_BENCH', recommendedWeight: min,
     });
     expect(calculateSizingDecision(baseInput({
       ...common,
@@ -310,14 +313,14 @@ describe('lifecycle and step decisions', () => {
 
   test('opens a fully aligned new long at MIN in the favorable half', () => {
     const result = calculateSizingDecision(baseInput());
-    expect(result).toMatchObject({ lifecycleState: 'ACTIVE', action: 'OPEN', minWeight: 2 });
-    expect(result.research).toMatchObject({ action: 'OPEN', recommendedWeight: 2 });
+    expect(result).toMatchObject({ lifecycleState: 'ACTIVE', action: 'OPEN', minWeight: 3.25 });
+    expect(result.research).toMatchObject({ action: 'OPEN', recommendedWeight: 3.25 });
     expect(result.actionable).toMatchObject({
       available: true,
       action: 'OPEN',
-      recommendedWeight: 2,
-      targetNotional: 20000,
-      targetShares: 200,
+      recommendedWeight: 3.25,
+      targetNotional: 32500,
+      targetShares: 325,
       readOnly: true,
       orderTransmissionAllowed: false,
     });
@@ -330,7 +333,7 @@ describe('lifecycle and step decisions', () => {
 
     const oneSignal = calculateSizingDecision(baseInput({ trendSignal: 'SHORT' }));
     expect(oneSignal).toMatchObject({ lifecycleState: 'WATCH', action: null });
-    expect(oneSignal.research).toMatchObject({ referenceMinWeight: 2, recommendedWeight: null });
+    expect(oneSignal.research).toMatchObject({ referenceMinWeight: 3.25, recommendedWeight: null });
   });
 
   test('takes an existing position directly to BENCH or EXIT as signals deteriorate', () => {
@@ -338,7 +341,7 @@ describe('lifecycle and step decisions', () => {
       trendSignal: 'SHORT', position: { exists: true, side: 'LONG', weight: 4 },
     }));
     expect(bench).toMatchObject({ lifecycleState: 'BENCH', action: 'REDUCE_TO_BENCH' });
-    expect(bench.research.recommendedWeight).toBe(2);
+    expect(bench.research.recommendedWeight).toBe(3.25);
 
     const exit = calculateSizingDecision(baseInput({
       tradeSignal: 'SHORT', trendSignal: 'SHORT', position: { exists: true, side: 'LONG', weight: 4 },
@@ -357,7 +360,7 @@ describe('lifecycle and step decisions', () => {
       trendSignal: 'SHORT', position: { exists: true, side: 'LONG', weight: 1 },
     }));
     expect(result.research).toMatchObject({
-      lifecycleState: 'BENCH', action: 'HOLD', recommendedWeight: 1, referenceMinWeight: 2,
+      lifecycleState: 'BENCH', action: 'HOLD', recommendedWeight: 1, referenceMinWeight: 3.25,
     });
     expect(result.research.reasons).toEqual(expect.arrayContaining([
       'TREND_BREAK_TRADE_ALIGNED',
@@ -388,7 +391,7 @@ describe('lifecycle and step decisions', () => {
 
     const candidate = calculateSizingDecision(baseInput({ trendSignal: null }));
     expect(candidate.research).toMatchObject({
-      lifecycleState: 'WATCH', referenceMinWeight: 2, recommendedWeight: null,
+      lifecycleState: 'WATCH', referenceMinWeight: 3.25, recommendedWeight: null,
     });
     expect(candidate.action).toBeNull();
   });
@@ -434,17 +437,18 @@ describe('lifecycle and step decisions', () => {
     expect(trim.research.recommendedWeight).toBeLessThan(5);
   });
 
-  test('rounds a non-boundary ATR cap down for operational trims', () => {
-    const atrForTwoPointThreePctCap = 25 / 2.3;
+  test('rounds a non-boundary ATR MAX down to 0.25 for operational trims', () => {
+    // ATR 3 / spot 100: raw MAX 0.25 / 0.06 = 4.17 → 4; raw MIN 2.08 → 2.25.
     const result = calculateSizingDecision(baseInput({
-      atr14: atrForTwoPointThreePctCap,
-      position: { exists: true, side: 'LONG', weight: 2.5 },
+      atr14: 3,
+      position: { exists: true, side: 'LONG', weight: 4.5 },
     }));
-    expect(result.maxWeight).toBeCloseTo(2.3);
-    expect(result.operationalMaxWeight).toBe(2);
-    expect(result.research).toMatchObject({ action: 'TRIM', recommendedWeight: 2 });
-    expect(result.research.recommendedWeight % 0.5).toBe(0);
-    expect(result.research.recommendedWeight).toBeLessThanOrEqual(result.maxWeight);
+    expect(result.rawMaxWeight).toBeCloseTo(4.1667, 4);
+    expect(result).toMatchObject({ minWeight: 2.25, maxWeight: 4, operationalMaxWeight: 4 });
+    expect(result.research).toMatchObject({ action: 'TRIM', recommendedWeight: 4 });
+    expect(result.research.reasons).toContain('ABOVE_EFFECTIVE_MAX');
+    expect(result.research.recommendedWeight % 0.25).toBe(0);
+    expect(result.research.recommendedWeight).toBeLessThanOrEqual(result.rawMaxWeight);
   });
 
   test('returns signed short notional and share targets while keeping weights positive', () => {
@@ -453,8 +457,8 @@ describe('lifecycle and step decisions', () => {
       lrr: 90, hrr: 110, priorAtl: 95, priorAth: 150,
       riskRangeHistory: [{ hrr: 115, lrr: 95 }, { hrr: 110, lrr: 90 }],
     }));
-    expect(result.minWeight).toBe(2);
-    expect(result.actionable).toMatchObject({ signedWeight: -2, targetNotional: -20000, targetShares: -200 });
+    expect(result.minWeight).toBe(3.25);
+    expect(result.actionable).toMatchObject({ signedWeight: -3.25, targetNotional: -32500, targetShares: -325 });
   });
 });
 
@@ -473,7 +477,7 @@ describe('live-data fail closed behavior', () => {
     expect(validateResearchProvenance(baseInput())).toEqual({ available: true, blockers: [] });
 
     const missing = calculateSizingDecision(baseInput({ provenance: null }));
-    expect(missing.research).toMatchObject({ action: 'OPEN', recommendedWeight: 2 });
+    expect(missing.research).toMatchObject({ action: 'OPEN', recommendedWeight: 3.25 });
     expect(missing.actionable).toMatchObject({ available: false, action: null, targetShares: null });
     expect(missing.actionable.blockers).toEqual(expect.arrayContaining([
       'TRADE_PROVENANCE_UNAVAILABLE',
@@ -482,12 +486,15 @@ describe('live-data fail closed behavior', () => {
       'RECORDS_PROVENANCE_UNAVAILABLE',
     ]));
 
-    const bareMetrics = calculateSizingDecision(baseInput({ beta: 1, atr14: 2 }));
-    expect(bareMetrics.research).toMatchObject({ action: 'OPEN', recommendedWeight: 2 });
-    expect(bareMetrics.actionable.blockers).toEqual(expect.arrayContaining([
-      'BETA_PROVENANCE_UNAVAILABLE',
-      'ATR_PROVENANCE_UNAVAILABLE',
-    ]));
+    const bareMetrics = calculateSizingDecision(baseInput({ atr14: 2 }));
+    expect(bareMetrics.research).toMatchObject({ action: 'OPEN', recommendedWeight: 3.25 });
+    expect(bareMetrics.actionable.blockers).toContain('ATR_PROVENANCE_UNAVAILABLE');
+    expect(bareMetrics.actionable.blockers.some(blocker => blocker.startsWith('BETA_'))).toBe(false);
+
+    const fewSessions = calculateSizingDecision(baseInput({
+      atr14: { value: 2, observations: 13, source: 'completed-daily-bars', asOf: '2026-07-16' },
+    }));
+    expect(fewSessions.actionable.blockers).toContain('ATR_OBSERVATIONS_UNAVAILABLE');
   });
 
   test('requires verified supported instrument metadata and applies multiplier and lot size', () => {
@@ -518,7 +525,7 @@ describe('live-data fail closed behavior', () => {
         currency: 'USD', multiplier: 10, lotSize: 5,
       },
     }));
-    expect(lotSized.actionable).toMatchObject({ available: true, targetNotional: 20000, targetShares: 20 });
+    expect(lotSized.actionable).toMatchObject({ available: true, targetNotional: 32500, targetShares: 30 });
   });
 
   test.each([
@@ -532,7 +539,7 @@ describe('live-data fail closed behavior', () => {
     ['inferred', { quote: { warning: 'inferred quote' } }],
   ])('suppresses the actionable %s recommendation but preserves research', (_label, override) => {
     const result = calculateSizingDecision(baseInput({ liveContext: liveContext(override) }));
-    expect(result.research).toMatchObject({ action: 'OPEN', recommendedWeight: 2 });
+    expect(result.research).toMatchObject({ action: 'OPEN', recommendedWeight: 3.25 });
     expect(result).toMatchObject({ action: null });
     expect(result.actionable).toMatchObject({
       available: false,
@@ -580,12 +587,14 @@ describe('live-data fail closed behavior', () => {
     ]));
   });
 
-  test('keeps a beta-only research band but blocks action when ATR is missing', () => {
+  test('has no band, research size, or action when ATR is missing', () => {
     const result = calculateSizingDecision(baseInput({ atr14: null }));
-    expect(result).toMatchObject({ minWeight: 2, betaMaxWeight: 6, maxWeight: 6 });
-    expect(result.research).toMatchObject({ action: 'OPEN', recommendedWeight: 2 });
+    expect(result).toMatchObject({ minWeight: null, maxWeight: null, riskBlocked: false, targetWeight: null });
+    expect(result.stop).toMatchObject({ price: null, distance: null, lossAtMinPctNlv: null });
+    expect(result.research).toMatchObject({ lifecycleState: 'WATCH', action: 'WATCH', recommendedWeight: null });
+    expect(result.research.reasons).toContain('ATR_UNAVAILABLE');
     expect(result.actionable).toMatchObject({ available: false, action: null });
-    expect(result.actionable.blockers).toContain('ATR_RISK_CAP_UNAVAILABLE');
+    expect(result.actionable.blockers).toContain('ATR_SIZING_UNAVAILABLE');
   });
 
   test('supports epoch-second quote timestamps and rejects delayed dataType variants', () => {
@@ -651,7 +660,8 @@ describe('live-data fail closed behavior', () => {
     const result = calculateSizingDecision(baseInput({
       provenance: { range: { source: 'hedgeye', asOf: '2026-07-17' } },
     }));
-    expect(result.provenance.beta).toMatchObject({ source: 'adjusted-daily', asOf: '2026-07-16', observations: 252 });
+    expect(result.provenance.atr).toMatchObject({ source: 'completed-daily-bars', asOf: '2026-07-16', observations: 14 });
+    expect(result.provenance).not.toHaveProperty('beta');
     expect(result.provenance.range).toEqual({ source: 'hedgeye', asOf: '2026-07-17' });
     expect(result.provenance.nlv).toMatchObject({ source: 'ibkr', asOf: '2026-07-17T18:59:30.000Z', ageSeconds: 30 });
   });

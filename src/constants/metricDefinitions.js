@@ -13,15 +13,15 @@ const shortEntryRule = getProcessRule('entry.short.range_half');
 export const METRIC_DEFINITIONS = {
   minMax: {
     name: 'MIN / MAX (% of NLV)',
-    definition: 'Per-security planning limits using the Portfolio Review’s beta band and ATR risk cap, independent of whether published Trade and Trend are available.',
-    calculation: 'Effective beta = clamp(|beta vs SPY|, 0.5, 2). MIN = 2% / effective beta, rounded up to 0.5 percentage points. MAX = the smaller of 6% / effective beta and 0.50% / (2 × ATR14 / closing price), rounded down to 0.5 percentage points.',
+    definition: 'Per-security planning limits from the security’s own volatility, independent of whether published Trade and Trend are available.',
+    calculation: 'ATR % = ATR14 / closing price, floored at 1.25%. Stop distance = 2 × ATR %. MIN = 0.125% / stop distance, rounded up to 0.25 percentage points. MAX = 0.25% / stop distance, rounded down to 0.25 percentage points.',
     interpretation: [
-      'Uses up to 252 aligned daily returns, with at least 126 required for beta, and 14 completed sessions for ATR.',
-      'The date is the last completed daily bar. A missing input remains a verification gap.',
-      'If MAX is below MIN, the risk cap leaves no positive sizing target.',
+      'A stop-out at MIN costs about 0.125% of NLV and at MAX about 0.25%, whatever the asset class.',
+      'The 1.25% ATR floor caps MAX at 10%; the stop itself still uses the measured ATR.',
+      'Uses 14 completed sessions for ATR. The date is the last completed daily bar; a missing input remains a verification gap.',
       'Trade/Trend, entry rules, and verified live holdings still determine whether an adjustment is eligible.'
     ],
-    source: 'Site Position Sizing v1.1; sourced adjusted daily history from Yahoo Finance chart API'
+    source: 'Site Position Sizing v2.0; sourced adjusted daily history from Yahoo Finance chart API'
   },
   'zScore': {
     name: 'Z-Score',
@@ -76,7 +76,7 @@ export const METRIC_DEFINITIONS = {
       tradeBreakRule.statement,
       'A missing Trade or Trend remains unknown and prevents executable output'
     ],
-    source: 'The Process v0.1 and Position Sizing v1.1'
+    source: 'The Process v0.1 and Position Sizing v2.0'
   },
 
   'ivolPrem': {
@@ -136,12 +136,12 @@ export const METRIC_DEFINITIONS = {
     definition: 'The 14-day moving average of True Range. True Range is the greatest of: (1) Current High minus Current Low, (2) |Current High minus Previous Close|, (3) |Current Low minus Previous Close|. The ATR % shows ATR as a percentage of the current price.',
     range: 'ATR % < 2% = low volatility (green), 2-5% = moderate (yellow), > 5% = high volatility (red)',
     interpretation: [
-      'Position Sizing v1.1 applies ATR as a maximum-position backstop after the beta-derived band',
-      'The current risk budget is 0.50% of NLV at a two-ATR adverse distance',
-      'If the ATR maximum falls below MIN, the security has no positive sizing target',
-      'Hard-stop placement and trailing behavior remain unresolved pending a canonical technical note'
+      'Position Sizing v2.0 sizes every security from ATR: MIN and MAX are the weights whose 2 × ATR stop costs 0.125% and 0.25% of NLV',
+      'The reference stop is 2 × ATR from the entry price (IBKR average cost) or, for limits, from the last close',
+      'An ATR below 1.25% of price is floored there, which caps MAX at 10%',
+      'Stop-order placement and trailing behavior remain unresolved pending a canonical technical note'
     ],
-    source: 'Position Sizing v1.1; hard-stop policy remains research-only',
+    source: 'Position Sizing v2.0; stop-order policy remains research-only',
     calculation: 'ATR = SMA(14, True Range); ATR % = ATR / Close × 100'
   },
 
@@ -177,6 +177,6 @@ export const METRIC_DEFINITIONS = {
       tradeBreakRule.statement,
       'A wrong-half or out-of-range price remains visible but cannot authorize an open or add'
     ],
-    source: 'The Process v0.1 and Position Sizing v1.1'
+    source: 'The Process v0.1 and Position Sizing v2.0'
   }
 };

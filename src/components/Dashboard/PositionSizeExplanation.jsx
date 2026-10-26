@@ -1,80 +1,61 @@
 import React from 'react';
-import { VOLATILITY_BAND_POLICY as policy } from '../../utils/volatilitySizingBand.cjs';
+import { ATR_FLOOR, SIZING_CONSTANTS as c } from '../../utils/signalWeightedPositionSizing';
 
-const vol = value => `${(value * 100).toFixed(2)}%`;
+const pct = (value, digits = 2) => `${value.toFixed(digits)}%`;
+const floorPct = pct(ATR_FLOOR * 100);
 
 export default function PositionSizeExplanation({ symbol, reference }) {
-  const { band, rv } = reference;
+  const atrPct = reference.available ? reference.relativeAtr * 100 : null;
+  const sizingStopPct = reference.available ? c.STOP_ATR_MULTIPLE * Math.max(atrPct, ATR_FLOOR * 100) : null;
   return (
     <div className="pcv2-sizing-explanation">
-      <p><strong>{reference.available ? `${symbol}: ${reference.value} of NAV` : 'Size unavailable.'}</strong>{' '}
+      <p><strong>{reference.available ? `${symbol}: ${reference.value} of NLV` : 'Size unavailable.'}</strong>{' '}
         {reference.available
-          ? `Operating range based on adjusted closes through ${reference.asOf}.`
+          ? `Operating range based on completed daily bars through ${reference.asOf}.`
           : reference.reason}
       </p>
-      <p><strong>Quick takeaway.</strong> Bigger price swings mean a smaller position; steadier prices allow a larger one.
-        The range gives you room to add and trim while keeping the amount at risk more consistent across holdings.
-        {reference.available && ` For ${symbol}, ${reference.value} means the share of your total portfolio allocated to it, not an expected return.`}
+      <p><strong>Quick takeaway.</strong> Bigger daily moves mean a smaller position; steadier prices allow a larger one.
+        Each range is set so that a stop two ATRs away costs about the same share of the portfolio for every holding.
+        {reference.available && ` For ${symbol}, ${reference.value} is the share of your total portfolio allocated to it, not an expected return.`}
         {' '}The upper end is a limit, not a target you have to reach.
       </p>
-      {symbol === 'OIH' && <p>
-        OIH is an equity ETF holding oil-services companies. Its businesses are exposed to oil activity,
-        but the fund owns stocks. We use OIH’s own returns to size it.{' '}
-        <a href="https://www.vaneck.com/us/en/investments/oil-services-etf-oih/overview/" target="_blank" rel="noreferrer">Fund description</a>.
-      </p>}
-      <p><strong>Rule.</strong> Start with {policy.referenceMinPct}–{policy.referenceMaxPct}% of portfolio net asset value (NAV)
-        at {policy.referenceVolatility * 100}% annual volatility. Multiply both ends by the same risk adjustment:
-        {' '}lower = 2% × (20% ÷ effective volatility); upper = 6% × (20% ÷ effective volatility).
-        The 20% reference is a fixed policy yardstick, not today’s market volatility.
+      <p><strong>Rule.</strong> ATR % = 14-day ATR ÷ last close, floored at {floorPct}. Stop distance = {c.STOP_ATR_MULTIPLE} × ATR %.
+        {' '}MIN = {pct(c.MIN_STOP_LOSS_PCT_NLV, 3)} ÷ stop distance; MAX = {pct(c.MAX_STOP_LOSS_PCT_NLV)} ÷ stop distance.
+        {' '}So a stop-out costs about {pct(c.MIN_STOP_LOSS_PCT_NLV, 3)} of NLV at MIN and {pct(c.MAX_STOP_LOSS_PCT_NLV)} at MAX.
+        The same equations apply to every asset class; there is no beta or asset-class adjustment.
       </p>
       {reference.available && <p><strong>{symbol} math.</strong>{' '}
-        {reference.limitedHistory
-          ? `63-day volatility = ${vol(rv.rv63)}; one-year history is unavailable, so the 63-day estimate is used (limited history).`
-          : `63-day volatility = ${vol(rv.rv63)}; 252-day volatility = ${vol(rv.rv252)}; use the higher, ${vol(band.volatility)}.`}{' '}
-        {band.floorApplied && `The 10% floor raises the sizing denominator to ${vol(band.effectiveVolatility)}. `}
-        2% × (20% ÷ {vol(band.effectiveVolatility)}) = {band.minWeightPct.toFixed(2)}%;{' '}
-        6% × (20% ÷ {vol(band.effectiveVolatility)}) = {band.maxWeightPct.toFixed(2)}%.
-        {' '}The table displays {reference.value}; rounding is for readability, not a trade increment.
+        ATR {reference.atr14.value.toFixed(2)} ÷ close {reference.referencePrice.value.toFixed(2)} = {pct(atrPct)}.{' '}
+        {reference.floorApplied && `That is below the ${floorPct} floor, so the floor sets the band. `}
+        Stop distance = {c.STOP_ATR_MULTIPLE} × {pct(reference.floorApplied ? ATR_FLOOR * 100 : atrPct)} = {pct(sizingStopPct)}.{' '}
+        {pct(c.MIN_STOP_LOSS_PCT_NLV, 3)} ÷ {pct(sizingStopPct)} rounds up to {pct(reference.minWeight)};{' '}
+        {pct(c.MAX_STOP_LOSS_PCT_NLV)} ÷ {pct(sizingStopPct)} rounds down to {pct(reference.maxWeight)}.
+        {' '}The reference stop is {pct(reference.stopDistance * 100)} from the entry price.
       </p>}
-      <p><strong>Easy example.</strong> At 20% volatility the band is 2–6% (4 percentage points of room).
-        At 10% it is 4–12% (8 points); at 40% it is 1–3% (2 points).
-        Twice the volatility gets half the dollars. Both ends and the room between them scale together;
-        asset-class labels do not assign a different risk budget.
+      <p><strong>Easy example.</strong> At 2% ATR the stop is 4% away and the band is 3.25–6.25%.
+        At 4% ATR the stop is 8% away and the band is 1.75–3.00%; at 8% it is 1.00–1.50%.
+        Twice the volatility gets half the dollars, so the loss at the stop stays level.
       </p>
-      <p><strong>What volatility means.</strong> Calculate each daily log return as ln(adjusted close ÷ prior adjusted close).
-        Take the sample standard deviation over the last 63 and 252 returns, then multiply by √252 for exchange-traded
-        securities (√365 for daily crypto). A 1.26% daily standard deviation is about 20% annualized.
-        This measures fluctuations, not expected return or a maximum possible loss. Use the higher lookback to respond
-        to increased risk while avoiding excessive size after a quiet quarter. At least 63 returns are required;
-        fewer than 252 are explicitly marked as limited history.
+      <p><strong>Limits applied here.</strong> ATR below {floorPct} of price is raised to the floor for sizing, which caps
+        every band at {pct(c.MAX_POSITION_WEIGHT * c.MIN_STOP_LOSS_PCT_NLV / c.MAX_STOP_LOSS_PCT_NLV, 0)}–{pct(c.MAX_POSITION_WEIGHT, 0)} in very quiet assets. The stop still
+        uses the measured ATR, so those positions risk less. Limits move in {pct(c.WEIGHT_INCREMENT)} steps.
+        The same band applies to a long or a short.
       </p>
-      <p><strong>Working the range.</strong> The lower end is a light active position and the upper end is a ceiling,
-        not a required target. For a supported long, additions near the lower price risk range and trims near the
-        upper price risk range can move the weight within this band; reverse the price locations for a short.
-        Direction, Trade/Trend, and price risk ranges remain separate decisions. Zero is always allowed when a thesis
-        fails. There is no forced minimum holding, automatic midpoint target, or automatic order.
+      <p><strong>Stops.</strong> A held position&apos;s reference stop is {c.STOP_ATR_MULTIPLE} × ATR from its IBKR average cost
+        (below it for a long, above it for a short). A stop is a trigger, not a guaranteed loss limit: an overnight gap
+        can fill beyond it. No stop order is created here.
       </p>
-      <p><strong>Limits applied here.</strong> Effective volatility is the greater of measured volatility and 10%.
-        This caps every operating band at 4–12% in very quiet assets. There is no upper clamp on volatility:
-        more volatile assets continue to receive smaller bands. The same absolute band applies to a long or short;
-        it does not imply equal tail risk. Refreshes use newly completed daily history, not intraday price moves.
+      <p><strong>Portfolio risk review.</strong> Each band is a standalone budget. It does not account for correlated
+        holdings, sector or theme concentration, gross/net exposure, cash, liquidity, or event risk. Options and futures
+        need contract-specific scenario sizing; leveraged/inverse ETFs use their own history.
       </p>
-      <p><strong>Portfolio risk review.</strong> Above the 10% floor, this equalizes standalone weight × volatility, not each position’s
-        contribution to total portfolio risk. Before trading, check correlated holdings, sector/theme concentration,
-        gross/net exposure, available cash, liquidity, and event or gap risk. The bands are independent budgets:
-        do not add them up as a fully invested target or increase them to use spare cash. ATR, stops, loss budgets, and correlations
-        do not automatically reduce this displayed band. A separate loss check is position weight × adverse move:
-        a 2% weight losing 25% costs 0.5% of NAV. A stop is not a guaranteed loss limit. Options and futures need
-        contract-specific scenario sizing; leveraged/inverse ETFs use their own history.
-      </p>
-      <p><strong>Data and execution.</strong> Only sourced adjusted daily history for the latest completed session is
-        accepted. Missing, stale, failed-refresh, cache-only, mock, or seeded inputs produce no band. Weekends and
-        exchange holidays retain the latest completed session. Historical volatility is an estimate and can lag a
-        regime change. These percentages are planning references; dollars, shares, and any trade still require
+      <p><strong>Data and execution.</strong> Only sourced daily history for the latest completed session is accepted.
+        Missing, stale, failed-refresh, cache-only, mock, or seeded inputs produce no band. ATR is a 14-day estimate and
+        can lag a regime change. These percentages are planning references; dollars, shares, and any trade still require
         verified live portfolio and quote data.
       </p>
       <p className="pcv2-sizing-explanation-source">
-        Method: {policy.version}.{reference.available && ` Source: ${reference.source}. ${reference.observationCount.toLocaleString()} daily returns available; history fetched ${reference.fetchedAt}.`}
+        Method: Position Sizing v2.0 (ATR).{reference.available && ` Source: ${reference.source}. ATR through ${reference.atr14.asOf}.`}
       </p>
     </div>
   );

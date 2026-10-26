@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarketDataService } from '../services/api/marketDataService';
 import { RESEARCH_REFRESH_INTERVAL_MS } from '../constants/portfolioResearch';
 import { finiteOptionalNumber } from '../utils/portfolioNumbers';
-import { validateVolatilityBandInputs } from '../utils/volatilitySizingBand.cjs';
+import { holdingSizingReference } from '../utils/securitySizingReference';
 import { isRefreshDelayedVolatilityRow } from '../utils/volatilitySnapshotRows';
 import { startVisibilityAwarePolling } from '../utils/visibilityAwarePolling';
 
@@ -323,7 +323,7 @@ export function usePortfolioMarketContext({ active, symbolsKey, holdings, refres
     const riskMetrics = getVerifiedRiskMetrics(normalizedSymbol);
     const beta = riskMetrics?.beta?.status === 'available'
       && finiteOptionalNumber(riskMetrics.beta.value) !== null ? riskMetrics.beta : null;
-    const reference = validateVolatilityBandInputs({
+    const reference = holdingSizingReference({
       symbol: normalizedSymbol,
       payload: marketContextState.riskMetrics,
       sourceStatus: marketContextState.sourceStatus?.riskMetrics,

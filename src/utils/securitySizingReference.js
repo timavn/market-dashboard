@@ -1,4 +1,4 @@
-import { calculateSizingBand, calculateAtrRiskCap, roundWeightDown, SIZING_CONSTANTS } from './signalWeightedPositionSizing';
+import { calculateSizingBand, SIZING_CONSTANTS } from './signalWeightedPositionSizing';
 import { expectedSizingSession } from './volatilitySizingBand.cjs';
 
 const SOURCE = 'Yahoo Finance chart API';
@@ -41,22 +41,40 @@ export function securitySizingReference(payload, symbol, { now = Date.now() } = 
     && (!positive || value.value > 0) && Number.isInteger(value.observations) && value.observations >= observations
     && Number.isFinite(Date.parse(value.asOf)) && value.asOf <= row.asOf
     && Date.parse(row.asOf) - Date.parse(value.asOf) <= (positive ? 0 : 7 * 86400000) ? value : null;
-  const benchmark = row.provenance?.benchmark;
-  const benchmarkAge = Number(now) - Date.parse(benchmark?.fetchedAt);
-  const beta = benchmark?.symbol === 'SPY' && !flagged(benchmark) && benchmarkAge >= -5000 && benchmarkAge <= 3600000
-    ? metric(row.beta, SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS) : null;
   const atr14 = metric(row.atr14, SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS, true);
   const referencePrice = metric(row.referencePrice, 1, true);
-  const band = calculateSizingBand({ symbol, beta });
-  const cap = calculateAtrRiskCap({ atr14, spot: referencePrice?.value });
-  const maxWeight = band.available && cap.available ? roundWeightDown(Math.min(band.maxWeight, cap.capWeight)) : null;
+  const band = calculateSizingBand({ atr14, spot: referencePrice?.value });
   return {
-    available: band.available && cap.available, minWeight: band.minWeight, maxWeight,
-    beta, atr14, referencePrice, sizingPolicy: band.policy, asOf: row.asOf, source: SOURCE,
-    historicalOnly: true, executable: false, riskBlocked: maxWeight !== null && maxWeight < band.minWeight,
-    reason: band.requiresBeta && !beta ? row.beta?.observations >= SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS ? 'Beta source needs verification' : `Beta needs ${SIZING_CONSTANTS.MIN_BETA_OBSERVATIONS} aligned sessions (${row.beta?.observations || 0} available)`
-      : !atr14 ? 'ATR needs 14 completed sessions' : !referencePrice ? 'Verified closing price needed' : null,
+    available: band.available, minWeight: band.minWeight, maxWeight: band.maxWeight,
+    atr14, referencePrice, relativeAtr: band.relativeAtr, floorApplied: band.floorApplied,
+    stopDistance: band.stopDistance, asOf: row.asOf, source: SOURCE,
+    historicalOnly: true, executable: false, riskBlocked: band.riskBlocked,
+    reason: !atr14 ? row.atr14?.observations >= SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS ? 'ATR source needs verification' : 'ATR needs 14 completed sessions'
+      : !referencePrice ? 'Verified closing price needed' : null,
   };
+}
+
+// Both ends share one precision so a 25 bp end never sits beside a rounded one.
+const hasHundredths = value => Math.abs(value * 10 - Math.round(value * 10)) > 1e-9;
+
+/**
+ * The Positions table's MIN–MAX for a holding: the same ATR band as Exposure Lab,
+ * gated on the current risk-metrics response and a spot-like instrument.
+ */
+export function holdingSizingReference({ symbol, payload, sourceStatus, sourceError, instrumentTypes = [], now = Date.now() } = {}) {
+  const unavailable = reason => ({ available: false, reason, value: null, minWeight: null, maxWeight: null });
+  if (instrumentTypes.some(type => type && !['STK', 'STOCK', 'ETF', 'CRYPTO'].includes(String(type).toUpperCase()))) {
+    return unavailable('This instrument requires contract-specific risk sizing.');
+  }
+  if (sourceError || !['ready', 'partial'].includes(sourceStatus)) {
+    return unavailable(sourceStatus === 'loading' ? 'Refreshing ATR inputs.' : 'The ATR provider is unavailable.');
+  }
+  const reference = securitySizingReference(payload, String(symbol || '').trim().toUpperCase(), { now });
+  if (!reference.available) return { ...reference, value: null };
+  // MAX below MIN: no position size fits, so show the reason instead of a band.
+  if (reference.riskBlocked) return { ...reference, available: false, value: null, reason: 'Too volatile to size: ATR is near half the price.' };
+  const digits = hasHundredths(reference.minWeight) || hasHundredths(reference.maxWeight) ? 2 : 1;
+  return { ...reference, value: `${reference.minWeight.toFixed(digits)}–${reference.maxWeight.toFixed(digits)}%` };
 }
 
 export function sizingUniverse(catalogue = [], base = []) {

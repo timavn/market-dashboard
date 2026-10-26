@@ -412,16 +412,29 @@ describe('ExposureLab', () => {
 
   test('shows dated MIN/MAX for the named universe and an explicit gap where inputs are missing', async () => {
     mockUseUniverseSizing.mockReturnValue({ securities: universe.rows, completed: 2, loading: false, refresh: jest.fn(), bySymbol: {
-      SPY: { available: true, minWeight: 2, maxWeight: 6, asOf: '2026-09-04' },
-      ABNB: { available: false, minWeight: null, maxWeight: null, reason: 'Beta needs 126 aligned sessions (90 available)' },
+      SPY: { available: true, minWeight: 3.25, maxWeight: 6.25, asOf: '2026-09-04' },
+      ABNB: { available: false, minWeight: null, maxWeight: null, reason: 'ATR needs 14 completed sessions' },
     } });
     render(<ExposureLab />);
     fireEvent.click(await screen.findByRole('tab', { name: /Universe QA/ }));
     expect(await screen.findByText('MIN/MAX · 1 / 2 calculated')).toBeVisible();
     const spy = screen.getByRole('row', { name: /^SPY/ });
-    expect(spy).toHaveTextContent('MIN2.0%MAX6.0%2026-09-04');
-    expect(screen.getByRole('row', { name: /^ABNB/ })).toHaveTextContent('Beta needs 126 aligned sessions');
+    expect(spy).toHaveTextContent('MIN3.25%MAX6.25%2026-09-04');
+    expect(spy).not.toHaveTextContent('Too volatile to size');
+    expect(screen.getByRole('row', { name: /^ABNB/ })).toHaveTextContent('ATR needs 14 completed sessions');
     expect(within(spy).getAllByRole('cell')).toHaveLength(14);
+  });
+
+  test('flags a security whose ATR is too high to size between MIN and MAX', async () => {
+    mockUseUniverseSizing.mockReturnValue({ securities: universe.rows, completed: 1, loading: false, refresh: jest.fn(), bySymbol: {
+      SPY: { available: true, minWeight: 0.25, maxWeight: 0, riskBlocked: true, asOf: '2026-09-04' },
+    } });
+    render(<ExposureLab />);
+    fireEvent.click(await screen.findByRole('tab', { name: /Universe QA/ }));
+    const spy = await screen.findByRole('row', { name: /^SPY/ });
+    expect(spy).toHaveTextContent('MIN0.25%MAX0.00%');
+    expect(spy).toHaveTextContent('Too volatile to size');
+    expect(spy).not.toHaveTextContent('Cap below MIN');
   });
 
   test('filters Universe QA by case-insensitive ticker prefix only', async () => {

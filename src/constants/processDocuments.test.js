@@ -77,13 +77,13 @@ describe('process document and rule registry', () => {
         type: 'method',
         parentId: 'methods-index',
         editable: true,
-        version: '1.1',
+        version: '2.0',
         status: 'Canonical',
       }),
     );
     expect(getProcessDocument('the-process').dependencies).toContainEqual({
       documentId: 'position-sizing',
-      version: '1.1',
+      version: '2.0',
     });
   });
 
@@ -160,8 +160,8 @@ describe('process document and rule registry', () => {
       'lifecycle.reversal',
     ]);
     expect(getProcessDocument('position-sizing').canonicalRuleIds).toEqual(expect.arrayContaining([
-      'risk.beta_band',
-      'risk.atr_cap',
+      'risk.atr_band',
+      'risk.atr_stop',
       'sizing.conviction',
       'sizing.target_rounding',
       'lifecycle.open_at_min',
@@ -179,10 +179,35 @@ describe('process document and rule registry', () => {
       ownerDocumentId: 'stops-exits-and-reversals',
       ownerVersion: '0.1',
     });
-    expect(getProcessRule('risk.beta_band')).toMatchObject({
+    expect(getProcessRule('risk.atr_band')).toMatchObject({
       ownerDocumentId: 'position-sizing',
-      ownerVersion: '1.1',
+      ownerVersion: '2.0',
     });
+    expect(getProcessRule('risk.atr_band').parameters).toEqual({
+      role: 'sizing-band',
+      atrSessions: 14,
+      stopAtrMultiple: 2,
+      minStopLossPctNlv: 0.125,
+      maxStopLossPctNlv: 0.25,
+      maxPositionWeightPct: 10,
+      executableIncrementPct: 0.25,
+      benchmark: null,
+    });
+    expect(getProcessRule('risk.atr_stop')).toMatchObject({
+      status: 'canonical',
+      ownerDocumentId: 'position-sizing',
+      ownerVersion: '2.0',
+      parameters: { atrMultiple: 2, basis: 'ENTRY_PRICE', orderTransmissionAllowed: false },
+    });
+    expect(getProcessRule('sizing.target_rounding').parameters).toEqual({
+      incrementPct: 0.25,
+      method: 'NEAREST',
+      clampToBand: true,
+    });
+    expect(getProcessRule('risk.beta_band')).toBeNull();
+    expect(getProcessRule('risk.atr_cap')).toBeNull();
+    expect(PROCESS_RULES.filter(({ ownerDocumentId }) => ownerDocumentId === 'position-sizing')
+      .every(({ ownerVersion }) => ownerVersion === '2.0')).toBe(true);
     expect(getProcessRule('sizing.conviction').parameters).toEqual({
       range: 0.2,
       structure: 0.3,
@@ -218,7 +243,7 @@ describe('process document and rule registry', () => {
     expect(result.valid).toBe(false);
     expect(result.errors).toEqual(expect.arrayContaining([
       'Duplicate document route: #/process',
-      'Document the-process requires position-sizing v9.9, but the registry contains v1.1.',
+      'Document the-process requires position-sizing v9.9, but the registry contains v2.0.',
     ]));
   });
 
@@ -248,12 +273,14 @@ describe('process document and rule registry', () => {
     ]));
   });
 
-  test('rejects lifecycle, entry terminology, and ATR-role drift', () => {
+  test('rejects lifecycle, entry terminology, ATR-band, ATR-stop, and rounding drift', () => {
     const { documents, rules } = cloneRegistry();
     rules.find(({ id }) => id === 'lifecycle.trend_break_trade_holds').parameters.target = 'ZERO';
     rules.find(({ id }) => id === 'lifecycle.trade_break').parameters.precedence = 0;
     rules.find(({ id }) => id === 'entry.long.range_half').parameters.rangeTerms = ['LRR', 'TRR'];
-    rules.find(({ id }) => id === 'risk.atr_cap').parameters.role = 'hard-stop';
+    rules.find(({ id }) => id === 'risk.atr_band').parameters.minStopLossPctNlv = 0.5;
+    rules.find(({ id }) => id === 'risk.atr_stop').parameters.atrMultiple = 3;
+    rules.find(({ id }) => id === 'sizing.target_rounding').parameters.incrementPct = 0.5;
 
     const result = validateProcessRegistry(documents, rules);
     expect(result.valid).toBe(false);
@@ -261,7 +288,9 @@ describe('process document and rule registry', () => {
       'Trend-break lifecycle rule must require Trade to hold and reduce the position to MIN.',
       'Trade-break exit must take precedence over the Trend-break reduction.',
       'Long opens and adds must use the bottom half of the LRR–HRR.',
-      'ATR must remain a maximum-position cap, not an entry-size or stop rule.',
+      'ATR-band constants must match the production 2 × ATR stop, 0.125%/0.25% stop losses, and 10% ceiling.',
+      'The reference stop must use the same ATR multiple as the sizing band.',
+      'Target rounding must remain nearest 25 basis points and clamped inside the band.',
     ]));
   });
 

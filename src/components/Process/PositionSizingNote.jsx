@@ -1,6 +1,8 @@
 import React from 'react';
 import {
+  ATR_FLOOR,
   SIZING_CONSTANTS,
+  calculateSizingBand,
   calculateSizingDecision,
 } from '../../utils/signalWeightedPositionSizing';
 import { getProcessDocument } from '../../constants/processDocuments';
@@ -18,8 +20,7 @@ export const POSITION_SIZING_SECTIONS = [
 
 const LONG_INPUT = Object.freeze({
   bias: 'LONG',
-  beta: { value: 1.25, observations: 252, source: 'adjusted daily returns', asOf: '2026-07-17' },
-  atr14: { value: 1, observations: 14, source: 'completed daily bars', asOf: '2026-07-17' },
+  atr14: { value: 2.08, observations: 14, source: 'completed daily bars', asOf: '2026-07-17' },
   spot: 104,
   lrr: 100,
   hrr: 120,
@@ -46,8 +47,7 @@ const LONG_INPUT = Object.freeze({
 
 const SHORT_INPUT = Object.freeze({
   bias: 'SHORT',
-  beta: { value: 1.8, observations: 252, source: 'adjusted daily returns', asOf: '2026-07-17' },
-  atr14: { value: 0.25, observations: 14, source: 'completed daily bars', asOf: '2026-07-17' },
+  atr14: { value: 2.32, observations: 14, source: 'completed daily bars', asOf: '2026-07-17' },
   spot: 58,
   lrr: 50,
   hrr: 60,
@@ -76,6 +76,9 @@ export const POSITION_SIZING_EXAMPLES = Object.freeze({
   long: calculateSizingDecision(LONG_INPUT),
   short: calculateSizingDecision(SHORT_INPUT),
 });
+
+// Bands for ATR at 1%, 2%, 4%, and 8% of a 100 spot.
+const ATR_BAND_EXAMPLES = [1, 2, 4, 8].map(atr => ({ atr, band: calculateSizingBand({ atr14: atr, spot: 100 }) }));
 
 const percent = (value, digits = 1) => `${Number(value).toFixed(digits)}%`;
 const coefficientPercent = (value) => `${Number(value * 100).toFixed(0)}%`;
@@ -106,8 +109,9 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
       <section id={sectionId('abstract')} className="wp-abstract" data-testid="process-section">
         <p>
           <strong>Abstract.</strong> This note specifies a deterministic method for setting a security-level
-          position weight. A 252-session beta against SPY establishes an initial minimum and maximum, and an ATR
-          constraint may reduce the maximum. When Trade and Trend are aligned, range location, risk-range structure,
+          position weight. Each security is sized from its own 14-day ATR: a stop two ATRs away sets the minimum and
+          maximum, so a stop-out costs about the same share of NLV for every security, and the same distance is the
+          reference stop. When Trade and Trend are aligned, range location, risk-range structure,
           and extension beyond a prior all-time high or low determine a target inside the interval. New positions
           open at MIN. If Trend breaks while Trade remains aligned, MIN becomes the ceiling for an existing position.
           If Trade breaks, the position target becomes zero. Actionable dollars and quantities require fresh,
@@ -129,7 +133,8 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
           <thead><tr><th>Term</th><th>Definition</th></tr></thead>
           <tbody>
             <tr><td>MIN</td><td>The smallest meaningful active position and the ceiling after a verified Trend break while Trade still supports the held side.</td></tr>
-            <tr><td>MAX</td><td>The largest position allowed by the beta band after application of the ATR constraint.</td></tr>
+            <tr><td>MAX</td><td>The largest position whose 2 × ATR stop costs no more than the maximum stop loss, capped by the ATR floor.</td></tr>
+            <tr><td>Stop</td><td>The reference level two ATRs against the position from its entry price. It is a planning level, not an order.</td></tr>
             <tr><td>Trade</td><td>The published short-duration directional signal, covering three weeks or less. It has terminal authority over the position lifecycle.</td></tr>
             <tr><td>Trend</td><td>The published intermediate-duration directional signal, covering three months or more.</td></tr>
             <tr><td>LRR / HRR</td><td>The current published low and high risk-range endpoints.</td></tr>
@@ -160,8 +165,8 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
         <table className="wp-table">
           <thead><tr><th>Input</th><th>Requirement</th><th>Use</th></tr></thead>
           <tbody>
-            <tr><td>Beta</td><td>Adjusted closes for the security and SPY; 252 aligned completed sessions, with at least 126 observations.</td><td>Initial MIN and MAX.</td></tr>
-            <tr><td>ATR(14)</td><td>The latest 14 completed daily true ranges, with dated OHLC provenance.</td><td>Volatility limit on MAX.</td></tr>
+            <tr><td>ATR(14)</td><td>The latest 14 completed daily true ranges, with dated OHLC provenance.</td><td>MIN, MAX, and the stop distance.</td></tr>
+            <tr><td>Closing price</td><td>The latest completed daily close, with dated provenance.</td><td>Converts ATR to a share of price.</td></tr>
             <tr><td>Trade</td><td>Published tracker direction and publication time.</td><td>Entry and terminal exit state.</td></tr>
             <tr><td>Trend</td><td>Published risk-range direction and publication time.</td><td>Active or MIN state.</td></tr>
             <tr><td>Risk ranges</td><td>Current LRR and HRR and all paginated prior editions.</td><td>Entry location and directional streaks.</td></tr>
@@ -170,8 +175,7 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
           </tbody>
         </table>
         <p>
-          Beta returns use only adjacent dates common to the security and SPY; partial daily bars are excluded.
-          ATH and ATL comparisons use prices dated strictly before the current range edition. Structure and record
+          ATR uses completed daily bars only; partial daily bars are excluded. ATH and ATL comparisons use prices dated strictly before the current range edition. Structure and record
           history are optional strength inputs. If either is unavailable, it contributes zero and remains marked
           unavailable rather than being reported as a negative signal.
         </p>
@@ -180,36 +184,40 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
       <section id={sectionId('position-boundaries')} data-testid="process-section">
         <h2>3. Position-Size Boundaries</h2>
         <p>
-          Beta is estimated from adjusted simple daily returns. Its magnitude is used because the same allocation
-          boundaries apply to long and short positions.
+          Every security uses the same equations, whatever its asset class. ATR is expressed as a share of the
+          closing price so that it compares across prices, and the stop sits {c.STOP_ATR_MULTIPLE} ATRs away.
+          MIN and MAX are the weights at which reaching that stop costs {percent(c.MIN_STOP_LOSS_PCT_NLV, 3)} and
+          {` ${percent(c.MAX_STOP_LOSS_PCT_NLV, 2)}`} of NLV.
         </p>
-        <Equation number="1">{`effective beta = clamp(|beta|, ${c.MIN_BETA}, ${c.MAX_BETA.toFixed(1)})`}</Equation>
-        <Equation number="2">{`raw MIN = ${c.MIN_WEIGHT_NUMERATOR}% / effective beta`}</Equation>
-        <Equation number="3">{`raw MAX = ${c.MAX_WEIGHT_NUMERATOR}% / effective beta`}</Equation>
+        <Equation number="1">{`ATR % = max(ATR(14) / close, ${percent(ATR_FLOOR * 100, 2)})`}</Equation>
+        <Equation number="2">{`stop distance = ${c.STOP_ATR_MULTIPLE} x ATR %`}</Equation>
+        <Equation number="3">{`raw MIN = ${percent(c.MIN_STOP_LOSS_PCT_NLV, 3)} / stop distance; raw MAX = ${percent(c.MAX_STOP_LOSS_PCT_NLV, 2)} / stop distance`}</Equation>
         <p>
-          Executable MIN is rounded upward and executable MAX downward to the nearest {percent(c.WEIGHT_INCREMENT)}
-          of NLV. Before application of the ATR constraint, the beta endpoints produce the following bands.
+          Executable MIN is rounded upward and executable MAX downward to the nearest {percent(c.WEIGHT_INCREMENT, 2)} of
+          NLV. Twice the volatility gets half the weight, so the loss at the stop stays level.
         </p>
         <table className="wp-table wp-table--numeric">
-          <thead><tr><th>Effective beta</th><th>MIN</th><th>MAX</th></tr></thead>
+          <thead><tr><th>ATR % of price</th><th>Stop distance</th><th>MIN</th><th>MAX</th></tr></thead>
           <tbody>
-            <tr><td>0.50</td><td>4.0%</td><td>12.0%</td></tr>
-            <tr><td>1.00</td><td>2.0%</td><td>6.0%</td></tr>
-            <tr><td>2.00</td><td>1.0%</td><td>3.0%</td></tr>
+            {ATR_BAND_EXAMPLES.map(({ atr, band }) => (
+              <tr key={atr}><td>{percent(atr)}</td><td>{percent(band.stopDistance * 100)}</td><td>{percent(band.minWeight, 2)}</td><td>{percent(band.maxWeight, 2)}</td></tr>
+            ))}
           </tbody>
         </table>
 
-        <h3>3.1 ATR constraint</h3>
+        <h3>3.1 ATR floor</h3>
         <p>
-          ATR limits security-specific volatility not captured by SPY beta. The assumed adverse distance is
-          {` ${c.ATR_MULTIPLIER} ATRs`}; the maximum NLV loss budget at that distance is
-          {` ${percent(c.ATR_RISK_BUDGET, 2)}`}.
+          Very quiet securities would otherwise receive very large weights. ATR below {percent(ATR_FLOOR * 100, 2)} of
+          price is raised to the floor for sizing, which caps MAX at {percent(c.MAX_POSITION_WEIGHT, 0)}. The stop
+          still uses the measured ATR, so a floored position risks less than the maximum stop loss.
         </p>
-        <Equation number="4">{`ATR MAX = ${percent(c.ATR_RISK_BUDGET, 2)} / (${c.ATR_MULTIPLIER} x ATR(14) / spot)`}</Equation>
-        <Equation number="5">effective MAX = min(beta MAX, ATR MAX)</Equation>
+
+        <h3>3.2 Reference stop</h3>
+        <Equation number="4">{`long stop = entry - ${c.STOP_ATR_MULTIPLE} x ATR(14); short stop = entry + ${c.STOP_ATR_MULTIPLE} x ATR(14)`}</Equation>
         <p>
-          Effective MAX is rounded down to the executable grid. If the ATR maximum is below MIN, no positive target
-          is produced because the security cannot be held at the defined minimum within the volatility budget.
+          For a held position the entry is the verified IBKR average cost; for planning limits it is the latest
+          close. A stop is a trigger, not a guaranteed fill: a gap can execute beyond it. The level is displayed for
+          reference and no stop order is created.
         </p>
       </section>
 
@@ -242,7 +250,7 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
         <Equation number="9">target = MIN + conviction x (effective MAX - MIN)</Equation>
         <p>
           Record extension has the largest coefficient but does not force MAX. The final target is rounded to the
-          nearest {percent(c.WEIGHT_INCREMENT)} and clamped within the effective band.
+          nearest {percent(c.WEIGHT_INCREMENT, 2)} and clamped within the effective band.
         </p>
       </section>
 
@@ -279,34 +287,37 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
         </p>
         <h3>6.1 Long position</h3>
         <p>
-          Beta 1.25 produces raw bounds {percent(long.rawMinWeight, 2)} and {percent(long.rawMaxWeight, 2)}, rounded
-          to {percent(long.minWeight)} and {percent(long.betaMaxWeight)}. LRR 100, HRR 120, and spot 104 produce
+          ATR 2.08 on spot 104 is {percent(long.sizingBand.relativeAtr * 100, 2)} of price, a stop distance of
+          {` ${percent(long.stop.distance * 100, 2)}`}. That produces raw bounds {percent(long.rawMinWeight, 2)} and
+          {` ${percent(long.rawMaxWeight, 2)}`}, rounded to {percent(long.minWeight, 2)} and {percent(long.maxWeight, 2)},
+          with the stop at {decimal(long.stop.price)}. LRR 100, HRR 120, and spot 104 produce
           p = {decimal(long.rangePosition)} and a long range score of {decimal(long.strengthInputs.range.score)}.
           Higher-HRR and higher-LRR streaks are {long.streaks.higherHigh} and {long.streaks.higherLow}, producing a
           structure score of {decimal(long.strengthInputs.structure.score)}. HRR exceeds the prior ATH, so the record
           variable is one.
         </p>
         <Equation number="10">{`conviction = ${decimal(long.strengthInputs.range.weighted)} + ${decimal(long.strengthInputs.structure.weighted)} + ${decimal(long.strengthInputs.record.weighted)} = ${decimal(long.conviction)}`}</Equation>
-        <Equation number="11">{`target = ${percent(long.minWeight)} + ${decimal(long.conviction)}(${percent(long.operationalMaxWeight)} - ${percent(long.minWeight)}) -> ${percent(long.targetWeight)}`}</Equation>
+        <Equation number="11">{`target = ${percent(long.minWeight, 2)} + ${decimal(long.conviction)}(${percent(long.operationalMaxWeight, 2)} - ${percent(long.minWeight, 2)}) -> ${percent(long.targetWeight, 2)}`}</Equation>
         <p>
-          The calculated target is {percent(long.targetWeight)}. A new position still opens at
-          {` ${percent(long.minWeight)}`}; later qualifying editions move it toward target.
+          The calculated target is {percent(long.targetWeight, 2)}. A new position still opens at
+          {` ${percent(long.minWeight, 2)}`}; later qualifying editions move it toward target.
         </p>
 
         <h3>6.2 Short position</h3>
         <p>
-          Beta 1.80 produces an operational band of {percent(short.minWeight)} to
-          {` ${percent(short.betaMaxWeight)}`}. LRR 50, HRR 60, and spot 58 produce p =
+          ATR 2.32 on spot 58 is {percent(short.sizingBand.relativeAtr * 100, 2)} of price, producing an operational
+          band of {percent(short.minWeight, 2)} to {percent(short.maxWeight, 2)} and a stop at
+          {` ${decimal(short.stop.price)}`}. LRR 50, HRR 60, and spot 58 produce p =
           {` ${decimal(short.rangePosition)}`} and a short range score of
           {` ${decimal(short.strengthInputs.range.score)}`}. Lower-HRR and lower-LRR streaks are
           {` ${short.streaks.lowerHigh}`} and {short.streaks.lowerLow}. LRR does not extend below the prior ATL, so
           the record variable is zero.
         </p>
         <Equation number="12">{`conviction = ${decimal(short.strengthInputs.range.weighted)} + ${decimal(short.strengthInputs.structure.weighted)} + ${decimal(short.strengthInputs.record.weighted)} = ${decimal(short.conviction)}`}</Equation>
-        <Equation number="13">{`target = ${percent(short.minWeight)} + ${decimal(short.conviction)}(${percent(short.operationalMaxWeight)} - ${percent(short.minWeight)}) -> ${percent(short.targetWeight)}`}</Equation>
+        <Equation number="13">{`target = ${percent(short.minWeight, 2)} + ${decimal(short.conviction)}(${percent(short.operationalMaxWeight, 2)} - ${percent(short.minWeight, 2)}) -> ${percent(short.targetWeight, 2)}`}</Equation>
         <p>
-          The calculated short target is {percent(short.targetWeight)}, and a new short opens at the
-          {` ${percent(short.minWeight)}`} MIN.
+          The calculated short target is {percent(short.targetWeight, 2)}, and a new short opens at the
+          {` ${percent(short.minWeight, 2)}`} MIN.
         </p>
       </section>
 
@@ -314,7 +325,7 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
         <h2>7. Validation and Limitations</h2>
         <p>
           The calculation engine is pure: identical complete inputs and evaluation time produce an identical result.
-          Tests cover beta regression and observation limits, clamps, ATR precedence, long and short lifecycle states,
+          Tests cover ATR observation limits, the ATR floor, stop levels, long and short lifecycle states,
           range boundaries, streak resets, record comparisons, rounding, provenance, and missing inputs. Separate
           fail-closed tests require every disconnected, delayed, frozen, stale, cached, mock, seeded, synthetic,
           inferred, or fallback execution case to suppress actionable output.
@@ -322,10 +333,10 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
         <table className="wp-table">
           <thead><tr><th>Result group</th><th>Fields retained</th></tr></thead>
           <tbody>
-            <tr><td>Boundaries</td><td>Raw and effective beta, raw and operational MIN/MAX, ATR limit, and risk-blocked status.</td></tr>
+            <tr><td>Boundaries</td><td>ATR share of price, floor status, stop distance and price, raw and operational MIN/MAX, and risk-blocked status.</td></tr>
             <tr><td>Strength</td><td>Range position and score, both structure streaks, record status, conviction, and target.</td></tr>
             <tr><td>Lifecycle</td><td>Bias, Trade, Trend, lifecycle state, research action, executable action, reasons, and blockers.</td></tr>
-            <tr><td>Provenance</td><td>Source, observation count, and as-of time for beta, ATR, signals, ranges, records, quote, and NLV.</td></tr>
+            <tr><td>Provenance</td><td>Source, observation count, and as-of time for ATR, signals, ranges, records, quote, and NLV.</td></tr>
           </tbody>
         </table>
 
@@ -339,7 +350,7 @@ const PositionSizingNote = ({ document, sectionPrefix = '' }) => {
 
         <h3>7.2 Limitations</h3>
         <ul>
-          <li>SPY beta measures common-market sensitivity, not total security risk; ATR is a secondary constraint.</li>
+          <li>ATR measures recent daily movement; it can lag a regime change and does not capture overnight gaps or event risk. Market beta is not part of security sizing.</li>
           <li>The method sizes one security at a time. Portfolio limits, correlation, and cash allocation belong to a separate technical note.</li>
           <li>Quantity requires verified multiplier, lot size, currency, and tradability. Unsupported instruments remain research-only.</li>
           <li>Record quality depends on verified daily history and appropriate continuous-contract mapping.</li>

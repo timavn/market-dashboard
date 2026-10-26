@@ -1,35 +1,74 @@
 import { evaluatePortfolioRule, portfolioPositionNeedsAttention, PORTFOLIO_WEIGHT_TOLERANCE_PP, sortPortfolioConflicts, sortPortfolioPositions, summarizePortfolioRules } from './portfolioReviewRules';
 
 const asOf = '2026-09-04T20:05:00Z';
-const beta = value => ({ value, observations: 252, status: 'verified_history', source: 'adjusted daily returns', asOf: '2026-09-04' });
-const holding = (extra = {}) => ({ holding: 'IGV', heldSide: 'LONG', trade: 'BULLISH', trend: 'NEUTRAL', weightPct: 4, sizingInputs: { beta: beta(1) }, ...extra });
+const metric = (value, observations) => ({ value, observations, status: 'verified_history', source: 'adjusted daily bars', asOf: '2026-09-04' });
+const atr = value => metric(value, 14);
+const price = value => metric(value, 1);
+const beta = value => ({ ...metric(value, 252), source: 'adjusted daily returns' });
+// ATR 2.5 on a 100 reference price: 2 × 2.5% = 5% stop distance, so MIN = 0.125 / 5% = 2.5 and MAX = 0.25 / 5% = 5.
+const inputs = (atrValue = 2.5, priceValue = 100) => ({ atr14: atr(atrValue), referencePrice: price(priceValue) });
+const holding = (extra = {}) => ({ holding: 'IGV', heldSide: 'LONG', trade: 'BULLISH', trend: 'NEUTRAL', weightPct: 4, sizingInputs: inputs(), ...extra });
 
-test('reports the unchanged sizing basis independently from security classification', () => {
-  const managedFutures = evaluatePortfolioRule(holding({ holding: 'DBMF', securityName: 'Captured DBMF name', sizingInputs: { beta: beta(0.2) } }), asOf);
-  expect(managedFutures).toMatchObject({ securityName: 'Captured DBMF name', sizingBasis: 'Beta sizing', minWeight: 4 });
-  const commodity = evaluatePortfolioRule(holding({ holding: 'IBIT', sizingInputs: {} }), asOf);
-  expect(commodity).toMatchObject({ sizingBasis: 'Commodity policy', minWeight: 1 });
+test('every security, including managed futures and IBIT, is sized from its own ATR', () => {
+  const managedFutures = evaluatePortfolioRule(holding({ holding: 'DBMF', securityName: 'Captured DBMF name' }), asOf);
+  expect(managedFutures).toMatchObject({ securityName: 'Captured DBMF name', sizingBasis: 'ATR sizing', minWeight: 2.5, maxWeight: 5 });
+  expect(evaluatePortfolioRule(holding({ holding: 'IBIT' }), asOf)).toMatchObject({ sizingBasis: 'ATR sizing', minWeight: 2.5, maxWeight: 5 });
+  expect(evaluatePortfolioRule(holding({ holding: 'IBIT', sizingInputs: {} }), asOf)).toMatchObject({ sizingBasis: 'ATR sizing', minWeight: null, maxWeight: null });
 });
 
-test('IGV Trend break uses the canonical beta-derived MIN and NLV percentage points', () => {
+test('IGV Trend break uses the canonical ATR-derived MIN and NLV percentage points', () => {
   const row = evaluatePortfolioRule(holding(), asOf);
-  expect(row).toMatchObject({ status: 'conflict', action: 'REDUCE', targetWeight: 2, reduction: 2, targetLabel: 'MIN' });
-  expect(evaluatePortfolioRule(holding({ sizingInputs: { beta: beta(2) } }), asOf).targetWeight).toBe(1);
-  expect(evaluatePortfolioRule(holding({ sizingInputs: { beta: beta(0.5) } }), asOf).status).toBe('aligned');
+  expect(row).toMatchObject({ status: 'conflict', action: 'REDUCE', targetWeight: 2.5, reduction: 1.5, targetLabel: 'MIN' });
+  // ATR 5 on 100: 10% stop distance → MIN 1.25.
+  expect(evaluatePortfolioRule(holding({ sizingInputs: inputs(5) }), asOf).targetWeight).toBe(1.25);
+  // ATR 1 on 100 is below the 1.25% floor → MIN 5, so 4% is already below MIN.
+  expect(evaluatePortfolioRule(holding({ sizingInputs: inputs(1) }), asOf)).toMatchObject({ status: 'aligned', minWeight: 5, maxWeight: 10 });
 });
 
-test.each([0.75, 2])('Trend break at/below MIN does not request an increase (%s)', weightPct => {
+test('MIN, MAX and the stop come from the 14-day ATR and reference price', () => {
+  // ATR 2 on 100: 4% stop distance → MIN roundUp(3.125) = 3.25, MAX roundDown(6.25) = 6.25.
+  const long = evaluatePortfolioRule(holding({ trend: 'BULLISH', weightPct: 5, sizingInputs: inputs(2) }), asOf);
+  expect(long).toMatchObject({ sizingBasis: 'ATR sizing', minWeight: 3.25, maxWeight: 6.25, stopPrice: 96, atrFloorApplied: false, volatilityBlocked: false });
+  expect(long.atrPct).toBeCloseTo(2);
+  expect(long.stopDistancePct).toBeCloseTo(4);
+  expect(long.stopLossPctNlv).toBeCloseTo(0.2);
+  const short = evaluatePortfolioRule(holding({ heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: -5, sizingInputs: inputs(2) }), asOf);
+  expect(short).toMatchObject({ minWeight: 3.25, maxWeight: 6.25, stopPrice: 104 });
+  for (const removed of ['beta', 'atrCapWeight', 'atrCapBelowMin']) expect(long).not.toHaveProperty(removed);
+});
+
+test('the 1.25% ATR floor caps MAX at 10% while the stop keeps the measured ATR', () => {
+  const floored = evaluatePortfolioRule(holding({ trend: 'BULLISH', weightPct: 5, sizingInputs: inputs(1) }), asOf);
+  expect(floored).toMatchObject({ minWeight: 5, maxWeight: 10, atrFloorApplied: true, stopPrice: 98 });
+  expect(floored.atrPct).toBeCloseTo(1);
+  expect(floored.stopDistancePct).toBeCloseTo(2);
+  expect(floored.stopLossPctNlv).toBeCloseTo(0.1);
+  expect(evaluatePortfolioRule(holding({ sizingInputs: inputs(1.25) }), asOf)).toMatchObject({ minWeight: 5, maxWeight: 10, atrFloorApplied: false, stopPrice: 97.5 });
+});
+
+test('beta inputs are ignored and never produce a band on their own', () => {
+  const withBeta = evaluatePortfolioRule(holding({ sizingInputs: { ...inputs(), beta: beta(3) } }), asOf);
+  expect(withBeta).toMatchObject({ minWeight: 2.5, maxWeight: 5, targetWeight: 2.5 });
+  expect(evaluatePortfolioRule(holding({ sizingInputs: { beta: beta(1) } }), asOf)).toMatchObject({
+    status: 'verification', reason: 'Trend changed; MIN comparison needs verified ATR and price', minWeight: null, maxWeight: null,
+    atrPct: null, stopPrice: null, stopDistancePct: null, stopLossPctNlv: null,
+  });
+});
+
+test.each([0.75, 2.5])('Trend break at/below MIN does not request an increase (%s)', weightPct => {
   expect(evaluatePortfolioRule(holding({ weightPct }), asOf).status).toBe('aligned');
 });
 
-test('Trade break overrides Trend and missing beta; existing short aligned with bearish Trade is not an exit', () => {
+test('Trade break overrides Trend and missing ATR; existing short aligned with bearish Trade is not an exit', () => {
   expect(evaluatePortfolioRule(holding({ trade: 'BEARISH', trend: null, sizingInputs: {} }), asOf)).toMatchObject({ status: 'conflict', action: 'EXIT', targetWeight: 0 });
   expect(evaluatePortfolioRule(holding({ heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH' }), asOf).status).not.toBe('conflict');
   expect(evaluatePortfolioRule(holding({ heldSide: 'SHORT', trade: 'BULLISH', trend: 'BEARISH' }), asOf).action).toBe('EXIT');
 });
 
-test('unavailable signals, NLV weights, beta and future inputs never become numeric recommendations', () => {
-  for (const row of [holding({ trade: null }), holding({ trend: null }), holding({ weightPct: null }), holding({ sizingInputs: {} }), holding({ sizingInputs: { beta: { ...beta(1), asOf: '2026-09-05' } } }), holding({ sizingInputs: { beta: { ...beta(1), observations: 10 } } })]) {
+test('unavailable signals, NLV weights, ATR/price and future inputs never become numeric recommendations', () => {
+  for (const row of [holding({ trade: null }), holding({ trend: null }), holding({ weightPct: null }), holding({ sizingInputs: {} }),
+    holding({ sizingInputs: { ...inputs(), atr14: { ...atr(2.5), asOf: '2026-09-05' } } }), holding({ sizingInputs: { ...inputs(), atr14: { ...atr(2.5), observations: 13 } } }),
+    holding({ sizingInputs: { ...inputs(), referencePrice: { ...price(100), asOf: '2026-09-05' } } })]) {
     expect(evaluatePortfolioRule(row, asOf)).toMatchObject({ status: 'verification', targetWeight: null, reduction: null });
   }
 });
@@ -41,23 +80,21 @@ test('exits precede reductions and missing signals are excluded from conflict co
   expect(result.checked).toBe(2);
 });
 
-test('verified ATR/range inputs enforce the existing MAX cap', () => {
-  const result = evaluatePortfolioRule(holding({ weightPct: 8, trend: 'BULLISH', valuationPrice: 100, netLiquidation: 100000, lrr: 90, hrr: 110, sizingInputs: { beta: beta(1), atr14: { ...beta(1), observations: 20 } } }), asOf);
-  expect(result).toMatchObject({ status: 'conflict', rule: 'ABOVE_MAX', targetWeight: 6, reduction: 2 });
+const sizedHolding = (extra = {}) => holding({
+  trend: 'BULLISH', netLiquidation: 100000, lrr: 90, hrr: 110, ...extra,
 });
 
-const sizedHolding = (extra = {}) => holding({
-  trend: 'BULLISH', valuationPrice: 100, netLiquidation: 100000, lrr: 90, hrr: 110,
-  sizingInputs: { beta: beta(1.2), atr14: { ...beta(1), observations: 20 } }, ...extra,
+test('verified ATR/range inputs enforce the ATR-derived MAX', () => {
+  const result = evaluatePortfolioRule(sizedHolding({ weightPct: 8 }), asOf);
+  expect(result).toMatchObject({ status: 'conflict', rule: 'ABOVE_MAX', targetWeight: 5, reduction: 3 });
 });
 
 test('new sizing inputs are dated to the research review, separately from closing holdings', () => {
-  const inputs = { beta: beta(1.2), atr14: { ...beta(1), observations: 14 }, referencePrice: { ...beta(100), observations: 1 } };
-  const data = { asOf: '2026-09-02T01:28:00Z', reviewedAt: '2026-09-07T22:00:00Z', holdings: [sizedHolding({ weightPct: 6.1, valuationPrice: 1, sizingInputs: inputs })] };
-  expect(summarizePortfolioRules(data).rows[0]).toMatchObject({ minWeight: 2, maxWeight: 5, rule: 'ABOVE_MAX', weightPct: 6.1 });
-  data.holdings[0].sizingInputs = { ...inputs, referencePrice: null };
-  expect(summarizePortfolioRules(data).rows[0].maxWeight).toBeNull();
-  data.holdings[0].sizingInputs = { ...inputs, beta: { ...inputs.beta, asOf: '2026-09-08' } };
+  const data = { asOf: '2026-09-02T01:28:00Z', reviewedAt: '2026-09-07T22:00:00Z', holdings: [sizedHolding({ weightPct: 6.1, valuationPrice: 1, sizingInputs: inputs() })] };
+  expect(summarizePortfolioRules(data).rows[0]).toMatchObject({ minWeight: 2.5, maxWeight: 5, stopPrice: 95, rule: 'ABOVE_MAX', weightPct: 6.1 });
+  data.holdings[0].sizingInputs = { ...inputs(), referencePrice: null };
+  expect(summarizePortfolioRules(data).rows[0]).toMatchObject({ minWeight: null, maxWeight: null, stopPrice: null });
+  data.holdings[0].sizingInputs = { ...inputs(), atr14: { ...atr(2.5), asOf: '2026-09-08' } };
   expect(summarizePortfolioRules(data).rows[0].minWeight).toBeNull();
 });
 
@@ -67,40 +104,51 @@ test.each([
   { heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: -6.1 },
 ])('6.1%% exceeds the verified 5%% MAX even with missing signals/ranges or a short position (%j)', extra => {
   const result = evaluatePortfolioRule(sizedHolding({ weightPct: 6.1, ...extra }), asOf);
-  expect(result).toMatchObject({ status: 'conflict', rule: 'ABOVE_MAX', weightPct: 6.1, minWeight: 2, maxWeight: 5, targetWeight: 5 });
+  expect(result).toMatchObject({ status: 'conflict', rule: 'ABOVE_MAX', weightPct: 6.1, minWeight: 2.5, maxWeight: 5, targetWeight: 5 });
   expect(result.reduction).toBeCloseTo(1.1);
 });
 
 test('Trade exits and Trend reductions to MIN take priority over overweight trims', () => {
   expect(evaluatePortfolioRule(sizedHolding({ weightPct: 6.1, trade: 'BEARISH' }), asOf)).toMatchObject({ rule: 'TRADE_BREAK', targetWeight: 0 });
-  expect(evaluatePortfolioRule(sizedHolding({ weightPct: 6.1, trend: 'BEARISH' }), asOf)).toMatchObject({ rule: 'TREND_BREAK', targetWeight: 2 });
+  expect(evaluatePortfolioRule(sizedHolding({ weightPct: 6.1, trend: 'BEARISH' }), asOf)).toMatchObject({ rule: 'TREND_BREAK', targetWeight: 2.5 });
 });
 
 test('compliant longs, aligned shorts, and a Trend break already at MIN stay unflagged', () => {
-  for (const extra of [{ weightPct: 5 }, { heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: -5 }, { trend: 'NEUTRAL', weightPct: 2 }]) {
+  for (const extra of [{ weightPct: 5 }, { heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: -5 }, { trend: 'NEUTRAL', weightPct: 2.5 }]) {
     expect(evaluatePortfolioRule(sizedHolding(extra), asOf)).toMatchObject({ status: 'aligned', maxWeight: 5, targetWeight: null, reduction: null });
   }
 });
 
-test('missing or invalid sizing evidence never turns the beta ceiling into a verified MAX', () => {
+test('missing or invalid ATR/price evidence never produces a verified MAX', () => {
   for (const extra of [
     { sizingInputs: {} },
     { sizingInputs: { beta: beta(1.2) } },
-    { sizingInputs: { beta: beta(1.2), atr14: { ...beta(1), asOf: '2026-09-05' } } },
-    { valuationPrice: null },
+    { sizingInputs: { referencePrice: price(100) } },
+    { sizingInputs: { atr14: atr(2.5) } },
+    { sizingInputs: { ...inputs(), atr14: { ...atr(2.5), asOf: '2026-09-05' } } },
+    { sizingInputs: { ...inputs(), referencePrice: { ...price(100), status: 'stale' } } },
   ]) {
-    expect(evaluatePortfolioRule(sizedHolding({ weightPct: 6.1, ...extra }), asOf)).toMatchObject({ status: 'verification', maxWeight: null, targetWeight: null, reduction: null });
+    expect(evaluatePortfolioRule(sizedHolding({ weightPct: 6.1, ...extra }), asOf)).toMatchObject({
+      status: 'verification', reason: 'Position limits need verified ATR and price', maxWeight: null, stopPrice: null, targetWeight: null, reduction: null,
+    });
   }
   expect(evaluatePortfolioRule(sizedHolding({ weightPct: null }), asOf)).toMatchObject({ status: 'verification', maxWeight: 5, targetWeight: null });
+  // Without a captured reference price the valuation price stands in.
+  expect(evaluatePortfolioRule(sizedHolding({ valuationPrice: 100, sizingInputs: { atr14: atr(2.5) } }), asOf)).toMatchObject({ minWeight: 2.5, maxWeight: 5, stopPrice: 95 });
 });
 
-test('a verified ATR cap below MIN still requires an exit when signals are missing', () => {
-  const result = evaluatePortfolioRule(sizedHolding({ trade: null, trend: null, sizingInputs: { beta: beta(1.2), atr14: beta(30) } }), asOf);
-  expect(result).toMatchObject({ status: 'conflict', rule: 'RISK_CAP', action: 'EXIT', targetWeight: 0 });
+// ATR 60 on 100: MIN rounds up to 0.25 while MAX rounds down to 0, so no band exists.
+const tooVolatile = () => inputs(60);
+
+test('an ATR too large to size still requires an exit when signals are missing', () => {
+  const result = evaluatePortfolioRule(sizedHolding({ trade: null, trend: null, sizingInputs: tooVolatile() }), asOf);
+  expect(result).toMatchObject({ status: 'conflict', rule: 'RISK_CAP', action: 'EXIT', targetWeight: 0, volatilityBlocked: true, minWeight: 0.25, maxWeight: 0 });
+  // At exactly half the price MIN and MAX meet at 0.25, which is still a band.
+  expect(evaluatePortfolioRule(sizedHolding({ weightPct: 0.25, sizingInputs: inputs(50) }), asOf)).toMatchObject({ status: 'aligned', volatilityBlocked: false, minWeight: 0.25, maxWeight: 0.25 });
 });
 
 const publishedTrend = (extra = {}) => holding({
-  holding: 'AMZN', trade: null, trend: 'BEARISH', weightPct: 2.4,
+  holding: 'AMZN', trade: null, trend: 'BEARISH', weightPct: 2.9,
   sources: { trend: { publishedAt: '2026-09-04T14:30:00Z', citation: { id: 'published-trend', title: 'Risk Ranges' } } },
   signalContext: { trade: { status: 'unavailable', value: null }, trend: { status: 'published', value: 'BEARISH' } },
   ...extra,
@@ -108,37 +156,37 @@ const publishedTrend = (extra = {}) => holding({
 
 test('AMZN independently published opposing Trend highlights a MIN breach without inventing missing Trade or an exit', () => {
   const result = evaluatePortfolioRule(publishedTrend(), asOf);
-  expect(result).toMatchObject({ holding: 'AMZN', trade: null, trend: 'BEARISH', status: 'conflict', rule: 'TREND_BREAK', action: 'REDUCE', targetLabel: 'MIN', targetWeight: 2 });
+  expect(result).toMatchObject({ holding: 'AMZN', trade: null, trend: 'BEARISH', status: 'conflict', rule: 'TREND_BREAK', action: 'REDUCE', targetLabel: 'MIN', targetWeight: 2.5 });
   expect(result.reduction).toBeCloseTo(0.4);
   const summary = summarizePortfolioRules({ asOf, holdings: [publishedTrend()] });
   expect(summary.conflicts).toHaveLength(1);
   expect(summary.checked).toBe(0);
 });
 
-test.each([2, 2.099, 2.1, 2.1000000000000005])('a missing-Trade Trend break at %s%% stays unflagged within the 10bp MIN buffer', weightPct => {
+test.each([2.5, 2.599, 2.6, 2.6000000000000005])('a missing-Trade Trend break at %s%% stays unflagged within the 10bp MIN buffer', weightPct => {
   expect(PORTFOLIO_WEIGHT_TOLERANCE_PP).toBe(0.10);
   expect(evaluatePortfolioRule(publishedTrend({ weightPct }), asOf)).toMatchObject({ status: 'verification', trade: null, targetWeight: null, reduction: null });
 });
 
-test.each([2.1001, 2.11])('a published Trend break beyond the 10bp buffer (%s%%) keeps the original MIN target', weightPct => {
+test.each([2.6001, 2.61])('a published Trend break beyond the 10bp buffer (%s%%) keeps the original MIN target', weightPct => {
   const result = evaluatePortfolioRule(publishedTrend({ weightPct }), asOf);
-  expect(result).toMatchObject({ status: 'conflict', targetWeight: 2, rule: 'TREND_BREAK' });
-  expect(result.reduction).toBeCloseTo(weightPct - 2);
+  expect(result).toMatchObject({ status: 'conflict', targetWeight: 2.5, rule: 'TREND_BREAK' });
+  expect(result.reduction).toBeCloseTo(weightPct - 2.5);
 });
 
 test('the same independent Trend and absolute weight comparison applies to short positions', () => {
   const source = publishedTrend();
-  const short = { ...source, heldSide: 'SHORT', trend: 'BULLISH', weightPct: -2.11,
+  const short = { ...source, heldSide: 'SHORT', trend: 'BULLISH', weightPct: -2.61,
     signalContext: { ...source.signalContext, trend: { status: 'published', value: 'BULLISH' } } };
-  expect(evaluatePortfolioRule(short, asOf)).toMatchObject({ status: 'conflict', rule: 'TREND_BREAK', trade: null, weightPct: 2.11, targetWeight: 2 });
-  expect(evaluatePortfolioRule({ ...short, weightPct: -2.1 }, asOf).status).toBe('verification');
+  expect(evaluatePortfolioRule(short, asOf)).toMatchObject({ status: 'conflict', rule: 'TREND_BREAK', trade: null, weightPct: 2.61, targetWeight: 2.5, stopPrice: 105 });
+  expect(evaluatePortfolioRule({ ...short, weightPct: -2.6 }, asOf).status).toBe('verification');
   expect(evaluatePortfolioRule({ ...short, trend: 'BEARISH', signalContext: {} }, asOf).status).toBe('verification');
 });
 
 test('published Trade-break exits keep priority regardless of the MIN buffer', () => {
-  const row = publishedTrend({ trade: 'BEARISH', weightPct: 2.05, signalContext: {} });
+  const row = publishedTrend({ trade: 'BEARISH', weightPct: 2.55, signalContext: {} });
   expect(evaluatePortfolioRule(row, asOf)).toMatchObject({ status: 'conflict', rule: 'TRADE_BREAK', action: 'EXIT', targetWeight: 0 });
-  expect(evaluatePortfolioRule(holding({ weightPct: 2.05 }), asOf)).toMatchObject({ status: 'aligned', targetWeight: null, reason: 'Within 10 bp of MIN' });
+  expect(evaluatePortfolioRule(holding({ weightPct: 2.55 }), asOf)).toMatchObject({ status: 'aligned', targetWeight: null, reason: 'Within 10 bp of MIN' });
 });
 
 test.each([5, 5.099, 5.1, 5.1000000000000005])('MAX uses the same inclusive 10bp buffer (%s%%)', weightPct => {
@@ -160,12 +208,14 @@ test('missing, future, invalid or stale evidence cannot create the independent T
     { sources: { trend: { ...source, stale: true } } },
     { signalContext: { trend: { status: 'conflict', value: 'BEARISH' } } },
     { heldSide: null }, { heldSide: 'BUY' }, { weightPct: null }, { weightPct: true },
-    { sizingInputs: {} }, { sizingInputs: { beta: { ...beta(1), source: ' ' } } },
-    { sizingInputs: { beta: { ...beta(1), asOf: '2026-08-20' } } },
-    { sizingInputs: { beta: { ...beta(1), asOf: '2026-09-05' } } },
-    { sizingInputs: { beta: { ...beta(1), observations: 20 } } },
-    ...['stale', 'offline', 'cache-only', 'mock', 'seeded', 'inferred'].map(status => ({ sizingInputs: { beta: { ...beta(1), status } } })),
-    ...['stale', 'cacheOnly', 'mock', 'seeded'].map(flag => ({ sizingInputs: { beta: { ...beta(1), [flag]: true } } })),
+    { sizingInputs: {} }, { sizingInputs: { beta: beta(1) } }, { sizingInputs: { ...inputs(), atr14: { ...atr(2.5), source: ' ' } } },
+    { sizingInputs: { ...inputs(), atr14: { ...atr(2.5), asOf: '2026-08-20' } } },
+    { sizingInputs: { ...inputs(), atr14: { ...atr(2.5), asOf: '2026-09-05' } } },
+    { sizingInputs: { ...inputs(), atr14: { ...atr(2.5), observations: 13 } } },
+    { sizingInputs: { ...inputs(), referencePrice: { ...price(100), asOf: '2026-09-05' } } },
+    ...['stale', 'offline', 'cache-only', 'mock', 'seeded', 'inferred'].map(status => ({ sizingInputs: { ...inputs(), atr14: { ...atr(2.5), status } } })),
+    ...['stale', 'cacheOnly', 'mock', 'seeded'].map(flag => ({ sizingInputs: { ...inputs(), atr14: { ...atr(2.5), [flag]: true } } })),
+    ...['stale', 'mock'].map(flag => ({ sizingInputs: { ...inputs(), referencePrice: { ...price(100), [flag]: true } } })),
   ];
   for (const extra of unsupported) {
     expect(evaluatePortfolioRule(publishedTrend(extra), asOf)).toMatchObject({ status: 'verification', targetWeight: null, reduction: null });
@@ -182,16 +232,6 @@ test('product indications never fill missing published Trade or Trend or assert 
     expect(evaluatePortfolioRule({ ...row, trend, signalContext: { trend: { status: 'indication', value: 'BEARISH' } } }, asOf))
       .toMatchObject({ trend: null, status: 'verification', targetWeight: null });
   }
-});
-
-test('catalog commodity policy establishes IBIT MIN without beta and still requires verified ATR for MAX', () => {
-  const ibit = publishedTrend({ holding: 'IBIT', weightPct: 1.2, sizingInputs: {} });
-  expect(evaluatePortfolioRule(ibit, asOf)).toMatchObject({ minWeight: 1, maxWeight: null, rule: 'TREND_BREAK', targetWeight: 1 });
-  const aligned = { ...ibit, trade: 'BULLISH', trend: 'BULLISH', signalContext: {}, sources: {}, weightPct: 4.11,
-    valuationPrice: 100, sizingInputs: { atr14: { ...beta(1), observations: 20 } } };
-  expect(evaluatePortfolioRule(aligned, asOf)).toMatchObject({ minWeight: 1, maxWeight: 4, rule: 'ABOVE_MAX', targetWeight: 4 });
-  expect(evaluatePortfolioRule({ ...aligned, sizingInputs: { atr14: { ...beta(1), status: 'stale' } } }, asOf))
-    .toMatchObject({ minWeight: 1, maxWeight: null, status: 'verification', targetWeight: null });
 });
 
 test('within each side confirmed exits and reductions sort first by deviation, then alphabetically without mutating rows', () => {
@@ -224,17 +264,17 @@ test('weight flags compare captured absolute weights with displayed limits witho
   expect(over).toMatchObject({ weightStatus: 'overweight', maxWeight: 5, action: 'REDUCE' });
   expect(over.weightDeviation).toBeCloseTo(1.1);
   const under = evaluatePortfolioRule(sizedHolding({ heldSide: 'SHORT', weightPct: -1, trade: null, trend: null }), asOf);
-  expect(under).toMatchObject({ weightPct: 1, minWeight: 2, weightStatus: 'underweight', weightDeviation: 1, status: 'verification', targetWeight: null, reduction: null });
+  expect(under).toMatchObject({ weightPct: 1, minWeight: 2.5, weightStatus: 'underweight', weightDeviation: 1.5, status: 'verification', targetWeight: null, reduction: null });
   expect(under.action).toBeUndefined();
   expect(portfolioPositionNeedsAttention(under)).toBe(true);
 });
 
-test.each([1.9, 1.9000000000000001, 1.8999999999999995, 2, 5, 5.1, 5.1000000000000005])('weight %s%% stays within the inclusive 10bp band buffer', weightPct => {
+test.each([2.4, 2.4000000000000004, 2.3999999999999995, 2.5, 5, 5.1, 5.1000000000000005])('weight %s%% stays within the inclusive 10bp band buffer', weightPct => {
   expect(evaluatePortfolioRule(sizedHolding({ weightPct }), asOf)).toMatchObject({ weightStatus: null, weightDeviation: null });
 });
 
 test.each([
-  [1.8999, 'underweight'],
+  [2.3999, 'underweight'],
   [5.1001, 'overweight'],
 ])('a weight of %s%% just beyond the band buffer is %s', (weightPct, weightStatus) => {
   const row = evaluatePortfolioRule(sizedHolding({ weightPct }), asOf);
@@ -247,10 +287,10 @@ test('below MIN remains informational for aligned, BENCH and EXIT holdings', () 
   const bench = evaluatePortfolioRule(sizedHolding({ weightPct: 1, trend: 'NEUTRAL' }), asOf);
   const exit = evaluatePortfolioRule(sizedHolding({ weightPct: 1, trade: 'BEARISH' }), asOf);
   for (const row of [active, bench]) {
-    expect(row).toMatchObject({ status: 'aligned', weightStatus: 'underweight', weightDeviation: 1, targetWeight: null, reduction: null });
+    expect(row).toMatchObject({ status: 'aligned', weightStatus: 'underweight', weightDeviation: 1.5, targetWeight: null, reduction: null });
     expect(row.action).toBeUndefined();
   }
-  expect(exit).toMatchObject({ status: 'conflict', rule: 'TRADE_BREAK', action: 'EXIT', weightStatus: 'underweight', weightDeviation: 1, targetWeight: 0, reduction: 1 });
+  expect(exit).toMatchObject({ status: 'conflict', rule: 'TRADE_BREAK', action: 'EXIT', weightStatus: 'underweight', weightDeviation: 1.5, targetWeight: 0, reduction: 1 });
   const summary = summarizePortfolioRules({ asOf, holdings: [sizedHolding({ weightPct: 1 })] });
   expect(summary.conflicts).toHaveLength(0);
   expect(portfolioPositionNeedsAttention(summary.rows[0])).toBe(true);
@@ -258,36 +298,33 @@ test('below MIN remains informational for aligned, BENCH and EXIT holdings', () 
 
 test('independent weight flags preserve stricter Trend MIN reductions and Trade exits', () => {
   const trend = evaluatePortfolioRule(sizedHolding({ weightPct: 6, trend: 'NEUTRAL' }), asOf);
-  expect(trend).toMatchObject({ rule: 'TREND_BREAK', action: 'REDUCE', weightStatus: 'overweight', weightDeviation: 1, targetWeight: 2, reduction: 4 });
+  expect(trend).toMatchObject({ rule: 'TREND_BREAK', action: 'REDUCE', weightStatus: 'overweight', weightDeviation: 1, targetWeight: 2.5, reduction: 3.5 });
   expect(evaluatePortfolioRule(sizedHolding({ weightPct: 4, trend: 'NEUTRAL' }), asOf))
-    .toMatchObject({ rule: 'TREND_BREAK', targetWeight: 2, weightStatus: null, weightDeviation: null });
+    .toMatchObject({ rule: 'TREND_BREAK', targetWeight: 2.5, weightStatus: null, weightDeviation: null });
   expect(evaluatePortfolioRule(sizedHolding({ weightPct: 6, trade: 'BEARISH' }), asOf))
     .toMatchObject({ rule: 'TRADE_BREAK', action: 'EXIT', weightStatus: 'overweight', weightDeviation: 1, targetWeight: 0, reduction: 6 });
 });
 
-test('known MIN can establish underweight without a final MAX, but unavailable limits cannot establish a weight flag', () => {
-  const minOnly = evaluatePortfolioRule(holding({ trend: 'BULLISH', weightPct: 1 }), asOf);
-  expect(minOnly).toMatchObject({ minWeight: 2, maxWeight: null, weightStatus: 'underweight', weightDeviation: 1 });
-  const fixedMin = evaluatePortfolioRule(holding({ holding: 'IBIT', weightPct: 0.5, sizingInputs: {} }), asOf);
-  expect(fixedMin).toMatchObject({ minWeight: 1, maxWeight: null, weightStatus: 'underweight', weightDeviation: 0.5 });
+test('verified ATR limits establish underweight without a risk range, but unavailable limits cannot establish a weight flag', () => {
+  const noRange = evaluatePortfolioRule(holding({ trend: 'BULLISH', weightPct: 1 }), asOf);
+  expect(noRange).toMatchObject({ minWeight: 2.5, maxWeight: 5, weightStatus: 'underweight', weightDeviation: 1.5 });
   for (const extra of [
     { weightPct: 7, sizingInputs: { beta: beta(1.2) } },
-    { weightPct: 7, sizingInputs: { beta: beta(1.2), atr14: { ...beta(1), stale: true } } },
-    { weightPct: 7, sizingInputs: { beta: beta(1.2), atr14: beta(1), referencePrice: null } },
+    { weightPct: 7, sizingInputs: { ...inputs(), atr14: { ...atr(2.5), stale: true } } },
+    { weightPct: 7, sizingInputs: { ...inputs(), referencePrice: null } },
     { weightPct: 1, sizingInputs: {} },
-    { weightPct: 1, sizingInputs: { beta: { ...beta(1.2), status: 'mock' } } },
-    { weightPct: 1, sizingInputs: { beta: { ...beta(1.2), asOf: '2026-09-05' } } },
+    { weightPct: 1, sizingInputs: { ...inputs(), atr14: { ...atr(2.5), status: 'mock' } } },
+    { weightPct: 1, sizingInputs: { ...inputs(), atr14: { ...atr(2.5), asOf: '2026-09-05' } } },
   ]) {
     expect(evaluatePortfolioRule(sizedHolding(extra), asOf)).toMatchObject({ weightStatus: null, weightDeviation: null });
   }
 });
 
-test('an ATR cap below MIN suppresses underweight but retains a verified MAX overage and exit', () => {
-  const inputs = { beta: beta(1.2), atr14: beta(30) };
-  expect(evaluatePortfolioRule(sizedHolding({ weightPct: 0.1, sizingInputs: inputs }), asOf))
-    .toMatchObject({ minWeight: 2, maxWeight: 0.5, action: 'EXIT', rule: 'RISK_CAP', weightStatus: null, weightDeviation: null });
-  expect(evaluatePortfolioRule(sizedHolding({ weightPct: 1, sizingInputs: inputs }), asOf))
-    .toMatchObject({ minWeight: 2, maxWeight: 0.5, action: 'EXIT', rule: 'RISK_CAP', weightStatus: 'overweight', weightDeviation: 0.5 });
+test('a volatility-blocked band suppresses underweight but retains the overage above its zero MAX and the exit', () => {
+  expect(evaluatePortfolioRule(sizedHolding({ weightPct: 0.1, sizingInputs: tooVolatile() }), asOf))
+    .toMatchObject({ minWeight: 0.25, maxWeight: 0, volatilityBlocked: true, action: 'EXIT', rule: 'RISK_CAP', weightStatus: null, weightDeviation: null });
+  expect(evaluatePortfolioRule(sizedHolding({ weightPct: 1, sizingInputs: tooVolatile() }), asOf))
+    .toMatchObject({ minWeight: 0.25, maxWeight: 0, volatilityBlocked: true, action: 'EXIT', rule: 'RISK_CAP', weightStatus: 'overweight', weightDeviation: 1 });
 });
 
 test('invalid captured holding evidence, side or weight never produces a weight flag', () => {
@@ -306,13 +343,13 @@ test('invalid captured holding evidence, side or weight never produces a weight 
   }
 });
 
-test('weight classification requires a valid review time even for catalog MIN and permits verified historical snapshots', () => {
-  const fixed = holding({ holding: 'IBIT', weightPct: 0.5, sizingInputs: {} });
+test('weight classification requires a valid review time even with verified ATR inputs and permits verified historical snapshots', () => {
+  const fixed = holding({ weightPct: 0.5 });
   for (const invalidDate of [undefined, null, '', 'not-a-date']) {
     expect(evaluatePortfolioRule(fixed, invalidDate)).toMatchObject({ weightStatus: null, weightDeviation: null });
   }
   expect(evaluatePortfolioRule(sizedHolding({ historical: true, verifiedAtCapture: true, weightPct: 1 }), asOf))
-    .toMatchObject({ weightStatus: 'underweight', weightDeviation: 1 });
+    .toMatchObject({ weightStatus: 'underweight', weightDeviation: 1.5 });
 });
 
 test('optional weight sorting groups preferred flags first by deviation, then keeps existing conflict order', () => {

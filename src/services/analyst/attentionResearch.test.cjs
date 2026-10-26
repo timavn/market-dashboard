@@ -24,6 +24,7 @@ test('fresh full-book process conflicts are evaluated without a new research eve
   assert.equal(finding.action, 'exit'); assert.equal(finding.kind, 'portfolio');
   assert.equal(finding.holdingsVerified, true); assert.equal(finding.quantity, 10);
   assert.match(finding.presentation.rows.find(row => row.label === 'Context').text, /Trade turned Bearish vs Long → exit/);
+  assert.equal(finding.presentation.rows.find(row => row.label === 'Order').text, 'Sell 10 / 10 → 0');
   assert.equal(result.complete, true);
 });
 test('fresh holdings cannot upgrade an undated or unlinked Trade into a conflict', () => {
@@ -299,30 +300,106 @@ test('Trade and Trend breaks are action-required; sizing breaches are not', () =
   sizing.holdings.currentHoldings[0].currentHolding.weightPct = 40;
   for (const item of evaluateResearchAttention(sizing, NOW).findings) assert.equal(item.severity, undefined);
 });
-test('unverified holdings turn today’s exits and removals into one urgent holdings check', () => {
+test('unverified holdings never raise an Alert; today’s exits and removals wait in one notice', () => {
   const ctx = context(); ctx.holdings.liveVerified = false;
   ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG'), changeEvent('WING', 'REMOVE', 'SHORT'), changeEvent('XLE', 'ADD', 'SHORT', { productKey: 'etf-pro' })];
-  const urgent = evaluateResearchAttention(ctx, NOW).findings.filter(item => item.severity === 'action-required');
-  assert.equal(urgent.length, 1);
-  assert.equal(urgent[0].kind, 'operational'); assert.equal(urgent[0].assessmentChannel, 'research');
-  assert.match(urgent[0].presentation.rows[0].text, /SNOW, WING/);
+  const findings = evaluateResearchAttention(ctx, NOW).findings;
+  assert.equal(findings.some(item => item.severity === 'action-required'), false);
+  assert.equal(findings.length, 1);
+  const [notice] = findings;
+  assert.equal(notice.kind, 'operational'); assert.equal(notice.assessmentChannel, 'research');
+  assert.deepEqual(notice.pendingHoldingsCheck, { marketDate: '2026-09-22', symbols: ['SNOW', 'WING'], checked: [] });
+  assert.equal(notice.presentation.rows.find(item => item.label === 'Pending').text, 'SNOW, WING');
+  assert.doesNotMatch(JSON.stringify(notice.presentation.rows), /confirm/i);
   ctx.holdings.liveVerified = true;
   assert.equal(evaluateResearchAttention(ctx, NOW).findings.some(item => item.kind === 'operational'), false);
 });
-test('a Trend-break sizing alert states the security\'s own MIN, MAX, basis and trim', () => {
+test('a checked removal is not raised again when holdings drop out later the same day', () => {
+  const ctx = context(); ctx.holdings.liveVerified = false;
+  ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG')];
+  const [notice] = evaluateResearchAttention(ctx, NOW).findings;
+  // A verified scan resolved the notice; Gateway then flaps.
+  ctx.previousAttention = [{ ...notice, state: 'resolved' }];
+  assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings, []);
+  // Only a new removal is pending, and the checked one is carried forward.
+  ctx.events.push(changeEvent('WING', 'REMOVE', 'SHORT'));
+  const [next] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual(next.pendingHoldingsCheck, { marketDate: '2026-09-22', symbols: ['WING'], checked: ['SNOW'] });
+  assert.equal(next.severity, undefined);
+  // Notices saved before the check was recorded were resolved by a verified scan.
+  ctx.previousAttention = [{ ...notice, pendingHoldingsCheck: undefined, state: 'resolved' }];
+  assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings, []);
+});
+test('once holdings verify, a pending removal alerts only for a position actually held, even on a later date', () => {
+  const ctx = context(); ctx.holdings.liveVerified = false;
+  ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG', { productKey: 'etf-pro', productLabel: 'ETF Pro' }), changeEvent('WING', 'REMOVE', 'SHORT'), changeEvent('DELL', 'REMOVE', 'LONG')];
+  const [notice] = evaluateResearchAttention(ctx, NOW).findings;
+  // Holdings return on the next market date: SNOW is held Long, DELL is held Short, WING is not held.
+  const later = new Date('2026-09-23T16:00:00Z');
+  Object.assign(ctx, { marketDate: '2026-09-23', previousAttention: [{ ...notice, state: 'open' }] });
+  Object.assign(ctx.holdings, { liveVerified: true, asOf: later.toISOString(), positions: [{ symbol: 'SNOW', quantity: 12 }, { symbol: 'DELL', quantity: -3 }] });
+  const findings = evaluateResearchAttention(ctx, later).findings;
+  assert.deepEqual(findings.map(item => item.symbol), ['SNOW']);
+  const [alert] = findings;
+  assert.equal(alert.severity, 'action-required'); assert.equal(alert.kind, 'portfolio');
+  assert.equal(alert.holdingsVerified, true); assert.equal(alert.quantity, 12);
+  const rows = Object.fromEntries(alert.presentation.rows.map(item => [item.label, item.text]));
+  assert.equal(rows['Current position'], 'Long');
+  assert.equal(rows.Action, 'ETF Pro removed SNOW (Long) → exit Long');
+  assert.deepEqual(alert.presentation.sourceLinks.map(link => link.label), ['ETF Pro']);
+  // Without the pending notice, a prior day's removal is not reconsidered.
+  ctx.previousAttention = [];
+  assert.deepEqual(evaluateResearchAttention(ctx, later).findings, []);
+});
+test('a Trend-break sizing alert states the security\'s own MIN, MAX, ATR, stop and trim', () => {
   const ctx = context(); addHolding(ctx, 'XLK');
   const metric = (value, observations) => ({ value, observations, status: 'available', source: 'Yahoo Finance chart API', asOf: '2026-09-21' });
-  ctx.holdings.currentHoldings[0].currentHolding.weightPct = 1.97;
-  Object.assign(ctx.holdings.ruleHoldings[0], { trade: null, trend: 'NEUTRAL', weightPct: 1.97,
-    sizingInputs: { beta: metric(1.767428, 252), atr14: metric(3.742858, 14), referencePrice: metric(185.44, 1) } });
+  ctx.holdings.currentHoldings[0].currentHolding.weightPct = 4.25;
+  // ATR 3.70 on 185 is 2% of price: 4% stop distance → MIN roundUp(3.125) = 3.25%, MAX 6.25%, stop 185 − 2 × 3.70 = 177.60.
+  Object.assign(ctx.holdings.ruleHoldings[0], { trade: null, trend: 'NEUTRAL', weightPct: 4.25,
+    sizingInputs: { beta: metric(1.767428, 252), atr14: metric(3.7, 14), referencePrice: metric(185, 1) } });
   const [finding] = evaluateResearchAttention(ctx, NOW).findings;
   const rows = Object.fromEntries(finding.presentation.rows.map(item => [item.label, item.text]));
   assert.equal(finding.state === 'open' && finding.rule.rule, 'TREND_BREAK');
-  assert.match(rows['Process limits'], /^MIN 1\.50% · MAX 3\.00% · beta 1\.77 · ATR cap \d+\.\d{2}%$/);
-  assert.equal(rows.Action, 'Reduce to MIN 1.50%');
-  assert.equal(rows.Trim, '0.47 pts (1.97% → 1.50%)');
+  assert.equal(rows['Process limits'], 'MIN 3.25% / MAX 6.25%');
+  assert.equal(rows.ATR, '2.00% of price');
+  // 4.25% × 4% stop distance = 0.17% of NLV.
+  assert.equal(rows.Stop, '177.60 · 2 × ATR from last close · 0.17% of NLV at this weight');
+  for (const removed of ['Beta', 'Sizing basis', 'ATR cap']) assert.equal(rows[removed], undefined);
+  assert.equal(rows.Action, 'Reduce to MIN 3.25%');
+  assert.equal(rows.Trim, '1.00 pts (4.25% → 3.25%)');
   assert.ok(finding.presentation.rows.find(item => item.label === 'Trim').requiresFreshHoldings);
+  // 10 shares at 4.25% → 3.25% keeps 7.65 shares.
+  assert.equal(rows.Order, 'Sell 2.35 / 10 → 7.65');
+  assert.ok(finding.presentation.rows.find(item => item.label === 'Order').requiresFreshHoldings);
   assert.deepEqual(finding.presentation.rows.slice(-4), [['Tick', 'N/A'], ['Trade', 'N/A'], ['Trend', 'Neutral'], ['Tail', 'N/A']].map(([label, text]) => ({ label, text })));
+});
+test('a quiet security notes the ATR floor, and an ATR too large to size exits', () => {
+  const metric = (value, observations) => ({ value, observations, status: 'available', source: 'Yahoo Finance chart API', asOf: '2026-09-21' });
+  const quiet = context(); addHolding(quiet, 'XLU');
+  quiet.holdings.currentHoldings[0].currentHolding.weightPct = 6;
+  // ATR 1.85 on 185 is 1% of price, below the 1.25% floor: MIN 5%, MAX 10%; the stop keeps the measured ATR (185 − 3.70).
+  Object.assign(quiet.holdings.ruleHoldings[0], { trade: null, trend: 'NEUTRAL', weightPct: 6,
+    sizingInputs: { atr14: metric(1.85, 14), referencePrice: metric(185, 1) } });
+  const quietRows = Object.fromEntries(evaluateResearchAttention(quiet, NOW).findings[0].presentation.rows.map(item => [item.label, item.text]));
+  assert.equal(quietRows['Process limits'], 'MIN 5.00% / MAX 10.00%');
+  assert.equal(quietRows.ATR, '1.00% of price (1.25% floor sets the band)');
+  assert.equal(quietRows.Stop, '181.30 · 2 × ATR from last close · 0.12% of NLV at this weight');
+  assert.equal(quietRows.Action, 'Reduce to MIN 5.00%');
+  const wild = context(); addHolding(wild, 'WILD');
+  // ATR 111 on 185 is 60% of price: MIN rounds up to 0.25% while MAX rounds down to 0, so the position cannot be sized.
+  Object.assign(wild.holdings.ruleHoldings[0], { trade: 'BULLISH', trend: 'BULLISH',
+    sizingInputs: { atr14: metric(111, 14), referencePrice: metric(185, 1) } });
+  const [finding] = evaluateResearchAttention(wild, NOW).findings;
+  const rows = Object.fromEntries(finding.presentation.rows.map(item => [item.label, item.text]));
+  assert.equal(finding.state === 'open' && finding.rule.rule, 'RISK_CAP');
+  assert.equal(finding.action, 'exit');
+  assert.equal(rows['Process limits'], 'MIN 0.25% / MAX 0.00%');
+  assert.equal(rows.ATR, '60.00% of price');
+  assert.equal(rows.Stop, undefined);
+  assert.equal(rows.Context, 'Too volatile to size → exit.');
+  assert.equal(rows.Order, 'Sell 10 / 10 → 0');
+  assert.deepEqual(finding.presentation.sourceLinks.map(link => link.label), ['Trade source', 'Trend source', 'atr14 evidence', 'referencePrice evidence']);
 });
 test('a published Tick fills the Tick line; a stale or future one stays N/A', () => {
   for (const [tick, expected] of [[{ value: 'BEARISH', status: 'published', publishedAt: '2026-09-22T13:00:00Z' }, 'Bearish'],

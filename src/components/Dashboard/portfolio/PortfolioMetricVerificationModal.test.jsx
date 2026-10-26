@@ -15,22 +15,19 @@ const makeSelection = (overrides = {}) => ({
   ...overrides,
 });
 
+// ATR 6 on a 100 close: 6% ATR, a 12% stop, MIN 0.125 / 0.12 → 1.25, MAX 0.25 / 0.12 → 2.00.
 const makePositionReference = (overrides = {}) => ({
   available: true,
-  value: '1.0–3.0%',
+  value: '1.25–2.00%',
   asOf: '2026-09-09',
   source: 'Verified adjusted daily history',
-  fetchedAt: '2026-09-10T18:00:00Z',
-  observationCount: 252,
-  limitedHistory: false,
-  rv: { rv63: 0.4, rv252: 0.3 },
-  band: {
-    volatility: 0.4,
-    effectiveVolatility: 0.4,
-    minWeightPct: 1,
-    maxWeightPct: 3,
-    floorApplied: false,
-  },
+  minWeight: 1.25,
+  maxWeight: 2,
+  relativeAtr: 0.06,
+  floorApplied: false,
+  stopDistance: 0.12,
+  atr14: { value: 6, asOf: '2026-09-09' },
+  referencePrice: { value: 100, asOf: '2026-09-09' },
   ...overrides,
 });
 
@@ -134,12 +131,12 @@ test('uses the wide position-size explanation and its prepared reference without
   })} />);
   const modal = screen.getByRole('dialog', { name: 'Position size calculation' });
   expect(modal).toHaveClass('pcv2-verification-dialog--sizing');
-  expect(within(modal).getByText('AMZN: 1.0–3.0% of NAV')).toBeInTheDocument();
+  expect(within(modal).getByText('AMZN: 1.25–2.00% of NLV')).toBeInTheDocument();
   expect(within(modal).getByText('AMZN math.').parentElement)
-    .toHaveTextContent('63-day volatility = 40.00%; 252-day volatility = 30.00%; use the higher, 40.00%.');
-  expect(within(modal).getByText(/Operating range based on adjusted closes through 2026-09-09/)).toBeInTheDocument();
+    .toHaveTextContent('ATR 6.00 ÷ close 100.00 = 6.00%. Stop distance = 2 × 6.00% = 12.00%. 0.125% ÷ 12.00% rounds up to 1.25%; 0.25% ÷ 12.00% rounds down to 2.00%.');
+  expect(within(modal).getByText(/Operating range based on completed daily bars through 2026-09-09/)).toBeInTheDocument();
   expect(modal.querySelector('.pcv2-sizing-explanation-source'))
-    .toHaveTextContent('Source: Verified adjusted daily history. 252 daily returns available; history fetched 2026-09-10T18:00:00Z.');
+    .toHaveTextContent('Source: Verified adjusted daily history. ATR through 2026-09-09.');
   expect(modal.querySelector('.pcv2-verification-result')).not.toBeInTheDocument();
   expect(modal.querySelector('.pcv2-verification-formula')).not.toBeInTheDocument();
   expect(within(modal).queryByRole('button', { name: /order|trade|buy|sell/i })).not.toBeInTheDocument();
@@ -151,7 +148,7 @@ test('updates the open sizing explanation when its owner invalidates the referen
     positionSizeReference: makePositionReference(),
   });
   const view = render(<PortfolioMetricVerificationModal {...props} />);
-  expect(screen.getByText('AMZN: 1.0–3.0% of NAV')).toBeInTheDocument();
+  expect(screen.getByText('AMZN: 1.25–2.00% of NLV')).toBeInTheDocument();
   view.rerender(<PortfolioMetricVerificationModal {...props} positionSizeReference={{
     available: false,
     reason: 'Latest completed-session history is unavailable.',
@@ -159,9 +156,9 @@ test('updates the open sizing explanation when its owner invalidates the referen
   const modal = screen.getByRole('dialog', { name: 'Position size calculation' });
   expect(within(modal).getByText('Size unavailable.')).toBeInTheDocument();
   expect(within(modal).getByText(/Latest completed-session history is unavailable/)).toBeInTheDocument();
-  expect(within(modal).queryByText('AMZN: 1.0–3.0% of NAV')).not.toBeInTheDocument();
+  expect(within(modal).queryByText('AMZN: 1.25–2.00% of NLV')).not.toBeInTheDocument();
   expect(within(modal).queryByText('AMZN math.')).not.toBeInTheDocument();
-  expect(modal.querySelector('.pcv2-sizing-explanation-source')).not.toHaveTextContent('history fetched');
+  expect(modal.querySelector('.pcv2-sizing-explanation-source')).not.toHaveTextContent('ATR through');
   expect(props.onClose).not.toHaveBeenCalled();
 });
 
@@ -186,7 +183,7 @@ test('keeps generic content tied to the selected snapshot, not unrelated positio
   const view = render(<PortfolioMetricVerificationModal {...props} />);
   view.rerender(<PortfolioMetricVerificationModal {...props} positionSizeReference={makePositionReference()} />);
   expect(screen.getByText('1.42')).toBeInTheDocument();
-  expect(screen.queryByText('AMZN: 1.0–3.0% of NAV')).not.toBeInTheDocument();
+  expect(screen.queryByText('AMZN: 1.25–2.00% of NLV')).not.toBeInTheDocument();
   view.rerender(<PortfolioMetricVerificationModal {...props} selection={makeSelection({
     symbol: 'TLT', metric: 'Stop', formula: 'Prepared stop formula', equation: 'Prepared stop inputs', result: '83.76',
   })} />);
