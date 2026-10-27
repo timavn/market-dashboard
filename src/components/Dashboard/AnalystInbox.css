@@ -118,3 +118,15 @@
 .analyst-inbox-bias-cell.is-negative { background: #fbe4e2; color: #a32d2d; }
 .analyst-inbox-bias-cell.is-neutral { background: #f3f4f6; color: #4b5563; }
 .analyst-inbox-bias-cell.is-unavailable { background: #f3f4f6; color: #9ca3af; }
+
+/* Stance alerts: product calls, then current → target → order, in bordered cells. */
+.analyst-inbox-finding.is-action-required.is-trim { border-color: #c98a1b; }
+.analyst-inbox-stance { display: grid; gap: 6px; }
+.analyst-inbox-stance-title { display: flex; gap: 6px; align-items: baseline; color: var(--analyst-muted, #6b7280); }
+.analyst-inbox-stance-ticker { color: var(--portfolio-review-blue, #2563eb); font-size: 11px; font-weight: 600; }
+.analyst-inbox-stance-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+.analyst-inbox-stance-table th,
+.analyst-inbox-stance-table td { overflow: hidden; padding: 2px 6px; border: 1px solid #cdd5dd; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.analyst-inbox-stance-table th { background: #f3f4f6; color: var(--analyst-muted, #6b7280); font-size: 9px; font-weight: 500; }
+.analyst-inbox-stance-table td span { font-weight: 600; }
+.analyst-inbox-stance-order { margin-top: 2px; }

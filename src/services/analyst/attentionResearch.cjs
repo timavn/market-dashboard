@@ -425,16 +425,39 @@ function accountFindings(context, now) {
   return { findings: output, complete: fresh && account.historyVerified === true };
 }
 const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
+const STANCE_SLOT_NAMES = { 'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts', 'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 const monthDay = date => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-function stanceText(item) {
-  const what = item.product === 'signal-strength' ? `${item.label} ${item.slot.endsWith(':short') ? 'Short' : 'Long'}` : item.label;
+// Each product call as the card's Action and Bias columns read it. A trim keeps
+// the side it trims; a removal leaves the product without a view.
+function stanceCall(item) {
+  const removal = item.stance.startsWith('EXIT_') && item.slot !== 'real-time-alert';
+  const action = { LONG: item.action === 'BUY-SOME' ? 'ADD' : 'LONG', SHORT: 'SHORT', REDUCE_LONG: 'TRIM', REDUCE_SHORT: 'TRIM',
+    EXIT_LONG: removal ? 'REMOVE' : 'SELL', EXIT_SHORT: removal ? 'REMOVE' : 'COVER' }[item.stance];
+  const bias = removal ? 'NEUTRAL' : { LONG: 'BULLISH', SHORT: 'BEARISH', REDUCE_LONG: 'BULLISH', REDUCE_SHORT: 'BEARISH', EXIT_LONG: 'BEARISH', EXIT_SHORT: 'BULLISH' }[item.stance];
   // A standing listing is dated by its entry; a change by its publication.
-  return `${STANCE_PRODUCT_NAMES[item.product]} ${what} ${item.label === 'Listed' ? `since ${monthDay(item.since)}` : monthDay(item.date)}`;
+  return { product: STANCE_SLOT_NAMES[item.slot], action, date: item.label === 'Listed' ? item.since : item.date, bias };
 }
+const amount = value => String(Math.round(value * 100) / 100);
+// Where the position is, where the calls take it, and the order between them.
+// A trim goes no lower than the security's own MIN and keeps its side.
+function stanceOrder(context, symbol, state, side, partial, now) {
+  const quantity = Math.abs(state.quantity);
+  const weight = state.currentHolding?.weightPct ?? null;
+  const verb = side === 'LONG' ? 'SELL' : 'BUY';
+  const current = { side, quantity, weightPct: weight };
+  if (!partial) return { verdict: 'exit', current, target: { side: null, quantity: 0, weightPct: 0 }, order: { verb, quantity, note: `to close ${side.toLowerCase()}` } };
+  const held = (context.holdings.ruleHoldings || []).find(candidate => symbolOf(candidate.holding) === symbol);
+  const min = held && weight !== null ? number(evaluatePortfolioRule({ ...held, weightPct: weight }, context.holdings.asOf || now.toISOString()).minWeight) : null;
+  if (min === null || min >= weight) return { verdict: 'trim', current, target: { side, quantity: null, weightPct: null }, order: { verb, quantity: null, note: `some · stays ${side.toLowerCase()}` } };
+  const remaining = Math.round(quantity * min / weight * 100) / 100;
+  return { verdict: 'trim', current, target: { side, quantity: remaining, weightPct: min },
+    order: { verb, quantity: Math.round((quantity - remaining) * 100) / 100, upTo: true, note: `stays ${side.toLowerCase()}` } };
+}
+const orderLine = ({ order }) => `${order.verb}${order.upTo ? ' up to' : ''}${order.quantity === null ? '' : ` ${amount(order.quantity)}`} ${order.note}`;
 // The whole verified book against every product's standing stance. Unlike a
 // source event, a stance holds until the product changes it, so the first
 // verified read after Gateway connects sees every contradiction at once.
-function stanceFindings(context, now, verified, sentenceMemo) {
+function stanceFindings(context, now, verified) {
   if (!verified) return [];
   const { book } = foldStanceEvents(context.stanceBook, context.events || [], now);
   const output = [];
@@ -443,7 +466,6 @@ function stanceFindings(context, now, verified, sentenceMemo) {
     const { symbol, opposing, supporting } = scanned;
     const state = holdingState(context.holdings, symbol, true, now);
     if (!state.quantity) continue;
-    const held = scanned.side === 'LONG' ? 'Long' : 'Short';
     const partial = opposing.every(item => item.partial);
     const key = [symbol, 'stance', scanned.side];
     // A Sell/Cover-SOME is acted on once the position shrinks from where it stood when first raised.
@@ -452,23 +474,21 @@ function stanceFindings(context, now, verified, sentenceMemo) {
       && !['resolved', 'superseded'].includes(item.state));
     const baseline = previous?.stanceBaseline?.date === latest.date ? previous.stanceBaseline : { date: latest.date, quantity: state.quantity };
     if (partial && Math.abs(state.quantity) < Math.abs(baseline.quantity)) continue;
-    const order = partial ? null : orderText(state.quantity, 0);
-    const rows = [...positionRows(state), row('Action', `${stanceText(latest)} vs your ${held} → ${partial ? 'reduce' : 'exit'} ${held}`)];
-    if (opposing.length > 1) rows.push(row('Also against', opposing.slice(1).map(stanceText).join('; ')));
-    if (supporting.length) rows.push(row('Still for', supporting.map(stanceText).join('; ')));
-    if (order) rows.push({ ...row('Order', order), requiresFreshHoldings: true });
-    // The exact report behind a current alert explains its case; otherwise its headline does.
-    const reported = (context.events || []).find(event => event.sourceReport && event.productKey === latest.product
-      && symbolOf(event.entityId) === symbol && event.sourceMessageId === latest.sourceMessageId);
-    const contextLines = reported ? describeAnalystFinding({ event: reported, ...state }, [], now.getTime(), sentenceMemo).sourceContext || [] : [];
-    const said = contextLines.join(' ') || opposing.find(item => item.headline)?.headline;
-    if (said) rows.push(row('Context', said));
-    rows.push(...durationRows(context, symbol, now));
+    // The three most recent product calls on this security, either way.
+    const calls = [...opposing, ...supporting].map(stanceCall).sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product)).slice(0, 3);
+    const plan = stanceOrder(context, symbol, state, scanned.side, partial, now);
+    const rows = [...positionRows(state),
+      ...calls.map(call => row(call.product, `${call.action} ${monthDay(call.date)} · ${call.bias}`)),
+      { ...row('Order', orderLine(plan)), requiresFreshHoldings: true },
+      ...durationRows(context, symbol, now)];
     const sourceLinks = opposing.map(item => ({ label: STANCE_PRODUCT_NAMES[item.product], citation: { id: `cite_${hash([item.sourceUri, item.slot, item.date, item.stance]).slice(0, 24)}`,
       title: `${STANCE_PRODUCT_NAMES[item.product]}: ${symbol} ${item.label}`, product: item.product, publicationDate: item.date, sourceUri: item.sourceUri, excerpt: item.headline || `${symbol} ${item.label}` } }));
-    output.push(finding({ key, material: [scanned.side, opposing.map(item => [item.slot, item.stance, item.date])],
-      symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: partial ? 'reduce' : 'exit',
-      publishedAt: opposing.map(item => item.at).sort().at(-1), rows, sourceLinks, state: { ...state, stanceBaseline: baseline } }));
+    const result = finding({ key, material: [scanned.side, opposing.map(item => [item.slot, item.stance, item.date])],
+      symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: plan.verdict,
+      publishedAt: opposing.map(item => item.at).sort().at(-1), rows, sourceLinks, state: { ...state, stanceBaseline: baseline } });
+    const name = [...opposing, ...supporting].find(item => item.name)?.name;
+    result.presentation.stance = { ...(name ? { name } : {}), calls, ...plan };
+    output.push(result);
   }
   return output;
 }
@@ -481,7 +501,7 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   const diagnostics = [...(context.diagnostics || [])];
   if (!verified) diagnostics.push({ component: 'holdings', status: 'unavailable' });
   const portfolio = portfolioFindings(context, now, verified);
-  const stances = stanceFindings(context, now, verified, sentenceMemo);
+  const stances = stanceFindings(context, now, verified);
   const actions = [...stances, ...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...pendingCheckFindings(context, now, verified)];
   const opportunities = opportunityFindings(context, now, verified, [...portfolio, ...stances], sentenceMemo);
   const accounts = accountFindings(context, now);

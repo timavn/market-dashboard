@@ -88,9 +88,8 @@ test('source Sell while already Short is silent; Sell some preserves exact body 
   ctx.events = [sourceEvent('EWL'), sourceEvent('CORN')];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.equal(findings.length, 1); assert.equal(findings[0].symbol, 'CORN');
-  assert.equal(findings[0].action, 'reduce');
-  assert.equal(findings[0].presentation.rows.find(row => row.label === 'Action').text, 'Real-Time Alert Sell-SOME Sep 22 vs your Long → reduce Long');
-  assert.match(findings[0].presentation.rows.find(row => row.label === 'Context').text, /growth outlook deteriorates/);
+  assert.equal(findings[0].action, 'trim');
+  assert.deepEqual(findings[0].presentation.stance.calls, [{ product: 'Real-Time Alert', action: 'TRIM', date: '2026-09-22', bias: 'BULLISH' }]);
   assert.equal(findings[0].presentation.rows.some(row => /no remaining quantity/.test(row.text)), false);
 });
 test('a Real-Time Alert against a holding stands across dates until it is a month old', () => {
@@ -131,7 +130,7 @@ test('a partial Sell with only generic coaching still reduces the held Long, wit
   const event = sourceEvent('CORN'); event.sourceReport.bodyText = 'Portfolio Managers should be selling-SOME of Bullish TRENDs that are green today.';
   ctx.events = [event];
   const [finding] = evaluateResearchAttention(ctx, NOW).findings;
-  assert.equal(finding.action, 'reduce'); assert.equal(finding.severity, 'action-required');
+  assert.equal(finding.action, 'trim'); assert.equal(finding.severity, 'action-required');
   assert.equal(finding.presentation.rows.some(row => row.label === 'Context'), false);
 });
 test('account deficits require fresh independent balance; healthy spare capacity is silent', () => {
@@ -225,13 +224,13 @@ test('source actions share exact report segmentation within the scan without sha
     'BBB has rallied sharply while its earnings outlook deteriorates, creating an opportunity to raise cash.',
   ];
   ctx.events = ['AAA', 'BBB'].map(symbol => {
-    const event = sourceEvent(symbol);
+    const event = { ...sourceEvent(symbol), productKey: 'investing-ideas', productLabel: 'Investing Ideas' };
     event.sourceReport = { ...event.sourceReport, entityId: undefined, title: 'Sell Signal AAA and BBB', bodyText: lines.join('\n') };
     return event;
   });
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.deepEqual(segmented, lines);
-  assert.deepEqual(findings.map(item => [item.symbol, item.action]), [['AAA', 'reduce'], ['BBB', 'reduce']]);
+  assert.deepEqual(findings.map(item => [item.symbol, item.action]), [['AAA', 'sell-some'], ['BBB', 'sell-some']]);
   assert.ok(findings[0].presentation.rows.find(row => row.label === 'Context').text.startsWith(lines[1]));
   assert.ok(findings[1].presentation.rows.find(row => row.label === 'Context').text.startsWith(lines[2]));
 });
@@ -265,8 +264,11 @@ test('ETF Pro and Real-Time Alert openings on the opposite side oppose the holdi
     changeEvent('TSLA', 'BUY', undefined, { productKey: 'real-time-alert', productLabel: 'Real-Time Alert' })];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.deepEqual(findings.map(item => item.symbol).sort(), ['TSLA', 'XLE']);
-  assert.equal(findings.find(item => item.symbol === 'XLE').presentation.rows.find(row => row.label === 'Action').text, 'ETF Pro Added Short Sep 22 vs your Long → exit Long');
-  assert.equal(findings.find(item => item.symbol === 'TSLA').presentation.rows.find(row => row.label === 'Action').text, 'Real-Time Alert Buy Sep 22 vs your Short → exit Short');
+  const stance = symbol => findings.find(item => item.symbol === symbol).presentation.stance;
+  assert.deepEqual(stance('XLE').calls, [{ product: 'ETF Pro', action: 'SHORT', date: '2026-09-22', bias: 'BEARISH' }]);
+  assert.deepEqual(stance('XLE').order, { verb: 'SELL', quantity: 10, note: 'to close long' });
+  assert.deepEqual(stance('TSLA').calls, [{ product: 'Real-Time Alert', action: 'LONG', date: '2026-09-22', bias: 'BULLISH' }]);
+  assert.deepEqual(stance('TSLA').order, { verb: 'BUY', quantity: 4, note: 'to close short' });
 });
 test('a Go-Anywhere removal of a held Long is an exit alert; its aligned add is silent', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLK', quantity: 20 }, { symbol: 'HGER', quantity: 30 }];
@@ -289,8 +291,8 @@ test('a Signal Strength Shorts addition opposes a held long; its removal exits a
     shorts('DECK', 'signal_strength_short_removed'), shorts('ZG', 'signal_strength_short_removed')];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.deepEqual(findings.map(item => [item.symbol, item.severity]).sort(), [['DECK', 'action-required'], ['JPM', 'action-required']]);
-  assert.equal(findings.find(item => item.symbol === 'JPM').presentation.rows.find(row => row.label === 'Action').text, 'Signal Strength Added Short Sep 22 vs your Long → exit Long');
-  assert.equal(findings.find(item => item.symbol === 'DECK').presentation.rows.find(row => row.label === 'Action').text, 'Signal Strength Removed Short Sep 22 vs your Short → exit Short');
+  assert.deepEqual(findings.find(item => item.symbol === 'JPM').presentation.stance.calls, [{ product: 'Signal Strength Shorts', action: 'SHORT', date: '2026-09-22', bias: 'BEARISH' }]);
+  assert.deepEqual(findings.find(item => item.symbol === 'DECK').presentation.stance.calls, [{ product: 'Signal Strength Shorts', action: 'REMOVE', date: '2026-09-22', bias: 'NEUTRAL' }]);
 });
 test('a later re-add from the same product supersedes its removal', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: 10 }];
@@ -352,7 +354,8 @@ test('once holdings verify, a pending removal alerts only for a position actuall
   assert.equal(alert.holdingsVerified, true); assert.equal(alert.quantity, 12);
   const rows = Object.fromEntries(alert.presentation.rows.map(item => [item.label, item.text]));
   assert.equal(rows['Current position'], 'Long');
-  assert.equal(rows.Action, 'ETF Pro Removed Long Sep 22 vs your Long → exit Long');
+  assert.equal(rows['ETF Pro'], 'REMOVE Sep 22 · NEUTRAL');
+  assert.deepEqual(alert.presentation.stance.target, { side: null, quantity: 0, weightPct: 0 });
   assert.deepEqual(alert.presentation.sourceLinks.map(link => link.label), ['ETF Pro']);
   // The ETF Pro removal is a standing stance; an Investing Ideas removal still needs the pending notice.
   ctx.previousAttention = [];

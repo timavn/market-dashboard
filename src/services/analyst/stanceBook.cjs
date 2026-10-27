@@ -96,7 +96,8 @@ function stancesFromEvent(event, now) {
       if (!source) return [];
       const short = type === 'signal_strength_short_membership';
       const since = DATE.test(String(source.entryDate)) && source.entryDate <= date ? source.entryDate : date;
-      return [out(short ? 'signal-strength:short' : 'signal-strength:long', short ? 'SHORT' : 'LONG', 'Listed', { since, roster: true })];
+      const name = typeof source.name === 'string' && source.name.trim() ? { name: source.name.trim().slice(0, 80) } : {};
+      return [out(short ? 'signal-strength:short' : 'signal-strength:long', short ? 'SHORT' : 'LONG', 'Listed', { since, roster: true, ...name })];
     }
     if (!bare) return [];
     if (type === 'signal_strength_added') return [out('signal-strength:long', 'LONG', 'Added')];
@@ -169,6 +170,7 @@ function foldStanceEvents(stored, events = [], now = new Date()) {
       if (current && !dropped && current.stance === entry.stance && ['LONG', 'SHORT'].includes(entry.stance) && entry.date >= current.date) {
         if (entry.roster) {
           if (entry.date > current.date) Object.assign(current, { date: entry.date, at: entry.at, sourceUri: entry.sourceUri, sourceMessageId: entry.sourceMessageId, label: 'Listed' });
+          if (entry.name && !current.name) current.name = entry.name;
           Object.assign(current, { roster: true, seen: current.date, since: entry.since < current.since ? entry.since : current.since });
         }
         // The edition that adds a name also lists it; "Added" says more.

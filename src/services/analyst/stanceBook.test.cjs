@@ -43,18 +43,19 @@ test('the first verified read after Gateway connects raises every standing contr
   // The journal has long since dropped the Oct 22–26 events; only the book remembers them.
   const { book } = foldStanceEvents(undefined, OCTOBER, NOW);
   const findings = evaluateResearchAttention(verified(BOOK, book), NOW).findings.filter(item => item.severity === 'action-required');
-  const actions = Object.fromEntries(findings.map(item => [item.symbol, [item.action, item.presentation.rows.find(row => row.label === 'Action').text]]));
-  assert.deepEqual(actions, {
-    EFX: ['exit', 'Signal Strength Added Long Oct 26 vs your Short → exit Short'],
-    GIII: ['exit', 'Signal Strength Removed Short Oct 23 vs your Short → exit Short'],
-    BRBR: ['exit', 'Signal Strength Removed Short Oct 22 vs your Short → exit Short'],
-    LCID: ['exit', 'Real-Time Alert Cover Oct 26 vs your Short → exit Short'],
-    MPC: ['reduce', 'Real-Time Alert Sell-SOME Oct 26 vs your Long → reduce Long'],
-  });
-  const lcid = findings.find(item => item.symbol === 'LCID').presentation.rows;
-  assert.equal(lcid.find(row => row.label === 'Still for').text, 'Signal Strength Listed Short since May 2');
-  assert.equal(findings.find(item => item.symbol === 'EFX').presentation.rows.find(row => row.label === 'Order').text, 'Buy 13.75 / 13.75 → 0');
-  assert.equal(findings.find(item => item.symbol === 'MPC').presentation.rows.some(row => row.label === 'Order'), false);
+  const stance = symbol => findings.find(item => item.symbol === symbol).presentation.stance;
+  const call = (product, action, date, bias) => ({ product, action, date, bias });
+  assert.deepEqual(Object.fromEntries(findings.map(item => [item.symbol, item.action])), { EFX: 'exit', GIII: 'exit', BRBR: 'exit', LCID: 'exit', MPC: 'trim' });
+  assert.deepEqual(stance('EFX').calls, [call('Signal Strength', 'LONG', '2026-10-26', 'BULLISH')]);
+  assert.deepEqual(stance('GIII').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-23', 'NEUTRAL')]);
+  assert.deepEqual(stance('BRBR').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-22', 'NEUTRAL')]);
+  // The covering alert and the standing Short listing both show, newest first.
+  assert.deepEqual(stance('LCID').calls, [call('Real-Time Alert', 'COVER', '2026-10-26', 'BULLISH'), call('Signal Strength Shorts', 'SHORT', '2026-05-02', 'BEARISH')]);
+  assert.deepEqual(stance('MPC').calls, [call('Real-Time Alert', 'TRIM', '2026-10-26', 'BULLISH')]);
+  assert.deepEqual(stance('EFX').order, { verb: 'BUY', quantity: 13.75, note: 'to close short' });
+  assert.deepEqual(stance('EFX').target, { side: null, quantity: 0, weightPct: 0 });
+  // No sizing band was captured for MPC, so the trim names no size and keeps the side.
+  assert.deepEqual([stance('MPC').target, stance('MPC').order], [{ side: 'LONG', quantity: null, weightPct: null }, { verb: 'SELL', quantity: null, note: 'some · stays long' }]);
 });
 
 test('a sizing review on the same holding never hides its contradiction', () => {
@@ -125,7 +126,7 @@ test('acting on a partial call clears it; a new call raises it again', () => {
   const again = verified([{ symbol: 'MPC', quantity: 4 }], later);
   again.holdings.asOf = new Date(next.getTime() - 5000).toISOString();
   again.previousAttention = trimmed.previousAttention;
-  assert.equal(evaluateResearchAttention(again, next).findings[0].action, 'reduce');
+  assert.equal(evaluateResearchAttention(again, next).findings[0].action, 'trim');
 });
 
 test('a partial call expires after a week, a full alert after a month and a removal after a quarter', () => {
@@ -154,4 +155,22 @@ test('the ledger history reads only the stance products, one projected query per
   assert.deepEqual(Object.entries(calls[0].ExpressionAttributeValues).filter(([key]) => key.startsWith(':p')).map(([, value]) => value), ['signal-strength', 'etf-pro', 'real-time-alert']);
   assert.match(calls[0].KeyConditionExpression, /^#f\d+ = :date$/);
   assert.equal(calls[0].ExpressionAttributeNames[calls[0].KeyConditionExpression.split(' ')[0]], 'marketDate');
+});
+
+test('a trim targets the security’s own MIN and never crosses to the other side', () => {
+  const { book } = foldStanceEvents(undefined, OCTOBER, NOW);
+  const ctx = verified([{ symbol: 'MPC', quantity: 7.5 }], book);
+  const asOf = ctx.holdings.asOf;
+  ctx.holdings.currentHoldings.push({ holding: 'MPC', quantity: 7.5, currentHolding: { weightPct: 4.25, source: 'ibkr', basis: 'absolute_market_value_over_net_liquidation', asOf } });
+  const metric = value => ({ value, observations: 14, status: 'available', source: 'Yahoo Finance chart API', asOf: '2026-10-26' });
+  // ATR 3.70 on 185 sets MIN 3.25% (see the sizing tests): 7.5 at 4.25% trims to 5.74.
+  ctx.holdings.ruleHoldings.push({ holding: 'MPC', quantity: 7.5, heldSide: 'LONG', trade: 'BULLISH', trend: 'BULLISH', weightPct: 4.25,
+    signalContext: { trade: { status: 'published' }, trend: { status: 'published' } },
+    sources: { trade: { publishedAt: '2026-10-27T12:00:00Z', citation: { id: 'cite_trade', sourceUri: feed('rr') } }, trend: { publishedAt: '2026-10-27T12:00:00Z', citation: { id: 'cite_trend', sourceUri: feed('rr') } } },
+    sizingInputs: { atr14: metric(3.7), referencePrice: metric(185) } });
+  const stance = evaluateResearchAttention(ctx, NOW).findings.find(item => item.presentation.stance).presentation.stance;
+  assert.equal(stance.verdict, 'trim');
+  assert.deepEqual(stance.current, { side: 'LONG', quantity: 7.5, weightPct: 4.25 });
+  assert.deepEqual(stance.target, { side: 'LONG', quantity: 5.74, weightPct: 3.25 });
+  assert.deepEqual(stance.order, { verb: 'SELL', quantity: 1.76, upTo: true, note: 'stays long' });
 });

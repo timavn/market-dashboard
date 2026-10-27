@@ -511,3 +511,35 @@ test('a security alert puts Tick, Trade, Trend and Tail beside its 1D–90D wind
   expect(within(table).getByText('1.6×')).not.toHaveClass('analyst-inbox-signal--negative');
   expect(within(table).getByText('—')).toHaveClass('analyst-inbox-signal--muted');
 });
+
+test('a stance alert lists the latest product calls, then current → target → order, and marks a trim apart from an exit', () => {
+  const stanceAlert = (id, symbol, quantity, stance) => attention(id, { kind: 'portfolio', severity: 'action-required', quantity,
+    holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    presentation: { subject: symbol, date: '2026-10-26', sourceLinks: [], stance, rows: [
+      { label: 'Real-Time Alert', text: 'filler' }, { label: 'Tick', text: 'N/A' }, { label: 'Trade', text: 'N/A' }, { label: 'Trend', text: 'N/A' }, { label: 'Tail', text: 'N/A' },
+    ] } });
+  const lcid = stanceAlert('lcid', 'LCID', -650, { verdict: 'exit', calls: [
+    { product: 'Real-Time Alert', action: 'COVER', date: '2026-10-26', bias: 'BULLISH' },
+    { product: 'Signal Strength Shorts', action: 'SHORT', date: '2026-08-19', bias: 'BEARISH' },
+  ], current: { side: 'SHORT', quantity: 650, weightPct: 1.16 }, target: { side: null, quantity: 0, weightPct: 0 }, order: { verb: 'BUY', quantity: 650, note: 'to close short' } });
+  const mpc = stanceAlert('mpc', 'MPC', 7.5, { verdict: 'trim', name: 'Marathon Petroleum Corporation', calls: [
+    { product: 'Real-Time Alert', action: 'TRIM', date: '2026-10-26', bias: 'BULLISH' },
+    { product: 'Signal Strength', action: 'LONG', date: '2026-09-22', bias: 'BULLISH' },
+  ], current: { side: 'LONG', quantity: 7.5, weightPct: 4.25 }, target: { side: 'LONG', quantity: 5.74, weightPct: 3.25 }, order: { verb: 'SELL', quantity: 1.76, upTo: true, note: 'stays long' } });
+  render(<AnalystInbox findings={[lcid, mpc]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  const card = screen.getByRole('heading', { name: 'LCID' }).closest('article');
+  const [calls, order] = within(card).getAllByRole('table');
+  expect(within(calls).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Product', 'Action', 'Date', 'Bias']);
+  expect(within(calls).getAllByRole('row').slice(1).map(row => row.textContent)).toEqual(['Real-Time AlertCOVEROct 26BULLISH', 'Signal Strength ShortsSHORTAug 19BEARISH']);
+  expect(within(calls).getByText('SHORT')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(calls).getByText('COVER')).not.toHaveClass('analyst-inbox-signal--positive');
+  expect(within(calls).getByText('BEARISH')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(order).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Current', 'Target', 'Order']);
+  expect(within(order).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['SHORT 650 · 1.16%', '0 · 0.00%', 'BUY 650 to close short']);
+  expect(within(card).queryByText(/filler/)).not.toBeInTheDocument();
+  expect(card).not.toHaveClass('is-trim');
+  const trim = screen.getByRole('heading', { name: 'MPC' }).closest('article');
+  expect(trim).toHaveClass('is-action-required', 'is-trim');
+  expect(within(trim).getByText('Marathon Petroleum Corporation')).toBeInTheDocument();
+  expect(within(within(trim).getAllByRole('table')[1]).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['LONG 7.5 · 4.25%', 'LONG 5.74 · 3.25%', 'SELL up to 1.76 stays long']);
+});

@@ -120,6 +120,40 @@ function HorizonTable({ durations, stats, side }) {
   </table>;
 }
 
+const STANCE_TONES = { LONG: 'positive', SHORT: 'negative', BUY: 'positive', SELL: 'negative', BULLISH: 'positive', BEARISH: 'negative', NEUTRAL: 'neutral' };
+const callDate = date => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
+const amount = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+const Toned = ({ value }) => <span className={toneClass(STANCE_TONES[value])}>{value}</span>;
+function stancePosition(position) {
+  if (position.quantity === 0) return '0 · 0.00%';
+  const weight = position.weightPct === null || position.weightPct === undefined ? '' : ` · ${position.weightPct.toFixed(2)}%`;
+  return position.quantity === null ? <><Toned value={position.side} /> · lower</> : <><Toned value={position.side} /> {amount(position.quantity)}{weight}</>;
+}
+
+// Stance alerts: the latest product calls, then the move from the current
+// position to the target and the order that gets there.
+function StanceCopy({ ticker, stance, freshHoldings }) {
+  const { calls, current, target, order } = stance;
+  return <div className="analyst-inbox-copy analyst-inbox-stance">
+    <div className="analyst-inbox-stance-title"><span className="analyst-inbox-stance-ticker">{ticker}</span>{stance.name && <span>{stance.name}</span>}</div>
+    <table className="analyst-inbox-stance-table">
+      <colgroup><col style={{ width: '38%' }} /><col style={{ width: '20%' }} /><col style={{ width: '18%' }} /><col style={{ width: '24%' }} /></colgroup>
+      <thead><tr><th scope="col">Product</th><th scope="col">Action</th><th scope="col">Date</th><th scope="col">Bias</th></tr></thead>
+      <tbody>{calls.map((call, index) => <tr key={index}>
+        <td>{call.product}</td><td><Toned value={call.action} /></td><td>{callDate(call.date)}</td><td><Toned value={call.bias} /></td>
+      </tr>)}</tbody>
+    </table>
+    <table className="analyst-inbox-stance-table analyst-inbox-stance-order">
+      <colgroup><col style={{ width: '34%' }} /><col style={{ width: '26%' }} /><col style={{ width: '40%' }} /></colgroup>
+      <thead><tr><th scope="col">Current</th><th scope="col">Target</th><th scope="col">Order</th></tr></thead>
+      <tbody><tr>{freshHoldings ? <>
+        <td>{stancePosition(current)}</td><td>{stancePosition(target)}</td>
+        <td><Toned value={order.verb} />{order.upTo ? ' up to' : ''}{order.quantity === null ? '' : ` ${amount(order.quantity)}`} {order.note}</td>
+      </> : <><td className="analyst-inbox-signal--neutral">Unavailable</td><td>—</td><td>—</td></>}</tr></tbody>
+    </table>
+  </div>;
+}
+
 // The alert as the user reads it, so the Analyst discusses this exact card.
 function alertSummary(finding, content, modern, date) {
   const payload = finding.payload || finding;
@@ -183,6 +217,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       const updateParts = content.updateParts || [{ text: content.headline, tone: content.tone }];
       const contextLines = [content.detail, ...(content.sourceContext || [])].filter(Boolean);
       const required = isActionRequired(finding);
+      const stance = modern && content.stance?.calls?.length ? content.stance : null;
       // Every linked publication opens from one Source popover beside the button.
       const durations = modern ? DURATIONS.map(label => content.rows.find(row => row.label === label)).filter(Boolean) : [];
       const rows = modern ? content.rows.filter(row => !DURATIONS.includes(row.label)) : [];
@@ -191,10 +226,10 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
         : payload.citation ? [payload.citation] : [];
       return <React.Fragment key={finding.id}>
       {!required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Notifications</h2>}
-      <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}`}>
+      <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}${stance?.verdict === 'trim' ? ' is-trim' : ''}`}>
         <h3 className="sr-only">{subject}</h3>
         <div className={durations.length ? 'analyst-inbox-body has-horizons' : 'analyst-inbox-body'}>
-        <dl className="analyst-inbox-copy">
+        {stance ? <StanceCopy ticker={subject} stance={stance} freshHoldings={attentionEvidenceFreshness(finding, now).holdings} /> : <dl className="analyst-inbox-copy">
           {ticker && <div className="analyst-inbox-ticker">
             <dt>Ticker: </dt><dd>{ticker}</dd>
           </div>}
@@ -231,7 +266,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
             </dd>
           </div>}
           </>}
-        </dl>
+        </dl>}
         {durations.length > 0 && <HorizonTable durations={durations} stats={horizonStats[content.subject]} side={side} />}
         </div>
         <AnalystAlertThread findingId={finding.id} alert={alertSummary(finding, content, modern, date)}
