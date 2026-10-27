@@ -89,7 +89,7 @@ test('source Sell while already Short is silent; Sell some preserves exact body 
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.equal(findings.length, 1); assert.equal(findings[0].symbol, 'CORN');
   assert.equal(findings[0].action, 'trim');
-  assert.deepEqual(findings[0].presentation.stance.calls, [{ product: 'Real-Time Alert', action: 'TRIM', date: '2026-09-22', bias: 'BULLISH' }]);
+  assert.deepEqual(findings[0].presentation.stance.calls, [{ product: 'Real-Time Alert', action: 'SELL SOME', date: '2026-09-22', bias: 'BULLISH' }]);
   assert.equal(findings[0].presentation.rows.some(row => /no remaining quantity/.test(row.text)), false);
 });
 test('a Real-Time Alert against a holding stands across dates until it is a month old', () => {

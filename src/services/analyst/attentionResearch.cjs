@@ -427,13 +427,14 @@ function accountFindings(context, now) {
 const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 const STANCE_SLOT_NAMES = { 'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts', 'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 const monthDay = date => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-// Each product call as the card's Action and Bias columns read it. A trim keeps
-// the side it trims; a removal leaves the product without a view.
+// Each product call as the card's Action and Bias columns read it. Bias is the
+// side the product still holds after its call: SOME keeps it; a full sell,
+// cover or removal leaves no view. Nothing here infers a Trade or Trend.
 function stanceCall(item) {
   const removal = item.stance.startsWith('EXIT_') && item.slot !== 'real-time-alert';
-  const action = { LONG: item.action === 'BUY-SOME' ? 'ADD' : 'LONG', SHORT: 'SHORT', REDUCE_LONG: 'TRIM', REDUCE_SHORT: 'TRIM',
+  const action = { LONG: item.action === 'BUY-SOME' ? 'ADD' : 'LONG', SHORT: 'SHORT', REDUCE_LONG: 'SELL SOME', REDUCE_SHORT: 'COVER SOME',
     EXIT_LONG: removal ? 'REMOVE' : 'SELL', EXIT_SHORT: removal ? 'REMOVE' : 'COVER' }[item.stance];
-  const bias = removal ? 'NEUTRAL' : { LONG: 'BULLISH', SHORT: 'BEARISH', REDUCE_LONG: 'BULLISH', REDUCE_SHORT: 'BEARISH', EXIT_LONG: 'BEARISH', EXIT_SHORT: 'BULLISH' }[item.stance];
+  const bias = { LONG: 'BULLISH', SHORT: 'BEARISH', REDUCE_LONG: 'BULLISH', REDUCE_SHORT: 'BEARISH', EXIT_LONG: 'NEUTRAL', EXIT_SHORT: 'NEUTRAL' }[item.stance];
   // A standing listing is dated by its entry; a change by its publication.
   return { product: STANCE_SLOT_NAMES[item.slot], action, date: item.label === 'Listed' ? item.since : item.date, bias };
 }

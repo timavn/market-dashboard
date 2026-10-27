@@ -2,7 +2,8 @@
 // ledger. Every product reads the same models, so the whole live book is
 // compared against the latest dated stance of each list, not against the day
 // an update happened to be published.
-const STANCE_BOOK_VERSION = 1;
+// Version 2 reads SOME from alert bodies; an older book is rebuilt from the ledger.
+const STANCE_BOOK_VERSION = 2;
 const STANCE_PRODUCTS = new Set(['signal-strength', 'etf-pro', 'real-time-alert']);
 const SLOT_LABELS = {
   'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts',
@@ -31,7 +32,7 @@ const days = (from, to) => (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T
 const untrusted = event => ['mock', 'isMock', 'seed', 'seeded', 'fixture', 'synthetic', 'inferred', 'fallback', 'stale', 'cacheOnly'].some(flag => event[flag] === true);
 
 function emptyStanceBook() {
-  return { version: STANCE_BOOK_VERSION, updatedAt: null, backfill: null, rosters: {}, tickers: {} };
+  return { version: STANCE_BOOK_VERSION, updatedAt: null, backfill: null, rosters: {}, partialAlerts: {}, tickers: {} };
 }
 function parsedExcerpt(event, symbol) {
   try {
@@ -60,14 +61,30 @@ function alertAction(value) {
   if (/\bBUY(?:ING)?\b/.test(phrase)) return 'BUY';
   return null;
 }
-// A report body that tells PMs to sell or cover SOME qualifies a bare action.
+// "Cover-SOME", "selling SOME", "We'll book-SOME": an alert that books only part
+// of a position. The web headline often drops it ("BUY SIGNAL - COVERING SHORT");
+// the email subject and body keep it.
+const SOME = /\b(?:book(?:ing)?|cover(?:ing)?|sell(?:ing)?|trim(?:ming)?)[\s-]+SOME\b/i;
+const PARTIAL = { SELL: 'SELL-SOME', COVER: 'COVER-SOME' };
 function reportPartial(event, action) {
   const report = event.sourceReport;
-  if (!report || report.sourceMessageId !== event.sourceMessageId) return action;
-  const body = text(report.bodyText);
-  if (action === 'SELL' && /\bPortfolio Managers should be selling[\s-]+SOME\b/i.test(body)) return 'SELL-SOME';
-  if (action === 'COVER' && /\bPortfolio Managers should be covering[\s-]+SOME\b/i.test(body)) return 'COVER-SOME';
-  return action;
+  if (!PARTIAL[action] || !report || report.sourceMessageId !== event.sourceMessageId) return action;
+  return SOME.test(text(report.title)) || SOME.test(text(report.bodyText)) ? PARTIAL[action] : action;
+}
+// Any row of an alert message that says SOME marks the alert partial, whichever
+// token the row was indexed under, unless the SOME names another ticker
+// ("cover-SOME EWA" inside an EWL alert). Returns the tickers it names; null
+// for an untargeted SOME.
+const SOME_TARGET = new RegExp(`${SOME.source}(?:\\s+\\$?([A-Z]{2,5})\\b)?`, 'gi');
+function partialAlertTargets(event) {
+  if (event?.productKey !== 'real-time-alert' || !event.sourceMessageId || !['validated', 'indexed'].includes(event.qualityStatus) || untrusted(event)) return [];
+  // Only an uppercase word is a ticker: "sell-SOME into strength" names none.
+  return [...text(event.excerpt).matchAll(SOME_TARGET)].map(match => match[1] && /^[A-Z]{2,5}$/.test(match[1]) && !['ON', 'OF', 'IN', 'AT', 'THE', 'AND', 'NOW'].includes(match[1]) ? match[1] : null);
+}
+const partialFor = (marks, symbol) => Boolean(marks?.targets?.some(target => target === null || target === symbol));
+function asPartial(entry) {
+  const action = PARTIAL[entry.action];
+  return action ? { ...entry, action, label: ALERT_LABELS[action], stance: ALERT_STANCES[action] } : entry;
 }
 function typedSide(event, source) {
   const side = String(event.positionSide || source?.side || source?.positionSide || '').trim().toUpperCase();
@@ -158,7 +175,13 @@ function prune(book, today) {
 // Folding is idempotent: the same events can be replayed every scan.
 function foldStanceEvents(stored, events = [], now = new Date()) {
   const book = stored?.version === STANCE_BOOK_VERSION ? JSON.parse(JSON.stringify(stored)) : emptyStanceBook();
-  const before = JSON.stringify([book.rosters, book.tickers]);
+  const before = JSON.stringify([book.rosters, book.partialAlerts, book.tickers]);
+  for (const event of events) {
+    const targets = partialAlertTargets(event);
+    if (!targets.length) continue;
+    const marks = book.partialAlerts[event.sourceMessageId] || (book.partialAlerts[event.sourceMessageId] = { date: String(event.marketDate || event.publishedAt || '').slice(0, 10), targets: [] });
+    for (const target of targets) if (!marks.targets.includes(target)) marks.targets.push(target);
+  }
   for (const event of events) {
     for (const { symbol, slot, entry } of stancesFromEvent(event, now)) {
       const slots = book.tickers[symbol] || (book.tickers[symbol] = {});
@@ -180,8 +203,15 @@ function foldStanceEvents(stored, events = [], now = new Date()) {
       if (newer(slot, entry, current)) slots[slot] = entry.roster ? { ...entry, seen: entry.date } : entry;
     }
   }
-  prune(book, now.toISOString().slice(0, 10));
-  const changed = JSON.stringify([book.rosters, book.tickers]) !== before;
+  // A body row can arrive after its headline, even in a later fold.
+  for (const [symbol, slots] of Object.entries(book.tickers)) {
+    const alert = slots['real-time-alert'];
+    if (alert && partialFor(book.partialAlerts[alert.sourceMessageId], symbol)) slots['real-time-alert'] = asPartial(alert);
+  }
+  const today = now.toISOString().slice(0, 10);
+  for (const [message, marks] of Object.entries(book.partialAlerts)) if (days(marks.date, today) > ALERT_RETENTION_DAYS) delete book.partialAlerts[message];
+  prune(book, today);
+  const changed = JSON.stringify([book.rosters, book.partialAlerts, book.tickers]) !== before;
   if (changed) book.updatedAt = now.toISOString();
   return { book, changed };
 }

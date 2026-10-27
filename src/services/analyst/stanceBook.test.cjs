@@ -27,6 +27,8 @@ const OCTOBER = [
   alert('MPC', 'SELL-SOME', 'Real-Time Alert: Sell-SOME Signal (Jonesy 100%): MPC -KM', '2026-10-26'),
   ledger('MPC', 'real-time-alert', 'position_change', 'article.headline', 'SELL SIGNAL MPC', '2026-10-26'),
   ledger('LCID', 'real-time-alert', 'position_change', 'data.alert.headline', 'BUY SIGNAL - COVERING SHORT LCID', '2026-10-26'),
+  // The web headline drops SOME; the alert body keeps it ("Cover-SOME (booking SOME = process)").
+  ledger('KM', 'real-time-alert', 'position_change', 'article.bodyText', '…10/26/2026 10:38 AM EDT BUY SIGNAL - COVERING SHORT LCID $3.44 We\'ll book-SOME on red on this one too, …', '2026-10-26'),
   // Field fragments index the wrong "ticker"; none of them is a stance.
   ledger('COVERING', 'real-time-alert', 'position_change', 'data.alert.headline', 'BUY SIGNAL - COVERING SHORT LCID', '2026-10-26'),
   ledger('SOME', 'real-time-alert', 'position_change', 'data.alert.signalPhrase', 'Sell-SOME', '2026-10-26'),
@@ -45,13 +47,14 @@ test('the first verified read after Gateway connects raises every standing contr
   const findings = evaluateResearchAttention(verified(BOOK, book), NOW).findings.filter(item => item.severity === 'action-required');
   const stance = symbol => findings.find(item => item.symbol === symbol).presentation.stance;
   const call = (product, action, date, bias) => ({ product, action, date, bias });
-  assert.deepEqual(Object.fromEntries(findings.map(item => [item.symbol, item.action])), { EFX: 'exit', GIII: 'exit', BRBR: 'exit', LCID: 'exit', MPC: 'trim' });
+  assert.deepEqual(Object.fromEntries(findings.map(item => [item.symbol, item.action])), { EFX: 'exit', GIII: 'exit', BRBR: 'exit', LCID: 'trim', MPC: 'trim' });
   assert.deepEqual(stance('EFX').calls, [call('Signal Strength', 'LONG', '2026-10-26', 'BULLISH')]);
   assert.deepEqual(stance('GIII').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-23', 'NEUTRAL')]);
   assert.deepEqual(stance('BRBR').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-22', 'NEUTRAL')]);
-  // The covering alert and the standing Short listing both show, newest first.
-  assert.deepEqual(stance('LCID').calls, [call('Real-Time Alert', 'COVER', '2026-10-26', 'BULLISH'), call('Signal Strength Shorts', 'SHORT', '2026-05-02', 'BEARISH')]);
-  assert.deepEqual(stance('MPC').calls, [call('Real-Time Alert', 'TRIM', '2026-10-26', 'BULLISH')]);
+  // Booking SOME of a short keeps it short: both calls stay bearish, newest first.
+  assert.deepEqual(stance('LCID').calls, [call('Real-Time Alert', 'COVER SOME', '2026-10-26', 'BEARISH'), call('Signal Strength Shorts', 'SHORT', '2026-05-02', 'BEARISH')]);
+  assert.deepEqual(stance('LCID').order, { verb: 'BUY', quantity: null, note: 'some · stays short' });
+  assert.deepEqual(stance('MPC').calls, [call('Real-Time Alert', 'SELL SOME', '2026-10-26', 'BULLISH')]);
   assert.deepEqual(stance('EFX').order, { verb: 'BUY', quantity: 13.75, note: 'to close short' });
   assert.deepEqual(stance('EFX').target, { side: null, quantity: 0, weightPct: 0 });
   // No sizing band was captured for MPC, so the trim names no size and keeps the side.
@@ -173,4 +176,34 @@ test('a trim targets the security’s own MIN and never crosses to the other sid
   assert.deepEqual(stance.current, { side: 'LONG', quantity: 7.5, weightPct: 4.25 });
   assert.deepEqual(stance.target, { side: 'LONG', quantity: 5.74, weightPct: 3.25 });
   assert.deepEqual(stance.order, { verb: 'SELL', quantity: 1.76, upTo: true, note: 'stays long' });
+});
+
+test('a full cover or sell leaves the product with no view; SOME anywhere in the alert keeps the side', () => {
+  const full = [ledger('XYZ', 'real-time-alert', 'position_change', 'data.alert.headline', 'BUY SIGNAL - COVERING SHORT XYZ', '2026-10-26')];
+  const [row] = scanHoldings(foldStanceEvents(undefined, full, NOW).book, [{ symbol: 'XYZ', quantity: -10 }]);
+  assert.deepEqual(row.opposing.map(item => [item.stance, item.action]), [['EXIT_SHORT', 'COVER']]);
+  const ctx = verified([{ symbol: 'XYZ', quantity: -10 }], foldStanceEvents(undefined, full, NOW).book);
+  assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings[0].presentation.stance.calls, [{ product: 'Real-Time Alert', action: 'COVER', date: '2026-10-26', bias: 'NEUTRAL' }]);
+  // The body row arrives in a later fold and still makes the stored alert partial.
+  const later = foldStanceEvents(foldStanceEvents(undefined, full, NOW).book,
+    [ledger('SOME', 'real-time-alert', 'position_change', 'article.bodyText', 'COVERING SHORT XYZ — book-SOME here', '2026-10-26')], NOW).book;
+  assert.deepEqual([later.tickers.XYZ['real-time-alert'].action, later.tickers.XYZ['real-time-alert'].stance], ['COVER-SOME', 'REDUCE_SHORT']);
+  // The email subject on the captured report says SOME too.
+  const subject = { ...full[0], sourceReport: { sourceMessageId: full[0].sourceMessageId, title: 'Real-Time Alert: Cover-SOME (booking SOME = process): XYZ -KM', bodyText: '' } };
+  assert.equal(foldStanceEvents(undefined, [subject], NOW).book.tickers.XYZ['real-time-alert'].action, 'COVER-SOME');
+});
+
+test('a book from an older version is rebuilt rather than read', () => {
+  const { book, changed } = foldStanceEvents({ version: 1, rosters: {}, tickers: { LCID: { 'real-time-alert': { stance: 'EXIT_SHORT' } } } }, [], NOW);
+  assert.deepEqual([book.version, book.backfill, book.tickers, changed], [2, null, {}, false]);
+});
+
+test('a SOME that names another ticker does not make this alert partial', () => {
+  const ewl = [ledger('EWL', 'real-time-alert', 'position_change', 'data.alert.headline', 'SELL SIGNAL EWL', '2026-10-26'),
+    ledger('SOME', 'real-time-alert', 'position_change', 'article.bodyText', '…the move is to cover-SOME EWA and replace the short exposure…', '2026-10-26')];
+  assert.equal(foldStanceEvents(undefined, ewl, NOW).book.tickers.EWL['real-time-alert'].action, 'SELL');
+  for (const said of ['No one ever went broke booking SOME gains', 'we should sell-SOME into strength', 'sell-SOME EWL here']) {
+    const own = [ewl[0], { ...ewl[1], excerpt: said }];
+    assert.equal(foldStanceEvents(undefined, own, NOW).book.tickers.EWL['real-time-alert'].action, 'SELL-SOME', said);
+  }
 });
