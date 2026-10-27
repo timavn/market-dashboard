@@ -70,6 +70,7 @@
 .portfolio-position-review small { color: var(--analyst-muted, #667085); font-size: 9px; }
 .portfolio-brief .portfolio-position-product { display: block; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
 .portfolio-position-product + .portfolio-position-product { margin-top: 2px; }
+.portfolio-brief .portfolio-position-alert-source { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer; }
 .portfolio-position-action { color: var(--dashboard-negative, #dc2626); font-weight: 400; }
 .portfolio-review-refresh { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .portfolio-review-refresh button { color: var(--analyst-accent); font-size: 10px; cursor: pointer; }

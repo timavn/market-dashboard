@@ -740,8 +740,8 @@ test('Portfolio launch reserves account tables before acceptance without display
   expect(body).toHaveAttribute('aria-busy', 'true');
   expect(within(body).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
   expect(within(body).getByRole('table', { name: 'Portfolio exposure' }).querySelectorAll('tbody tr')).toHaveLength(4);
-  expect(within(body).getByRole('region', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
-  expect(within(body).getByRole('table', { name: 'Position exceptions' })).toBeVisible();
+  expect(within(body).getByRole('region', { name: 'Action required' })).toHaveTextContent('Loading…');
+  expect(within(body).getByRole('table', { name: 'Action required' })).toBeVisible();
   expect(body).not.toHaveTextContent(/\$|\d+\.\d+%/);
 });
 
@@ -1178,7 +1178,7 @@ test('a rejected compact capture clears previously verified metrics even when it
   await findPortfolioExposureAmount('$1,234');
   const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
   const exposureTable = within(exposure).getByRole('table', { name: 'Portfolio exposure' });
-  const exceptions = screen.getByRole('region', { name: 'Position exceptions' });
+  const exceptions = screen.getByRole('region', { name: 'Action required' });
   conversations.a = { ...conversations.a, revision: 2, briefsIncluded: false,
     messages: [{ ...conversations.a.messages[0], portfolioBrief: { ...capturedBrief,
       presentation: 'compact', available: false, metrics: {} } }] };
@@ -1190,7 +1190,7 @@ test('a rejected compact capture clears previously verified metrics even when it
   expect(exposureTable.querySelectorAll('tbody tr')).toHaveLength(4);
   expect(exposureTable.querySelectorAll('tbody td')).toHaveLength(16);
   expect([...exposureTable.querySelectorAll('tbody td')].every(cell => cell.textContent === '—')).toBe(true);
-  expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
+  expect(screen.getByRole('region', { name: 'Action required' })).toBe(exceptions);
   expect(exceptions).toHaveTextContent('Unavailable');
 });
 
@@ -1207,7 +1207,7 @@ test('Portfolio sections keep their slots and tables from an empty loading post 
   const article = transcript.querySelector('[data-message-id="stable-post"]');
   const slots = [...article.querySelectorAll('.portfolio-review-section')];
   const exposure = within(article).getByRole('table', { name: 'Portfolio exposure' });
-  const positions = within(article).getByRole('table', { name: 'Position exceptions' });
+  const positions = within(article).getByRole('table', { name: 'Action required' });
   expect(slots.length).toBeGreaterThanOrEqual(3);
   expect(article).toHaveAttribute('aria-busy', 'true');
   expect(within(article).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
@@ -1218,7 +1218,7 @@ test('Portfolio sections keep their slots and tables from an empty loading post 
     expect(current).toHaveLength(slots.length);
     current.forEach((slot, index) => expect(slot).toBe(slots[index]));
     expect(within(article).getByRole('table', { name: 'Portfolio exposure' })).toBe(exposure);
-    expect(within(article).getByRole('table', { name: 'Position exceptions' })).toBe(positions);
+    expect(within(article).getByRole('table', { name: 'Action required' })).toBe(positions);
   };
   fireEvent.scroll(transcript, { target: { scrollTop: 180 } });
   const partial = { presentation: 'compact', available: false, runId: 'stable-run', metrics: {}, holdings: [],
@@ -1330,7 +1330,7 @@ test('opening a cold completed Portfolio reads its latest compact primary withou
   expect(placeholder).toHaveClass('analyst-captured-report-placeholder', 'portfolio-brief-centered');
   expect(placeholder).toHaveAttribute('aria-busy', 'true');
   expect(within(placeholder).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
-  expect(within(placeholder).getByRole('table', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
+  expect(within(placeholder).getByRole('table', { name: 'Action required' })).toHaveTextContent('Loading…');
   expect(placeholder).not.toHaveTextContent('$250');
   expect(api.request.mock.calls.filter(([path]) => path === '/conversations/a?includeBriefs=false&briefScope=latest')).toHaveLength(1);
   expect(api.request.mock.calls.some(([path]) => path === '/conversations/a')).toBe(false);
@@ -1405,7 +1405,7 @@ test('a rejected exact saved-body read settles its existing report slots without
     const placeholder = transcript.querySelector('[data-message-id="old-post"]');
     const sections = [...placeholder.querySelectorAll('.portfolio-review-section')];
     const exposure = within(placeholder).getByRole('table', { name: 'Portfolio exposure' });
-    const positions = within(placeholder).getByRole('table', { name: 'Position exceptions' });
+    const positions = within(placeholder).getByRole('table', { name: 'Action required' });
     expect(placeholder).toHaveClass('analyst-captured-report-placeholder');
     expect(placeholder).toHaveAttribute('aria-busy', 'true');
     await waitFor(() => expect(observers.length).toBeGreaterThan(0));
@@ -1418,7 +1418,7 @@ test('a rejected exact saved-body read settles its existing report slots without
     expect(settledSections).toHaveLength(sections.length);
     settledSections.forEach((section, index) => expect(section).toBe(sections[index]));
     expect(within(placeholder).getByRole('table', { name: 'Portfolio exposure' })).toBe(exposure);
-    expect(within(placeholder).getByRole('table', { name: 'Position exceptions' })).toBe(positions);
+    expect(within(placeholder).getByRole('table', { name: 'Action required' })).toBe(positions);
     expect(placeholder).not.toHaveAttribute('aria-busy', 'true');
     expect(placeholder).not.toHaveTextContent(/Loading|\$|\d+\.\d+%/);
     expect(positions).toHaveTextContent('Unavailable');
@@ -1894,7 +1894,7 @@ test.each([true, false])('a historical portfolio review makes an older or intrad
   expect(screen.queryByText(/market.*closed|reviews resume/i)).not.toBeInTheDocument();
 });
 
-test('a disconnected refresh retains saved position exceptions until a verified review replaces them', async () => {
+test('a disconnected refresh retains saved Action required positions until a verified review replaces them', async () => {
   const brief = holding => ({ available: true, asOf: '2026-09-04T20:05:00Z', metrics: {},
     holdings: [{ holding, heldSide: 'LONG', weightPct: 4, trade: 'BEARISH', trend: 'BULLISH', sizingInputs: {}, sources: {} }], nextSession: [] });
   conversations.a.kind = 'portfolio-review';
@@ -1908,7 +1908,7 @@ test('a disconnected refresh retains saved position exceptions until a verified 
   await screen.findByRole('row', { name: /IGV/ });
   expect(screen.getByRole('note')).toHaveTextContent('The latest refresh could not verify holdings. Showing the last saved portfolio below.');
   expect(screen.queryByText('Verified portfolio evidence is unavailable for this saved review.')).not.toBeInTheDocument();
-  expect(screen.getAllByRole('table', { name: 'Position exceptions' })).toHaveLength(1);
+  expect(screen.getAllByRole('table', { name: 'Action required' })).toHaveLength(1);
   conversations.a.messages.push({ id: 'refreshed', role: 'assistant', state: 'complete', text: 'New report', portfolioBrief: brief('AMZN') });
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'a' }) }));
   await screen.findByRole('row', { name: /AMZN/ });

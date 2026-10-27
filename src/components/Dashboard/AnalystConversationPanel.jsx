@@ -378,7 +378,7 @@ const CompletedMarkdown = memo(function CompletedMarkdown({ markdown, reviewKind
 const citationLabel = citation => citation.title
   || (/^unknown$/i.test(citation.product || '') ? '' : citation.product) || 'Source';
 
-const Message = memo(function Message({ message, onCitation, reviewKind, historical = false, captureUnavailable = false }) {
+const Message = memo(function Message({ message, onCitation, inboxFindings, reviewKind, historical = false, captureUnavailable = false }) {
   const deferredPortfolio = reviewKind === 'portfolio-review' && message.role === 'assistant'
     && (message.portfolioBriefIncluded === false || message.reviewBodyIncluded === false) && !message.portfolioBrief;
   const pendingPortfolio = reviewKind === 'portfolio-review' && message.role === 'assistant' && !message.portfolioBrief
@@ -401,7 +401,7 @@ const Message = memo(function Message({ message, onCitation, reviewKind, histori
     className="analyst-captured-report-placeholder portfolio-brief-centered" aria-busy="true">
     <p>{formatAnalystReportDate(message.created_at)}</p>
   </article>;
-  if (message.portfolioBrief) return <AnalystPortfolioBrief message={message} onCitation={onCitation} historical={historical} />;
+  if (message.portfolioBrief) return <AnalystPortfolioBrief message={message} onCitation={onCitation} inboxFindings={inboxFindings} historical={historical} />;
   if (deferredPortfolio || (message.role === 'assistant' && message.streaming && !message.text?.trim())) return null;
   return (
     <article data-message-id={message.id} className={`analyst-message analyst-message--${message.role}${reviewKind === 'portfolio-review' && message.role === 'assistant' ? ' analyst-portfolio-markdown' : ''}${message.error ? ' is-error' : ''}`}>

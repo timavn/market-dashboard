@@ -148,7 +148,7 @@ test('every review section dates its captured inputs without refreshing old rese
   expect(JSON.stringify(data)).toBe(original);
 });
 
-test('position exceptions keep their original holdings date beside the complete captured research period', () => {
+test('position sections keep their original holdings date beside the complete captured research period', () => {
   const data = brief();
   data.reviewedAt = '2026-09-05T23:00:00Z';
   const tradeCitation = { id: 'older-trade', title: 'Trade report', publicationDate: '2026-09-02' };
@@ -164,7 +164,7 @@ test('position exceptions keep their original holdings date beside the complete 
   const original = JSON.stringify(data);
   const onCitation = jest.fn();
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} onCitation={onCitation} />);
-  const section = screen.getByRole('region', { name: 'Position exceptions' });
+  const section = screen.getByRole('region', { name: 'Corrections' });
   const dateline = section.querySelector('.portfolio-review-dateline');
   expect(dateline).toHaveClass('has-period');
   expect(dateline.querySelector('.portfolio-review-primary-date')).toHaveTextContent('Sep 4, 2026 13:05 PDT');
@@ -175,11 +175,11 @@ test('position exceptions keep their original holdings date beside the complete 
   expect(JSON.stringify(data)).toBe(original);
 });
 
-test('only supported position exceptions appear and their signal sources still open', () => {
+test('Trade and Trend breaks are Action required and their signal sources still open', () => {
   const onCitation = jest.fn();
   render(<AnalystPortfolioBrief message={message()} onCitation={onCitation} />);
-  const exceptions = screen.getByRole('region', { name: 'Position exceptions' });
-  expect(within(exceptions).getByRole('table', { name: 'Position exceptions' })).toBeVisible();
+  const exceptions = screen.getByRole('region', { name: 'Action required' });
+  expect(within(exceptions).getByRole('table', { name: 'Action required' })).toBeVisible();
   expect(exceptions).not.toHaveTextContent('FBY');
   expect(exceptions).toHaveTextContent('Reduce to 2.5% MIN');
   expect(exceptions).toHaveTextContent('Exit to 0.0%');
@@ -187,6 +187,7 @@ test('only supported position exceptions appear and their signal sources still o
   expect(onCitation).toHaveBeenCalledWith(expect.objectContaining({ id: 'rta' }));
   expect(screen.queryByRole('region', { name: 'Needs attention' })).not.toBeInTheDocument();
   expect(exceptions).not.toHaveTextContent(/Verify Trade|Verify Trend/);
+  expect(screen.getByRole('table', { name: 'Corrections' })).toHaveTextContent('Unavailable');
 });
 
 test('saved product-list indications do not appear as published Trade while captured Trend remains visible', () => {
@@ -228,35 +229,36 @@ test('retained published Trade displays its captured source without changing cur
   expect(JSON.stringify(data)).toBe(original);
 });
 
-test.each([true, false])('the empty exceptions slot stays present without including ordinary holdings with coverageComplete %s', coverageComplete => {
+test.each([true, false])('the empty position sections stay present without including ordinary holdings with coverageComplete %s', coverageComplete => {
   const data = brief();
   data.coverageComplete = coverageComplete;
   data.holdings = [sizedRow('CALM'), row('NOTREND', { trend: null }), row('NOSIGNALS', { trade: null, trend: null })];
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  expect(screen.getByRole('table', { name: 'Position exceptions' })).toHaveTextContent(coverageComplete ? 'No position exceptions' : 'Unavailable');
+  expect(screen.getByRole('table', { name: 'Action required' })).toHaveTextContent(coverageComplete ? 'No positions need immediate action' : 'Unavailable');
+  expect(screen.getByRole('table', { name: 'Corrections' })).toHaveTextContent(coverageComplete ? 'No corrections' : 'Unavailable');
   expect(screen.queryByText(/CALM|NOTREND|NOSIGNALS|Some checks need verification|No confirmed|Verify Trade|Verify Trend/)).not.toBeInTheDocument();
 });
 
-test('five long and five short exceptions expand inline without including ordinary holdings', () => {
+test('five long and five short corrections expand inline without including ordinary holdings', () => {
   const data = brief();
   data.holdings = ['LONG', 'SHORT'].flatMap(heldSide => Array.from({ length: 7 }, (_, index) => sizedRow(`${heldSide}-${index}`, {
     heldSide, trade: heldSide === 'LONG' ? 'BULLISH' : 'BEARISH', trend: heldSide === 'LONG' ? 'BULLISH' : 'BEARISH', weightPct: heldSide === 'LONG' ? 7 + index : 1.5 - index / 10,
   })));
   data.holdings.push(sizedRow('ORDINARY'));
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const table = screen.getByRole('table', { name: 'Position exceptions' });
+  const table = screen.getByRole('table', { name: 'Corrections' });
   for (const side of ['Long', 'Short']) {
     expect(within(within(table).getByRole('rowgroup', { name: `${side} positions` })).getAllByRole('row')).toHaveLength(5);
   }
   expect(table.querySelectorAll('.portfolio-position-row')).toHaveLength(10);
   expect(table).not.toHaveTextContent('ORDINARY');
-  fireEvent.click(screen.getByRole('button', { name: 'Show all 14 exceptions' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Show all 14 corrections' }));
   expect(table.querySelectorAll('.portfolio-position-row')).toHaveLength(14);
-  fireEvent.click(screen.getByRole('button', { name: 'Show fewer exceptions' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Show fewer corrections' }));
   expect(table.querySelectorAll('.portfolio-position-row')).toHaveLength(10);
 });
 
-test('weight exceptions keep side ordering and colored group borders without Long/Short label rows', () => {
+test('weight corrections keep side ordering and colored group borders while Trade exits move to Action required', () => {
   const data = brief();
   data.holdings = ['LONG', 'SHORT'].flatMap(heldSide => {
     const trade = heldSide === 'LONG' ? 'BULLISH' : 'BEARISH';
@@ -264,13 +266,15 @@ test('weight exceptions keep side ordering and colored group borders without Lon
     return [position('ORDINARY'), position('UNDER', { weightPct: 1.5 }), position('OVER', { weightPct: 7 }), position('EXIT', { trade: heldSide === 'LONG' ? 'BEARISH' : 'BULLISH' })];
   });
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
+  const urgent = screen.getByRole('table', { name: 'Action required' });
+  expect([...urgent.querySelectorAll('.portfolio-position-row th strong')].map(cell => cell.textContent)).toEqual(['LONG-EXIT', 'SHORT-EXIT']);
   for (const [side, first, second] of [['LONG', 'OVER', 'UNDER'], ['SHORT', 'UNDER', 'OVER']]) {
-    const group = screen.getByRole('rowgroup', { name: `${side === 'LONG' ? 'Long' : 'Short'} positions` });
+    const group = within(screen.getByRole('table', { name: 'Corrections' })).getByRole('rowgroup', { name: `${side === 'LONG' ? 'Long' : 'Short'} positions` });
     expect(group).toHaveClass('portfolio-position-section', `is-${side.toLowerCase()}`);
     expect(group.querySelector('th[scope="rowgroup"]')).toBeNull();
     expect(within(group).queryByText(side, { exact: true })).not.toBeInTheDocument();
     const rows = within(group).getAllByRole('row');
-    expect(rows.map(position => position.querySelector('strong').textContent)).toEqual([`${side}-${first}`, `${side}-${second}`, `${side}-EXIT`]);
+    expect(rows.map(position => position.querySelector('strong').textContent)).toEqual([`${side}-${first}`, `${side}-${second}`]);
     const overweight = within(group).getByRole('row', { name: new RegExp(`${side}-OVER`) });
     expect(within(overweight).getByText('Overweight')).not.toHaveClass('portfolio-position-action');
     expect(overweight.querySelector('.portfolio-position-action')).toBeNull();
@@ -284,15 +288,17 @@ test('weight exceptions keep side ordering and colored group borders without Lon
   }
 });
 
-test('position exceptions keep compact headers and captured names without classification or sizing labels', () => {
-  usePortfolioSecurityNames.mockReturnValueOnce({ DBMF: { name: 'Current renamed fund', source: 'Verified catalog' }, UNKNOWN: { name: 'Known company', source: 'SEC company ticker directory' } });
+test('position tables keep compact headers and captured names without classification or sizing labels', () => {
+  const names = { DBMF: { name: 'Current renamed fund', source: 'Verified catalog' }, UNKNOWN: { name: 'Known company', source: 'SEC company ticker directory' } };
+  // Action required renders first, then Corrections.
+  usePortfolioSecurityNames.mockReturnValueOnce(names).mockReturnValueOnce(names);
   const data = brief();
   data.holdings = [sizedRow('DBMF', { securityName: 'iMGP DBi Managed Futures Strategy ETF', weightPct: 1 }),
     sizedRow('IBIT', { securityName: 'iShares Bitcoin Trust ETF', weightPct: 0.5 }),
     sizedRow('UNKNOWN', { weightPct: 1 })];
   const original = JSON.stringify(data);
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const table = screen.getByRole('table', { name: 'Position exceptions' });
+  const table = screen.getByRole('table', { name: 'Corrections' });
   expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
     'Ticker', 'Security', 'Tick / Trade / Trend', 'MIN / MAX / Stop', 'Review', 'Product',
   ]);
@@ -330,7 +336,7 @@ test('a missing holding weight leaves the ticker cell without a placeholder dash
   expect(ticker.querySelector('.portfolio-position-weight')).toBeNull();
 });
 
-test('position exceptions show captured product labels beside Review and open all of that product’s evidence', () => {
+test('position tables show captured product labels beside Review and open all of that product’s evidence', () => {
   const onCitation = jest.fn();
   const first = { id: 'call-first', product: 'the-call', productLabel: 'The Call', publicationDate: '2026-09-03', title: 'The Call' };
   const confirmed = { ...first, id: 'call-confirmed', publicationDate: '2026-09-04' };
@@ -343,7 +349,7 @@ test('position exceptions show captured product labels beside Review and open al
   ] })];
   const original = JSON.stringify(data);
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} onCitation={onCitation} />);
-  const position = within(screen.getByRole('table', { name: 'Position exceptions' })).getByRole('row', { name: /ETHA/ });
+  const position = within(screen.getByRole('table', { name: 'Corrections' })).getByRole('row', { name: /ETHA/ });
   const cells = within(position).getAllByRole('cell');
   expect(cells[3]).toHaveClass('portfolio-position-review');
   expect(cells[4]).toHaveClass('portfolio-position-products');
@@ -363,7 +369,7 @@ test('saved position products preserve the publisher label and visible proxy ins
     { product: 'crypto-quant', productLabel: 'Crypto Quant', reading: 'Bullish Trend', kind: 'trend', date: '2026-09-04', relation: 'proxy', sourceTicker: 'ETH', citations: [citation] },
   ] }] }] }] };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} historical />);
-  const table = screen.getByRole('table', { name: 'Position exceptions' });
+  const table = screen.getByRole('table', { name: 'Corrections' });
   const productCell = within(within(table).getByRole('row', { name: /ETHA/ })).getAllByRole('cell')[4];
   expect(productCell).toHaveTextContent('Crypto Quant: Bullish Trend (ETH proxy)');
   expect(productCell.querySelector('.analyst-process--positive')).toHaveTextContent('Bullish');
@@ -503,7 +509,7 @@ test('the 10 bp buffer and invalid sizing evidence never create exceptions', () 
     })),
   ];
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  expect(screen.getByRole('region', { name: 'Position exceptions' })).toHaveTextContent('Unavailable');
+  expect(screen.getByRole('region', { name: 'Corrections' })).toHaveTextContent('Unavailable');
   expect(screen.queryByText(/Overweight|Underweight/)).not.toBeInTheDocument();
 });
 
@@ -511,11 +517,13 @@ test('stop evidence does not create a report section or an exception', () => {
   const data = brief(); data.stopCoverage = { status: 'captured', asOf };
   data.holdings = ['missing', 'partial', 'oversized', 'wrong_side', 'unavailable'].map(status => sizedRow(status, { stopCheck: { status, coveragePct: 60 } }));
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const section = screen.getByRole('region', { name: 'Position exceptions' });
-  expect(section).toHaveTextContent('Unavailable');
-  expect(section.querySelectorAll('.portfolio-position-row')).toHaveLength(0);
-  // Only the ATR stop column header mentions a stop; captured stop coverage stays out of the report.
-  expect(screen.queryAllByText(/stop/i).map(element => element.textContent)).toEqual(['MIN / MAX / Stop']);
+  for (const name of ['Action required', 'Corrections']) {
+    const section = screen.getByRole('region', { name });
+    expect(section).toHaveTextContent('Unavailable');
+    expect(section.querySelectorAll('.portfolio-position-row')).toHaveLength(0);
+  }
+  // Only the ATR stop column headers mention a stop; captured stop coverage stays out of the report.
+  expect(screen.queryAllByText(/stop/i).map(element => element.textContent)).toEqual(['MIN / MAX / Stop', 'MIN / MAX / Stop']);
   expect(screen.queryByText(/none found|60.0% covered/i)).not.toBeInTheDocument();
 });
 
@@ -545,7 +553,7 @@ test('the limits cell shows the ATR-derived MIN, MAX and stop with 25 bp precisi
   const short = screen.getByRole('row', { name: /SHORTATR/ });
   expect(short.querySelector('.portfolio-position-limits')).toHaveTextContent('MIN3.25%MAX6.25%Stop104.00');
   expect(within(short).getByText('104.00')).toHaveAttribute('title', expect.stringContaining('2 × ATR above the last close (4.0%)'));
-  const header = screen.getByRole('columnheader', { name: 'MIN / MAX / Stop' });
+  const header = within(screen.getByRole('table', { name: 'Corrections' })).getByRole('columnheader', { name: 'MIN / MAX / Stop' });
   expect(header).toHaveAttribute('title', 'MIN and MAX cost 0.125% and 0.25% of NLV if the 2 × ATR stop is hit');
 });
 
@@ -710,7 +718,8 @@ test('omits the redundant asset exposure table even when the saved report includ
   expect(screen.queryByRole('region', { name: 'Asset exposure' })).not.toBeInTheDocument();
   expect(screen.queryByRole('table', { name: 'Asset exposure' })).not.toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBeInTheDocument();
-  expect(screen.getByRole('region', { name: 'Position exceptions' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Action required' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Corrections' })).toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Unavailable');
   expect(screen.queryByText('Growth')).not.toBeInTheDocument();
 });
@@ -810,7 +819,7 @@ test('loading, partial, ready and rejected captures keep account sections and co
   const { rerender } = render(<AnalystPortfolioBrief message={base} />);
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
-  const exceptions = screen.getByRole('region', { name: 'Position exceptions' });
+  const exceptions = screen.getByRole('region', { name: 'Action required' });
   const exposureRows = within(exposure).getAllByRole('row');
   const exposureColumns = within(exposure).getAllByRole('columnheader');
   const sectionOrder = [...report.querySelectorAll('.portfolio-review-section')].map(section => section.getAttribute('aria-label'));
@@ -822,20 +831,20 @@ test('loading, partial, ready and rejected captures keep account sections and co
   rerender(<AnalystPortfolioBrief message={{ ...base, portfolioBrief: partial }} />);
   expect(screen.getByRole('article', { name: 'Portfolio Review summary' })).toBe(report);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBe(exposure);
-  expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
+  expect(screen.getByRole('region', { name: 'Action required' })).toBe(exceptions);
   expect(screen.queryByText('$210,429')).not.toBeInTheDocument();
   expect(screen.queryByRole('row', { name: /IGV/ })).not.toBeInTheDocument();
   expect(screen.getByText('Captured partial research.')).toBeVisible();
   const ready = { ...brief(), dailyRollup: partial.dailyRollup };
   rerender(<AnalystPortfolioBrief message={{ ...base, state: 'complete', portfolioBrief: ready }} />);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBe(exposure);
-  expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
+  expect(screen.getByRole('region', { name: 'Action required' })).toBe(exceptions);
   expect(within(exposure).getAllByRole('row')).toEqual(exposureRows);
   expect(within(exposure).getAllByRole('columnheader')).toEqual(exposureColumns);
   expect(screen.getByText('$210,429')).toBeVisible();
   rerender(<AnalystPortfolioBrief message={{ ...base, state: 'failed', portfolioBrief: { ...ready, available: false } }} />);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBe(exposure);
-  expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
+  expect(screen.getByRole('region', { name: 'Action required' })).toBe(exceptions);
   expect(exceptions).toHaveTextContent('Unavailable');
   expect(screen.queryByText('$210,429')).not.toBeInTheDocument();
   expect(screen.queryByRole('row', { name: /IGV/ })).not.toBeInTheDocument();
@@ -869,10 +878,11 @@ test('the launch and deferred-history placeholder keeps the full report without 
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveClass('analyst-captured-report-placeholder', 'analyst-historical-report');
   expect(report).toHaveAttribute('data-message-id', 'deferred-post');
-  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(12);
+  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(13);
   expect(report).not.toHaveTextContent('$');
   expect(screen.getByRole('table', { name: 'Portfolio exposure' })).toBeVisible();
-  expect(screen.getByRole('table', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
+  expect(screen.getByRole('table', { name: 'Action required' })).toHaveTextContent('Loading…');
+  expect(screen.getByRole('table', { name: 'Corrections' })).toHaveTextContent('Loading…');
 });
 
 test('Portfolio Review sections use content height and centered titles with datelines beneath in loading, unavailable and saved captures', () => {
@@ -921,7 +931,7 @@ test('Portfolio Review sections use content height and centered titles with date
 });
 
 
-test.each([[5, 5], [6, 3], [3, 7], [0, 6]])('exception disclosure caps each held side independently with %s Long and %s Short', (longCount, shortCount) => {
+test.each([[5, 5], [6, 3], [3, 7], [0, 6]])('correction disclosure caps each held side independently with %s Long and %s Short', (longCount, shortCount) => {
   const data = brief();
   data.holdings = [['LONG', longCount], ['SHORT', shortCount]].flatMap(([heldSide, count]) =>
     Array.from({ length: count }, (_, index) => sizedRow(`${heldSide}-${index}`, {
@@ -929,9 +939,48 @@ test.each([[5, 5], [6, 3], [3, 7], [0, 6]])('exception disclosure caps each held
       weightPct: heldSide === 'LONG' ? 7 + index : 1.5 - index / 10,
     })));
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const table = screen.getByRole('table', { name: 'Position exceptions' });
+  const table = screen.getByRole('table', { name: 'Corrections' });
   expect(table.querySelectorAll('.portfolio-position-row')).toHaveLength(Math.min(5, longCount) + Math.min(5, shortCount));
   const hasMore = longCount > 5 || shortCount > 5;
-  const button = screen.queryByRole('button', { name: `Show all ${longCount + shortCount} exceptions` });
+  const button = screen.queryByRole('button', { name: `Show all ${longCount + shortCount} corrections` });
   expect(Boolean(button)).toBe(hasMore);
+});
+
+const inboxAlert = (symbol, quantity, rows, extra = {}) => ({ id: `attention:portfolio:${symbol}`, attentionVersion: 1, symbol, state: 'open', unread: 1,
+  kind: 'portfolio', priority: 0, severity: 'action-required', quantity, holdingsVerified: true, holdingsVerifiedAt: asOf,
+  currentHolding: { weightPct: quantity < 0 ? -2 : 2 }, presentation: { subject: symbol, date: '2026-09-04', rows: [
+    { label: 'Current position', text: quantity < 0 ? 'Short' : 'Long' }, ...rows,
+  ], sourceLinks: [{ label: 'Signal Strength', citation: { id: `ss-${symbol}`, title: `Signal Strength: ${symbol}` } }] }, ...extra });
+
+test('every red Inbox alert on a held position has an Action required row, sizing stays in Corrections', () => {
+  const onCitation = jest.fn();
+  const data = brief();
+  data.holdings = [sizedRow('EFX', { heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: -1 }), sizedRow('OVER', { weightPct: 7 })];
+  const findings = [
+    inboxAlert('EFX', -40, [{ label: 'Action', text: 'Signal Strength Removed Short Sep 4 vs your Short → exit Short' }]),
+    // Opened after this capture: the alert still gets its row.
+    inboxAlert('GIII', 100, [{ label: 'Action', text: 'ETF Pro Sell Sep 4 → review Long' }]),
+    inboxAlert('READ', 100, [{ label: 'Action', text: 'Removed → exit Long' }], { unread: 0 }),
+    inboxAlert('BLUE', 100, [{ label: 'Action', text: 'Above MAX' }], { severity: undefined }),
+  ];
+  render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} inboxFindings={findings} onCitation={onCitation} />);
+  const urgent = screen.getByRole('table', { name: 'Action required' });
+  expect([...urgent.querySelectorAll('.portfolio-position-row th strong')].map(cell => cell.textContent)).toEqual(['GIII', 'EFX']);
+  const efx = within(urgent).getByRole('row', { name: /EFX/ });
+  expect(within(efx).getByText(wholeText('Exit Short'), { selector: 'strong' })).toHaveClass('portfolio-position-action');
+  expect(efx).not.toHaveTextContent('Underweight');
+  fireEvent.click(within(efx).getByRole('button', { name: /Signal Strength Removed Short Sep 4 vs your Short/ }));
+  expect(onCitation).toHaveBeenCalledWith(expect.objectContaining({ id: 'ss-EFX' }));
+  expect(within(urgent).getByRole('row', { name: /GIII/ })).toHaveTextContent('Review Long');
+  const corrections = screen.getByRole('table', { name: 'Corrections' });
+  expect(corrections).toHaveTextContent('OVER');
+  expect(corrections).not.toHaveTextContent(/EFX|GIII|READ|BLUE/);
+  expect(urgent).not.toHaveTextContent(/READ|BLUE/);
+});
+
+test('a saved historical report never takes live Inbox alerts', () => {
+  const data = brief();
+  data.holdings = [sizedRow('CALM')];
+  render(<AnalystPortfolioBrief historical message={{ portfolioBrief: data }} inboxFindings={[inboxAlert('EFX', -40, [{ label: 'Action', text: 'Removed → exit Short' }])]} />);
+  expect(screen.getByRole('table', { name: 'Action required' })).not.toHaveTextContent('EFX');
 });

@@ -1376,6 +1376,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
                 {portfolioBrief && !portfolioBrief.reviewedAt && reference && (reference.tradingDate !== reference.targetDate || !reference.afterClose) && <p className="portfolio-brief-caption" role="note">Last verified holdings: {reference.tradingDate}. Start a new Portfolio review to check all positions against the latest research.</p>}
                 {renderedMessages.map(message => (
                   <Message key={message.id} reviewKind={selectedKind} message={message} onCitation={openCitation}
+                    inboxFindings={selectedKind === 'portfolio-review' && message === newestPortfolioPost ? inbox.findings : undefined}
                     captureUnavailable={unavailableCapturedBodies.has(`${selected}:${message.id}:${message.reviewRunId}`)}
                     historical={selectedKind === 'portfolio-review' && Boolean(message.portfolioBrief) && message !== newestPortfolioPost} />
                 ))}

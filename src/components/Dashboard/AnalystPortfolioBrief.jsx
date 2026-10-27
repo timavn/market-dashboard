@@ -6,6 +6,7 @@ import { portfolioPositionProducts } from '../../utils/portfolioPositionProducts
 import { portfolioComparisonDateline, portfolioDate, publicationDatelineParts } from '../../utils/portfolioReviewDates';
 import { formatAnalystReportDate } from '../../utils/analystReportDates';
 import { isExplicitTradeProvenance } from '../../utils/publishedResearchSignals.cjs';
+import { activeAttentionFinding, isActionRequired } from '../../utils/analystInboxAlerts.cjs';
 import usePortfolioSecurityNames from '../../hooks/usePortfolioSecurityNames';
 import AnalystSemanticText from './AnalystSemanticText';
 import AnalystDailyRollup from './AnalystDailyRollup';
@@ -26,6 +27,8 @@ function ExposureAmount({ value }) {
 const weight = value => value == null ? 'unavailable' : `${value.toFixed(Math.abs(value * 10 - Math.round(value * 10)) > 1e-9 ? 2 : 1)}%`;
 const adjustment = value => value > 0 && value < 0.1 ? '<0.1' : value.toFixed(1);
 const holdingWeight = row => (row.action === 'REDUCE' && row.reduction < 0.2) || (row.weightDeviation > 0 && row.weightDeviation < 0.2) ? `${row.weightPct.toFixed(3)}%` : weight(row.weightPct);
+// A Trade or Trend against the held side is red in the Inbox; sizing breaches are not.
+const RED_RULES = new Set(['TRADE_BREAK', 'TREND_BREAK']);
 const label = value => typeof value === 'string' && value ? value[0].toUpperCase() + value.slice(1).toLowerCase() : 'Unavailable';
 // Saved captures can contain legacy list-derived indications. A Trade label
 // always requires an independently published Trade direction.
@@ -132,7 +135,34 @@ function PositionWeightReview({ row }) {
   </>;
 }
 
-function PositionReview({ row }) {
+// "SS removed Short Oct 24 vs your Short → exit Short" reads as Exit Short
+// over its condition; a rule alert's Action has no arrow and keeps its Context.
+function alertAction(alert) {
+  const text = name => alert.rows.find(row => row.label === name)?.text || '';
+  const [condition, action] = text('Action').split(' → ');
+  if (action) return { action: label(action).replace(/ (long|short)$/i, (_, side) => ` ${label(side)}`), condition };
+  return { action: condition, condition: text('Context').split(' → ')[0] };
+}
+
+function PositionAlertReview({ alert, onCitation }) {
+  const { action, condition } = alertAction(alert);
+  const [link] = alert.sourceLinks;
+  return <>
+    <strong className="portfolio-position-action"><AnalystSemanticText>{action}</AnalystSemanticText></strong>
+    {condition && (link && onCitation
+      ? <button type="button" className="portfolio-position-alert-source" title={`${condition} · ${link.label}`} onClick={() => onCitation(link.citation, ...(alert.sourceLinks.length > 1 ? [{ relatedSources: alert.sourceLinks.map(item => item.citation) }] : []))}><AnalystSemanticText>{condition}</AnalystSemanticText></button>
+      : <span><AnalystSemanticText>{condition}</AnalystSemanticText></span>)}
+  </>;
+}
+
+function PositionReview({ row, onCitation }) {
+  const redRule = row.status === 'conflict' && RED_RULES.has(row.rule);
+  // This review's own rule break already states its rule alert; other alerts add their instruction.
+  const alerts = (row.alerts || []).filter(alert => !(redRule && alert.rule));
+  if (alerts.length) return <>
+    {redRule && <PositionRuleReview row={row} />}
+    {alerts.map(alert => <PositionAlertReview key={alert.id} alert={alert} onCitation={onCitation} />)}
+  </>;
   if (row.status === 'conflict') return <>
     <PositionRuleReview row={row} />
     {row.weightStatus && row.rule !== 'ABOVE_MAX' && <PositionWeightReview row={row} />}
@@ -164,21 +194,21 @@ function PositionStop({ row }) {
   return <span className="portfolio-position-field"><small>Stop</small><span title={title}>{row.stopPrice == null ? '—' : row.stopPrice.toFixed(2)}</span></span>;
 }
 
-function PortfolioPositions({ rows, brief, citations, onCitation, emptyText }) {
+function PortfolioPositions({ rows, brief, citations, onCitation, emptyText, name, sizingFirst }) {
   const securityNames = usePortfolioSecurityNames(rows);
-  return <div className="portfolio-brief-table-scroll"><table className="portfolio-positions" aria-label="Position exceptions">
+  return <div className="portfolio-brief-table-scroll"><table className="portfolio-positions" aria-label={name}>
     <colgroup><col className="portfolio-position-holding-col" /><col className="portfolio-position-name-col" /><col className="portfolio-position-signals-col" /><col className="portfolio-position-limits-col" /><col className="portfolio-position-review-col" /><col className="portfolio-position-products-col" /></colgroup>
     <thead><tr><th scope="col">Ticker</th><th scope="col">Security</th><th scope="col">Tick / Trade / Trend</th><th scope="col" title="MIN and MAX cost 0.125% and 0.25% of NLV if the 2 × ATR stop is hit">MIN / MAX / Stop</th><th scope="col" title="Sizing flags allow a 10 bps buffer. Trade exits still take priority.">Review</th><th scope="col">Product</th></tr></thead>
     {!rows.length && <tbody><tr className="portfolio-position-placeholder"><td colSpan={6}>{emptyText}</td></tr></tbody>}
     {['LONG', 'SHORT'].map(side => {
-      const positions = sortPortfolioPositions(rows.filter(row => row.heldSide === side), { preferredWeightStatus: side === 'LONG' ? 'overweight' : 'underweight' });
+      const positions = sortPortfolioPositions(rows.filter(row => row.heldSide === side), sizingFirst ? { preferredWeightStatus: side === 'LONG' ? 'overweight' : 'underweight' } : {});
       return positions.length > 0 && <tbody key={side} className={`portfolio-position-section is-${side.toLowerCase()}`} aria-label={`${label(side)} positions`}>
         {positions.map(row => <tr key={`${row.holding}:${side}`} className="portfolio-position-row">
           <th scope="row"><strong><AnalystSemanticText context="Ticker">{row.holding}</AnalystSemanticText></strong>{row.weightPct != null && <span className="portfolio-position-weight" title="Weight as a percentage of net liquidation value">{holdingWeight(row)}</span>}</th>
           <td><span className="portfolio-position-name" title={row.securityName || (securityNames[row.holding] ? `${securityNames[row.holding].name} · Current security name · ${securityNames[row.holding].source}` : undefined)}><AnalystSemanticText context="Security">{row.securityName || securityNames[row.holding]?.name || '—'}</AnalystSemanticText></span></td>
           <td><PositionTick row={row} citations={citations} onCitation={onCitation} /><PositionSignal row={row} field="trade" onCitation={onCitation} /><PositionSignal row={row} field="trend" onCitation={onCitation} /></td>
           <td className="portfolio-position-limits">{[['MIN', row.minWeight], ['MAX', row.maxWeight]].map(([name, value]) => <span className="portfolio-position-field" key={name}><small>{name}</small><span title={value == null ? `${name} needs verified sizing inputs` : `${name} as a percentage of NLV`}>{value == null ? '—' : weight(value)}</span></span>)}<PositionStop row={row} /></td>
-          <td className="portfolio-position-review"><PositionReview row={row} /></td>
+          <td className="portfolio-position-review"><PositionReview row={row} onCitation={onCitation} /></td>
           <td className="portfolio-position-products"><PositionProducts row={row} brief={brief} onCitation={onCitation} /></td>
         </tr>)}
       </tbody>;
@@ -287,6 +317,63 @@ export function PortfolioResearchUpdates({ brief, findings = [], onCitation }) {
   </section></PortfolioReviewTextProvider>;
 }
 
+// The red Inbox alerts on held positions, exactly as the Inbox lists them:
+// unread, still open, and action-required.
+function positionAlerts(findings = [], now = Date.now()) {
+  return findings.filter(finding => finding.unread !== 0 && finding.unread !== false && isActionRequired(finding)
+    && activeAttentionFinding(finding, now) && !['resolved', 'unavailable'].includes(finding.state || finding.payload?.state))
+    .map(finding => {
+      const payload = finding.payload || finding;
+      const presentation = payload.presentation || finding.presentation;
+      const quantity = typeof payload.quantity === 'number' ? payload.quantity : null;
+      return { id: finding.id, symbol: finding.symbol || payload.symbol || presentation.subject,
+        heldSide: quantity > 0 ? 'LONG' : quantity < 0 ? 'SHORT' : null, weightPct: payload.currentHolding?.weightPct ?? null,
+        rule: payload.rule?.rule || null, rows: presentation.rows, sourceLinks: (presentation.sourceLinks || []).filter(link => link?.citation) };
+    }).filter(alert => alert.symbol && alert.heldSide);
+}
+
+// Action required holds every position that changed against us: a red rule
+// break in this review and every red Inbox alert. Corrections hold the rest
+// (sizing breaches, volatility caps) that need fixing but not immediately.
+function positionSections(rows, alerts) {
+  const key = row => `${row.holding}:${row.heldSide}`;
+  const alertsByPosition = new Map();
+  for (const alert of alerts) {
+    const id = `${alert.symbol}:${alert.heldSide}`;
+    alertsByPosition.set(id, [...(alertsByPosition.get(id) || []), alert]);
+  }
+  const urgent = [];
+  const corrections = [];
+  for (const row of rows) {
+    const rowAlerts = alertsByPosition.get(key(row));
+    alertsByPosition.delete(key(row));
+    if (rowAlerts || (row.status === 'conflict' && RED_RULES.has(row.rule))) urgent.push(rowAlerts ? { ...row, alerts: rowAlerts } : row);
+    else if (portfolioPositionNeedsAttention(row)) corrections.push(row);
+  }
+  // A position opened after this capture still answers to its alert.
+  for (const [, [first, ...rest]] of alertsByPosition) urgent.push({ holding: first.symbol, heldSide: first.heldSide,
+    weightPct: first.weightPct == null ? null : Math.abs(first.weightPct), alerts: [first, ...rest] });
+  return { urgent, corrections };
+}
+
+function PositionSection({ name, rows, emptyText, sizingFirst, brief, sources, onCitation, loading }) {
+  const [expanded, setExpanded] = useState(false);
+  const sides = ['LONG', 'SHORT'].map(side => sortPortfolioPositions(rows.filter(row => row.heldSide === side),
+    sizingFirst ? { preferredWeightStatus: side === 'LONG' ? 'overweight' : 'underweight' } : {}));
+  const displayed = sides.flatMap(group => expanded ? group : group.slice(0, 5));
+  const hasMore = sides.some(group => group.length > 5);
+  const period = publicationDatelineParts(rows.flatMap(row => [
+    ...Object.values(row.sources || {}), ...Object.values(row.researchSignals || {}).map(signal => signal?.source), row.tick?.source,
+  ]).filter(Boolean).map(source => ({ ...source.citation, publishedAt: source.publishedAt || source.citation?.publishedAt })), { label: 'Period' }).period;
+  const noun = name.toLowerCase();
+  return <section className="portfolio-review-section portfolio-brief-exceptions" aria-label={name} aria-busy={!brief.available && loading || undefined}><h2>{name}</h2>
+    <PortfolioReviewDateline text={`Positioning: ${portfolioDate(brief.available ? brief.asOf : null)}`} period={period} />
+    <div className="portfolio-review-section-body"><PortfolioPositions name={name} rows={displayed} brief={brief} citations={sources} onCitation={onCitation} sizingFirst={sizingFirst}
+      emptyText={!brief.available || brief.coverageComplete === false ? loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Unavailable' : emptyText} /></div>
+    {hasMore && <div className="portfolio-review-section-controls"><button type="button" className="portfolio-brief-more" onClick={() => setExpanded(!expanded)}>{expanded ? `Show fewer ${noun}` : `Show all ${rows.length} ${noun}`}</button></div>}
+  </section>;
+}
+
 const loadingStates = ['queued', 'accepted', 'starting', 'running', 'reviewing'];
 const placeholderBrief = { available: false, metrics: {}, holdings: [], citations: [], dailyRollup: { version: 1, sections: [] } };
 
@@ -305,9 +392,8 @@ const unavailableReasonText = {
   portfolio_unverified: 'Unavailable — the live portfolio could not be verified.',
 };
 
-const AnalystPortfolioBrief = memo(function AnalystPortfolioBrief({ message, onCitation, historical = false, loading = loadingStates.includes(message.reviewState || message.state), deferred = false, unavailableText }) {
+const AnalystPortfolioBrief = memo(function AnalystPortfolioBrief({ message, onCitation, inboxFindings, historical = false, loading = loadingStates.includes(message.reviewState || message.state), deferred = false, unavailableText }) {
   const brief = message.portfolioBrief || placeholderBrief;
-  const [expanded, setExpanded] = useState(false);
   const summary = useMemo(() => summarizePortfolioRules(brief.available ? brief : { ...brief, holdings: [] }), [brief]);
   const outlook = useMemo(() => portfolioReviewOutlook(brief), [brief]);
   const metrics = brief.available ? brief.metrics || {} : {};
@@ -319,21 +405,13 @@ const AnalystPortfolioBrief = memo(function AnalystPortfolioBrief({ message, onC
       ? 'Last verified holdings. Connect to IB Gateway to update.' : 'Last verified holdings. Refresh to update.' : null;
   const sources = new Map((brief.citations || []).map(source => [source.id, source]));
   const hasDailyRollup = brief.dailyRollup?.version === 1;
-  const exceptions = ['LONG', 'SHORT'].map(side => sortPortfolioPositions(summary.rows.filter(row => row.heldSide === side && portfolioPositionNeedsAttention(row)), { preferredWeightStatus: side === 'LONG' ? 'overweight' : 'underweight' }));
-  const flaggedCount = exceptions.flat().length;
-  const displayedExceptions = exceptions.flatMap(rows => expanded ? rows : rows.slice(0, 5));
-  const hasMoreExceptions = exceptions.some(rows => rows.length > 5);
-  const exceptionSources = exceptions.flat().flatMap(row => [
-    ...Object.values(row.sources || {}), ...Object.values(row.researchSignals || {}).map(signal => signal?.source), row.tick?.source,
-  ]).filter(Boolean).map(source => ({ ...source.citation, publishedAt: source.publishedAt || source.citation?.publishedAt }));
+  // A saved report keeps what it captured; only the current one meets live alerts.
+  const { urgent, corrections } = useMemo(() => positionSections(summary.rows, historical || !brief.available ? [] : positionAlerts(inboxFindings)),
+    [summary, historical, brief.available, inboxFindings]);
   return <PortfolioReviewTextProvider brief={brief}><article data-message-id={message.id} className={`portfolio-brief portfolio-brief-centered${deferred ? ' analyst-captured-report-placeholder' : ''}${historical ? ' analyst-historical-report' : ''}`} aria-label="Portfolio Review summary" aria-busy={loading || undefined}>
     <PortfolioExposure metrics={metrics} comparison={brief.available ? brief.comparison : null} asOf={brief.available ? brief.asOf : null} loading={loading} state={exposureState} />
-    <section className="portfolio-review-section portfolio-brief-exceptions" aria-label="Position exceptions" aria-busy={!brief.available && loading || undefined}><h2>Position exceptions</h2>
-      <PortfolioReviewDateline text={`Positioning: ${portfolioDate(brief.available ? brief.asOf : null)}`} period={publicationDatelineParts(exceptionSources, { label: 'Period' }).period} />
-      <div className="portfolio-review-section-body"><PortfolioPositions rows={displayedExceptions} brief={brief} citations={sources} onCitation={onCitation}
-        emptyText={!brief.available || brief.coverageComplete === false ? loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Unavailable' : 'No position exceptions'} /></div>
-      {hasMoreExceptions && <div className="portfolio-review-section-controls"><button type="button" className="portfolio-brief-more" onClick={() => setExpanded(!expanded)}>{expanded ? 'Show fewer exceptions' : `Show all ${flaggedCount} exceptions`}</button></div>}
-    </section>
+    <PositionSection name="Action required" rows={urgent} emptyText="No positions need immediate action" brief={brief} sources={sources} onCitation={onCitation} loading={loading} />
+    <PositionSection name="Corrections" rows={corrections} emptyText="No corrections" sizingFirst brief={brief} sources={sources} onCitation={onCitation} loading={loading} />
     {brief.available && <>
       {!hasDailyRollup && outlook && <section className="portfolio-review-section" aria-label="Session outlook"><h2>Session outlook</h2>
         <PortfolioReviewDateline {...publicationDatelineParts([{ ...outlook.citation, publishedAt: outlook.publishedAt }])} />
