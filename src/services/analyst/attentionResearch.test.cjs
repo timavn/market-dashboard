@@ -88,15 +88,19 @@ test('source Sell while already Short is silent; Sell some preserves exact body 
   ctx.events = [sourceEvent('EWL'), sourceEvent('CORN')];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.equal(findings.length, 1); assert.equal(findings[0].symbol, 'CORN');
-  assert.match(findings[0].presentation.rows.find(row => row.label === 'Action').text, /^Sell some/);
+  assert.equal(findings[0].action, 'reduce');
+  assert.equal(findings[0].presentation.rows.find(row => row.label === 'Action').text, 'Real-Time Alert Sell-SOME Sep 22 vs your Long → reduce Long');
   assert.match(findings[0].presentation.rows.find(row => row.label === 'Context').text, /growth outlook deteriorates/);
   assert.equal(findings[0].presentation.rows.some(row => /no remaining quantity/.test(row.text)), false);
 });
-test('old source instructions and generic unlinked SELL headlines do not refill the inbox', () => {
+test('a Real-Time Alert against a holding stands across dates until it is a month old', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'CORN', quantity: 10 }];
   const event = sourceEvent('CORN'); event.marketDate = '2026-09-21'; event.publishedAt = '2026-09-21T12:00:00Z'; ctx.events = [event];
-  assert.equal(evaluateResearchAttention(ctx, NOW).findings.length, 0);
+  assert.equal(evaluateResearchAttention(ctx, NOW).findings[0].severity, 'action-required');
+  // A bare Sell without its report is still a published Sell against the Long.
   ctx.events = [{ ...sourceEvent('CORN'), sourceReport: undefined }];
+  assert.equal(evaluateResearchAttention(ctx, NOW).findings[0].action, 'exit');
+  Object.assign(event, { marketDate: '2026-08-20', publishedAt: '2026-08-20T12:00:00Z' }); ctx.events = [event];
   assert.equal(evaluateResearchAttention(ctx, NOW).findings.length, 0);
 });
 test('broad market commentary never becomes an Inbox finding', () => {
@@ -118,15 +122,17 @@ test('a known applicable source instruction keeps its condition across dates wit
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'CORN', quantity: 10 }]; ctx.events = [sourceEvent('CORN')];
   const first = evaluateResearchAttention(ctx, NOW).findings[0]; assert.ok(first);
   const next = new Date('2026-09-23T16:00:00Z'); ctx.marketDate = '2026-09-23'; ctx.holdings.asOf = next.toISOString();
-  assert.equal(evaluateResearchAttention(ctx, next).findings.length, 0);
-  ctx.previousAttention = [first];
+  // A standing stance needs no carried-forward finding to apply the next day.
   const retained = evaluateResearchAttention(ctx, next).findings[0];
   assert.equal(retained.id, first.id); assert.equal(retained.fingerprint, first.fingerprint); assert.equal(retained.publicationTime, first.publicationTime);
 });
-test('generic partial source instruction with no useful case is silent', () => {
+test('a partial Sell with only generic coaching still reduces the held Long, without inventing a case', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'CORN', quantity: 10 }];
   const event = sourceEvent('CORN'); event.sourceReport.bodyText = 'Portfolio Managers should be selling-SOME of Bullish TRENDs that are green today.';
-  ctx.events = [event]; assert.equal(evaluateResearchAttention(ctx, NOW).findings.length, 0);
+  ctx.events = [event];
+  const [finding] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.equal(finding.action, 'reduce'); assert.equal(finding.severity, 'action-required');
+  assert.equal(finding.presentation.rows.some(row => row.label === 'Context'), false);
 });
 test('account deficits require fresh independent balance; healthy spare capacity is silent', () => {
   const ctx = context(); ctx.account = { verified: true, historyVerified: true, asOf: NOW.toISOString(), issues: ['Maintenance margin deficit: $123.00.', 'Cash-floor and reserve requirements leave no buffered capacity for additional longs.'] };
@@ -225,7 +231,7 @@ test('source actions share exact report segmentation within the scan without sha
   });
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.deepEqual(segmented, lines);
-  assert.deepEqual(findings.map(item => [item.symbol, item.action]), [['AAA', 'sell-some'], ['BBB', 'sell-some']]);
+  assert.deepEqual(findings.map(item => [item.symbol, item.action]), [['AAA', 'reduce'], ['BBB', 'reduce']]);
   assert.ok(findings[0].presentation.rows.find(row => row.label === 'Context').text.startsWith(lines[1]));
   assert.ok(findings[1].presentation.rows.find(row => row.label === 'Context').text.startsWith(lines[2]));
 });
@@ -259,7 +265,8 @@ test('ETF Pro and Real-Time Alert openings on the opposite side oppose the holdi
     changeEvent('TSLA', 'BUY', undefined, { productKey: 'real-time-alert', productLabel: 'Real-Time Alert' })];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.deepEqual(findings.map(item => item.symbol).sort(), ['TSLA', 'XLE']);
-  assert.match(findings.find(item => item.symbol === 'XLE').presentation.rows.find(row => row.label === 'Action').text, /ETF Pro went Short vs your Long → review/);
+  assert.equal(findings.find(item => item.symbol === 'XLE').presentation.rows.find(row => row.label === 'Action').text, 'ETF Pro Added Short Sep 22 vs your Long → exit Long');
+  assert.equal(findings.find(item => item.symbol === 'TSLA').presentation.rows.find(row => row.label === 'Action').text, 'Real-Time Alert Buy Sep 22 vs your Short → exit Short');
 });
 test('a Go-Anywhere removal of a held Long is an exit alert; its aligned add is silent', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLK', quantity: 20 }, { symbol: 'HGER', quantity: 30 }];
@@ -282,8 +289,8 @@ test('a Signal Strength Shorts addition opposes a held long; its removal exits a
     shorts('DECK', 'signal_strength_short_removed'), shorts('ZG', 'signal_strength_short_removed')];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
   assert.deepEqual(findings.map(item => [item.symbol, item.severity]).sort(), [['DECK', 'action-required'], ['JPM', 'action-required']]);
-  assert.equal(findings.find(item => item.symbol === 'JPM').presentation.rows.find(row => row.label === 'Action').text, 'Signal Strength went Short vs your Long → review');
-  assert.equal(findings.find(item => item.symbol === 'DECK').presentation.rows.find(row => row.label === 'Action').text, 'Signal Strength removed DECK (Short) → exit Short');
+  assert.equal(findings.find(item => item.symbol === 'JPM').presentation.rows.find(row => row.label === 'Action').text, 'Signal Strength Added Short Sep 22 vs your Long → exit Long');
+  assert.equal(findings.find(item => item.symbol === 'DECK').presentation.rows.find(row => row.label === 'Action').text, 'Signal Strength Removed Short Sep 22 vs your Short → exit Short');
 });
 test('a later re-add from the same product supersedes its removal', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: 10 }];
@@ -345,11 +352,11 @@ test('once holdings verify, a pending removal alerts only for a position actuall
   assert.equal(alert.holdingsVerified, true); assert.equal(alert.quantity, 12);
   const rows = Object.fromEntries(alert.presentation.rows.map(item => [item.label, item.text]));
   assert.equal(rows['Current position'], 'Long');
-  assert.equal(rows.Action, 'ETF Pro removed SNOW (Long) → exit Long');
+  assert.equal(rows.Action, 'ETF Pro Removed Long Sep 22 vs your Long → exit Long');
   assert.deepEqual(alert.presentation.sourceLinks.map(link => link.label), ['ETF Pro']);
-  // Without the pending notice, a prior day's removal is not reconsidered.
+  // The ETF Pro removal is a standing stance; an Investing Ideas removal still needs the pending notice.
   ctx.previousAttention = [];
-  assert.deepEqual(evaluateResearchAttention(ctx, later).findings, []);
+  assert.deepEqual(evaluateResearchAttention(ctx, later).findings.map(item => item.symbol), ['SNOW']);
 });
 test('a Trend-break sizing alert states the security\'s own MIN, MAX, ATR, stop and trim', () => {
   const ctx = context(); addHolding(ctx, 'XLK');

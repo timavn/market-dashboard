@@ -5,6 +5,11 @@ const INTERVAL_MS = 30_000;
 const MAX_DEFERRED_CYCLES = 2;
 // Only attention publication writes this switch; re-read it occasionally anyway.
 const ENABLED_CACHE_MS = 60_000;
+// The stance book outlives the 2,000-event journal; a missing history is
+// fetched from the ledger at most hourly while the live feed keeps folding in.
+const STANCE_BOOK_KEY = 'stance-book-v1';
+const STANCE_HISTORY_DAYS = 90;
+const STANCE_HISTORY_RETRY_MS = 3_600_000;
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 function unavailableFinding(channel, now) {
@@ -20,13 +25,15 @@ function unavailableFinding(channel, now) {
     presentation: { subject, date: now.toISOString().slice(0, 10), rows: [{ label: 'Issue', text }], sourceLinks: [] } };
 }
 
-function createAttentionWorkflow({ call: workspaceCall, request, now = () => new Date(), fetchJson, collectOperations, evaluateResearch }) {
+function createAttentionWorkflow({ call: workspaceCall, request, now = () => new Date(), fetchJson, collectOperations, evaluateResearch, loadStanceHistory }) {
   const get = fetchJson || (async path => {
     if (!path.startsWith('/api/')) throw new Error('Unexpected attention source');
     const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3001}${path}`, { signal: AbortSignal.timeout(45_000) });
     if (!response.ok) throw new Error('Dashboard evidence unavailable');
     return response.json();
   });
+  const stanceHistory = loadStanceHistory || (() => get(`/api/analyst/stance-ledger?days=${STANCE_HISTORY_DAYS}`));
+  let stanceHistoryAttemptAt = -Infinity;
   let running = null;
   let queuedReset = null;
   let lastStarted = 0;
@@ -53,6 +60,23 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
     return entry.promise;
   };
 
+  async function stanceBook(events, at) {
+    const { foldStanceEvents } = require('./stanceBook.cjs');
+    const stored = (await call('setting', { key: STANCE_BOOK_KEY })).value;
+    let { book, changed } = foldStanceEvents(stored, events, at);
+    if (!book.backfill && at.getTime() - stanceHistoryAttemptAt >= STANCE_HISTORY_RETRY_MS) {
+      stanceHistoryAttemptAt = at.getTime();
+      try {
+        const history = await stanceHistory();
+        ({ book } = foldStanceEvents(book, history.events || [], at));
+        book.backfill = { from: history.from, through: history.through, at: at.toISOString() };
+        changed = true;
+      } catch { /* Retried later; today's feed still reaches the book. */ }
+    }
+    if (changed) await call('setting', { key: STANCE_BOOK_KEY, value: book });
+    return book;
+  }
+
   async function scan({ reset = false, events = [] } = {}) {
     const startedAt = now();
     const runId = randomUUID();
@@ -61,8 +85,11 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
     const retained = (await call('setting', { key: 'attention-source-events' })).value || [];
     const results = await Promise.allSettled([
       (collectOperations || require('./attentionOperations.cjs').collectOperationalAttention)({ fetchJson: get, now: startedAt }),
-      request('/internal/workspace/attention-context', { method: 'POST', body: { events: [...retained, ...events] }, timeoutMs: 75_000 })
-        .then(context => (evaluateResearch || require('./attentionResearch.cjs').evaluateResearchAttention)(context, now())),
+      // The book updates beside the holdings capture; an unreadable book still
+      // lets the evaluation fold the journal it is given.
+      Promise.all([stanceBook([...retained, ...events], startedAt).catch(() => undefined),
+        request('/internal/workspace/attention-context', { method: 'POST', body: { events: [...retained, ...events] }, timeoutMs: 75_000 })])
+        .then(([book, context]) => (evaluateResearch || require('./attentionResearch.cjs').evaluateResearchAttention)({ ...context, stanceBook: book }, now())),
     ]);
     const findings = [];
     const completeKinds = new Set();

@@ -1,6 +1,7 @@
 const { createHash } = require('node:crypto');
 const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js');
 const { sourceActionEvidence, describeAnalystFinding } = require('../../utils/analystFindingPresentation.cjs');
+const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings } = require('./stanceBook.cjs');
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
@@ -197,6 +198,8 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
   // from the same product supersedes its earlier removal.
   const latest = new Map();
   for (const event of context.events || []) {
+    // Signal Strength, ETF Pro and Real-Time Alerts are standing stances in the stance book.
+    if (STANCE_PRODUCTS.has(event.productKey)) continue;
     const instruction = sourceInstruction(event, now);
     // A generic alert headline cannot establish full versus partial action.
     // Require its exact report body/subject or an explicit partial typed action.
@@ -212,7 +215,8 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
   }
   const output = [];
   for (const { symbol, event, evidence, exit, change, actionKey } of latest.values()) {
-    if (conflicts.some(item => item.symbol === symbol)) continue;
+    // Only a red Trade/Trend break replaces a source instruction; a sizing review never hides one.
+    if (conflicts.some(item => item.symbol === symbol && item.severity === ACTION_REQUIRED)) continue;
     const state = holdingState(context.holdings, symbol, true, now);
     if (!state.quantity) continue;
     const held = state.quantity > 0 ? 'Long' : 'Short';
@@ -420,6 +424,54 @@ function accountFindings(context, now) {
   }
   return { findings: output, complete: fresh && account.historyVerified === true };
 }
+const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
+const monthDay = date => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+function stanceText(item) {
+  const what = item.product === 'signal-strength' ? `${item.label} ${item.slot.endsWith(':short') ? 'Short' : 'Long'}` : item.label;
+  // A standing listing is dated by its entry; a change by its publication.
+  return `${STANCE_PRODUCT_NAMES[item.product]} ${what} ${item.label === 'Listed' ? `since ${monthDay(item.since)}` : monthDay(item.date)}`;
+}
+// The whole verified book against every product's standing stance. Unlike a
+// source event, a stance holds until the product changes it, so the first
+// verified read after Gateway connects sees every contradiction at once.
+function stanceFindings(context, now, verified, sentenceMemo) {
+  if (!verified) return [];
+  const { book } = foldStanceEvents(context.stanceBook, context.events || [], now);
+  const output = [];
+  for (const scanned of scanHoldings(book, context.holdings.positions)) {
+    if (!scanned.opposing.length) continue;
+    const { symbol, opposing, supporting } = scanned;
+    const state = holdingState(context.holdings, symbol, true, now);
+    if (!state.quantity) continue;
+    const held = scanned.side === 'LONG' ? 'Long' : 'Short';
+    const partial = opposing.every(item => item.partial);
+    const key = [symbol, 'stance', scanned.side];
+    // A Sell/Cover-SOME is acted on once the position shrinks from where it stood when first raised.
+    const latest = opposing[0];
+    const previous = (context.previousAttention || []).find(item => item.id === `attention:portfolio:${hash(key).slice(0, 28)}`
+      && !['resolved', 'superseded'].includes(item.state));
+    const baseline = previous?.stanceBaseline?.date === latest.date ? previous.stanceBaseline : { date: latest.date, quantity: state.quantity };
+    if (partial && Math.abs(state.quantity) < Math.abs(baseline.quantity)) continue;
+    const order = partial ? null : orderText(state.quantity, 0);
+    const rows = [...positionRows(state), row('Action', `${stanceText(latest)} vs your ${held} → ${partial ? 'reduce' : 'exit'} ${held}`)];
+    if (opposing.length > 1) rows.push(row('Also against', opposing.slice(1).map(stanceText).join('; ')));
+    if (supporting.length) rows.push(row('Still for', supporting.map(stanceText).join('; ')));
+    if (order) rows.push({ ...row('Order', order), requiresFreshHoldings: true });
+    // The exact report behind a current alert explains its case; otherwise its headline does.
+    const reported = (context.events || []).find(event => event.sourceReport && event.productKey === latest.product
+      && symbolOf(event.entityId) === symbol && event.sourceMessageId === latest.sourceMessageId);
+    const contextLines = reported ? describeAnalystFinding({ event: reported, ...state }, [], now.getTime(), sentenceMemo).sourceContext || [] : [];
+    const said = contextLines.join(' ') || opposing.find(item => item.headline)?.headline;
+    if (said) rows.push(row('Context', said));
+    rows.push(...durationRows(context, symbol, now));
+    const sourceLinks = opposing.map(item => ({ label: STANCE_PRODUCT_NAMES[item.product], citation: { id: `cite_${hash([item.sourceUri, item.slot, item.date, item.stance]).slice(0, 24)}`,
+      title: `${STANCE_PRODUCT_NAMES[item.product]}: ${symbol} ${item.label}`, product: item.product, publicationDate: item.date, sourceUri: item.sourceUri, excerpt: item.headline || `${symbol} ${item.label}` } }));
+    output.push(finding({ key, material: [scanned.side, opposing.map(item => [item.slot, item.stance, item.date])],
+      symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: partial ? 'reduce' : 'exit',
+      publishedAt: opposing.map(item => item.at).sort().at(-1), rows, sourceLinks, state: { ...state, stanceBaseline: baseline } }));
+  }
+  return output;
+}
 function evaluateResearchAttention(context = {}, now = new Date()) {
   now = now instanceof Date ? now : new Date(now);
   // Reuse exact source text only within this evaluation; citations, security
@@ -429,8 +481,9 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   const diagnostics = [...(context.diagnostics || [])];
   if (!verified) diagnostics.push({ component: 'holdings', status: 'unavailable' });
   const portfolio = portfolioFindings(context, now, verified);
-  const actions = [...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...pendingCheckFindings(context, now, verified)];
-  const opportunities = opportunityFindings(context, now, verified, portfolio, sentenceMemo);
+  const stances = stanceFindings(context, now, verified, sentenceMemo);
+  const actions = [...stances, ...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...pendingCheckFindings(context, now, verified)];
+  const opportunities = opportunityFindings(context, now, verified, [...portfolio, ...stances], sentenceMemo);
   const accounts = accountFindings(context, now);
   const completeKinds = [];
   if (verified && context.holdings.researchComplete !== false && context.research?.scanComplete === true) completeKinds.push('portfolio');
