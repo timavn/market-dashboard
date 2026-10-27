@@ -99,7 +99,8 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
       const channel = index === 0 ? 'operations' : 'research';
       if (result.status === 'rejected') {
         findings.push(unavailableFinding(channel, now()));
-        diagnostics.push({ channel, code: 'ASSESSMENT_UNAVAILABLE' });
+        // The reason stays in the scan status; the Inbox shows only that the channel is unavailable.
+        diagnostics.push({ channel, code: 'ASSESSMENT_UNAVAILABLE', reason: String(result.reason?.message || result.reason || '').slice(0, 300) });
         continue;
       }
       const value = result.value;
