@@ -8,6 +8,13 @@ const PARTICIPATION_WINDOWS = Object.freeze({ '1m': 21, '3m': 63 });
 const PARTICIPATION_RATIO_BANDS = Object.freeze({ accumulationAtOrAbove: 1.1, distributionAtOrBelow: 0.9 });
 // Fewer up or down sessions than this leaves the ratio too noisy to label.
 const MIN_SESSIONS_PER_SIDE = 5;
+// Recent average daily volume is compared with the trailing year's average.
+const VOLUME_TREND_WINDOWS = Object.freeze({ '1w': 5, '1m': 21, '3m': 63 });
+const VOLUME_TREND_BASELINE = 252;
+// A 1M average more than 5% off the yearly norm reads light or heavy.
+const VOLUME_TREND_BAND = 0.05;
+// A window needs most of its sessions verified before it is averaged.
+const VOLUME_TREND_MIN_COVERAGE = 0.8;
 
 function positive(value) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
@@ -87,11 +94,45 @@ function calculateParticipation(volumeRows, closes) {
   };
 }
 
+// Conviction behind the tape, not direction: how busy recent sessions are
+// against the trailing year. Rows are calendar slots, so a session Cboe left
+// incomplete stays a gap instead of shifting the window.
+function calculateVolumeTrend(volumeRows) {
+  const rows = (volumeRows || []).filter(row => row?.date).sort((a, b) => b.date.localeCompare(a.date));
+  const windowAverage = (size) => {
+    const window = rows.slice(0, size);
+    const volumes = window.map(row => row.volume).filter(positive);
+    return window.length === size && volumes.length >= Math.ceil(size * VOLUME_TREND_MIN_COVERAGE)
+      ? average(volumes)
+      : null;
+  };
+  const baseline = windowAverage(VOLUME_TREND_BASELINE);
+  const windows = Object.fromEntries(Object.entries(VOLUME_TREND_WINDOWS).map(([key, size]) => {
+    const recent = windowAverage(size);
+    return [key, positive(recent) && positive(baseline) ? (recent / baseline) - 1 : null];
+  }));
+  const oneMonth = windows['1m'];
+  const read = !Number.isFinite(oneMonth)
+    ? 'unavailable'
+    : oneMonth < -VOLUME_TREND_BAND ? 'light' : oneMonth > VOLUME_TREND_BAND ? 'heavy' : 'normal';
+  const latest = rows.find(row => positive(row.volume)) || null;
+  return {
+    status: read === 'unavailable' ? 'unavailable' : 'ok',
+    asOf: rows[0]?.date || null,
+    latest: latest ? { date: latest.date, volume: latest.volume } : null,
+    baselineSessions: VOLUME_TREND_BASELINE,
+    windows,
+    read,
+  };
+}
+
 module.exports = {
   MIN_SESSIONS_PER_SIDE,
   PARTICIPATION_RATIO_BANDS,
   PARTICIPATION_WINDOWS,
+  VOLUME_TREND_BASELINE,
   calculateParticipation,
+  calculateVolumeTrend,
   pairSessions,
   participationRegime,
 };

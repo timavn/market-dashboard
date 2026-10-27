@@ -79,15 +79,18 @@ function summarizeMoneyFunds(series, now = new Date()) {
   const rows = (series || []).filter((point) => finite(point.value)).sort((a, b) => a.date.localeCompare(b.date));
   if (!rows.length) return { status: 'unavailable', latest: null };
   const latest = rows[rows.length - 1];
-  const change4w = pctChange(latest.value, rows[rows.length - 5]?.value);
-  const change13w = pctChange(latest.value, rows[rows.length - 14]?.value);
+  const change = (weeks) => pctChange(latest.value, rows[rows.length - 1 - weeks]?.value);
+  const change4w = change(4);
+  const change13w = change(13);
   return {
     status: ageDays(latest.date, now) > MMF_MAX_AGE_DAYS ? 'stale' : 'ok',
     latest: {
       date: latest.date,
       retailMoneyFunds: latest.value,
+      change1w: change(1),
       change4w,
       change13w,
+      change52w: change(52),
       cash: direction(change13w, 'building', 'drawing down'),
     },
   };

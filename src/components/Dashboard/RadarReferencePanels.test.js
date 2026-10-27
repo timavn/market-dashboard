@@ -10,7 +10,6 @@ import RadarReferencePanels, {
   readManualRecord,
 } from './RadarReferencePanels';
 import { resetSessionResourceStore } from '../../utils/sessionResourceStore';
-import { EXCHANGE_VOLUME_METHODOLOGY, EXCHANGE_VOLUME_WINDOWS } from '../../utils/exchangeVolume.cjs';
 import {
   createUnknownDashboardCardStatuses,
   mergeDashboardCardStatuses,
@@ -391,6 +390,68 @@ describe('radar reference volume card', () => {
     data: [],
   };
 
+  const fullMoneyFlow = {
+    verdict: 'neutral',
+    reasons: ['Net liquidity is mixed while volume is balanced; the two do not agree on a direction.'],
+    layers: {
+      netLiquidity: {
+        status: 'ok',
+        latest: {
+          date: '2026-10-21', netLiquidity: 5801, fedBalanceSheet: 6753, treasuryGeneralAccount: 952, reverseRepo: 0.2,
+          regime: 'mixed',
+          changes: { '1w': { pct: -0.0121 }, '13w': { pct: -0.0196 } },
+        },
+        history: [
+          { date: '2026-10-14', netLiquidity: 5872, fedBalanceSheet: 6755, treasuryGeneralAccount: 883, reverseRepo: 0.2 },
+          { date: '2026-10-21', netLiquidity: 5801, fedBalanceSheet: 6753, treasuryGeneralAccount: 952, reverseRepo: 0.2 },
+        ],
+      },
+      usStack: { date: '2026-10-01', regime: 'yellow', growth3m: 0.0618, stackToGdp: 0.94 },
+      participation: {
+        status: 'ok', regime: 'balanced', asOf: '2026-10-23',
+        windows: { '1m': { upDownRatio: 0.98 }, '3m': { upDownRatio: 1.051 } },
+        latest: { signal: 'light decline' },
+        volumeTrend: {
+          status: 'ok', asOf: '2026-10-23', baselineSessions: 252, read: 'light',
+          latest: { date: '2026-10-23', volume: 15.7e9 },
+          windows: { '1w': -0.1, '1m': -0.08, '3m': -0.09 },
+        },
+      },
+      margin: {
+        status: 'ok',
+        latest: {
+          marginDebt: 1480, freeCredit: 434, asOf: '2026-09-30', leverage: 'falling',
+          changes: {
+            '1m': { marginDebt: 0.018, freeCredit: 0.0206 },
+            '3m': { marginDebt: -0.0147, freeCredit: -0.0158 },
+            '12m': { marginDebt: 0.314, freeCredit: 0.0875 },
+          },
+        },
+      },
+      moneyFunds: {
+        status: 'ok',
+        latest: { date: '2026-08-31', retailMoneyFunds: 3034, change1w: -0.001, change4w: 0.0083, change13w: 0.0035, change52w: 0.055 },
+      },
+    },
+  };
+
+  const situationReport = {
+    date: '2026-07-13',
+    snapshotType: 'market-structure',
+    contentComplete: true,
+    data: {
+      signals: [
+        { id: 'spxGammaExposure', label: 'SPX Gamma Exposure', value: 'Negative', tone: 'negative' },
+        { id: 'systematicFlowRisk', label: 'Systematic Flow Risk', value: 'Bearish', tone: 'negative' },
+        { id: 'pvBandRiskReward', label: 'PV Band Risk/Reward', value: 'Neutral', tone: 'neutral' },
+        { id: 'strategicAllocation', label: 'Strategic Allocation', value: 'Risk On', tone: 'positive' },
+      ],
+      chartMetrics: { spxGammaVolatilityThrottle: { gammaThrottle: -8.28 } },
+      blocks: [{ type: 'paragraph', text: 'Dealers will start the week in negative gamma territory.' }],
+      charts: [],
+    },
+  };
+
   const originalResizeObserver = global.ResizeObserver;
 
   // The expanded Money Flow view draws Recharts containers, which need it.
@@ -482,12 +543,9 @@ describe('radar reference volume card', () => {
     expect(card.querySelector('header time')).not.toBeInTheDocument();
   });
 
-  test('renders three reference cards with Money Flow carrying supply, participation and volume', async () => {
-    MarketDataService.getMarketShareVolume.mockResolvedValue({
-      totalMarket: [],
-      totalExchange: [],
-      meta: { status: 'missing' },
-    });
+  test('renders three reference cards with Money Flow as one layered percent grid', async () => {
+    MarketDataService.getMoneyFlow.mockResolvedValue(fullMoneyFlow);
+    MarketDataService.getHedgeyeSnapshot.mockResolvedValue(situationReport);
 
     render(<RadarReferencePanels />);
 
@@ -499,31 +557,55 @@ describe('radar reference volume card', () => {
     const cftc = screen.getByRole('region', { name: 'CFTC Positioning' });
     const quads = screen.getByRole('region', { name: 'Global Quads' });
     const moneyFlow = screen.getByRole('region', { name: 'Money Flow' });
-    const volume = screen.getByRole('region', { name: 'Volume' });
     expect(cards).toEqual([cftc, quads, moneyFlow]);
     expect(within(referenceBar).queryByRole('region', { name: 'Dollar Liquidity' })).not.toBeInTheDocument();
-    expect(moneyFlow).toContainElement(volume);
-    expect(await within(moneyFlow).findByText('Neutral')).toHaveClass('money-flow-block--flat');
-    expect(within(moneyFlow).getByText('Neutral').closest('header')).toBeInTheDocument();
-    expect(within(moneyFlow).getByText('$5.80T')).toBeInTheDocument();
-    expect(within(moneyFlow).getByText('mixed')).toHaveClass('money-flow-block--flat');
-    expect(within(moneyFlow).getByText('−$116B')).toBeInTheDocument();
-    expect(within(moneyFlow).getByText('contracting')).toHaveClass('money-flow-block--down');
-    expect(within(moneyFlow).getByText('0.98')).toBeInTheDocument();
-    const supply = within(moneyFlow).getByRole('table', { name: 'Money flow supply' });
-    const participation = within(moneyFlow).getByRole('table', { name: 'Money flow participation' });
-    // Each side fills the card to the same twelve rows as Global Quads.
-    expect(within(supply).getAllByRole('row')).toHaveLength(12);
-    expect(within(supply).getByText('U.S. dollar liquidity 3M')).toBeInTheDocument();
-    expect(within(participation).getAllByRole('row')).toHaveLength(8);
-    expect(participation.compareDocumentPosition(volume)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // Volume is a row of the grid now; the exchange-volume table lives in the expanded view.
+    expect(within(referenceBar).queryByRole('region', { name: 'Volume' })).not.toBeInTheDocument();
+    expect(MarketDataService.getMarketShareVolume).not.toHaveBeenCalled();
+
+    const table = await within(moneyFlow).findByRole('table', { name: 'Money flow' });
+    // No header bar: the verdict fills the top-left cell and the title heads the Flow column.
+    expect(moneyFlow.querySelector('header')).not.toBeInTheDocument();
+    const [verdictCell, ...columns] = within(table).getAllByRole('columnheader');
+    await waitFor(() => expect(verdictCell).toHaveTextContent('Neutral'));
+    expect(verdictCell).toHaveClass('money-flow-block--flat');
+    expect(within(columns[0]).getByRole('button', { name: 'Money Flow' })).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(columns.map((cell) => cell.textContent)).toEqual(['Money Flow', 'Level', '1W', '1M', '3M', '1Y', 'Read']);
+
+    // The layers run down the left, each spanning its own rows, to Global Quads' thirteen rows.
+    await waitFor(() => expect(within(table).getAllByRole('rowheader').map((cell) => cell.getAttribute('rowspan')))
+      .toEqual(['3', '2', '3', '4']));
+    const tiles = within(table).getAllByRole('rowheader');
+    expect(within(table).getAllByRole('row')).toHaveLength(13);
+    // Each tile is filled with its read's color; the figure behind it is in the tooltip.
+    expect(tiles.map((tile) => tile.textContent)).toEqual(['Liquiditymixed', 'Tapebalanced', 'Investorsde-levering', 'Mechanicalselling']);
+    expect(tiles.map((tile) => tile.className.match(/money-flow-block--(\w+)/)[1])).toEqual(['flat', 'flat', 'down', 'down']);
+    expect(tiles[0]).toHaveAttribute('title', 'Fed net liquidity 3M: −1.96%');
+    expect(tiles[3]).toHaveAttribute('title', expect.stringContaining('2 of 4 signals bearish'));
+
+    const row = (label) => within(table).getByText(label).closest('tr');
+    const cells = (label) => Array.from(row(label).querySelectorAll('td')).map((cell) => cell.textContent);
+    // Every value prints without a sign; the Fed inputs are shares of net liquidity.
+    expect(cells('Fed net liquidity')).toEqual(['Fed net liquidity', '5.80T', '1.21%', '—', '1.96%', '—', 'mixed']);
+    expect(cells('Treasury cash released')).toEqual(['Treasury cash released', '952B', '1.18%', '—', '—', '—', '']);
+    expect(within(row('Treasury cash released')).getByText('1.18%')).toHaveClass('is-down');
+    // A window the source can't fill stays blank; a missing reading in a window it can fill is a dash.
+    expect(cells('Up vs down volume')).toEqual(['Up vs down volume', '0.98×', '', '2.00%', '5.10%', '', 'balanced']);
+    expect(cells('US volume vs 1Y avg')).toEqual(['US volume vs 1Y avg', '15.70B', '10.00%', '8.00%', '9.00%', '', 'light']);
+    expect(within(table).queryByText('Reverse repo released')).not.toBeInTheDocument();
+    expect(within(table).queryByText('U.S. M2 stack')).not.toBeInTheDocument();
+    // A shrinking cash balance is money put to work, so it reads green.
+    expect(within(row('Free credit deployed')).getByText('1.58%')).toHaveClass('is-up');
+    expect(within(row('Free credit deployed')).getByText('deploying')).toHaveClass('money-flow-block--up');
+    expect(cells('Dealer gamma')).toEqual(['Dealer gamma', 'GVT −8.28', 'Amplifies moves', 'Negative']);
+    expect(cells('Strategic allocation')).toEqual(['Strategic allocation', '', '', 'Risk On']);
+    expect(table.textContent.replace('GVT −8.28', '')).not.toMatch(/\$|−|\+/);
+
     expect(within(referenceBar).queryByRole('button', { name: /full view/i })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Market Situation' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Style Factors' })).not.toBeInTheDocument();
     expect(within(referenceBar).queryByRole('region', { name: 'Currencies' })).not.toBeInTheDocument();
-    await waitFor(() => expect(volume).toHaveAttribute('data-status', 'unavailable'));
-    expect(moneyFlow).toHaveAttribute('data-status', 'mixed');
-    expect(within(volume).queryByRole('button', { name: /status details/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(moneyFlow).toHaveAttribute('data-status', 'historical'));
     // The monthly U.S. stack loads only when the expanded view opens.
     expect(MarketDataService.getDollarLiquidityModels).not.toHaveBeenCalled();
   });
@@ -654,86 +736,61 @@ describe('radar reference volume card', () => {
     consoleError.mockRestore();
   });
 
-  test('shares one verified dated volume response with the Money Flow detail view', async () => {
-    MarketDataService.getMarketShareVolume.mockResolvedValue({
-      asOf: '2026-07-10',
-      totalMarket: [],
-      totalExchange: [{ date: '2026-07-10', volume: 120 }, { date: '2026-07-09', volume: 100 }],
-      metrics: {
-        exchange: {
-          priorDay: 120, avg1M: 100, avg3M: 100, avg1Y: 100,
-          pctPriorDay: 20, pct1M: 20, pct3M: 20, pct1Y: 20,
-        },
-      },
-      meta: {
-        status: 'current',
-        verified: true,
-        provider: 'Cboe',
-        sourceType: 'cboe-consolidated-volume',
-        asOfTradingDate: '2026-07-10',
-        expectedTradingDate: '2026-07-10',
-        fetchedAt: '2026-07-13T20:59:00.000Z',
-        methodologyVersion: EXCHANGE_VOLUME_METHODOLOGY,
-        comparisonWindows: EXCHANGE_VOLUME_WINDOWS,
-        sourceBreakdown: [{
-          id: 'cboeConsolidatedVolume', label: 'Cboe', provider: 'Cboe',
-          dataset: 'Historical Market Volume',
-          description: 'Tape A+B+C share volume, including FINRA-reported trades in listed stocks.',
-        }],
-      },
-    });
-    const onDashboardStatusChange = jest.fn();
-
-    render(<RadarReferencePanels onDashboardStatusChange={onDashboardStatusChange} />);
-
-    const panel = screen.getByRole('region', { name: 'Volume' });
-    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'mixed'));
-    const subhead = within(panel).getByRole('heading', { name: 'Volume (7/10)' });
-    expect(within(subhead).getByText('(7/10)')).toHaveAttribute('dateTime', '2026-07-10');
-    expect(within(panel).queryByText(/AS OF/)).not.toBeInTheDocument();
-    expect(within(panel).queryByText(/Tape A/)).not.toBeInTheDocument();
-    expect(within(panel).queryByText(/ACWX/)).not.toBeInTheDocument();
-    expect(within(panel).getByRole('row', { name: 'ex-US volume unavailable' })).toHaveTextContent('—');
-    expect(within(panel).queryByRole('button', { name: /status details/i })).not.toBeInTheDocument();
-    expect(onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'money-flow').diagnostics)
-      .toEqual(expect.arrayContaining([{ label: 'Volume', value: 'JUL 10' }]));
-
-    fireEvent.click(screen.getByRole('button', { name: 'Money Flow' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Money Flow' });
-    expect(within(dialog).queryByText(/AS OF/)).not.toBeInTheDocument();
-    expect(within(dialog).getByText(/Tape A\+B\+C/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/ACWX regular-session ETF volume/)).toHaveTextContent('not total overseas-exchange volume');
-    expect(MarketDataService.getMarketShareVolume).toHaveBeenCalledTimes(1);
-
-    MarketDataService.getMarketShareVolume.mockRejectedValue(new Error('offline'));
-    await act(async () => { await jest.advanceTimersByTimeAsync(15 * 60 * 1000); });
-
-    expect(panel).toHaveAttribute('data-status', 'unavailable');
-    expect(within(panel).getByText('UNAVAILABLE')).toBeInTheDocument();
-    expect(within(panel).queryByText('(7/10)')).not.toBeInTheDocument();
-    expect(within(panel).getByRole('heading', { name: 'Volume' })).toBeInTheDocument();
-    expect(within(dialog).queryByText('20%')).not.toBeInTheDocument();
-    expect(onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'money-flow'))
-      .toEqual(expect.objectContaining({ status: 'mixed' }));
-  });
-
-  test.each([
-    ['failed', () => MarketDataService.getMarketShareVolume.mockRejectedValue(new Error('offline'))],
-    ['missing', () => MarketDataService.getMarketShareVolume.mockResolvedValue({
-      totalMarket: [],
-      totalExchange: [],
-      meta: { status: 'missing', asOfTradingDate: null },
-    })],
-  ])('keeps a %s volume dataset unavailable', async (_case, arrange) => {
-    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
-    arrange();
+  test('expands to the same grid with every signal, the volume table and the full report', async () => {
+    MarketDataService.getMoneyFlow.mockResolvedValue(fullMoneyFlow);
+    MarketDataService.getHedgeyeSnapshot.mockResolvedValue(situationReport);
+    MarketDataService.getMarketShareVolume.mockResolvedValue({ totalMarket: [], totalExchange: [], meta: { status: 'missing' } });
 
     render(<RadarReferencePanels />);
 
-    const panel = screen.getByRole('region', { name: 'Volume' });
-    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'unavailable'));
-    expect(within(panel).queryByRole('button', { name: /status details/i })).not.toBeInTheDocument();
-    expect(within(panel).queryByText('PROVISIONAL')).not.toBeInTheDocument();
-    consoleError.mockRestore();
+    fireEvent.click(await screen.findByRole('button', { name: 'Money Flow' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Money Flow' });
+    const table = await within(dialog).findByRole('table', { name: 'Money flow' });
+    expect(table).toHaveClass('money-flow-grid--expanded');
+    await waitFor(() => expect(within(table).getAllByRole('rowheader').map((cell) => cell.getAttribute('rowspan')))
+      .toEqual(['5', '2', '3', '4']));
+    expect(within(table).getByText('Reverse repo released')).toBeInTheDocument();
+    expect(within(table).getByText('U.S. M2 stack').closest('tr')).toHaveTextContent('0.94×');
+    expect(within(dialog).getByText(/Investors and Mechanical are context and do not vote/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: 'Volume · vs trailing averages' })).toBeInTheDocument();
+    await waitFor(() => expect(MarketDataService.getMarketShareVolume).toHaveBeenCalledTimes(1));
+    expect(await within(dialog).findByText('UNAVAILABLE')).toBeInTheDocument();
+    expect(within(dialog).getByTestId('market-structure-reader')).toBeInTheDocument();
+  });
+
+  test.each([
+    ['missing', undefined],
+    ['unavailable', { status: 'unavailable', windows: {}, read: 'unavailable' }],
+  ])('marks Money Flow mixed when the Cboe volume trend is %s', async (_case, volumeTrend) => {
+    const onDashboardStatusChange = jest.fn();
+    MarketDataService.getMoneyFlow.mockResolvedValue({
+      ...fullMoneyFlow,
+      layers: {
+        ...fullMoneyFlow.layers,
+        participation: { ...fullMoneyFlow.layers.participation, volumeTrend },
+      },
+    });
+
+    render(<RadarReferencePanels onDashboardStatusChange={onDashboardStatusChange} />);
+
+    const moneyFlow = screen.getByRole('region', { name: 'Money Flow' });
+    await waitFor(() => expect(moneyFlow).toHaveAttribute('data-status', 'mixed'));
+    const status = onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'money-flow');
+    expect(status.diagnostics).toEqual(expect.arrayContaining([{ label: 'Volume', value: 'Unavailable' }]));
+    expect(status.issues).toContain('The Cboe volume trend is unavailable.');
+  });
+
+  test('dates the Money Flow volume diagnostic by the Cboe session', async () => {
+    const onDashboardStatusChange = jest.fn();
+    MarketDataService.getMoneyFlow.mockResolvedValue(fullMoneyFlow);
+
+    render(<RadarReferencePanels onDashboardStatusChange={onDashboardStatusChange} />);
+
+    await waitFor(() => expect(
+      onDashboardStatusChange.mock.calls.at(-1)[0].find(({ id }) => id === 'money-flow'),
+    ).toEqual(expect.objectContaining({
+      status: 'historical',
+      diagnostics: expect.arrayContaining([{ label: 'Volume', value: 'OCT 23' }]),
+    })));
   });
 });

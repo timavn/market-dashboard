@@ -221,6 +221,7 @@ const {
 const {
   createMarketEventsService,
 } = require('./src/services/marketEventsService.cjs');
+const { loadUsCpiConsensus } = require('./src/services/tradingEconomicsCalendarProvider.cjs');
 const { scanAllPages } = require('./src/utils/dynamoScanAllPages.cjs');
 const { createAsyncTtlCache } = require('./src/utils/serverResponseCache.cjs');
 const {
@@ -1254,6 +1255,11 @@ const loadHedgaiResearch = options => hedgaiResearchWorker.loadResearch(options)
 const { createSetupBoardLoader, emailPublishedAt, extraCboeSeries } = require('./src/services/predictionSetupBoard.cjs');
 const PREDICTION_EXTRA_CBOE_SERIES = extraCboeSeries();
 const predictionRangeHistoryCache = new Map();
+// History takes the dashboard alias for an index (SPX for ^GSPC); caret symbols are not accepted there.
+const predictionHistorySymbol = (symbol) => (symbol.startsWith('^')
+  ? Object.keys(YAHOO_TICKER_MAP).find((key) => YAHOO_TICKER_MAP[key] === symbol) || symbol : symbol);
+// The survey consensus changes a few times a month; one read an hour is plenty.
+let predictionCpiConsensus = null;
 const loadPredictionSetupBoard = createSetupBoardLoader({
   loadRiskRanges: async ({ now }) => {
     const envelope = await loadRiskRangePublicationEnvelope({ now });
@@ -1313,9 +1319,7 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
     const record = getTickerMapping(symbol).source === 'fred'
       ? await fetchFredHistoricalData(getTickerMapping(symbol).ticker, 600).then((rows) => (rows || [])
         .reduce((best, row) => (Number.isFinite(row.value) && (!best || row.value > best.value) ? { value: row.value, date: row.date } : best), null))
-      // History takes the dashboard alias for an index (SPX for ^GSPC); caret symbols are not accepted there.
-      : await fetchYahooMaximumAdjustedHistory(symbol.startsWith('^')
-        ? Object.keys(YAHOO_TICKER_MAP).find((key) => YAHOO_TICKER_MAP[key] === symbol) || symbol : symbol).then(({ bars }) => bars
+      : await fetchYahooMaximumAdjustedHistory(predictionHistorySymbol(symbol)).then(({ bars }) => bars
         .reduce((best, bar) => (Number.isFinite(bar.rawHigh) && (!best || bar.rawHigh > best.value) ? { value: bar.rawHigh, date: bar.date } : best), null),
       () => null);
     return record ? [symbol, { ...record, symbol }] : null;
@@ -1324,6 +1328,17 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
   loadVolumeHistory: async (symbols) => Object.fromEntries((await Promise.all(symbols.map((symbol) => fetchYahooAdjustedHistory(symbol, {
     cacheScope: 'prediction-volume', period1: String(Math.floor(Date.now() / 1000) - 200 * 86400),
   }).then(({ bars }) => [symbol, bars], () => null)))).filter(Boolean)),
+  // Recent daily closes for each market's own price, for its Z-score. Treasury yields read FRED.
+  loadPriceHistory: async (symbols) => Object.fromEntries((await Promise.all(symbols.map((symbol) => (getTickerMapping(symbol).source === 'fred'
+    ? fetchFredHistoricalData(getTickerMapping(symbol).ticker, 3).then((rows) => (rows || []).map((row) => ({ date: row.date, close: row.value })))
+    : fetchYahooMaximumAdjustedHistory(predictionHistorySymbol(symbol)).then(({ bars }) => bars.map((bar) => ({ date: bar.date, close: bar.rawClose }))))
+    .then((closes) => [symbol, closes], () => null)))).filter(Boolean)),
+  loadCpiConsensus: async () => {
+    if (predictionCpiConsensus && Date.now() - predictionCpiConsensus.at < 60 * 60_000) return predictionCpiConsensus.value;
+    const value = await loadUsCpiConsensus({ httpClient: axios, requestedAt: Date.now() });
+    predictionCpiConsensus = { at: Date.now(), value };
+    return value;
+  },
   marketDateFor: (now) => defaultResearchMarketDate(now),
 });
 // ?date=YYYY-MM-DD reads an earlier market day's morning research for the report's date picker.

@@ -1,4 +1,4 @@
-const { loadNextWeekCalendar } = require('./tradingEconomicsCalendarProvider.cjs');
+const { loadNextWeekCalendar, loadUsCpiConsensus } = require('./tradingEconomicsCalendarProvider.cjs');
 
 const NOW = Date.parse('2026-09-16T17:30:00.000Z');
 const COVERAGE = { from: '2026-09-20', to: '2026-09-26' };
@@ -187,5 +187,37 @@ describe('Trading Economics next-week calendar provider', () => {
     expect(snapshot.events.every(({ observedAt }) => observedAt === snapshot.sourceObservedAt)).toBe(true);
     expect(snapshot.events[2].startAt).toBe(coverage.from.startsWith('2026-03')
       ? '2026-03-15T03:30:00.000Z' : '2026-11-08T04:30:00.000Z');
+  });
+});
+
+describe('Trading Economics US CPI consensus', () => {
+  // Reduced from the US CPI page: its header cells are malformed (a <th> closed by </td>).
+  const cpiRow = (id, date, name, reference, actual, previous, consensus) => `<tr data-id="${id}" data-country="United States">
+    <td>${date}</td><td>12:30 PM</td><td><div class='d-none'>${name}</div></td><td id="reference">${reference}</span></td>
+    <td id="actual">${actual}</td><td id="previous">${previous}</td><td>${consensus}</td><td>3.6%</td></tr>`;
+  const cpiPage = (rows, headings = '<th>Calendar</td><th>GMT</th><th colspan="2"><span>Reference</span></th></th><th>Actual</th><th>Previous</th><th>Consensus</th><th>TEForecast</th>') =>
+    `<html><head><title>United States Inflation Rate</title></head><body>
+    <table id="calendar"><thead><tr>${headings}</tr></thead><tbody>${rows.join('')}</tbody></table></body></html>`;
+  const loadCpi = (data) => loadUsCpiConsensus({ httpClient: { get: jest.fn().mockResolvedValue(response(data)) }, requestedAt: NOW });
+
+  test('reads each CPI YoY print’s survey consensus, not the model forecast, by its reference month', async () => {
+    const result = await loadCpi(cpiPage([
+      cpiRow('1', '2026-10-14', 'Inflation Rate YoY', 'Sep', '3.7%', '3.4%', '3.6%'),
+      cpiRow('2', '2026-10-14', 'Core Inflation Rate YoY', 'Sep', '3.1%', '3.0%', '3.0%'),
+      cpiRow('3', '2026-11-10', 'Inflation Rate YoY', 'Oct', '', '3.7%', ''),
+      cpiRow('4', '2027-01-13', 'Inflation Rate YoY', 'Dec', '', '', '3.5%'),
+    ]));
+    expect(result.releases).toEqual([
+      { reportMonth: '2026-09', releaseDate: '2026-10-14', consensus: 3.6, previous: 3.4, actual: 3.7 },
+      { reportMonth: '2026-10', releaseDate: '2026-11-10', consensus: null, previous: 3.7, actual: null },
+      { reportMonth: '2026-12', releaseDate: '2027-01-13', consensus: 3.5, previous: null, actual: null },
+    ]);
+    expect(result.sourceUrl).toBe('https://tradingeconomics.com/united-states/inflation-cpi');
+  });
+
+  test('rejects a page whose calendar columns changed rather than misreading them', async () => {
+    const shuffled = '<th>Calendar</th><th>GMT</th><th>Reference</th><th>Actual</th><th>Consensus</th><th>Previous</th><th>TEForecast</th>';
+    await expect(loadCpi(cpiPage([cpiRow('1', '2026-10-14', 'Inflation Rate YoY', 'Sep', '3.7%', '3.4%', '3.6%')], shuffled)))
+      .rejects.toMatchObject({ code: 'CALENDAR_INVALID_RESPONSE' });
   });
 });

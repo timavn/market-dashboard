@@ -195,6 +195,26 @@ test('bias cells stack direction, date and product; missing readings read N/A', 
   expect(container).not.toHaveTextContent(/BIAS\(|MKT\(/);
 });
 
+test('boards with price history stack the 20-session Z-score under the market name', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Metals" />);
+  const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const cell = value => <Cell node={{ children: [{ type: 'text', value }] }}>{value}</Cell>;
+  const { container } = render(<table><tbody><tr>
+    {cell('NAME(Gold;;+2.1)')}{cell('MKT(Nasdaq-100;COMPQ range;-1.0)')}{cell('REF(US Dollar;DXY;+0.6)')}{cell('NAME(WTI;;)')}
+  </tr></tbody></table>);
+  const [gold, nasdaq, dollar, wti] = container.querySelectorAll('td');
+  expect([...gold.children].map(span => span.textContent)).toEqual(['Gold', 'Z +2.1']);
+  expect(gold.querySelector('.analyst-prediction-z--stretched')).toHaveTextContent('+2.1');
+  expect([...nasdaq.children].map(span => span.textContent)).toEqual(['Nasdaq-100', 'COMPQ range', 'Z −1.0']);
+  expect(nasdaq.querySelector('.analyst-prediction-z--stretched')).toBeNull();
+  expect(dollar).toHaveClass('analyst-prediction-reference-cell');
+  expect([...dollar.children].map(span => span.textContent)).toEqual(['US Dollar', 'DXY', 'Z +0.6']);
+  expect([...wti.children].map(span => span.textContent)).toEqual(['WTI', 'Z N/A']);
+  expect(gold).toHaveAttribute('title', 'Gold · Z-score +2.1 vs. the prior 20 daily closes');
+  expect(container).not.toHaveTextContent(/NAME\(|MKT\(|REF\(/);
+});
+
 test('the Dollar reference row and As of cells stack pull time with each signal publication and product', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Metals" />);

@@ -5,13 +5,12 @@ import { MarketDataService } from '../../services/api/marketDataService';
 import CFTCNetLongCard, { getCftcFreshness } from './CFTCNetLongCard';
 import DelayedDataMarker from './DelayedDataMarker';
 import { delayedMarkerMarketContext } from '../../utils/delayedMarkerMarketContext';
-import MoneyFlowPanel, { MoneyFlowPreview, VerdictPill } from './MoneyFlowPanel';
+import MoneyFlowPanel, { MoneyFlowPreview } from './MoneyFlowPanel';
 import GlobalQuadsCard, { QuadsPreview } from './GlobalQuadsCard';
 import { useGlobalQuads } from '../../hooks/useGlobalQuads';
 import MarketSituationReportCard, {
   getMarketSituationFreshness,
 } from './MarketSituationReportCard';
-import MarketVolumeTable, { getVolumeCardHeaderDate } from './MarketVolumeTable';
 import PersistentSurface from '../common/PersistentSurface';
 import { useDashboardResource } from '../../hooks/useDashboardResource';
 import { useMarketStructureReport } from '../../hooks/useMarketStructureReport';
@@ -166,11 +165,25 @@ const aggregateQuoteStatus = (rows, providerStatus, options) => {
   return 'live';
 };
 
+const PreviewTitle = ({ id, title, onOpen }) => (
+  <button
+    type="button"
+    className="efr-reference-card__title"
+    onClick={() => onOpen(id)}
+    id={`efr-reference-${id}`}
+    aria-haspopup="dialog"
+  >
+    {title}
+  </button>
+);
+
+// A headless card puts its title inside its own grid instead of a header bar.
 const PreviewCard = ({
   id,
   title,
   status,
   headerNote,
+  headless = false,
   onOpen,
   children,
 }) => (
@@ -179,18 +192,12 @@ const PreviewCard = ({
     aria-labelledby={`efr-reference-${id}`}
     data-status={status}
   >
-    <header className={`efr-reference-card__header${headerNote ? ' efr-reference-card__header--dated' : ''}`}>
-      <button
-        type="button"
-        className="efr-reference-card__title"
-        onClick={() => onOpen(id)}
-        id={`efr-reference-${id}`}
-        aria-haspopup="dialog"
-      >
-        {title}
-      </button>
-      {headerNote && <span className="efr-reference-card__header-note">{headerNote}</span>}
-    </header>
+    {!headless && (
+      <header className={`efr-reference-card__header${headerNote ? ' efr-reference-card__header--dated' : ''}`}>
+        <PreviewTitle id={id} title={title} onOpen={onOpen} />
+        {headerNote && <span className="efr-reference-card__header-note">{headerNote}</span>}
+      </header>
+    )}
     <div className="efr-reference-card__body">{children}</div>
   </section>
 );
@@ -374,7 +381,11 @@ const FullReferencePanel = ({
             <GlobalQuadsCard resourceState={quadsResource} />
           </PersistentSurface>
           <PersistentSurface active={activePanel === 'money-flow'}>
-            <MoneyFlowPanel resourceState={moneyFlowState} liquidityState={liquidityState} />
+            <MoneyFlowPanel
+              resourceState={moneyFlowState}
+              liquidityState={liquidityState}
+              situationState={marketSituationState}
+            />
           </PersistentSurface>
         </div>
       </section>
@@ -384,10 +395,6 @@ const FullReferencePanel = ({
 
 const RadarReferencePanels = ({ onDashboardStatusChange }) => {
   const [activePanel, setActivePanel] = useState(null);
-  const [volumeMeta, setVolumeMeta] = useState({ sources: [], asOf: null, datasetStatus: null });
-  const volumeTitle = <>Volume{volumeMeta.asOf ? (
-    <> <time dateTime={volumeMeta.asOf}>({getVolumeCardHeaderDate({ asOf: volumeMeta.asOf })})</time></>
-  ) : null}</>;
   const quadsResource = useGlobalQuads();
   const lastTriggerRef = useRef(null);
   const loadCftc = useCallback(async () => {
@@ -483,31 +490,6 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     || cftcAgeMs > 10 * 24 * 60 * 60 * 1000
     || cftcState.data?.cacheState === 'stale'
   );
-  const volumeStatus = useMemo(() => {
-    if (!volumeMeta.sources.length) return 'loading';
-    const availableSources = volumeMeta.sources.filter((source) => source.status === 'current');
-    if (!availableSources.length) return 'unavailable';
-    if (availableSources.length < volumeMeta.sources.length) return 'mixed';
-    return 'historical';
-  }, [volumeMeta.sources]);
-  const handleVolumeSources = useCallback((sources) => {
-    setVolumeMeta((current) => ({ ...current, sources: Array.isArray(sources) ? sources : [] }));
-  }, []);
-  const handleVolumeHeader = useCallback((asOf) => {
-    setVolumeMeta((current) => ({ ...current, asOf: asOf ? current.asOf : null }));
-  }, []);
-  const handleVolumeMetadata = useCallback((metadata) => {
-    setVolumeMeta((current) => ({
-      ...current,
-      asOf: metadata?.asOfTradingDate || null,
-      datasetStatus: metadata?.status || null,
-    }));
-  }, []);
-  const volumeSourceIssues = useMemo(() => volumeMeta.sources
-    .filter((source) => source?.status !== 'current')
-    .map((source) => (
-      `${source?.label || source?.name || 'Volume source'}: ${source?.detail || source?.status || 'unavailable'}`
-    )), [volumeMeta.sources]);
   const cftcStatus = cftcState.loading
     ? 'loading'
     : cftcStale
@@ -525,6 +507,8 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     || null;
   const moneyFlowVerdict = moneyFlowState.data?.verdict || null;
   const moneyFlowStale = moneyFlowState.data?.layers?.netLiquidity?.status === 'stale';
+  const moneyFlowVolume = moneyFlowState.data?.layers?.participation?.volumeTrend || null;
+  const moneyFlowVolumeOk = moneyFlowVolume?.status === 'ok';
   const moneyFlowSupplyStatus = moneyFlowState.loading
     ? 'loading'
     : !moneyFlowVerdict || moneyFlowVerdict === 'unavailable'
@@ -532,15 +516,15 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
       : moneyFlowStale
         ? 'delayed'
         : 'historical';
-  // The card carries both the verdict and the exchange-volume table, so one
+  // The card carries both the verdict and the Cboe volume trend, so one
   // missing half reads as mixed rather than hiding the other.
   const moneyFlowStatus = moneyFlowSupplyStatus === 'loading'
     ? 'loading'
     : moneyFlowSupplyStatus === 'unavailable'
-      ? (['historical', 'mixed'].includes(volumeStatus) ? 'mixed' : 'unavailable')
-      : volumeStatus === 'unavailable' || volumeStatus === 'mixed'
-        ? 'mixed'
-        : moneyFlowSupplyStatus;
+      ? (moneyFlowVolumeOk ? 'mixed' : 'unavailable')
+      : moneyFlowVolumeOk
+        ? moneyFlowSupplyStatus
+        : 'mixed';
   const dashboardCardStatuses = useMemo(() => [
     {
       id: 'cftc-positioning',
@@ -605,13 +589,13 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
       diagnostics: [
         { label: 'Verdict', value: moneyFlowVerdict || 'Checking' },
         { label: 'Net liquidity', value: moneyFlowState.data?.layers?.netLiquidity?.latest?.date || 'Unavailable' },
-        { label: 'Volume', value: volumeMeta.asOf ? formatDate(volumeMeta.asOf) : volumeMeta.datasetStatus || 'Checking' },
+        { label: 'Volume', value: moneyFlowVolumeOk ? formatDate(moneyFlowVolume.asOf) : moneyFlowState.loading ? 'Checking' : 'Unavailable' },
       ],
       issues: [
         moneyFlowState.error ? `Money flow request: ${moneyFlowState.error}` : null,
         moneyFlowStale ? 'The latest weekly Fed release is older than expected.' : null,
         ...(moneyFlowVerdict === 'unavailable' ? moneyFlowState.data?.reasons || [] : []),
-        ...volumeSourceIssues,
+        !moneyFlowState.loading && !moneyFlowVolumeOk ? 'The Cboe volume trend is unavailable.' : null,
       ].filter(Boolean),
     },
   ], [
@@ -619,6 +603,7 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     moneyFlowStale,
     moneyFlowState.data,
     moneyFlowState.error,
+    moneyFlowState.loading,
     moneyFlowStatus,
     moneyFlowVerdict,
     cftcDate,
@@ -639,8 +624,8 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
     quadsResource.error,
     quadsResource.initialLoading,
     situationStatus,
-    volumeMeta,
-    volumeSourceIssues,
+    moneyFlowVolume,
+    moneyFlowVolumeOk,
   ]);
 
   useEffect(() => {
@@ -679,23 +664,14 @@ const RadarReferencePanels = ({ onDashboardStatusChange }) => {
             id="money-flow"
             title="Money Flow"
             status={moneyFlowStatus}
-            headerNote={moneyFlowVerdict && <VerdictPill verdict={moneyFlowVerdict} />}
+            headless
             onOpen={openPanel}
           >
             <MoneyFlowPreview
               data={moneyFlowState.data}
+              situation={marketSituationState.data}
               loading={moneyFlowState.loading}
-              volume={(
-                <section className="money-flow-card__volume" aria-label="Volume" data-status={volumeStatus}>
-                  <h3 className="money-flow-card__subhead">{volumeTitle}</h3>
-                  <MarketVolumeTable
-                    onSourcesChange={handleVolumeSources}
-                    onHeaderNoteChange={handleVolumeHeader}
-                    onMetadataChange={handleVolumeMetadata}
-                    showAsOf={false}
-                  />
-                </section>
-              )}
+              title={<PreviewTitle id="money-flow" title="Money Flow" onOpen={openPanel} />}
             />
           </PreviewCard>
         </div>

@@ -4,15 +4,23 @@ import { Activity, Landmark } from 'lucide-react';
 import LoadingIndicator from '../common/LoadingIndicator';
 import MarketVolumeTable from './MarketVolumeTable';
 import UsDollarLiquidityPanel from './DollarLiquidityModels';
+import MarketSituationReportCard, { getMarketSituationFreshness } from './MarketSituationReportCard';
 import './MoneyFlowPanel.css';
 
-const CHANGE_WINDOWS = ['1w', '4w', '13w', '52w'];
 const VERDICT_LABELS = {
   inflow: 'Inflow',
   outflow: 'Outflow',
   neutral: 'Neutral',
   unavailable: 'Unavailable',
 };
+
+// Every flow is a percent change over the same four windows. Weekly Fed data
+// counts weeks; monthly FINRA data fills 1M, 3M and 1Y only.
+const WINDOWS = [['1w', '1W'], ['1m', '1M'], ['3m', '3M'], ['1y', '1Y']];
+const NET_WEEKS = { '1w': 1, '1m': 4, '3m': 13, '1y': 52 };
+const NET_CHANGE_KEYS = { '1w': '1w', '1m': '4w', '3m': '13w', '1y': '52w' };
+// Cash moves under half a percent read flat, like FINRA and FRED summaries.
+const CASH_BAND = 0.005;
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
 
@@ -24,11 +32,8 @@ export const formatBillions = (value, { signed = false } = {}) => {
   return `${sign}$${abs.toFixed(abs < 10 ? 1 : 0)}B`;
 };
 
-const formatPct = (value, digits = 1) => (
-  isNumber(value) ? `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value * 100).toFixed(digits)}%` : '—'
-);
-
-const formatRatio = (value) => (isNumber(value) ? value.toFixed(2) : '—');
+// Grid levels drop the $, like the rest of the dashboard's level columns.
+const formatLevel = (value) => (isNumber(value) ? formatBillions(value).replace('$', '') : '—');
 
 const formatShares = (value) => (isNumber(value) ? `${(value / 1e9).toFixed(2)}B` : '—');
 
@@ -39,14 +44,21 @@ const shortDate = (date) => {
   return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 };
 
+const monthLabel = (date) => {
+  if (!date) return '—';
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime())
+    ? date
+    : parsed.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+};
+
 // Same four-color blocks as Global Quads: green adds money to stocks, red
 // drains it, yellow is mixed or low conviction, white is no reading.
 const UP_READS = new Set([
-  'inflow', 'expanding', 'accumulation', 'confirmed advance', 'leverage rising', 'cash drawing down', 'adding', 'green',
+  'inflow', 'expanding', 'accumulation', 'rising', 'levering up', 'deploying', 'buying', 'green',
 ]);
 const DOWN_READS = new Set([
-  'outflow', 'contracting', 'distribution', 'confirmed decline', 'leverage falling', 'cash building', 'draining',
-  'red risk',
+  'outflow', 'contracting', 'distribution', 'falling', 'de-levering', 'building', 'selling', 'red',
 ]);
 
 const readTone = (read = '') => {
@@ -57,196 +69,309 @@ const readTone = (read = '') => {
   return 'flat';
 };
 
-const directionClass = (direction = '') => ({
-  up: 'is-up', down: 'is-down', flat: 'is-flat', none: 'is-muted',
-}[readTone(direction)]);
+const flowPct = (value) => `${Math.abs(value * 100).toFixed(2)}%`;
 
-export const ReadBlock = ({ read, label = read, strong = false }) => (
-  <span className={`money-flow-block money-flow-block--${readTone(read)}${strong ? ' money-flow-block--strong' : ''}`}>
-    {label || '—'}
-  </span>
-);
+// A flow prints without its sign: green when money moved toward stocks, red
+// when it moved away, gray when it rounds to nothing.
+const FlowValue = ({ value }) => {
+  if (!isNumber(value)) return <span className="is-muted">—</span>;
+  const text = flowPct(value);
+  const tone = text === '0.00%' ? 'is-muted' : value > 0 ? 'is-up' : 'is-down';
+  return <span className={tone}>{text}</span>;
+};
 
-export const VerdictPill = ({ verdict }) => (
-  <ReadBlock read={verdict} label={VERDICT_LABELS[verdict] || VERDICT_LABELS.unavailable} strong />
-);
+// A row lists only the windows its source can fill; the rest stay blank, and
+// a listed window with no reading shows a dash.
+const pickWindows = (keys, source = {}) => Object.fromEntries(keys.map((key) => [key, source?.[key] ?? null]));
 
-// Weekly change in one net-liquidity input. Moves under $10B read flat.
-// Fed assets add money as they grow; the Treasury account and reverse repo
-// take cash out of the system as they fill.
-const componentRead = (history = [], key, weeks, [upRead, downRead]) => {
+const describeFigure = (label, value) => `${label}: ${isNumber(value) ? `${value < 0 ? '−' : ''}${flowPct(value)}` : 'unavailable'}`;
+
+const cashRead = (deployed) => {
+  if (!isNumber(deployed)) return 'unavailable';
+  if (deployed > CASH_BAND) return 'deploying';
+  if (deployed < -CASH_BAND) return 'building';
+  return 'flat';
+};
+
+const negate = (value) => (isNumber(value) ? -value : null);
+
+// Each Fed input as a share of the prior net liquidity, signed so that money
+// added to the system is positive. The three inputs add up to the net change.
+const contributions = (history = [], key, sign) => {
   const latest = history[history.length - 1];
-  const prior = history[history.length - 1 - weeks];
-  const change = latest && prior ? latest[key] - prior[key] : null;
-  if (!isNumber(change)) return { change: null, read: 'unavailable' };
-  if (Math.abs(change) < 10) return { change, read: 'flat' };
-  return { change, read: change > 0 ? upRead : downRead };
+  return Object.fromEntries(WINDOWS.map(([window]) => {
+    const prior = history[history.length - 1 - NET_WEEKS[window]];
+    const ok = latest && prior && isNumber(latest[key]) && isNumber(prior[key]) && prior.netLiquidity > 0;
+    return [window, ok ? (sign * (latest[key] - prior[key])) / prior.netLiquidity : null];
+  }));
 };
 
-const FED_ASSETS_READS = ['expanding', 'contracting'];
-const CASH_ACCOUNT_READS = ['draining', 'adding'];
-
-// Idle brokerage and fund cash piling up is money parked outside stocks.
-const cashRead = (pct) => {
-  if (!isNumber(pct)) return 'unavailable';
-  if (pct > 0.005) return 'cash building';
-  if (pct < -0.005) return 'cash drawing down';
-  return 'cash flat';
+const liquidityLayer = (data, { expanded }) => {
+  const model = data?.layers?.netLiquidity;
+  const net = model?.latest;
+  const history = model?.history || [];
+  const stack = data?.layers?.usStack;
+  const netValues = Object.fromEntries(WINDOWS.map(([window]) => [window, net?.changes?.[NET_CHANGE_KEYS[window]]?.pct ?? null]));
+  const source = net ? `Fed H.4.1 · week of ${shortDate(net.date)}` : 'Fed H.4.1 unavailable';
+  return {
+    id: 'liquidity',
+    name: 'Liquidity',
+    summary: describeFigure('Fed net liquidity 3M', netValues['3m']),
+    read: net?.regime || 'unavailable',
+    rows: [
+      { label: 'Fed net liquidity', source, level: formatLevel(net?.netLiquidity), values: netValues, read: net?.regime },
+      { label: 'Fed balance sheet', sub: true, source, level: formatLevel(net?.fedBalanceSheet), values: contributions(history, 'fedBalanceSheet', 1) },
+      { label: 'Treasury cash released', sub: true, source, level: formatLevel(net?.treasuryGeneralAccount), values: contributions(history, 'treasuryGeneralAccount', -1) },
+      // The reverse repo has sat near zero since 2025 and the M2 stack only
+      // moves monthly, so both earn rows only in the expanded view.
+      ...(expanded ? [
+        { label: 'Reverse repo released', sub: true, source, level: formatLevel(net?.reverseRepo), values: contributions(history, 'reverseRepo', -1) },
+        {
+          label: 'U.S. M2 stack',
+          source: stack ? `FRED · ${monthLabel(stack.date)} · M2 stack to GDP` : 'FRED unavailable',
+          level: isNumber(stack?.stackToGdp) ? `${stack.stackToGdp.toFixed(2)}×` : '—',
+          values: { '3m': stack?.growth3m ?? null },
+          read: stack?.regime,
+        },
+      ] : []),
+    ],
+  };
 };
 
-const PreviewTable = ({ label, rows }) => (
-  <table className="efr-mini-table money-flow-mini" aria-label={`Money flow ${label.toLowerCase()}`}>
-    <thead>
-      <tr><th>{label}</th><th>Value</th><th>Read</th></tr>
-    </thead>
-    <tbody>
-      {rows.map(([rowLabel, value, read, readLabel]) => (
-        <tr key={rowLabel}>
-          <td>{rowLabel}</td>
-          <td>{value}</td>
-          <td className={`money-flow-read money-flow-block--${readTone(read)}`}>{readLabel || read || '—'}</td>
-        </tr>
-      ))}
-    </tbody>
-  </table>
+const tapeLayer = (data) => {
+  const participation = data?.layers?.participation;
+  const trend = participation?.volumeTrend;
+  const ratio = (window) => participation?.windows?.[window]?.upDownRatio;
+  const skew = (window) => (isNumber(ratio(window)) ? ratio(window) - 1 : null);
+  const asOf = participation?.asOf ? `Cboe · through ${shortDate(participation.asOf)}` : 'Cboe unavailable';
+  return {
+    id: 'tape',
+    name: 'Tape',
+    summary: describeFigure('Up vs down volume 1M', skew('1m')),
+    read: participation?.regime || 'unavailable',
+    rows: [
+      {
+        label: 'Up vs down volume',
+        source: `${asOf} · up-session volume over down-session volume`,
+        level: isNumber(ratio('1m')) ? `${ratio('1m').toFixed(2)}×` : '—',
+        values: { '1m': skew('1m'), '3m': skew('3m') },
+        read: participation?.regime,
+      },
+      {
+        label: 'US volume vs 1Y avg',
+        source: `${asOf} · average daily volume against the trailing ${trend?.baselineSessions || 252} sessions`,
+        level: formatShares(trend?.latest?.volume),
+        values: pickWindows(['1w', '1m', '3m'], trend?.windows),
+        read: trend?.read,
+      },
+    ],
+  };
+};
+
+const investorsLayer = (data) => {
+  const margin = data?.layers?.margin?.latest;
+  const funds = data?.layers?.moneyFunds?.latest;
+  const marginChange = (window, field) => margin?.changes?.[window]?.[field] ?? null;
+  const freeCredit = {
+    '1m': negate(marginChange('1m', 'freeCredit')),
+    '3m': negate(marginChange('3m', 'freeCredit')),
+    '1y': negate(marginChange('12m', 'freeCredit')),
+  };
+  const fundsDeployed = {
+    '1w': negate(funds?.change1w),
+    '1m': negate(funds?.change4w),
+    '3m': negate(funds?.change13w),
+    '1y': negate(funds?.change52w),
+  };
+  const finra = margin ? `FINRA · ${monthLabel(margin.asOf)}` : 'FINRA unavailable';
+  const leverage = margin?.leverage;
+  return {
+    id: 'investors',
+    name: 'Investors',
+    summary: describeFigure('Margin debt 3M', marginChange('3m', 'marginDebt')),
+    read: { rising: 'levering up', falling: 'de-levering', flat: 'steady' }[leverage] || 'unavailable',
+    rows: [
+      {
+        label: 'Margin debt',
+        source: finra,
+        level: formatLevel(margin?.marginDebt),
+        values: { '1m': marginChange('1m', 'marginDebt'), '3m': marginChange('3m', 'marginDebt'), '1y': marginChange('12m', 'marginDebt') },
+        read: leverage,
+      },
+      {
+        label: 'Free credit deployed',
+        source: `${finra} · idle brokerage cash; a falling balance is cash put to work`,
+        level: formatLevel(margin?.freeCredit),
+        values: freeCredit,
+        read: cashRead(freeCredit['3m']),
+      },
+      {
+        label: 'Money funds deployed',
+        source: funds ? `FRED WRMFNS · ${shortDate(funds.date)} · a falling balance is cash put to work` : 'FRED WRMFNS unavailable',
+        level: formatLevel(funds?.retailMoneyFunds),
+        values: fundsDeployed,
+        read: cashRead(fundsDeployed['3m']),
+      },
+    ],
+  };
+};
+
+// Market Situation Report signals. Matched by label because the report's ids
+// have changed between parser versions.
+const SITUATION_SIGNALS = [
+  { pattern: /gamma/i, label: 'Dealer gamma', notes: { negative: 'Amplifies moves', positive: 'Dampens moves' } },
+  { pattern: /systematic/i, label: 'Systematic flows', notes: { negative: 'CTAs selling', positive: 'CTAs buying' } },
+  { pattern: /pv band/i, label: 'PV band risk/reward', notes: {} },
+  { pattern: /strategic/i, label: 'Strategic allocation', notes: {} },
+];
+const SIGNAL_TONES = { positive: 'up', negative: 'down', neutral: 'flat' };
+
+const mechanicalLayer = (situation) => {
+  const freshness = getMarketSituationFreshness(situation);
+  const signals = freshness.status === 'unavailable' ? [] : situation?.data?.signals || [];
+  const gvt = situation?.data?.chartMetrics?.spxGammaVolatilityThrottle?.gammaThrottle;
+  const source = freshness.detail ? `Market Situation Report · ${freshness.detail}` : 'Market Situation Report unavailable';
+  const rows = SITUATION_SIGNALS.map((definition) => {
+    const signal = signals.find((candidate) => definition.pattern.test(candidate?.label || ''));
+    const tone = SIGNAL_TONES[signal?.tone] || 'none';
+    return {
+      label: definition.label,
+      source: freshness.status === 'delayed' ? `${source} · stale` : source,
+      level: /gamma/i.test(definition.label) && isNumber(gvt) ? `GVT ${gvt < 0 ? '−' : ''}${Math.abs(gvt).toFixed(2)}` : '',
+      note: definition.notes[signal?.tone] || '',
+      read: signal ? { label: signal.value, tone } : null,
+    };
+  });
+  const negatives = signals.filter((signal) => signal?.tone === 'negative').length;
+  const positives = signals.filter((signal) => signal?.tone === 'positive').length;
+  return {
+    id: 'mechanical',
+    name: 'Mechanical',
+    summary: signals.length ? `${negatives} of ${signals.length} signals bearish · ${source}` : source,
+    read: !signals.length ? 'unavailable' : negatives > positives ? 'selling' : positives > negatives ? 'buying' : 'mixed',
+    rows,
+  };
+};
+
+export const buildFlowLayers = (data, situation, { expanded = false } = {}) => [
+  liquidityLayer(data, { expanded }),
+  tapeLayer(data),
+  investorsLayer(data),
+  mechanicalLayer(situation),
+];
+
+const readOf = (read) => (read && typeof read === 'object'
+  ? read
+  : { label: read, tone: readTone(read) });
+
+const ReadCell = ({ read }) => {
+  if (!read) return <td className="money-flow-read" />;
+  const { label, tone } = readOf(read);
+  return <td className={`money-flow-read money-flow-block--${tone}`}>{label || '—'}</td>;
+};
+
+// A tile is colored by its layer's read, like a Global Quads cell; the
+// figure behind the read sits in its tooltip.
+const LayerTile = ({ layer, rowSpan }) => (
+  <th
+    scope="rowgroup"
+    rowSpan={rowSpan}
+    className={`money-flow-grid__tile money-flow-block--${readTone(layer.read)}`}
+    title={layer.summary}
+  >
+    <span className="money-flow-grid__tile-name">{layer.name}</span>
+    <span className="money-flow-grid__tile-read">{layer.read}</span>
+  </th>
 );
 
-// One card for money entering or leaving stocks: supply on the left, the
-// volume and positioning that confirm it on the right. `volume` is the
-// exchange-volume table, which loads on its own.
-// The volume table keeps the same slot in every state so it never remounts.
-const MoneyFlowCard = ({ supply, participation, volume }) => (
+// Layers run down the left, each tile spanning its own rows; every row reads
+// green when money moved toward stocks over that window.
+export const MoneyFlowGrid = ({ data, situation, title = 'Money Flow', expanded = false, empty = null }) => {
+  const layers = buildFlowLayers(data, situation, { expanded });
+  return (
+    <table className={`efr-mini-table money-flow-grid${expanded ? ' money-flow-grid--expanded' : ''}`} aria-label="Money flow">
+      <thead>
+        <tr>
+          <th
+            scope="col"
+            className={`money-flow-grid__verdict money-flow-block--${data ? readTone(data.verdict) : 'none'}`}
+            title="Verdict: supply leads, volume confirms"
+          >
+            {data ? VERDICT_LABELS[data.verdict] || VERDICT_LABELS.unavailable : ''}
+          </th>
+          <th scope="col" className="money-flow-grid__title">{title}</th>
+          <th scope="col">Level</th>
+          {WINDOWS.map(([window, label]) => <th scope="col" key={window}>{label}</th>)}
+          <th scope="col">Read</th>
+        </tr>
+      </thead>
+      <tbody>
+        {!data ? (
+          <tr><td colSpan={WINDOWS.length + 4} className="money-flow-grid__empty">{empty}</td></tr>
+        ) : layers.flatMap((layer) => layer.rows.map((row, index) => (
+          <tr key={`${layer.id}-${row.label}`} data-layer={layer.id}>
+            {index === 0 && <LayerTile layer={layer} rowSpan={layer.rows.length} />}
+            <td className={row.sub ? 'money-flow-grid__sub' : undefined} title={row.source}>{row.label}</td>
+            <td>{row.level}</td>
+            {row.note !== undefined
+              ? <td colSpan={WINDOWS.length} className="money-flow-grid__note">{row.note}</td>
+              : WINDOWS.map(([window]) => (
+                <td key={window}>{row.values && window in row.values ? <FlowValue value={row.values[window]} /> : null}</td>
+              ))}
+            <ReadCell read={row.read} />
+          </tr>
+        )))}
+      </tbody>
+    </table>
+  );
+};
+
+export const MoneyFlowPreview = ({ data, situation, loading = false, title }) => (
   <div className="money-flow-card">
-    {supply}
-    <div className="money-flow-card__column">
-      {participation}
-      {volume}
-    </div>
+    <MoneyFlowGrid
+      data={data}
+      situation={situation}
+      title={title}
+      empty={loading ? <LoadingIndicator label="Loading money flow…" size="sm" /> : 'No verified data available'}
+    />
   </div>
 );
 
-export const MoneyFlowPreview = ({ data, loading = false, volume = null }) => {
-  if (!data) {
-    const empty = (
-      <div className="efr-reference-empty">{loading ? <LoadingIndicator label="Loading money flow…" size="sm" /> : 'No verified data available'}</div>
-    );
-    return <MoneyFlowCard supply={empty} participation={null} volume={volume} />;
-  }
-  const netModel = data.layers?.netLiquidity;
-  const net = netModel?.latest;
-  const participation = data.layers?.participation;
-  const margin = data.layers?.margin?.latest;
-  const funds = data.layers?.moneyFunds?.latest;
-  const usStack = data.layers?.usStack;
-  const change = (key) => net?.changes?.[key];
-  const componentRow = (label, key, weeks, reads) => {
-    const { change: delta, read } = componentRead(netModel?.history, key, weeks, reads);
-    return [label, formatBillions(delta, { signed: true }), read];
-  };
-  const supplyRows = [
-    ['Fed net liquidity', formatBillions(net?.netLiquidity), net?.regime],
-    ['1W change', formatBillions(change('1w')?.change, { signed: true }), change('1w')?.direction],
-    ['4W change', formatBillions(change('4w')?.change, { signed: true }), change('4w')?.direction],
-    ['13W change', formatBillions(change('13w')?.change, { signed: true }), change('13w')?.direction],
-    ['52W change', formatBillions(change('52w')?.change, { signed: true }), change('52w')?.direction],
-    componentRow('Fed balance sheet 1W', 'fedBalanceSheet', 1, FED_ASSETS_READS),
-    componentRow('Fed balance sheet 4W', 'fedBalanceSheet', 4, FED_ASSETS_READS),
-    componentRow('Treasury cash 1W', 'treasuryGeneralAccount', 1, CASH_ACCOUNT_READS),
-    componentRow('Treasury cash 4W', 'treasuryGeneralAccount', 4, CASH_ACCOUNT_READS),
-    componentRow('Reverse repo 4W', 'reverseRepo', 4, CASH_ACCOUNT_READS),
-    ['U.S. dollar liquidity 3M', formatPct(usStack?.growth3m), usStack?.regime],
-  ];
-  const freeCredit = margin?.changes?.['3m']?.freeCredit;
-  const funds4w = cashRead(funds?.change4w);
-  const participationRows = [
-    ['Up/down volume 1M', formatRatio(participation?.windows?.['1m']?.upDownRatio), participation?.windows?.['1m']?.regime],
-    ['Up/down volume 3M', formatRatio(participation?.windows?.['3m']?.upDownRatio), participation?.windows?.['3m']?.regime],
-    [
-      `S&P ${participation?.asOf ? shortDate(participation.asOf) : 'last session'}`,
-      participation?.latest ? `${formatPct(participation.latest.change, 2)} · vol ${formatPct(participation.latest.volumeVs1m, 0)}` : '—',
-      participation?.latest?.signal,
-    ],
-    ['Margin debt 3M', formatPct(margin?.changes?.['3m']?.marginDebt), margin ? `leverage ${margin.leverage}` : null, margin?.leverage],
-    ['Brokerage free credit 3M', formatPct(freeCredit), cashRead(freeCredit), cashRead(freeCredit).replace('cash ', '')],
-    ['Retail money funds 4W', formatPct(funds?.change4w), funds4w, funds4w.replace('cash ', '')],
-    ['Retail money funds 13W', formatPct(funds?.change13w), funds ? `cash ${funds.cash}` : null, funds?.cash],
-  ];
-  return (
-    <MoneyFlowCard
-      supply={<PreviewTable label="Supply" rows={supplyRows} />}
-      participation={<PreviewTable label="Participation" rows={participationRows} />}
-      volume={volume}
-    />
-  );
-};
-
-const SupplySection = ({ model }) => {
-  const latest = model?.latest;
-  return (
-    <section className="dollar-liquidity-model">
-      <div className="dollar-liquidity-model-header">
-        <div className="dollar-liquidity-title-block">
-          <Landmark size={16} />
-          <div>
-            <h3>Supply · Fed net liquidity</h3>
-            <span>Fed balance sheet − Treasury account − reverse repo</span>
-          </div>
+const NetLiquidityChart = ({ model }) => (
+  <section className="dollar-liquidity-model">
+    <div className="dollar-liquidity-model-header">
+      <div className="dollar-liquidity-title-block">
+        <Landmark size={16} />
+        <div>
+          <h3>Fed net liquidity</h3>
+          <span>Fed balance sheet − Treasury account − reverse repo, weekly</span>
         </div>
-        <ReadBlock read={latest?.regime || 'unavailable'} strong />
       </div>
-      {!latest ? (
-        <div className="dollar-liquidity-empty">
-          <strong>No verified net liquidity</strong>
-          <span>{(model?.missingInputs || []).join(', ') || 'Weekly Fed data was unavailable on the latest refresh.'}</span>
-        </div>
-      ) : (
-        <>
-          <div className="dollar-liquidity-headlines">
-            <div><span>Net liquidity</span><strong>{formatBillions(latest.netLiquidity)}</strong></div>
-            <div><span>Fed assets</span><strong>{formatBillions(latest.fedBalanceSheet)}</strong></div>
-            <div><span>TGA</span><strong>{formatBillions(latest.treasuryGeneralAccount)}</strong></div>
-            <div><span>Reverse repo</span><strong>{formatBillions(latest.reverseRepo)}</strong></div>
-          </div>
-          <table className="dollar-liquidity-growth-table">
-            <thead>
-              <tr><th>Week of {shortDate(latest.date)}</th>{CHANGE_WINDOWS.map((key) => <th key={key}>{key.toUpperCase()}</th>)}</tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Change</td>
-                {CHANGE_WINDOWS.map((key) => (
-                  <td key={key} className={directionClass(latest.changes?.[key]?.direction)}>
-                    {formatBillions(latest.changes?.[key]?.change, { signed: true })}
-                  </td>
-                ))}
-              </tr>
-              <tr>
-                <td>Percent</td>
-                {CHANGE_WINDOWS.map((key) => <td key={key}>{formatPct(latest.changes?.[key]?.pct)}</td>)}
-              </tr>
-            </tbody>
-          </table>
-          {model.status === 'stale' && (
-            <div className="money-flow-note">The latest weekly Fed release is older than expected.</div>
-          )}
-          <div className="dollar-liquidity-chart">
-            <ResponsiveContainer width="100%" height={150}>
-              <AreaChart data={model.history || []} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
-                <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10 }} minTickGap={36} />
-                <YAxis tick={{ fontSize: 10 }} width={52} domain={['auto', 'auto']} tickFormatter={(value) => formatBillions(value)} />
-                <Tooltip labelFormatter={shortDate} formatter={(value) => [formatBillions(value), 'Net liquidity']} />
-                <Area type="monotone" dataKey="netLiquidity" stroke="#4682B4" fill="#dbe7f3" strokeWidth={1.5} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </>
-      )}
-    </section>
-  );
-};
+    </div>
+    {model?.status === 'stale' && (
+      <div className="money-flow-note">The latest weekly Fed release is older than expected.</div>
+    )}
+    {model?.history?.length ? (
+      <div className="dollar-liquidity-chart">
+        <ResponsiveContainer width="100%" height={150}>
+          <AreaChart data={model.history} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+            <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10 }} minTickGap={36} />
+            <YAxis tick={{ fontSize: 10 }} width={52} domain={['auto', 'auto']} tickFormatter={(value) => formatBillions(value)} />
+            <Tooltip labelFormatter={shortDate} formatter={(value) => [formatBillions(value), 'Net liquidity']} />
+            <Area type="monotone" dataKey="netLiquidity" stroke="#4682B4" fill="#dbe7f3" strokeWidth={1.5} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    ) : (
+      <div className="dollar-liquidity-empty">
+        <strong>No verified net liquidity</strong>
+        <span>{(model?.missingInputs || []).join(', ') || 'Weekly Fed data was unavailable on the latest refresh.'}</span>
+      </div>
+    )}
+  </section>
+);
 
-const ParticipationSection = ({ participation }) => {
-  const windows = participation?.windows || {};
+const ParticipationChart = ({ participation }) => {
   const sessions = (participation?.history || []).slice(0, 21).reverse();
   return (
     <section className="dollar-liquidity-model">
@@ -254,137 +379,32 @@ const ParticipationSection = ({ participation }) => {
         <div className="dollar-liquidity-title-block">
           <Activity size={16} />
           <div>
-            <h3>Participation · up vs down volume</h3>
-            <span>Cboe consolidated volume by S&amp;P 500 close direction</span>
+            <h3>Up vs down volume · last 21 sessions</h3>
+            <span>Cboe consolidated volume, colored by S&amp;P 500 close direction</span>
           </div>
         </div>
-        <ReadBlock read={participation?.regime || 'unavailable'} strong />
       </div>
-      {participation?.status !== 'ok' ? (
+      {sessions.length ? (
+        <div className="dollar-liquidity-chart">
+          <ResponsiveContainer width="100%" height={150}>
+            <BarChart data={sessions} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+              <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10 }} minTickGap={24} />
+              <YAxis tick={{ fontSize: 10 }} width={42} tickFormatter={formatShares} />
+              <Tooltip labelFormatter={shortDate} formatter={(value) => [formatShares(value), 'Shares']} />
+              <Bar dataKey="volume" radius={[2, 2, 0, 0]}>
+                {sessions.map((session) => (
+                  <Cell key={session.date} fill={session.change > 0 ? '#2f855a' : '#c0392b'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
         <div className="dollar-liquidity-empty">
           <strong>No verified participation</strong>
           <span>{participation?.reason || 'Not enough paired up and down sessions to label volume.'}</span>
         </div>
-      ) : (
-        <>
-          <div className="dollar-liquidity-headlines">
-            <div><span>Last session</span><strong>{shortDate(participation.asOf)}</strong></div>
-            <div>
-              <span>S&amp;P 500</span>
-              <strong className={participation.latest?.change > 0 ? 'is-up' : 'is-down'}>{formatPct(participation.latest?.change, 2)}</strong>
-            </div>
-            <div><span>Volume vs 1M</span><strong>{formatPct(participation.latest?.volumeVs1m)}</strong></div>
-            <div>
-              <span>Read</span>
-              <strong><ReadBlock read={participation.latest?.signal} /></strong>
-            </div>
-          </div>
-          <table className="dollar-liquidity-growth-table">
-            <thead>
-              <tr><th>Window</th><th>Up days</th><th>Down days</th><th>Up vol avg</th><th>Down vol avg</th><th>Ratio</th></tr>
-            </thead>
-            <tbody>
-              {[['1M', windows['1m']], ['3M', windows['3m']]].map(([label, stats]) => (
-                <tr key={label}>
-                  <td>{label}</td>
-                  <td>{stats?.upDays ?? '—'}</td>
-                  <td>{stats?.downDays ?? '—'}</td>
-                  <td>{formatShares(stats?.upVolumeAvg)}</td>
-                  <td>{formatShares(stats?.downVolumeAvg)}</td>
-                  <td>{formatRatio(stats?.upDownRatio)} <ReadBlock read={stats?.regime} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="dollar-liquidity-chart">
-            <ResponsiveContainer width="100%" height={150}>
-              <BarChart data={sessions} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
-                <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10 }} minTickGap={24} />
-                <YAxis tick={{ fontSize: 10 }} width={42} tickFormatter={formatShares} />
-                <Tooltip labelFormatter={shortDate} formatter={(value) => [formatShares(value), 'Shares']} />
-                <Bar dataKey="volume" radius={[2, 2, 0, 0]}>
-                  {sessions.map((session) => (
-                    <Cell key={session.date} fill={session.change > 0 ? '#2f855a' : '#c0392b'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </>
       )}
-    </section>
-  );
-};
-
-const monthLabel = (date) => {
-  if (!date) return '—';
-  const parsed = new Date(`${date}T00:00:00Z`);
-  return Number.isNaN(parsed.getTime())
-    ? date
-    : parsed.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-};
-
-const ContextSection = ({ layers = {} }) => {
-  const { usStack, margin, moneyFunds } = layers;
-  const marginLatest = margin?.latest;
-  const fundsLatest = moneyFunds?.latest;
-  const rows = [
-    {
-      label: 'U.S. M2 stack',
-      level: usStack ? `Stack/GDP ${isNumber(usStack.stackToGdp) ? usStack.stackToGdp.toFixed(2) : '—'}` : '—',
-      change: usStack ? `3M ${formatPct(usStack.growth3m)}` : '—',
-      read: usStack?.regime,
-      asOf: usStack ? monthLabel(usStack.date) : '—',
-      source: 'FRED',
-    },
-    {
-      label: 'Margin debt',
-      level: formatBillions(marginLatest?.marginDebt),
-      change: marginLatest ? `3M ${formatPct(marginLatest.changes?.['3m']?.marginDebt)}` : '—',
-      read: marginLatest ? `leverage ${marginLatest.leverage}` : margin?.status,
-      asOf: marginLatest ? monthLabel(marginLatest.asOf) : '—',
-      source: 'FINRA',
-      stale: margin?.status === 'stale',
-    },
-    {
-      label: 'Brokerage free credit',
-      level: formatBillions(marginLatest?.freeCredit),
-      change: marginLatest ? `3M ${formatPct(marginLatest.changes?.['3m']?.freeCredit)}` : '—',
-      read: marginLatest ? cashRead(marginLatest.changes?.['3m']?.freeCredit) : margin?.status,
-      asOf: marginLatest ? monthLabel(marginLatest.asOf) : '—',
-      source: 'FINRA',
-      stale: margin?.status === 'stale',
-    },
-    {
-      label: 'Retail money funds',
-      level: formatBillions(fundsLatest?.retailMoneyFunds),
-      change: fundsLatest ? `13W ${formatPct(fundsLatest.change13w)}` : '—',
-      read: fundsLatest ? `cash ${fundsLatest.cash}` : moneyFunds?.status,
-      asOf: fundsLatest ? shortDate(fundsLatest.date) : '—',
-      source: 'FRED',
-      stale: moneyFunds?.status === 'stale',
-    },
-  ];
-  return (
-    <section className="money-flow-context">
-      <h3>Context <span>(does not vote)</span></h3>
-      <table className="dollar-liquidity-growth-table">
-        <thead>
-          <tr><th>Series</th><th>Level</th><th>Change</th><th>Read</th><th>As of</th><th>Source</th></tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label}>
-              <td>{row.label}</td>
-              <td>{row.level}</td>
-              <td>{row.change}</td>
-              <td><ReadBlock read={row.read || 'unavailable'} /></td>
-              <td className={row.stale ? 'is-flat' : undefined}>{row.asOf}{row.stale ? ' · stale' : ''}</td>
-              <td>{row.source}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </section>
   );
 };
@@ -421,7 +441,7 @@ const UsStackSection = ({ liquidityState }) => {
   );
 };
 
-const MoneyFlowPanel = ({ resourceState, liquidityState }) => {
+const MoneyFlowPanel = ({ resourceState, liquidityState, situationState }) => {
   const { data, loading, error } = resourceState || {};
   if (loading && !data) {
     return (
@@ -442,25 +462,29 @@ const MoneyFlowPanel = ({ resourceState, liquidityState }) => {
   }
   return (
     <section className="dashboard-card-chrome dollar-liquidity-panel money-flow-panel">
+      <MoneyFlowGrid data={data} situation={situationState?.data} expanded />
       <div className="money-flow-summary">
-        <VerdictPill verdict={data.verdict} />
-        <div>
-          {(data.reasons || []).map((reason) => <p key={reason}>{reason}</p>)}
-          <p className="money-flow-rule">
-            Supply leads, volume confirms: Inflow needs expanding net liquidity and accumulation;
-            Outflow needs contracting net liquidity and distribution.
-          </p>
-        </div>
+        {(data.reasons || []).map((reason) => <p key={reason}>{reason}</p>)}
+        <p className="money-flow-rule">
+          Supply leads, volume confirms: Inflow needs expanding net liquidity and accumulation;
+          Outflow needs contracting net liquidity and distribution. Investors and Mechanical are context and do not vote.
+        </p>
       </div>
       <div className="dollar-liquidity-grid">
-        <SupplySection model={data.layers?.netLiquidity} />
-        <ParticipationSection participation={data.layers?.participation} />
+        <NetLiquidityChart model={data.layers?.netLiquidity} />
+        <ParticipationChart participation={data.layers?.participation} />
       </div>
       <div className="dollar-liquidity-grid">
         <VolumeSection />
         <UsStackSection liquidityState={liquidityState} />
       </div>
-      <ContextSection layers={data.layers} />
+      <MarketSituationReportCard
+        snapshot={situationState?.data}
+        loading={situationState?.loading}
+        refreshing={situationState?.refreshing}
+        error={situationState?.error}
+        embedded
+      />
     </section>
   );
 };

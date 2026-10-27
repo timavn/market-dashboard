@@ -1,5 +1,5 @@
 const { fetchYahooAdjustedHistoryData } = require('./providers/yahooAdjustedHistory.cjs');
-const { calculateParticipation, PARTICIPATION_WINDOWS } = require('../utils/volumeParticipation.cjs');
+const { calculateParticipation, calculateVolumeTrend, VOLUME_TREND_BASELINE } = require('../utils/volumeParticipation.cjs');
 const { buildMoneyFlow } = require('../utils/moneyFlow.cjs');
 const { parseCsvSeries } = require('../utils/liquidityModel.cjs');
 const { parseFinraMarginRows, summarizeMargin, summarizeMoneyFunds } = require('../utils/positioningFlows.cjs');
@@ -63,8 +63,8 @@ function createMoneyFlowService({
   async function loadParticipation() {
     const period1 = String(Math.floor(now().getTime() / 1000) - PRICE_LOOKBACK_DAYS * 86400);
     const [volume, prices] = await Promise.all([
-      // One spare session beyond the 3M window lets the oldest row pair with a prior close.
-      exchangeVolumeService.fetchSnapshot({ days: PARTICIPATION_WINDOWS['3m'] + 5 }),
+      // A year of sessions feeds the volume trend; participation reads the newest 3M.
+      exchangeVolumeService.fetchSnapshot({ days: VOLUME_TREND_BASELINE + 5 }),
       fetchPriceHistory({ symbol: PARTICIPATION_INDEX, period1 }),
     ]);
     if (volume?.meta?.status !== 'current') {
@@ -73,6 +73,7 @@ function createMoneyFlowService({
     const closes = (prices?.bars || []).map((bar) => ({ date: bar.date, close: bar.rawClose }));
     return {
       ...calculateParticipation(volume.totalExchange, closes),
+      volumeTrend: calculateVolumeTrend(volume.totalExchange),
       sources: { volume: 'Cboe Historical Market Volume', price: `S&P 500 (${PARTICIPATION_INDEX}) daily close` },
     };
   }

@@ -1,5 +1,6 @@
 const PROVIDER = 'Trading Economics';
 const SOURCE_URL = 'https://tradingeconomics.com/calendar';
+const CPI_URL = 'https://tradingeconomics.com/united-states/inflation-cpi';
 const TIME_ZONE = 'America/New_York';
 const MAX_OBSERVATION_AGE_MS = 2 * 60 * 60 * 1000;
 const FUTURE_TOLERANCE_MS = 2 * 60 * 1000;
@@ -319,4 +320,48 @@ async function loadCurrentWeekActuals({ httpClient, requestedAt, coverage } = {}
   };
 }
 
-module.exports = { PROVIDER, SOURCE_URL, loadCurrentWeekActuals, loadNextWeekCalendar };
+// Survey consensus for US CPI YoY prints, from the release calendar on Trading
+// Economics' US CPI page. A print's consensus is blank until economists are surveyed.
+const CPI_HEADINGS = 'Calendar GMT Reference Actual Previous Consensus TEForecast';
+const MONTH_NUMBERS = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
+
+function percentValue(text) {
+  const match = String(text || '').match(/^(-?\d+(?:\.\d+)?)%$/);
+  return match ? Number(match[1]) : null;
+}
+
+async function loadUsCpiConsensus({ httpClient, requestedAt } = {}) {
+  if (!httpClient?.get || !Number.isFinite(requestedAt)) invalidResponse();
+  const response = await httpClient.get(CPI_URL, {
+    timeout: 10000,
+    headers: { Accept: 'text/html', 'User-Agent': 'market-dashboard-calendar/1.0' },
+  });
+  if (response?.status !== 200 || typeof response.data !== 'string'
+      || !/^text\/html(?:\s*;|$)/i.test(headerValue(response.headers, 'content-type') || '')) invalidResponse();
+  const observedAt = observationTime(response, requestedAt);
+  const html = response.data.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
+  const tables = elements(html, 'table', ({ id }) => id === 'calendar');
+  if (tables.length !== 1) invalidResponse();
+  // The page's header cells are not well formed, so the header is checked as text.
+  const heads = elements(tables[0].inner, 'thead');
+  if (heads.length !== 1 || plainText(heads[0].inner) !== CPI_HEADINGS) invalidResponse();
+  const releases = [];
+  for (const { inner } of elements(tables[0].inner, 'tr', (attrs) => /^\d+$/.test(attrs['data-id'] || ''))) {
+    const cells = elements(inner, 'td').map((cell) => plainText(cell.inner));
+    if (cells.length !== 8 || !validDateKey(cells[0])) invalidResponse();
+    const [releaseDate, , name, reference, actual, previous, consensus] = cells;
+    const month = MONTH_NUMBERS[reference];
+    if (name !== 'Inflation Rate YoY' || !month) continue;
+    // December prints in January: a reference month after the release month is the prior year.
+    const releaseMonth = Number(releaseDate.slice(5, 7));
+    const year = Number(releaseDate.slice(0, 4)) - (month > releaseMonth ? 1 : 0);
+    releases.push({
+      reportMonth: `${year}-${String(month).padStart(2, '0')}`, releaseDate,
+      consensus: percentValue(consensus), previous: percentValue(previous), actual: percentValue(actual),
+    });
+  }
+  if (!releases.length) invalidResponse();
+  return { provider: PROVIDER, sourceUrl: CPI_URL, observedAt, releases };
+}
+
+module.exports = { PROVIDER, SOURCE_URL, loadCurrentWeekActuals, loadNextWeekCalendar, loadUsCpiConsensus };

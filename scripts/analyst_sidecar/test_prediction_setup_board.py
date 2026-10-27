@@ -238,6 +238,33 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertIn("| CPI YoY · Oct 2026 | N/A | 3.69% | 3.80% | 3.91% | Oct 6 04:48 PDT |", report)
         self.assertIn("Sources: HedgAI Signals, Cboe volatility indices, Kalshi", report)
 
+    def test_cpi_with_survey_consensus_shows_it_in_place_of_the_kalshi_contract(self):
+        report = render_setup_board({"rows": [{"id": "cpi", "label": "CPI YoY", "group": "inflation",
+            "events": [{"eventTicker": "KXCPIYOY-26NOV"}], "forecasts": [
+                {"reportMonth": "2026-10", "available": True, "lower": 3.77, "base": 3.88, "upper": 3.99,
+                 "publishedAt": "2026-10-16T20:11:55+00:00", "eventTicker": None, "consensus": 3.7},
+                {"reportMonth": "2026-11", "available": False, "eventTicker": "KXCPIYOY-26NOV", "consensus": None}]}],
+            "sources": {"cpiConsensus": "2026-10-26T17:26:10.000Z"}})
+        self.assertIn("| Market | Consensus | Low | Base | High | Published |", report)
+        self.assertIn("| CPI YoY · Oct 2026 | 3.70% | 3.77% | 3.88% | 3.99% | Oct 16 13:11 PDT |", report)
+        self.assertIn("| CPI YoY · Nov 2026 | N/A | N/A | N/A | N/A | N/A |", report)
+        self.assertIn("Trading Economics CPI consensus Oct 26 10:26 PDT", report)
+
+    def test_boards_with_price_history_add_the_z_score_to_the_market_cell(self):
+        data = board()
+        data["usd"]["zScore"] = {"value": 0.62, "sessions": 20, "through": "2026-10-09"}
+        scores = {"gold": {"value": 2.149}, "nasdaq100": {"value": -1.04}, "wti": None}
+        for row in data["rows"]:
+            row["zScore"] = scores.get(row["id"], {"value": 0.0})
+        report = render_setup_board(data)
+        self.assertIn("| REF(US Dollar;DXY;+0.6) |", report)
+        self.assertIn("| NAME(Gold;;+2.1) | BIAS(Neutral;;) |", report)
+        self.assertIn("| MKT(Nasdaq-100;COMPQ range;-1.0) |", report)
+        # A market without enough history keeps its row with the score unavailable.
+        self.assertIn("| NAME(WTI;;) |", report)
+        # Every other column is unchanged.
+        self.assertIn("| Market | Tick | Trade | Trend | Price and Risk Range | Status |", report)
+
     def test_sources_line_gives_every_publication_the_same_date_and_time(self):
         report = render_setup_board({"rows": [], "sources": {
             "riskRanges": "2026-10-15T11:37:00.000Z", "cryptoQuant": "2026-10-15T11:40:00.000Z",

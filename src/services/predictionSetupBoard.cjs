@@ -256,6 +256,24 @@ function volumeReading(symbol, bars) {
     changePct: ((latest.rawClose / prior.rawClose) - 1) * 100 };
 }
 
+const Z_SCORE_SESSIONS = 20;
+const etDay = (value) => (Number.isFinite(Date.parse(value))
+  ? new Date(value).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) : null);
+
+/** How many standard deviations the price sits from its mean over the 20 daily closes before the quote's day. */
+function zScoreReading(price, history) {
+  if (!Number.isFinite(price?.value)) return null;
+  const day = etDay(price.asOf);
+  const closes = (history || [])
+    .filter((bar) => /^\d{4}-\d{2}-\d{2}$/.test(String(bar?.date || '')) && finite(bar.close) !== null && (!day || bar.date < day))
+    .sort((left, right) => left.date.localeCompare(right.date)).slice(-Z_SCORE_SESSIONS);
+  if (closes.length < Z_SCORE_SESSIONS) return null;
+  const mean = closes.reduce((sum, bar) => sum + bar.close, 0) / closes.length;
+  const sd = Math.sqrt(closes.reduce((sum, bar) => sum + (bar.close - mean) ** 2, 0) / (closes.length - 1));
+  if (!(sd > 0)) return null;
+  return { value: (price.value - mean) / sd, sessions: closes.length, through: closes.at(-1).date };
+}
+
 /**
  * DV when the session's volume is below its 30-day (1-month) average, AV above it. A move against the Trend
  * (a down day in a Bullish Trend, an up day in a Bearish one) on DV supports adding; on AV it warns.
@@ -344,7 +362,7 @@ const eventMonth = (ticker) => {
  * Every month in the latest nowcast that BLS has not released yet, plus any from the current Kalshi
  * release on, each with its Kalshi event when one is listed. Kalshi may not list the next print.
  */
-function cpiForecasts(nowcast, currentEvent, eventsBySeries, asOf) {
+function cpiForecasts(nowcast, currentEvent, eventsBySeries, asOf, cpiConsensus) {
   const listed = new Map((eventsBySeries?.KXCPIYOY || []).map((event) => [eventMonth(event?.event_ticker), event.event_ticker]));
   const firstMonth = eventMonth(currentEvent?.eventTicker);
   const now = Date.parse(asOf);
@@ -356,8 +374,11 @@ function cpiForecasts(nowcast, currentEvent, eventsBySeries, asOf) {
     .filter((row) => /^\d{4}-\d{2}$/.test(String(row?.reportMonth || '')))
     .filter((row) => upcoming(row) ?? (!firstMonth || row.reportMonth >= firstMonth))
     .map((row) => row.reportMonth).concat(listed.has(firstMonth) ? [firstMonth] : []))].sort();
+  // Boards captured with the survey consensus carry it on every month, null until it is published.
+  const consensus = (month) => (cpiConsensus
+    ? { consensus: finite(cpiConsensus.releases?.find((row) => row?.reportMonth === month)?.consensus) } : {});
   return months.map((month) => ({ ...cpiForecast(nowcast, { eventTicker: listed.get(month) || null }, month),
-    eventTicker: listed.get(month) || null }));
+    eventTicker: listed.get(month) || null, ...consensus(month) }));
 }
 
 /**
@@ -397,7 +418,7 @@ const allTimeHighSymbol = (market) => market.hedgeye.riskRange?.priceSymbol || m
 
 function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations,
   usdPeriods, eventsBySeries, morningSnapshots, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory,
-  marketDate, asOf = new Date().toISOString() } = {}) {
+  priceHistory, cpiConsensus, marketDate, asOf = new Date().toISOString() } = {}) {
   // Saved boards from before volume keep their original shape.
   // Bond ETFs (SHY, IEF, TLT) move opposite to the yield their Trend describes.
   const volumeFor = ({ symbol, inverse } = {}, trend) => {
@@ -414,7 +435,8 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
     const events = selectEvents(market, eventsBySeries);
     if (market.id === 'cpi') {
       return { id: market.id, label: market.label, group: market.group, cadence: market.cadence,
-        events, forecast: cpiForecast(nowcast, events[0]), forecasts: cpiForecasts(nowcast, events[0], eventsBySeries, asOf) };
+        events, forecast: cpiForecast(nowcast, events[0]),
+        forecasts: cpiForecasts(nowcast, events[0], eventsBySeries, asOf, cpiConsensus) };
     }
     const range = riskRangeReading(market, { riskRanges, cryptoQuant });
     const price = priceReading(market.price.symbol, market.price.label, market.price.fit, quotes);
@@ -440,10 +462,13 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       tick, trade, trend, setup: evaluateSetup({ trend, tick, trade, position }),
       ...(withStructure ? { structure: structureFor(market, range) } : {}),
       ...(volumeHistory ? { volume: volumeFor(market.volume, trend) } : {}),
+      // Saved boards from before price history keep their original shape.
+      ...(priceHistory ? { zScore: zScoreReading(mismatch && rangePrice === price ? null : price, priceHistory[market.price.symbol]) } : {}),
     };
   });
   const usd = usdReading({ quotes, riskRanges, securityIntelligence, usdPeriods, hedgai, marketDate });
   if (usd && volumeHistory) usd.volume = volumeFor({ symbol: UNIVERSE.usd.volumeSymbol }, usd.trend);
+  if (usd && priceHistory) usd.zScore = zScoreReading({ value: usd.value, asOf: usd.asOf }, priceHistory[UNIVERSE.usd.symbol]);
   if (usd && withStructure) {
     usd.structure = usd.low !== null && usd.high !== null
       ? structureFor({ hedgeye: { riskRange: { product: 'risk-ranges', ticker: UNIVERSE.usd.riskRangeTicker } }, price: UNIVERSE.usd },
@@ -465,6 +490,7 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       cryptoQuant: emailPublishedAt(cryptoQuant) || cryptoQuant?.date || null,
       hedgai: hedgai?.asOf || null,
       inflationNowcast: nowcast?.publishedAt || nowcast?.date || null,
+      ...(cpiConsensus ? { cpiConsensus: cpiConsensus.observedAt || null } : {}),
     },
     rows };
 }
@@ -476,6 +502,8 @@ const priceSymbols = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
   [market.price?.symbol, market.hedgeye.riskRange?.priceSymbol]).concat(UNIVERSE.usd.symbol, PROXY_TICKERS).filter(Boolean))];
 const volumeSymbols = () => [...new Set(UNIVERSE.markets.map((market) => market.volume?.symbol)
   .concat(UNIVERSE.usd.volumeSymbol).filter(Boolean))];
+const zScoreSymbols = () => [...new Set(UNIVERSE.markets.map((market) => market.price?.symbol)
+  .concat(UNIVERSE.usd.symbol).filter(Boolean))];
 const allTimeHighSymbols = () => [...new Set(UNIVERSE.markets.filter((market) => market.hedgeye.riskRange)
   .map(allTimeHighSymbol).concat(UNIVERSE.usd.symbol).filter(Boolean))];
 const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.hedgeye.trade?.ticker)
@@ -487,7 +515,8 @@ const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.h
  */
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
   loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts,
-  loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, marketDateFor }) {
+  loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
+  marketDateFor }) {
   return async function loadSetupBoard({ now = new Date(), researchDate = null } = {}) {
     const marketDate = researchDate || marketDateFor(now);
     const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
@@ -497,7 +526,7 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
     // An earlier day reads its own Crypto Quant; the current one would put today's call on that date.
     const products = MORNING_PRODUCTS.map((product) => product.key).filter((key) => researchDate || key !== 'crypto-quant');
     const [riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations, usdPeriods,
-      events, morning, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory] = await Promise.all([
+      events, morning, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory, priceHistory, cpiConsensus] = await Promise.all([
       loadedRanges,
       settle(loadCryptoQuant()),
       settle(full(() => loadHedgai({ now }))),
@@ -516,6 +545,8 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       optional(loadCryptoQuantHistory, { sessions: STRUCTURE_SESSIONS + 1 }),
       optional(loadAllTimeHighs, allTimeHighSymbols()),
       optional(loadVolumeHistory, volumeSymbols()),
+      optional(loadPriceHistory, zScoreSymbols()),
+      optional(loadCpiConsensus),
     ]);
     if (researchDate && morning.value) morning.value = { 'crypto-quant': {}, ...morning.value };
     const board = buildSetupBoard({
@@ -529,11 +560,15 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
         allTimeHighs: allTimeHighs?.value || {} } : {}),
       // A failed volume load still yields a board whose volume reads unavailable.
       ...(volumeHistory ? { volumeHistory: volumeHistory.value || {} } : {}),
+      // A failed load still yields a board whose Z-scores and CPI consensus read unavailable.
+      ...(priceHistory ? { priceHistory: priceHistory.value || {} } : {}),
+      ...(cpiConsensus ? { cpiConsensus: cpiConsensus.value || { releases: [] } } : {}),
     });
     board.sourceStatus = Object.fromEntries(Object.entries({ riskRanges, cryptoQuant, hedgai, securityIntelligence,
       nowcast, quotes, volatility, usdCorrelations, kalshi: events, ...(loadMorningProducts ? { morningResearch: morning } : {}),
       ...(riskRangeHistory ? { riskRangeHistory } : {}), ...(cryptoQuantHistory ? { cryptoQuantHistory } : {}),
-      ...(allTimeHighs ? { allTimeHighs } : {}), ...(volumeHistory ? { volumeHistory } : {}) })
+      ...(allTimeHighs ? { allTimeHighs } : {}), ...(volumeHistory ? { volumeHistory } : {}),
+      ...(priceHistory ? { priceHistory } : {}), ...(cpiConsensus ? { cpiConsensus } : {}) })
       .map(([key, result]) => [key, result.error ? 'failed' : 'ready']));
     return board;
   };
@@ -543,5 +578,5 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
 const extraCboeSeries = () => UNIVERSE.markets.map((market) => market.volatility)
   .filter((spec) => spec?.cboeSymbol).map((spec) => ({ name: spec.key, symbol: spec.cboeSymbol }));
 
-module.exports = { allTimeHighSymbols, volumeSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents,
+module.exports = { allTimeHighSymbols, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents,
   priceSymbols, seriesNames, tradeTickers };

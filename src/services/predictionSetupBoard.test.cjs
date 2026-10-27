@@ -443,3 +443,58 @@ test('a bond ETF falling is its yield rising, so in a Bullish yield Trend it is 
   assert.deepEqual(board.rows.find((row) => row.id === 'ust30y').volume.signal, { move: 'DV', tone: 'supports', direction: 'up' });
   assert.equal(board.rows.find((row) => row.id === 'ust2y').volume.inverse, true);
 });
+
+// Twenty weekday closes before Oct 26: 100 and 102 alternating (mean 101, sample SD ~1.026).
+const twentyCloses = () => Array.from({ length: 30 }, (_, index) => new Date(Date.UTC(2026, 8, 20 + index)))
+  .filter((day) => day.getUTCDay() % 6 !== 0).map((day) => day.toISOString().slice(0, 10))
+  .filter((date) => date < '2026-10-26').slice(-20).map((date, index) => ({ date, close: index % 2 ? 102 : 100 }));
+
+test('each market and the Dollar carry a Z-score against the 20 daily closes before the quote’s day', () => {
+  const history = twentyCloses();
+  const board = buildSetupBoard({
+    quotes: { 'GC=F': { price: '104', timestamp: '2026-10-26T14:00:00Z' }, 'DX-Y.NYB': { price: '101', observedAt: '2026-10-26T14:00:00Z' } },
+    // A bar on the quote's own day is its unfinished session, never part of the window.
+    priceHistory: { 'GC=F': [...history, { date: '2026-10-26', close: 500 }], 'DX-Y.NYB': history },
+  });
+  const gold = board.rows.find((row) => row.id === 'gold').zScore;
+  assert.equal(gold.sessions, 20);
+  assert.equal(gold.through, history.at(-1).date);
+  assert.ok(Math.abs(gold.value - 3 / Math.sqrt(20 / 19)) < 1e-9);
+  assert.equal(board.usd.zScore.value, 0);
+  // Fewer than 20 closes, or no price, reads unavailable rather than a short-window score.
+  assert.equal(board.rows.find((row) => row.id === 'silver').zScore, null);
+  assert.equal('zScore' in buildSetupBoard({}).rows[0], false);
+});
+
+test('CPI carries the survey consensus for each month, null until it is published', () => {
+  const board = buildSetupBoard({
+    asOf: '2026-10-15T13:00:00Z',
+    nowcast: { data: { forecasts: [
+      { reportMonth: '2026-10', releaseAt: '2026-11-10T13:30:00Z', scenarios: { lower: 3.69, base: 3.8, upper: 3.91 } },
+      { reportMonth: '2026-11', releaseAt: '2026-12-10T13:30:00Z', scenarios: { lower: 3.7, base: 3.85, upper: 4 } },
+    ] } },
+    cpiConsensus: { observedAt: '2026-10-15T12:00:00.000Z', releases: [{ reportMonth: '2026-10', consensus: 3.7 }] },
+  });
+  const cpi = board.rows.find((row) => row.id === 'cpi');
+  assert.deepEqual(cpi.forecasts.map((row) => [row.reportMonth, row.consensus]), [['2026-10', 3.7], ['2026-11', null]]);
+  assert.equal(board.sources.cpiConsensus, '2026-10-15T12:00:00.000Z');
+  const saved = buildSetupBoard({ nowcast: { data: { forecasts: [{ reportMonth: '2026-10', scenarios: { lower: 3.69, base: 3.8, upper: 3.91 } }] } } });
+  assert.equal('consensus' in saved.rows.find((row) => row.id === 'cpi').forecasts[0], false);
+});
+
+test('the loader asks for each market’s own price history and the CPI consensus; failures read unavailable', async () => {
+  let requested = null;
+  const empty = () => Promise.resolve(null);
+  const load = createSetupBoardLoader({
+    loadRiskRanges: empty, loadCryptoQuant: empty, loadHedgai: empty, loadSecurityIntelligence: empty, loadNowcast: empty,
+    loadQuotes: () => Promise.resolve({}), loadVolatility: empty, loadUsdCorrelations: empty, loadKalshiEvents: () => Promise.resolve([]),
+    loadPriceHistory: (symbols) => { requested = symbols; return Promise.reject(new Error('down')); },
+    loadCpiConsensus: () => Promise.reject(new Error('down')),
+    marketDateFor: () => '2026-10-21',
+  });
+  const board = await load({ now: new Date('2026-10-21T20:00:00Z') });
+  assert.deepEqual(requested, ['GC=F', 'SI=F', 'HG=F', 'CL=F', 'BZ=F', 'BTC-USD', 'ETH-USD', '^GSPC', '^NDX', 'UST2Y', 'UST10Y', 'UST30Y', 'DX-Y.NYB']);
+  assert.equal(board.sourceStatus.priceHistory, 'failed');
+  assert.equal(board.sourceStatus.cpiConsensus, 'failed');
+  assert.equal(board.rows.find((row) => row.id === 'gold').zScore, null);
+});
