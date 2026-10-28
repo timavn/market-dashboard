@@ -300,8 +300,9 @@ test('position tables keep compact headers and captured names without classifica
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const table = screen.getByRole('table', { name: 'Corrections' });
   expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
-    'Ticker', 'Security', 'Tick / Trade / Trend', 'MIN / MAX / Stop', 'Review', 'Product',
+    'Ticker', 'Security', 'T/T/T', 'M/M/S', 'Review', 'Product',
   ]);
+  expect(within(table).getByRole('columnheader', { name: 'T/T/T' })).toHaveAttribute('title', 'Tick / Trade / Trend');
   expect(within(table).getByRole('columnheader', { name: 'Ticker' }).children).toHaveLength(0);
   expect(table).not.toHaveTextContent(/Classification|Beta|ATR sizing|Commodity policy/);
   expect(table.querySelector('.portfolio-position-classification')).toBeNull();
@@ -336,7 +337,7 @@ test('a missing holding weight leaves the ticker cell without a placeholder dash
   expect(ticker.querySelector('.portfolio-position-weight')).toBeNull();
 });
 
-test('position tables show captured product labels beside Review and open all of that product’s evidence', () => {
+test('position tables show dated product calls beside Review and open all of that product’s evidence', () => {
   const onCitation = jest.fn();
   const first = { id: 'call-first', product: 'the-call', productLabel: 'The Call', publicationDate: '2026-09-03', title: 'The Call' };
   const confirmed = { ...first, id: 'call-confirmed', publicationDate: '2026-09-04' };
@@ -353,9 +354,12 @@ test('position tables show captured product labels beside Review and open all of
   const cells = within(position).getAllByRole('cell');
   expect(cells[3]).toHaveClass('portfolio-position-review');
   expect(cells[4]).toHaveClass('portfolio-position-products');
-  const call = within(cells[4]).getByRole('button', { name: 'The Call: Long · View source' });
+  // A confirmed call keeps one line, dated by its latest publication.
+  const call = within(cells[4]).getByRole('button', { name: 'Sep 4 The Call: Long · View source' });
+  expect(call).toHaveTextContent(/^Sep 4 The Call: Long$/);
   expect(call.querySelector('.analyst-process--positive')).toHaveTextContent('Long');
-  expect(within(cells[4]).getByRole('button', { name: 'ETF Pro: Sell some · View source' })).toBeInTheDocument();
+  expect(call.querySelector('time.portfolio-position-product-date')).toHaveAttribute('dateTime', '2026-09-04');
+  expect(within(cells[4]).getByRole('button', { name: 'Sep 4 ETF Pro: Sell some · View source' })).toHaveTextContent('Sep 4 ETF Pro: Sell some');
   fireEvent.click(call);
   expect(onCitation).toHaveBeenCalledWith(first, { relatedSources: [first, confirmed] });
   expect(JSON.stringify(data)).toBe(original);
@@ -371,7 +375,7 @@ test('saved position products preserve the publisher label and visible proxy ins
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} historical />);
   const table = screen.getByRole('table', { name: 'Corrections' });
   const productCell = within(within(table).getByRole('row', { name: /ETHA/ })).getAllByRole('cell')[4];
-  expect(productCell).toHaveTextContent('Crypto Quant: Bullish Trend (ETH proxy)');
+  expect(productCell).toHaveTextContent('Sep 4 Crypto Quant: Bullish Trend (ETH proxy)');
   expect(productCell.querySelector('.analyst-process--positive')).toHaveTextContent('Bullish');
   const missingProduct = within(within(table).getByRole('row', { name: /UNKNOWN/ })).getAllByRole('cell')[4];
   expect(missingProduct).toHaveTextContent(/^—$/);
@@ -523,7 +527,8 @@ test('stop evidence does not create a report section or an exception', () => {
     expect(section.querySelectorAll('.portfolio-position-row')).toHaveLength(0);
   }
   // Only the ATR stop column headers mention a stop; captured stop coverage stays out of the report.
-  expect(screen.queryAllByText(/stop/i).map(element => element.textContent)).toEqual(['MIN / MAX / Stop', 'MIN / MAX / Stop']);
+  expect(screen.queryAllByText(/stop/i)).toEqual([]);
+  expect([...document.querySelectorAll('[title*="Stop"]')].map(element => element.textContent)).toEqual(['M/M/S', 'M/M/S']);
   expect(screen.queryByText(/none found|60.0% covered/i)).not.toBeInTheDocument();
 });
 
@@ -553,8 +558,8 @@ test('the limits cell shows the ATR-derived MIN, MAX and stop with 25 bp precisi
   const short = screen.getByRole('row', { name: /SHORTATR/ });
   expect(short.querySelector('.portfolio-position-limits')).toHaveTextContent('MIN3.25%MAX6.25%Stop104.00');
   expect(within(short).getByText('104.00')).toHaveAttribute('title', expect.stringContaining('2 × ATR above the last close (4.0%)'));
-  const header = within(screen.getByRole('table', { name: 'Corrections' })).getByRole('columnheader', { name: 'MIN / MAX / Stop' });
-  expect(header).toHaveAttribute('title', 'MIN and MAX cost 0.125% and 0.25% of NLV if the 2 × ATR stop is hit');
+  const header = within(screen.getByRole('table', { name: 'Corrections' })).getByRole('columnheader', { name: 'M/M/S' });
+  expect(header).toHaveAttribute('title', 'MIN / MAX / Stop · MIN and MAX cost 0.125% and 0.25% of NLV if the 2 × ATR stop is hit');
 });
 
 test('missing ATR leaves MIN, MAX and the stop as dashes while a Trade exit still shows', () => {
@@ -966,12 +971,12 @@ test('every red Inbox alert on a held position has an Action required row, sizin
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} inboxFindings={findings} onCitation={onCitation} />);
   const urgent = screen.getByRole('table', { name: 'Action required' });
   expect([...urgent.querySelectorAll('.portfolio-position-row th strong')].map(cell => cell.textContent)).toEqual(['GIII', 'EFX']);
-  const efx = within(urgent).getByRole('row', { name: /EFX/ });
-  expect(within(efx).getByText(wholeText('Exit Short'), { selector: 'strong' })).toHaveClass('portfolio-position-action');
-  expect(efx).not.toHaveTextContent('Underweight');
-  fireEvent.click(within(efx).getByRole('button', { name: /Signal Strength Removed Short Sep 4 vs your Short/ }));
-  expect(onCitation).toHaveBeenCalledWith(expect.objectContaining({ id: 'ss-EFX' }));
-  expect(within(urgent).getByRole('row', { name: /GIII/ })).toHaveTextContent('Review Long');
+  // Without a Trade or Trend break, Action required answers to its product calls alone.
+  expect(within(urgent).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
+    'Ticker', 'Security', 'T/T/T', 'M/M/S', 'Product',
+  ]);
+  expect(urgent.querySelector('.portfolio-position-review')).toBeNull();
+  expect(within(urgent).getByRole('row', { name: /EFX/ })).not.toHaveTextContent('Underweight');
   const corrections = screen.getByRole('table', { name: 'Corrections' });
   expect(corrections).toHaveTextContent('OVER');
   expect(corrections).not.toHaveTextContent(/EFX|GIII|READ|BLUE/);

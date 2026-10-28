@@ -190,6 +190,9 @@
 .analyst-panel-v2 .analyst-prediction-report .is-range-board:not(.has-setup) :is(th, td):is(:nth-child(2), :nth-child(3), :nth-child(4)) { text-align: center; }
 .analyst-prediction-stack { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .analyst-prediction-stack__key { display: inline-block; min-width: 14px; color: var(--dashboard-muted-text, #667085); }
+/* The market's 20-session Z-score under its name; two or more standard deviations reads heavier. */
+.analyst-prediction-z { font-variant-numeric: tabular-nums; }
+.analyst-prediction-z--stretched { font-weight: 600; }
 /* As of lines: key and product on the left, the date right-aligned. */
 .analyst-prediction-as-of-line { display: flex; align-items: baseline; gap: 4px; }
 .analyst-prediction-as-of-line__product { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

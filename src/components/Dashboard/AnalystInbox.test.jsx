@@ -512,7 +512,28 @@ test('a security alert puts Tick, Trade, Trend and Tail beside its 1D–90D wind
   expect(within(table).getByText('—')).toHaveClass('analyst-inbox-signal--muted');
 });
 
-test('a stance alert lists the latest product calls, then current → target → order, and marks a trim apart from an exit', () => {
+test('price and range colors follow their own sign for a short exactly as for a long', async () => {
+  const stats = { asOf: '2026-10-20', baselineVolPct: 20, columns: [
+    { label: '1D', priceChangePct: -4.0, realizedVolPct: 8, volumeRatio: 1.7, rangePct: 87 },
+    { label: '15D', priceChangePct: 2.5, realizedVolPct: 4, volumeRatio: 0.4, rangePct: 11 },
+    { label: '30D', priceChangePct: -1.6, realizedVolPct: 4, volumeRatio: 0.4, rangePct: 50 },
+    { label: '90D', priceChangePct: -2.7, realizedVolPct: 5, volumeRatio: 0.6, rangePct: 35 },
+  ] };
+  const alert = attention('emif', { kind: 'portfolio', severity: 'action-required', quantity: -112.5, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    presentation: { subject: 'EMIF', date: '2026-08-31', sourceLinks: [], rows: [
+      { label: 'Action', text: 'Cover' }, { label: 'Tick', text: 'N/A' }, { label: 'Trade', text: 'Unknown' }, { label: 'Trend', text: 'N/A' }, { label: 'Tail', text: 'N/A' },
+    ] } });
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} loadHorizonStats={jest.fn().mockResolvedValue({ EMIF: stats })} />);
+  const table = within(screen.getByRole('heading', { name: 'EMIF' }).closest('article')).getByRole('table');
+  expect(within(table).getAllByText('N/A')).toHaveLength(4);
+  await waitFor(() => expect(within(table).getByText('−4.0%')).toBeInTheDocument());
+  expect(within(table).getByText('−4.0%')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(table).getByText('+2.5%')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(table).getByText('87%')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(table).getByText('11%')).toHaveClass('analyst-inbox-signal--negative');
+});
+
+test('a stance alert lists the latest product calls, then current → target → order, with a trim framed red like an exit', () => {
   const stanceAlert = (id, symbol, quantity, stance) => attention(id, { kind: 'portfolio', severity: 'action-required', quantity,
     holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
     presentation: { subject: symbol, date: '2026-10-26', sourceLinks: [], stance, rows: [
@@ -537,9 +558,27 @@ test('a stance alert lists the latest product calls, then current → target →
   expect(within(order).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Current', 'Target', 'Order']);
   expect(within(order).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['SHORT 650 · 1.16%', '0 · 0.00%', 'BUY 650 to close short']);
   expect(within(card).queryByText(/filler/)).not.toBeInTheDocument();
-  expect(card).not.toHaveClass('is-trim');
   const trim = screen.getByRole('heading', { name: 'MPC' }).closest('article');
-  expect(trim).toHaveClass('is-action-required', 'is-trim');
+  expect(trim).toHaveClass('is-action-required');
   expect(within(trim).getByText('Marathon Petroleum Corporation')).toBeInTheDocument();
   expect(within(within(trim).getAllByRole('table')[1]).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['LONG 7.5 · 4.25%', 'LONG 5.74 · 3.25%', 'SELL up to 1.76 stays long']);
+});
+
+test('a Trade/Trend read from list membership looks like a stated one, with its source in the tooltip', () => {
+  const alert = attention('hyp', { kind: 'portfolio', severity: 'action-required', quantity: 150, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    presentation: { subject: 'HYP', date: '2026-10-15', sourceLinks: [], rows: [
+      { label: 'Action', text: 'Exit Long' },
+      { label: 'Tick', text: 'N/A' },
+      { label: 'Trade', text: 'Bullish', basis: 'inferred', note: 'Inferred from list membership (ETF Pro LONG Oct 14); not stated by the source' },
+      { label: 'Trend', text: 'N/A', basis: 'removed', note: 'ETF Pro REMOVE Oct 15: Trade and/or Trend broke; which is not stated' },
+      { label: 'Tail', text: 'N/A' },
+    ] } });
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  const table = within(screen.getByRole('heading', { name: 'HYP' }).closest('article')).getByRole('table');
+  expect(within(table).getByText('Bullish')).toHaveClass('analyst-inbox-bias-cell is-positive', { exact: true });
+  expect(within(table).getByText('Bullish')).toHaveAttribute('title', expect.stringMatching(/^Inferred from list membership/));
+  expect(within(table).getAllByText('N/A')).toHaveLength(3);
+  within(table).getAllByText('N/A').forEach(cell => expect(cell).toHaveClass('analyst-inbox-bias-cell is-unavailable', { exact: true }));
+  expect(within(table).queryByText('from list')).not.toBeInTheDocument();
+  expect(within(table).queryByText('removed')).not.toBeInTheDocument();
 });

@@ -73,20 +73,59 @@ function signalEvidence(holding, field, now) {
 }
 const DURATIONS = [['tick', 'Tick'], ['trade', 'Trade'], ['trend', 'Trend'], ['tail', 'Tail']];
 const SIGNALS = ['BULLISH', 'BEARISH', 'NEUTRAL'];
+// Real-Time Alerts and ETF Pro list only their strongest ideas, so a name they
+// currently list Long reads bullish Trade and Trend, and Short bearish. A trim
+// leaves it listed. A removal or exit says only that Trade and/or Trend broke,
+// so neither direction is known. Both come from the list, not a stated reading.
+const LISTING_SLOTS = ['etf-pro:long', 'etf-pro:short', 'real-time-alert'];
+const LISTED_BIAS = { LONG: 'BULLISH', REDUCE_LONG: 'BULLISH', SHORT: 'BEARISH', REDUCE_SHORT: 'BEARISH' };
+function listingBias(book, symbol) {
+  const entries = LISTING_SLOTS.map(slot => ({ ...book?.tickers?.[symbol]?.[slot], slot })).filter(entry => entry.stance && entry.date);
+  if (!entries.length) return null;
+  // Ordered as the stance book orders them: market date, then publication.
+  const key = entry => `${entry.date}|${entry.at || ''}`;
+  const latest = entries.map(key).sort().at(-1);
+  const newest = entries.filter(entry => key(entry) === latest);
+  const values = [...new Set(newest.map(entry => LISTED_BIAS[entry.stance]).filter(Boolean))];
+  const at = Math.max(...newest.map(entry => time(entry.at) || time(entry.date)));
+  // One edition can remove a Long and add a Short; the listing is the current state.
+  const said = entry => { const call = stanceCall(entry); return `${call.product} ${call.action} ${monthDay(call.date)}`; };
+  if (values.length === 1) {
+    const listing = newest.find(entry => LISTED_BIAS[entry.stance]);
+    return { value: values[0], at, basis: 'inferred', note: `Inferred from list membership (${said(listing)}); not stated by the source` };
+  }
+  const exit = newest.find(entry => !LISTED_BIAS[entry.stance]) || newest[0];
+  const broke = exit.product === 'etf-pro' && exit.stance.startsWith('EXIT_') ? 'Trade and/or Trend broke; which is not stated' : 'direction not stated';
+  return { value: null, at, basis: 'removed', note: `${said(exit)}: ${values.length ? 'listed both ways' : broke}` };
+}
+// The time an explicit reading was published; an undated one cannot be shown newer than a listing.
+function readingTime(...dates) {
+  return dates.map(time).find(Number.isFinite) ?? -Infinity;
+}
 // Every security alert states each duration; one without verified evidence reads N/A.
+// Trade and Trend fall back to RTA / ETF Pro list membership unless an explicit
+// reading is at least as new as the latest listing change.
 function durationRows(context, symbol, now) {
   const held = (context.holdings?.ruleHoldings || []).find(candidate => symbolOf(candidate.holding) === symbol);
   const decision = context.research?.bySymbol?.[symbol]?.decision || {};
+  const listed = listingBias(context.stanceBook, symbol);
   return DURATIONS.map(([field, label]) => {
     let value = null;
+    let at = -Infinity;
     if (field === 'tick') {
       const tick = held?.tick;
       value = tick && !invalid(tick) && tick.status === 'published' && dated(tick.publishedAt, now) ? tick.value : null;
     } else if (held && field !== 'tail') {
       value = signalEvidence(held, field, now) ? held[field] : null;
+      at = readingTime(held.sources?.[field]?.publishedAt);
     } else {
       const descriptor = decision[field];
       value = descriptor?.status === 'available' && !invalid(descriptor) ? descriptor.value : null;
+      at = readingTime(descriptor?.publishedAt, descriptor?.sourceDate);
+    }
+    if (listed && ['trade', 'trend'].includes(field) && !(SIGNALS.includes(value) && at >= listed.at)) {
+      const text = listed.value ? listed.value[0] + listed.value.slice(1).toLowerCase() : 'N/A';
+      return { ...row(label, text), basis: listed.basis, note: listed.note };
     }
     return row(label, SIGNALS.includes(value) ? value[0] + value.slice(1).toLowerCase() : 'N/A');
   });
@@ -460,7 +499,7 @@ const orderLine = ({ order }) => `${order.verb}${order.upTo ? ' up to' : ''}${or
 // verified read after Gateway connects sees every contradiction at once.
 function stanceFindings(context, now, verified) {
   if (!verified) return [];
-  const { book } = foldStanceEvents(context.stanceBook, context.events || [], now);
+  const book = context.stanceBook;
   const output = [];
   for (const scanned of scanHoldings(book, context.holdings.positions)) {
     if (!scanned.opposing.length) continue;
@@ -498,6 +537,8 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   // Reuse exact source text only within this evaluation; citations, security
   // relevance and current evidence gates remain specific to each reading.
   const sentenceMemo = new Map();
+  // One fold serves the stance scan and every alert's list-inferred Trade/Trend.
+  context = { ...context, stanceBook: foldStanceEvents(context.stanceBook, context.events || [], now).book };
   const verified = freshBook(context.holdings, now);
   const diagnostics = [...(context.diagnostics || [])];
   if (!verified) diagnostics.push({ component: 'holdings', status: 'unavailable' });

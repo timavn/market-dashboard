@@ -198,12 +198,16 @@ def _as_of_cell(observed: Any, readings: list[tuple[Any, Any]]) -> str:
 
 
 def _market_cell(row: dict[str, Any]) -> str:
+    """Market name with its sub-label; boards captured with price history add the 20-session Z-score:
+    REF(name;DXY;z) for the Dollar, MKT(name;GLD range;z) for a related range, NAME(name;;z) otherwise."""
+    z = (row.get("zScore") or {}).get("value")
+    z = f";{z:+.1f}" if isinstance(z, (int, float)) and not isinstance(z, bool) else ";" if "zScore" in row else ""
     if row.get("reference"):
-        return f"REF({row.get('label')};{row['reference']})"
+        return f"REF({row.get('label')};{row['reference']}{z})"
     risk_range = row.get("range") or {}
     if risk_range.get("fit") == "related-only" and risk_range.get("ticker"):
-        return f"MKT({row.get('label')};{risk_range['ticker']} range)"
-    return row.get("label") or NA
+        return f"MKT({row.get('label')};{risk_range['ticker']} range{z})"
+    return f"NAME({row.get('label') or NA};{z})" if z else row.get("label") or NA
 
 
 def _alpha_code(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -421,7 +425,8 @@ def _dollar_row(usd: dict[str, Any] | None) -> dict[str, Any] | None:
             "price": {"value": usd.get("value"), "asOf": usd.get("asOf")},
             "range": {"low": usd.get("low"), "high": usd.get("high"), "date": usd.get("rangeDate")} if has_range else {},
             "tick": usd.get("tick"), "trade": usd.get("trade"), "trend": usd.get("trend"), "research": usd.get("research"),
-            "structure": usd.get("structure"), **({"volume": usd.get("volume")} if "volume" in usd else {})}
+            "structure": usd.get("structure"), **({"volume": usd.get("volume")} if "volume" in usd else {}),
+            **({"zScore": usd.get("zScore")} if "zScore" in usd else {})}
 
 
 def _section_rows(board: dict[str, Any], rows: list[dict[str, Any]]) -> list[tuple[str, str, list[dict[str, Any]]]]:
@@ -470,6 +475,7 @@ def render_setup_board(board: dict[str, Any]) -> str:
                 # Every published nowcast month from the current release on; older captures carry one forecast.
                 forecasts = cpi.get("forecasts") or [{**(cpi.get("forecast") or {}),
                                                       "eventTicker": ((cpi.get("events") or [{}])[0]).get("eventTicker")}]
+                with_consensus = any("consensus" in forecast for forecast in forecasts)
                 rows = []
                 for forecast in forecasts:
                     month = re.match(r"^(\d{4})-(\d{2})$", str(forecast.get("reportMonth") or ""))
@@ -477,12 +483,15 @@ def render_setup_board(board: dict[str, Any]) -> str:
                     label = (f"{MONTHS[int(month[2]) - 1]} {month[1]}" if month
                              else f"{MONTHS[MONTH_CODES[coded[2]] - 1]} 20{coded[1]}" if coded and coded[2] in MONTH_CODES else NA)
                     published = _pacific_zoned(forecast.get("publishedAt"))
-                    rows.append([f"{cpi.get('label') or 'CPI YoY'} · {label}",
-                                 _event_label({"eventTicker": forecast.get("eventTicker")}) if forecast.get("eventTicker") else NA,
+                    # Boards captured with the survey consensus show it where older ones named the Kalshi contract.
+                    second = (_number(forecast.get("consensus"), percent=True) if isinstance(forecast.get("consensus"), (int, float)) else NA
+                              ) if with_consensus else (
+                        _event_label({"eventTicker": forecast.get("eventTicker")}) if forecast.get("eventTicker") else NA)
+                    rows.append([f"{cpi.get('label') or 'CPI YoY'} · {label}", second,
                                  *(_number(forecast.get(key), percent=True) if forecast.get("available") else NA
                                    for key in ("lower", "base", "upper")),
                                  published if published != DASH else NA])
-                lines += _table(["Market", "Kalshi", "Low", "Base", "High", "Published"], rows)
+                lines += _table(["Market", "Consensus" if with_consensus else "Kalshi", "Low", "Base", "High", "Published"], rows)
             continue
         drivers = _driver_block(board, members, label)
         if drivers["volatility"] or drivers.get("correlations"):
@@ -522,7 +531,8 @@ def render_setup_board(board: dict[str, Any]) -> str:
             lines += ["```analyst-research", json.dumps(block, ensure_ascii=False, separators=(",", ":")), "```", ""]
 
     dated = [(label, _pacific_zoned(sources.get(key))) for key, label in (
-        ("riskRanges", "Risk Ranges"), ("cryptoQuant", "Crypto Quant"), ("inflationNowcast", "Inflation Nowcast"))]
+        ("riskRanges", "Risk Ranges"), ("cryptoQuant", "Crypto Quant"), ("inflationNowcast", "Inflation Nowcast"),
+        ("cpiConsensus", "Trading Economics CPI consensus"))]
     named = [f"{label} {date}" for label, date in dated if date != DASH] + ["HedgAI Signals", "Cboe volatility indices", "Kalshi"]
     lines += ["Sources: " + ", ".join(named), ""]
     if with_research:

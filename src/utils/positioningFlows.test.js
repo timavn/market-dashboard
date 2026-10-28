@@ -46,6 +46,9 @@ describe('retail money funds', () => {
     }));
     const summary = summarizeMoneyFunds(series, new Date('2026-09-05T00:00:00Z'));
     expect(summary).toMatchObject({ status: 'ok', latest: { date: '2026-08-24', retailMoneyFunds: 3090, cash: 'building' } });
+    expect(summary.latest.change1w).toBeCloseTo(3090 / 3080 - 1);
+    // Twenty weeks of history cannot reach back a year.
+    expect(summary.latest.change52w).toBeNull();
     expect(summarizeMoneyFunds(series, new Date('2026-12-01T00:00:00Z')).status).toBe('stale');
     expect(summarizeMoneyFunds([])).toEqual({ status: 'unavailable', latest: null });
   });

@@ -1,66 +1,94 @@
-.money-flow-block {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 64px;
-  padding: 0 6px;
-  border: 1px solid transparent;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .03em;
-  line-height: 1.4;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
 .money-flow-block--up { background: var(--dashboard-quad-1); color: #fff; }
 .money-flow-block--flat { background: var(--dashboard-quad-3); color: #332900; }
 .money-flow-block--down { background: var(--dashboard-quad-4); color: #fff; }
-.money-flow-block--none { background: #fff; color: #667085; border-color: #d0d5dd; }
+.money-flow-block--none { background: #fff; color: #667085; }
 
-.money-flow-block--strong {
-  min-width: 84px;
-  font-size: 10px;
-}
-
-/* Supply on the left; participation and exchange volume stacked on the right. */
 .money-flow-card {
-  display: grid;
   flex: 1 1 auto;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
   min-width: 0;
 }
 
-.money-flow-card > .money-flow-mini,
-.money-flow-card__column {
-  min-width: 0;
+/* Colored layer tiles on the left span their rows; then Flow, Level, four
+   windows, Read. The fixed layout takes its widths from the header row. */
+.efr-mini-table.money-flow-grid > thead > tr > th:nth-child(1) { width: 12%; }
+.efr-mini-table.money-flow-grid > thead > tr > th:nth-child(2) { width: 27%; text-align: left; }
+.efr-mini-table.money-flow-grid > thead > tr > th:nth-child(3) { width: 10%; }
+.efr-mini-table.money-flow-grid > thead > tr > th:nth-child(n + 4) { width: 9%; }
+.efr-mini-table.money-flow-grid > thead > tr > th:last-child { width: 15%; text-align: center; }
+
+.money-flow-grid thead th {
+  text-align: right;
 }
 
-.money-flow-card__column {
-  align-self: stretch;
-  border-left: 1px solid #e3e8ef;
+.efr-mini-table.money-flow-grid > tbody > tr > td {
+  text-align: right;
 }
 
-.money-flow-card__subhead {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  font-size: 9px;
+.efr-mini-table.money-flow-grid > tbody > tr > td:first-of-type {
+  text-align: left;
+}
+
+/* The verdict and layer tiles are filled edge to edge with their read's
+   color. Outrank the shared mini-table header and cell backgrounds. */
+.efr-mini-table.money-flow-grid > :is(thead, tbody) > tr > th:is(.money-flow-grid__verdict, .money-flow-grid__tile) {
+  padding: 0 5px;
+  overflow: hidden;
   font-weight: 700;
+  letter-spacing: .03em;
+  text-align: left;
   text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
-.efr-reference-card__header .money-flow-block--strong {
-  min-width: 0;
-  font-size: 9px;
-  line-height: 1.3;
+.efr-mini-table.money-flow-grid > :is(thead, tbody) > tr > th.money-flow-block--up { background: var(--dashboard-quad-1); color: #fff; }
+.efr-mini-table.money-flow-grid > :is(thead, tbody) > tr > th.money-flow-block--flat { background: var(--dashboard-quad-3); color: #332900; }
+.efr-mini-table.money-flow-grid > :is(thead, tbody) > tr > th.money-flow-block--down { background: var(--dashboard-quad-4); color: #fff; }
+.efr-mini-table.money-flow-grid > :is(thead, tbody) > tr > th.money-flow-block--none { background: #fff; color: #667085; }
+
+.efr-mini-table.money-flow-grid > thead > tr > th.money-flow-grid__verdict {
+  text-align: center;
+}
+
+/* Name over read, both at the table's size so the longest (Mechanical,
+   De-levering) fits the narrow column without clipping. */
+.money-flow-grid__tile-name,
+.money-flow-grid__tile-read {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.money-flow-grid__tile-read {
+  font-weight: 600;
+  opacity: .9;
+}
+
+/* The card title sits in the Flow header at the header row's size. */
+.efr-mini-table.money-flow-grid > thead > tr > th.money-flow-grid__title .efr-reference-card__title {
+  width: auto;
+  font-size: inherit;
+  text-align: left;
+}
+
+.efr-mini-table.money-flow-grid > tbody > tr > td.money-flow-grid__sub {
+  padding-left: 12px;
+  color: #586573;
+}
+
+.efr-mini-table.money-flow-grid > tbody > tr > td.money-flow-grid__note {
+  color: #586573;
+  text-align: left;
+}
+
+.efr-mini-table.money-flow-grid > tbody > tr > td.money-flow-grid__empty {
+  height: 160px;
+  color: #8d97a6;
+  text-align: center;
 }
 
 /* The read column is colored edge to edge, like the Global Quads cells. */
-.money-flow-mini .money-flow-read {
-  width: 34%;
+.money-flow-grid .money-flow-read {
   font-weight: 700;
   letter-spacing: .03em;
   text-align: center;
@@ -68,38 +96,31 @@
   white-space: nowrap;
 }
 
-.money-flow-mini td:nth-child(2) {
-  text-align: right;
-  white-space: nowrap;
-}
+.efr-mini-table.money-flow-grid > tbody > tr > td.money-flow-read { text-align: center; }
+.money-flow-grid tbody td.money-flow-read.money-flow-block--up { background: var(--dashboard-quad-1); color: #fff; }
+.money-flow-grid tbody td.money-flow-read.money-flow-block--flat { background: var(--dashboard-quad-3); color: #332900; }
+.money-flow-grid tbody td.money-flow-read.money-flow-block--down { background: var(--dashboard-quad-4); color: #fff; }
+.money-flow-grid tbody td.money-flow-read.money-flow-block--none { background: #fff; color: #667085; }
 
-.efr-reference-card__body .money-flow-mini thead th {
-  text-align: center;
-}
-
-.money-flow-mini .is-up,
+.money-flow-grid .is-up,
 .money-flow-panel .is-up { color: #15803d; }
-.money-flow-mini .is-down,
+.money-flow-grid .is-down,
 .money-flow-panel .is-down { color: #b91c1c; }
-.money-flow-mini .is-flat,
+.money-flow-grid .is-flat,
 .money-flow-panel .is-flat { color: #a16207; }
-.money-flow-mini .is-muted,
-.money-flow-panel .is-muted { color: #64748b; }
+.money-flow-grid .is-muted,
+.money-flow-panel .is-muted { color: #98a2b3; }
+
+/* The expanded view uses the same grid at reading size. */
+.money-flow-grid--expanded th,
+.money-flow-grid--expanded td {
+  height: 22px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
 
 .money-flow-summary {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid #d3d3d3;
-  border-radius: 6px;
-  margin-bottom: 12px;
-}
-
-.money-flow-summary .money-flow-block {
-  min-width: 110px;
-  padding: 6px 14px;
-  font-size: 13px;
+  margin: 8px 0 12px;
 }
 
 .money-flow-summary p {
@@ -119,28 +140,6 @@
   color: #a16207;
 }
 
-.money-flow-context {
+.money-flow-panel .market-structure-reader--embedded {
   margin-top: 12px;
 }
-
-.money-flow-context h3 {
-  margin: 0 0 4px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #000080;
-}
-
-.money-flow-context h3 span {
-  color: #64748b;
-  font-weight: 400;
-}
-
-.money-flow-panel .dollar-liquidity-headlines {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-/* Outrank the shared mini-table header and cell backgrounds. */
-.efr-reference-card__body .money-flow-mini .money-flow-read.money-flow-block--up { background: var(--dashboard-quad-1); color: #fff; }
-.efr-reference-card__body .money-flow-mini .money-flow-read.money-flow-block--flat { background: var(--dashboard-quad-3); color: #332900; }
-.efr-reference-card__body .money-flow-mini .money-flow-read.money-flow-block--down { background: var(--dashboard-quad-4); color: #fff; }
-.efr-reference-card__body .money-flow-mini .money-flow-read.money-flow-block--none { background: #fff; color: #667085; }

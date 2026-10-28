@@ -54,17 +54,20 @@
 .global-quads-grid--compact .global-quads-reading { min-height: 11px; }
 .global-quads-grid--compact .global-quads-aggregate .global-quads-country { font-size: 9px; }
 .global-quads-grid--compact .global-quads-current-quarter { position: relative; }
-/* Draw one continuous column frame without changing the compact row dimensions. */
+/* Draw one continuous 1px column frame in the dashboard blue without changing the compact row dimensions. */
 .global-quads-grid--compact .global-quads-current-quarter::after {
   content: '';
   position: absolute;
   inset: -1px 0;
   z-index: 1;
-  border-inline: 2px solid #171717;
+  border-inline: 1px solid var(--portfolio-review-blue, #2563eb);
   pointer-events: none;
 }
-.global-quads-grid--compact thead .global-quads-current-quarter::after { top: 0; border-top: 2px solid #171717; }
-.global-quads-grid--compact tbody tr:last-child .global-quads-current-quarter::after { bottom: 0; border-bottom: 2px solid #171717; }
+.global-quads-grid--compact thead .global-quads-current-quarter::after { top: 0; border-top: 1px solid var(--portfolio-review-blue, #2563eb); }
+.global-quads-grid--compact tbody tr:last-child .global-quads-current-quarter::after {
+  bottom: 0;
+  border-bottom: 1px solid var(--portfolio-review-blue, #2563eb);
+}
 
 @media (pointer: coarse) {
   .global-quads-tabs button { min-height: 44px; }

@@ -92,5 +92,12 @@
   { "symbol": "MOVE", "aliases": ["MOVE", "^MOVE"], "names": ["ICE BofA MOVE Index"] },
   { "symbol": "G5RV", "aliases": ["G5RV"], "names": ["G5 FX Realized Volatility"] },
   { "symbol": "XLE", "aliases": ["XLE"], "names": ["Energy Select Sector SPDR Fund"] },
-  { "symbol": "XLV", "aliases": ["XLV"], "names": ["Health Care Select Sector SPDR Fund"] }
+  { "symbol": "XLV", "aliases": ["XLV"], "names": ["Health Care Select Sector SPDR Fund"] },
+  { "symbol": "XLK", "aliases": ["XLK"], "names": ["Technology Select Sector SPDR Fund"] },
+  { "symbol": "XLC", "aliases": ["XLC"], "names": ["Communication Services Select Sector SPDR Fund"] },
+  { "symbol": "XLY", "aliases": ["XLY"], "names": ["Consumer Discretionary Select Sector SPDR Fund"] },
+  { "symbol": "XLI", "aliases": ["XLI"], "names": ["Industrial Select Sector SPDR Fund"] },
+  { "symbol": "XLB", "aliases": ["XLB"], "names": ["Materials Select Sector SPDR Fund"] },
+  { "symbol": "XLP", "aliases": ["XLP"], "names": ["Consumer Staples Select Sector SPDR Fund"] },
+  { "symbol": "XLU", "aliases": ["XLU"], "names": ["Utilities Select Sector SPDR Fund"] }
 ]

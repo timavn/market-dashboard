@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { evaluateResearchAttention } = require('./attentionResearch.cjs');
+const { foldStanceEvents } = require('./stanceBook.cjs');
 const NOW = new Date('2026-09-22T16:00:00Z');
 const url = 'https://app.hedgeye.com/feed_items/12345';
 const cite = field => ({ id: `cite_${field}`, sourceUri: url, title: `${field} source`, publicationDate: '2026-09-22' });
@@ -420,4 +421,48 @@ test('a published Tick fills the Tick line; a stale or future one stays N/A', ()
     assert.equal(finding.presentation.rows.find(item => item.label === 'Tick').text, expected);
     assert.equal(finding.presentation.rows.find(item => item.label === 'Trade').text, 'Bearish');
   }
+});
+// RTA / ETF Pro list membership stands in for an unstated Trade and Trend.
+const durations = finding => Object.fromEntries(finding.presentation.rows.filter(item => ['Tick', 'Trade', 'Trend', 'Tail'].includes(item.label))
+  .map(item => [item.label, item.basis ? `${item.text} (${item.basis})` : item.text]));
+const etfPro = { productKey: 'etf-pro', productLabel: 'ETF Pro' };
+test('a current Long listing reads bullish Trade and Trend, inferred; Tick and Tail stay N/A', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLU', quantity: -10 }];
+  ctx.events = [changeEvent('XLU', 'ADD', 'LONG', etfPro)];
+  const [finding] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual(durations(finding), { Tick: 'N/A', Trade: 'Bullish (inferred)', Trend: 'Bullish (inferred)', Tail: 'N/A' });
+  assert.equal(finding.presentation.rows.find(item => item.label === 'Trade').note, 'Inferred from list membership (ETF Pro LONG Sep 22); not stated by the source');
+});
+test('a current Short listing reads bearish Trade and Trend, inferred', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'TSLA', quantity: 4 }];
+  ctx.events = [changeEvent('TSLA', 'SHORT', undefined, { productKey: 'real-time-alert', productLabel: 'Real-Time Alert' })];
+  const [finding] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual(durations(finding), { Tick: 'N/A', Trade: 'Bearish (inferred)', Trend: 'Bearish (inferred)', Tail: 'N/A' });
+});
+test('a removal clears the inferred Trade and Trend instead of carrying the listing over', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'HYP', quantity: 150 }];
+  ctx.events = [changeEvent('HYP', 'ADD', 'LONG', { ...etfPro, marketDate: '2026-09-21', publishedAt: '2026-09-21T12:00:00Z' }), changeEvent('HYP', 'REMOVE', 'LONG', etfPro)];
+  const [finding] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual(durations(finding), { Tick: 'N/A', Trade: 'N/A (removed)', Trend: 'N/A (removed)', Tail: 'N/A' });
+  assert.equal(finding.presentation.rows.find(item => item.label === 'Trend').note, 'ETF Pro REMOVE Sep 22: Trade and/or Trend broke; which is not stated');
+});
+test('each scan reads the latest list state: removal, then a flip to Short', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLE', quantity: 10 }];
+  const day = (date, action, side) => changeEvent('XLE', action, side, { ...etfPro, marketDate: date, publishedAt: `${date}T12:00:00Z`, sourceMessageId: `msgXLE${date}${side}` });
+  const removed = foldStanceEvents(null, [day('2026-09-20', 'ADD', 'LONG'), day('2026-09-21', 'REMOVE', 'LONG')], NOW).book;
+  const [before] = evaluateResearchAttention({ ...ctx, stanceBook: removed }, NOW).findings;
+  assert.equal(durations(before).Trade, 'N/A (removed)');
+  const [after] = evaluateResearchAttention({ ...ctx, stanceBook: removed, events: [day('2026-09-22', 'ADD', 'SHORT')] }, NOW).findings;
+  assert.equal(after.id, before.id);
+  assert.deepEqual([durations(after).Trade, durations(after).Trend], ['Bearish (inferred)', 'Bearish (inferred)']);
+});
+test('a newer explicit reading overrides the listing; an older one loses to it', () => {
+  const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLU', quantity: -10 }];
+  ctx.events = [changeEvent('XLU', 'ADD', 'LONG', etfPro)];
+  // Listed Long at 12:00; Trade restated Bearish at 15:00, Trend last stated at 11:00.
+  ctx.holdings.ruleHoldings.push({ holding: 'XLU', quantity: -10, heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: 4,
+    signalContext: { trade: { status: 'published' }, trend: { status: 'published' } },
+    sources: { trade: { publishedAt: '2026-09-22T15:00:00Z', citation: cite('trade') }, trend: { publishedAt: '2026-09-22T11:00:00Z', citation: cite('trend') } } });
+  const finding = evaluateResearchAttention(ctx, NOW).findings.find(item => item.symbol === 'XLU' && item.presentation.stance);
+  assert.deepEqual([durations(finding).Trade, durations(finding).Trend], ['Bearish', 'Bullish (inferred)']);
 });

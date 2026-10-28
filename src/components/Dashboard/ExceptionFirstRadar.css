@@ -1961,50 +1961,6 @@
   line-height: 1;
 }
 
-.money-flow-card__volume .market-volume-table--mw {
-  height: auto;
-}
-
-.money-flow-card__volume .region-mw-table-wrap {
-  overflow: hidden;
-}
-
-.money-flow-card__volume .region-mw-quotes-table {
-  width: 100%;
-  min-width: 0;
-  table-layout: fixed;
-}
-
-.money-flow-card__volume .region-mw-th,
-.money-flow-card__volume .region-mw-td {
-  height: 13px;
-  padding: 1px 2px;
-  font-size: 7px;
-  line-height: 1.1;
-}
-
-.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table .region-mw-th {
-  font-size: 6px;
-  letter-spacing: 0;
-}
-
-.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-th-name,
-.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-td-name {
-  width: 34%;
-  padding-right: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-th-metric,
-.money-flow-card__volume .market-volume-table--mw .region-mw-quotes-table.volume-mw-table .region-mw-td.region-mw-td-heat {
-  width: 15%;
-}
-
-.money-flow-card__volume .volume-footnotes {
-  display: none;
-}
-
 .efr-reference-empty {
   height: 100%;
   display: flex;
@@ -2448,10 +2404,6 @@
 
   .efr-reference-card--money-flow {
     grid-column: auto;
-  }
-
-  .money-flow-card {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .efr-backdrop {

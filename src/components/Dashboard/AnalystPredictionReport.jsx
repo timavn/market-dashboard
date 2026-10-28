@@ -15,9 +15,10 @@ const nodeText = node => node?.type === 'text' ? node.value : (node?.children ||
 const reportPlugins = [remarkGfm, [remarkAnalystProcessColors, { reviewKind: 'prediction-markets-review' }]];
 const dateValue = /^(?:(?:Published|As of|Since|Initiated|Last close) )?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?: \d{1,2},)? \d{4}(?: \d{2}:\d{2} [A-Z]{2,4})?$/i;
 const shortReading = /^(?:Last known\s+)?(?:Long|Short|Buy|Wait|Watch|Bullish|Bearish|Neutral)$/i;
-// Setup board stacked cells: BIAS(direction;date;product) and MKT(name;sub-label).
+// Setup board stacked cells: BIAS(direction;date;product) and MKT(name;sub-label). Boards with price history add
+// the 20-session Z-score as a third field, and NAME(name;;z) carries it for a market with no sub-label.
 const BIAS_TOKEN = /^BIAS\((Bullish|Bearish|Neutral|N\/A);([^;()]*);([^;()]*)\)$/;
-const MARKET_TOKEN = /^(MKT|REF)\(([^;()]+);([^;()]+)\)$/;
+const MARKET_TOKEN = /^(MKT|REF)\(([^;()]+);([^;()]+)\)$|^(MKT|REF|NAME)\(([^;()]+);([^;()]*);([-+]\d+(?:\.\d+)?)?\)$/;
 // ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct)
 const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*)\)$/;
 // ALPHA(trade;trend;tradeRel;trendRel;unit;approximate;product): this morning's Alpha Code with the price above or below each level.
@@ -144,9 +145,21 @@ function cellFor({ node, children }) {
     </td>;
   }
   const market = text.match(MARKET_TOKEN);
-  if (market) return <td className={market[1] === 'REF' ? 'analyst-prediction-reference-cell' : undefined} title={`${market[2]} · ${market[3]}`}>
-    <span className="analyst-prediction-stack">{market[2]}</span>
-    <span className="analyst-prediction-stack analyst-prediction-stack--muted">{market[3]}</span></td>;
+  if (market) {
+    const [kind, name, sub] = market[1] ? market.slice(1, 4) : market.slice(4, 7);
+    const scored = !market[1];
+    const z = market[7];
+    const label = [name, sub, scored && `Z-score ${z || 'N/A'} vs. the prior 20 daily closes`].filter(Boolean).join(' · ');
+    return <td className={kind === 'REF' ? 'analyst-prediction-reference-cell' : undefined} title={label}>
+      <span className="analyst-prediction-stack">{name}</span>
+      {sub && <span className="analyst-prediction-stack analyst-prediction-stack--muted">{sub}</span>}
+      {scored && <span className="analyst-prediction-stack analyst-prediction-z">
+        <span className="analyst-prediction-stack__key">Z</span>{' '}
+        {z ? <span className={Math.abs(Number(z)) >= 2 ? 'analyst-prediction-z--stretched' : undefined}>{z.replace('-', '−')}</span>
+          : <span className="analyst-prediction-stack--muted">N/A</span>}
+      </span>}
+    </td>;
+  }
   const alpha = text.match(ALPHA_TOKEN);
   if (alpha) {
     const [, trade, trend, tradeRel, trendRel, unit, approximate, product] = alpha;

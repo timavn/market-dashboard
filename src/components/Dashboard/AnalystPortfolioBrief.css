@@ -70,6 +70,10 @@
 .portfolio-position-review small { color: var(--analyst-muted, #667085); font-size: 9px; }
 .portfolio-brief .portfolio-position-product { display: block; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
 .portfolio-position-product + .portfolio-position-product { margin-top: 2px; }
+/* A wrapped call stays beside its date, so the dates read as one column. */
+.portfolio-position-product-call { display: flex; align-items: baseline; gap: 4px; }
+/* Fixed width fits the widest month ("May 31"), so every product name starts at the same x. */
+.portfolio-position-product-date { flex: 0 0 4.2em; min-width: 0; color: var(--analyst-muted, #667085); white-space: nowrap; }
 .portfolio-brief .portfolio-position-alert-source { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer; }
 .portfolio-position-action { color: var(--dashboard-negative, #dc2626); font-weight: 400; }
 .portfolio-review-refresh { display: flex; justify-content: flex-end; margin-bottom: 12px; }
@@ -93,7 +97,8 @@
 .portfolio-brief-centered .portfolio-positions tbody :is(th, td) { vertical-align: middle; }
 .portfolio-brief-centered .portfolio-position-field { justify-content: space-between; }
 .portfolio-brief-centered .portfolio-position-field > small { min-width: 0; }
-.portfolio-brief-centered .portfolio-position-product { text-align: center; }
+/* Product calls read as a dated list, so their dates line up on the left. */
+.portfolio-brief-centered .portfolio-positions td.portfolio-position-products, .portfolio-brief-centered .portfolio-position-product { text-align: left; }
 .portfolio-brief-exceptions .portfolio-brief-more { margin-top: 8px; }
 .portfolio-brief .portfolio-review-section {
   height: auto;

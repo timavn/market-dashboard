@@ -1,6 +1,7 @@
 /** @jest-environment node */
 const {
   calculateParticipation,
+  calculateVolumeTrend,
   pairSessions,
   participationRegime,
 } = require('./volumeParticipation.cjs');
@@ -59,5 +60,37 @@ describe('volume participation', () => {
     expect(calculateParticipation(volumeRows, closes)).toMatchObject({ status: 'unavailable', regime: 'unavailable' });
     expect(participationRegime(1.0)).toBe('balanced');
     expect(participationRegime(null)).toBe('unavailable');
+  });
+});
+
+describe('volume trend', () => {
+  // Newest first: the latest `recent` sessions trade `recentVolume`, the rest of the year 10B.
+  function year({ recent = 21, recentVolume = 9, sessions = 252 } = {}) {
+    return sessionDates(sessions).reverse().map((date, index) => ({
+      date, volume: (index < recent ? recentVolume : 10) * 1e9,
+    }));
+  }
+
+  test('compares recent average volume with the trailing year and reads it light', () => {
+    const trend = calculateVolumeTrend(year());
+    expect(trend.status).toBe('ok');
+    expect(trend.asOf).toBe('2026-10-23');
+    expect(trend.latest).toEqual({ date: '2026-10-23', volume: 9e9 });
+    const baseline = (21 * 9 + 231 * 10) / 252;
+    expect(trend.windows['1w']).toBeCloseTo(9 / baseline - 1);
+    expect(trend.windows['1m']).toBeCloseTo(9 / baseline - 1);
+    expect(trend.read).toBe('light');
+    expect(calculateVolumeTrend(year({ recentVolume: 10 })).read).toBe('normal');
+    expect(calculateVolumeTrend(year({ recentVolume: 12 })).read).toBe('heavy');
+  });
+
+  test('refuses a year it cannot fill or a window with too many incomplete sessions', () => {
+    expect(calculateVolumeTrend(year({ sessions: 200 }))).toMatchObject({ status: 'unavailable', read: 'unavailable' });
+    const gappy = year().map((row, index) => (index < 2 ? { ...row, volume: null } : row));
+    const trend = calculateVolumeTrend(gappy);
+    // Three of five sessions is too thin for 1W; 19 of 21 still averages 1M.
+    expect(trend.windows['1w']).toBeNull();
+    expect(trend.windows['1m']).not.toBeNull();
+    expect(trend.latest.date).toBe(gappy[2].date);
   });
 });

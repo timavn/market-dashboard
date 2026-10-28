@@ -87,11 +87,12 @@ function attentionContent(finding, now) {
 const signed = (value, digits = 1) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value).toFixed(digits)}%`;
 const toneClass = tone => tone ? `analyst-inbox-signal--${tone}` : undefined;
 
-// Price windows are colored against the held side; volatility only when it runs
-// well above its one-year level. Volume carries no direction of its own.
-function horizonRows(stats, side) {
+// Price windows are colored by their own sign, whichever side is held: down is
+// always red. Volatility is red only when it runs well above its one-year level.
+// Volume carries no direction of its own.
+function horizonRows(stats) {
   const columns = stats?.columns || HORIZONS.map(label => ({ label }));
-  const against = value => !side || value == null || value === 0 ? null : value * side > 0 ? 'positive' : 'negative';
+  const against = value => value == null || value === 0 ? null : value > 0 ? 'positive' : 'negative';
   const cell = (value, format, tone) => value == null ? { text: '—', tone: 'muted' } : { text: format(value), tone };
   return [
     ['Price', columns.map(column => cell(column.priceChangePct, signed, against(column.priceChangePct)))],
@@ -103,16 +104,18 @@ function horizonRows(stats, side) {
   ];
 }
 
-function HorizonTable({ durations, stats, side }) {
+function HorizonTable({ durations, stats }) {
   return <table className="analyst-inbox-horizons">
     <colgroup><col className="analyst-inbox-horizons-label" />{HORIZONS.map(label => <col key={label} className="analyst-inbox-horizons-column" />)}</colgroup>
     <thead><tr><td />{durations.map(row => <th key={row.label} scope="col">{row.label}</th>)}</tr></thead>
     <tbody>
+      {/* Each duration reads Bullish, Neutral, Bearish or N/A. Where a reading came from
+          (stated, or RTA / ETF Pro list membership) is in its tooltip only. */}
       <tr className="analyst-inbox-bias"><td />{durations.map(row => <td key={row.label}>
-        <span className={`analyst-inbox-bias-cell is-${BIAS_TONES[row.text] || 'unavailable'}`}>{row.text}</span>
+        <span className={`analyst-inbox-bias-cell is-${BIAS_TONES[row.text] || 'unavailable'}`} title={row.note}>{BIAS_TONES[row.text] ? row.text : 'N/A'}</span>
       </td>)}</tr>
       <tr className="analyst-inbox-horizon-head"><td />{(stats?.columns || HORIZONS.map(label => ({ label }))).map(column => <th key={column.label} scope="col">{column.label}</th>)}</tr>
-      {horizonRows(stats, side).map(([label, cells]) => <tr key={label}>
+      {horizonRows(stats).map(([label, cells]) => <tr key={label}>
         <th scope="row" title={label === 'Range position' ? 'Close between the window low (0%) and high (100%)' : undefined}>{label}</th>
         {cells.map((cell, index) => <td key={index} className={toneClass(cell.tone)}>{cell.text}</td>)}
       </tr>)}
@@ -144,7 +147,7 @@ function StanceCopy({ ticker, stance, freshHoldings }) {
       </tr>)}</tbody>
     </table>
     <table className="analyst-inbox-stance-table analyst-inbox-stance-order">
-      <colgroup><col style={{ width: '34%' }} /><col style={{ width: '26%' }} /><col style={{ width: '40%' }} /></colgroup>
+      <colgroup><col style={{ width: '32%' }} /><col style={{ width: '32%' }} /><col style={{ width: '36%' }} /></colgroup>
       <thead><tr><th scope="col">Current</th><th scope="col">Target</th><th scope="col">Order</th></tr></thead>
       <tbody><tr>{freshHoldings ? <>
         <td>{stancePosition(current)}</td><td>{stancePosition(target)}</td>
@@ -158,7 +161,7 @@ function StanceCopy({ ticker, stance, freshHoldings }) {
 function alertSummary(finding, content, modern, date) {
   const payload = finding.payload || finding;
   const title = `${modern ? content.subject : finding.symbol || payload.symbol}${date ? ` (${date})` : ''}`;
-  const lines = modern ? content.rows.map(row => `${row.label}: ${row.text}`) : [
+  const lines = modern ? content.rows.map(row => `${row.label}: ${row.text}${row.note ? ` (${row.note})` : ''}`) : [
     `Current position: ${content.currentPosition?.label || 'Unavailable'}`,
     `Action: ${content.positionAction || 'Unavailable'}`,
     content.headline && `${content.updateLabel || 'Signal'}: ${content.headline}`,
@@ -221,12 +224,11 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       // Every linked publication opens from one Source popover beside the button.
       const durations = modern ? DURATIONS.map(label => content.rows.find(row => row.label === label)).filter(Boolean) : [];
       const rows = modern ? content.rows.filter(row => !DURATIONS.includes(row.label)) : [];
-      const side = Math.sign(Number(payload.quantity) || 0) || null;
       const citations = content.sourceLinks?.length ? content.sourceLinks.filter(link => link?.citation && link.label).map(link => link.citation)
         : payload.citation ? [payload.citation] : [];
       return <React.Fragment key={finding.id}>
       {!required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Notifications</h2>}
-      <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}${stance?.verdict === 'trim' ? ' is-trim' : ''}`}>
+      <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}`}>
         <h3 className="sr-only">{subject}</h3>
         <div className={durations.length ? 'analyst-inbox-body has-horizons' : 'analyst-inbox-body'}>
         {stance ? <StanceCopy ticker={subject} stance={stance} freshHoldings={attentionEvidenceFreshness(finding, now).holdings} /> : <dl className="analyst-inbox-copy">
@@ -267,7 +269,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
           </div>}
           </>}
         </dl>}
-        {durations.length > 0 && <HorizonTable durations={durations} stats={horizonStats[content.subject]} side={side} />}
+        {durations.length > 0 && <HorizonTable durations={durations} stats={horizonStats[content.subject]} />}
         </div>
         <AnalystAlertThread findingId={finding.id} alert={alertSummary(finding, content, modern, date)}
           conversationId={threads[finding.id] || null} onCitation={onCitation} MessageComponent={MessageComponent}

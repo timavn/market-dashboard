@@ -102,10 +102,17 @@ describe('multi-region server instrument configuration', () => {
     expect(catalogRow(symbol).provider).toEqual({ provider: 'yahoo', yahooSymbol, secType });
   });
 
+  it('expands US to every sector SPDR, with VNQ standing in for XLRE', () => {
+    const usSymbols = marketBackdropCatalog.find((group) => group.id === 'us').rows.map((row) => row.symbol);
+    ['XLK', 'XLC', 'XLY', 'XLF', 'XLV', 'XLI', 'XLE', 'XLB', 'XLP', 'XLU', 'VNQ']
+      .forEach((symbol) => expect(usSymbols).toContain(symbol));
+    expect(usSymbols).not.toContain('XLRE');
+  });
+
   it('preserves the expanded catalog: eight rows in the top cards, nine in Commodities, Rates and Crypto', () => {
-    expect(catalogRows).toHaveLength(64);
+    expect(catalogRows).toHaveLength(73);
     expect(catalogRows.filter((row) => row.summary)).toHaveLength(51);
-    expect(new Set(catalogRows.map((row) => row.symbol)).size).toBe(64);
+    expect(new Set(catalogRows.map((row) => row.symbol)).size).toBe(73);
     marketBackdropCatalog.forEach((group) => {
       expect(group.rows.filter((row) => row.summary)).toHaveLength(['commodities', 'rates', 'crypto'].includes(group.id) ? 9 : 8);
     });
