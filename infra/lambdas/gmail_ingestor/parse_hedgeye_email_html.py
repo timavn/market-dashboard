@@ -2604,6 +2604,24 @@ def _extract_position_change_body(text: str) -> Dict[str, Dict[str, Any]]:
     return changes
 
 
+_MULTI_POSITION_CHANGE_SUBJECT = re.compile(r"\b\d+\s+Changes?:\s*(.+)$", re.IGNORECASE)
+# A single change names the side in the subject instead:
+# "Add Airbnb Inc. (ABNB) to LONG Side" / "Remove ... (TICKER) from SHORT Side".
+_SINGLE_POSITION_CHANGE_SUBJECT = re.compile(
+    r"^(Add|Remove)\s+.+?\(\s*([A-Z][A-Z0-9./-]{0,9})\s*\)\s+(?:to|from)\s+(?:the\s+)?(LONG|SHORT)\s+Side\b",
+    re.IGNORECASE,
+)
+
+
+def is_position_change_subject(subject: Optional[str]) -> bool:
+    """True for an Investing Ideas position-change subject, multi or single."""
+    normalized = re.sub(r"\s+", " ", str(subject or "")).strip()
+    return bool(
+        _MULTI_POSITION_CHANGE_SUBJECT.search(normalized)
+        or _SINGLE_POSITION_CHANGE_SUBJECT.search(normalized)
+    )
+
+
 def _extract_position_change_alerts(
     headline: Optional[str],
     body_text: str = "",
@@ -2612,14 +2630,8 @@ def _extract_position_change_alerts(
         return []
     body = _extract_position_change_body(body_text)
     normalized = re.sub(r"\s+", " ", headline).strip()
-    match = re.search(r"\b\d+\s+Changes?:\s*(.+)$", normalized, re.IGNORECASE)
-    # A single change names the side in the subject instead:
-    # "Add Airbnb Inc. (ABNB) to LONG Side" / "Remove ... (TICKER) from SHORT Side".
-    single = None if match else re.search(
-        r"^(Add|Remove)\s+.+?\(\s*([A-Z][A-Z0-9./-]{0,9})\s*\)\s+(?:to|from)\s+(?:the\s+)?(LONG|SHORT)\s+Side\b",
-        normalized,
-        re.IGNORECASE,
-    )
+    match = _MULTI_POSITION_CHANGE_SUBJECT.search(normalized)
+    single = None if match else _SINGLE_POSITION_CHANGE_SUBJECT.search(normalized)
     if single and re.search(r"\binvesting ideas\b", body_text or "", re.IGNORECASE):
         action = single.group(1).upper()
         ticker = single.group(2).upper()

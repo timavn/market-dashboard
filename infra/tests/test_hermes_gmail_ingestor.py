@@ -5331,6 +5331,77 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertNotIn("riskRangeLow", alert)
         self.assertNotIn("ADDING", {event["entityId"] for event in research_intelligence.build_entity_events(snapshot)})
 
+    ABNB_LEDGER_ROW = {
+        "messageId": "1a17ec8a530b21d0",
+        "attachmentId": "message-body-html-1",
+        "status": "UNSUPPORTED",
+        "errorCode": "RESEARCH_PRODUCT_UNSUPPORTED",
+        "filename": "message-body.html",
+        "mimeType": "text/html",
+        "reportType": "unknown",
+        "subject": "Add Airbnb Inc. (ABNB) to LONG Side",
+        "sender": "Hedgeye <info@hedgeye.com>",
+        "s3Bucket": "market-dashboard-csv-data",
+        "s3Key": "hedgeye-email/messages/2026-10-27/unknown/1a17ec8a530b21d0-message-body-html-1-message-body.html",
+        "receivedAt": "2026-10-27T19:13:59+00:00",
+        "materializationAttemptVersion": ingestor.MATERIALIZED_DATA_VERSION,
+        "materializationAttemptCount": 1,
+        "materializationStatus": "ERROR",
+        "retryable": False,
+    }
+
+    def test_operator_replay_reaches_an_unsupported_single_investing_ideas_change(self):
+        row = dict(self.ABNB_LEDGER_ROW, contentSha256="a" * 64)
+        self.assertTrue(ingestor.is_position_change_subject(row["subject"]))
+        self.assertFalse(ingestor._should_backfill_materialized_snapshot(row))
+        self.assertTrue(ingestor._should_backfill_materialized_snapshot(row, allow_version_upgrade=True))
+
+        table = FakeLedgerTable([row])
+        with patch.object(ingestor, "backfill_html_snapshot", return_value=True) as backfill, patch.object(
+            ingestor, "get_message_metadata"
+        ) as get_metadata, patch.object(ingestor, "get_message") as get_message:
+            result = ingestor.process_message("token", "me", row["messageId"], table, allow_version_backfill=True)
+
+        backfill.assert_called_once()
+        get_metadata.assert_not_called()
+        get_message.assert_not_called()
+        self.assertEqual(result["stored"], [{"filename": "message-body.html", "detail": "snapshot-backfilled"}])
+
+    def test_backfilled_single_investing_ideas_change_leaves_the_unknown_manifest(self):
+        html_body = (
+            "<h1>Add Airbnb Inc. (ABNB) to LONG Side</h1>"
+            "<p>We are <strong>ADDING</strong> the following to <em>Investing Ideas</em>:</p>"
+            "<p><strong>Long:</strong></p><ul><li><abbr name=\"Airbnb Inc.\">ABNB</abbr></li></ul>"
+        ).encode()
+        row = dict(self.ABNB_LEDGER_ROW, contentSha256=hashlib.sha256(html_body).hexdigest())
+        table = FakeLedgerTable([row])
+        s3_client = MagicMock()
+        s3_client.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=html_body))}
+
+        with patch.object(ingestor, "s3", s3_client), patch.object(
+            ingestor, "persist_research_event_ledger", return_value=1
+        ), patch.object(ingestor, "persist_snapshot_intelligence", return_value=1), patch.object(
+            ingestor, "materialize_email_snapshot", return_value=({}, None)
+        ), patch.object(ingestor, "finalize_snapshot_intelligence"), patch.object(
+            ingestor, "reclassify_manifest_artifact"
+        ) as reclassify:
+            backfilled = ingestor.backfill_html_snapshot(
+                table=table,
+                message_id=row["messageId"],
+                attachment_id=row["attachmentId"],
+                report_type="unknown",
+                mime_type="text/html",
+                received_at=datetime(2026, 10, 27, 19, 13, 59, tzinfo=timezone.utc),
+                ledger_item=row,
+                replace_entity_projection=True,
+            )
+
+        self.assertTrue(backfilled)
+        [snapshot] = reclassify.call_args.args[:1]
+        self.assertEqual(snapshot["snapshotType"], "investing-ideas")
+        self.assertEqual(reclassify.call_args.kwargs["source_product_id"], "unknown")
+        self.assertEqual(snapshot["data"]["alerts"][0]["ticker"], "ABNB")
+
     def test_single_side_subject_without_investing_ideas_body_is_not_a_position_change(self):
         snapshot = ingestor.parse_html_snapshot(
             report_type="unknown",
