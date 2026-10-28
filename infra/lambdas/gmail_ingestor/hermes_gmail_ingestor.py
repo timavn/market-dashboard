@@ -1186,6 +1186,18 @@ def link_only_notice_reason(subject: str) -> Optional[str]:
     normalized = re.sub(r"\s+", " ", str(subject or "")).strip().casefold()
     if normalized.startswith("macro week summary notes"):
         return "macro-week-summary-link"
+    # Webcast invites, countdowns and replay recaps: "HAPPENING NOW | ...",
+    # "HAPPENING IN ONE HOUR | ...", "SUBMIT YOUR QUESTIONS FOR KEITH | ...",
+    # "GEOPOLITICAL EVENT IN ONE HOUR | ...", "Keith Q&A | Read the Answers ...".
+    if re.match(
+        r"(?:happening (?:now|in)\b|submit your questions\b|[\w .&-]*\bevent in (?:one|\d+)\b|keith q&a\s*\|)",
+        normalized,
+    ):
+        return "event-notice"
+    # "L1 Watch | Weekly Update" is a crypto chart book: images plus a
+    # download link, with no positions or levels in the body.
+    if normalized.startswith("l1 watch"):
+        return "chart-book-link"
     return None
 
 

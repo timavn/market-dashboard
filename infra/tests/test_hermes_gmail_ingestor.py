@@ -5289,6 +5289,59 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertIsNone(ingestor.link_only_notice_reason("The Macro Show | October 23rd, 2026"))
         self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown")
 
+    def test_event_invites_and_chart_book_links_are_link_only_notices(self):
+        for subject in [
+            "HAPPENING NOW | MID-TERM MANIA: THE FINAL COUNTDOWN WITH NEIL HOWE AND JT TAYLOR",
+            "HAPPENING IN ONE HOUR | Exclusive Q&A Session with Keith McCullough at 11AM ET",
+            "HAPPENING IN 10 MINUTES | Exclusive Q&A Session With Keith McCullough at 11AM ET",
+            "SUBMIT YOUR QUESTIONS FOR KEITH | Exclusive Q&A Session Tuesday at 11AM ET",
+            "GEOPOLITICAL EVENT IN ONE HOUR | SPANNING THE GLOBE WITH COL. McCAUSLAND",
+            "Keith Q&A | Read the Answers and Watch the Replay",
+        ]:
+            self.assertEqual(ingestor.link_only_notice_reason(subject), "event-notice", subject)
+        self.assertEqual(ingestor.link_only_notice_reason("L1 Watch | Weekly Update"), "chart-book-link")
+        for subject in [
+            "Add Airbnb Inc. (ABNB) to LONG Side",
+            "Digital Assets Position Monitor",
+            "Early Look: Happening Now",
+            "Real-Time Alert: Selling SPY",
+        ]:
+            self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+
+    def test_single_investing_ideas_add_takes_its_side_from_the_subject(self):
+        subject = "Add Airbnb Inc. (ABNB) to LONG Side"
+        html_body = """
+            <h1>Add Airbnb Inc. (ABNB) to LONG Side</h1>
+            <p>We are <strong>ADDING</strong> the following to <em>Investing Ideas</em>:</p>
+            <p><strong>Long:</strong></p><ul><li><abbr name="Airbnb Inc.">ABNB</abbr></li></ul>
+            <p>Travel related stocks are down with hotel stocks like HLT today...</p>
+        """
+        snapshot = ingestor.parse_html_snapshot(
+            report_type=ingestor.infer_report_type("message-body.html", subject),
+            html_body=html_body,
+            received_at=datetime(2026, 10, 27, 19, 12, tzinfo=timezone.utc),
+            s3_key="gmail/unknown/abnb.html",
+            message_id="abnb-add",
+            subject=subject,
+        )
+
+        self.assertEqual(snapshot["snapshotType"], "investing-ideas")
+        [alert] = snapshot["data"]["alerts"]
+        self.assertEqual((alert["ticker"], alert["action"], alert["side"]), ("ABNB", "ADD", "long"))
+        self.assertNotIn("riskRangeLow", alert)
+        self.assertNotIn("ADDING", {event["entityId"] for event in research_intelligence.build_entity_events(snapshot)})
+
+    def test_single_side_subject_without_investing_ideas_body_is_not_a_position_change(self):
+        snapshot = ingestor.parse_html_snapshot(
+            report_type="unknown",
+            html_body="<h1>Add Airbnb Inc. (ABNB) to LONG Side</h1><p>Webinar recap.</p>",
+            received_at=datetime(2026, 10, 27, 19, 12, tzinfo=timezone.utc),
+            s3_key="gmail/unknown/abnb.html",
+            message_id="abnb-other",
+            subject="Add Airbnb Inc. (ABNB) to LONG Side",
+        )
+        self.assertIsNone(snapshot)
+
     def test_market_situation_webcast_is_ignored_from_metadata_without_fetching_body(self):
         table = FakeLedgerTable()
         subject = (

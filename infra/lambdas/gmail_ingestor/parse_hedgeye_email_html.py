@@ -2613,6 +2613,31 @@ def _extract_position_change_alerts(
     body = _extract_position_change_body(body_text)
     normalized = re.sub(r"\s+", " ", headline).strip()
     match = re.search(r"\b\d+\s+Changes?:\s*(.+)$", normalized, re.IGNORECASE)
+    # A single change names the side in the subject instead:
+    # "Add Airbnb Inc. (ABNB) to LONG Side" / "Remove ... (TICKER) from SHORT Side".
+    single = None if match else re.search(
+        r"^(Add|Remove)\s+.+?\(\s*([A-Z][A-Z0-9./-]{0,9})\s*\)\s+(?:to|from)\s+(?:the\s+)?(LONG|SHORT)\s+Side\b",
+        normalized,
+        re.IGNORECASE,
+    )
+    if single and re.search(r"\binvesting ideas\b", body_text or "", re.IGNORECASE):
+        action = single.group(1).upper()
+        ticker = single.group(2).upper()
+        side = single.group(3).lower()
+        detail = body.get(ticker) or {}
+        ranged = detail.get("action") == action and detail.get("side") == side
+        return [{
+            "headline": normalized,
+            "signalFamily": "Position Changes",
+            "signalPhrase": f"{single.group(1).title()} {ticker}",
+            "action": action,
+            "side": side,
+            "context": "position-change",
+            "ticker": ticker,
+            "name": ticker,
+            "analyst": None,
+            **({"riskRangeLow": detail["riskRangeLow"], "riskRangeHigh": detail["riskRangeHigh"]} if ranged else {}),
+        }]
     if not match:
         return []
 

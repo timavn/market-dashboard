@@ -180,6 +180,20 @@ test('received explicit processing failure alerts before scheduled deadline', as
   assert.match(result.findings[0].presentation.rows[0].text, /failed to load/);
 });
 
+test('an unregistered publication stays in Systems and never reaches the Inbox', async () => {
+  const data = fixture();
+  data.report.researchProductMatrix.products.push({
+    id: 'unsupported:unknown', label: 'unknown', cadence: 'unsupported', due: true, status: 'failed',
+    marketDate: '2026-09-22', observedAt: NOW, stages: { received: true, parsed: false, validated: false, indexed: false },
+    counts: { manifests: 1, failures: 1 }, errorCode: 'RESEARCH_PRODUCT_UNSUPPORTED',
+    detail: 'Received product "unknown" is not registered and cannot be parsed or indexed safely.', sourceIds: [],
+  });
+  const result = await run(data);
+  assert.deepEqual(result.findings, []);
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.diagnostics.unregisteredPublications.map(row => row.id), ['unsupported:unknown']);
+});
+
 test('an ordinary import gets processing grace while a stalled import becomes an incident', async () => {
   const data = fixture();
   Object.assign(data.product('the-call'), { status: 'received', stages: { received: true } });

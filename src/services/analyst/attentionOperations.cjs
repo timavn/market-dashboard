@@ -212,13 +212,11 @@ function productConcern(product, now, receiptHealthy) {
   }
   if (product.status === 'failed') return {
     stage: 'processing-failed',
-    concern: product.id.startsWith('unsupported:')
-      ? 'Unregistered publication received.'
-      : `${product.label || registered?.label} failed to load.`,
+    concern: `${product.label || registered?.label} failed to load.`,
     impact: 'Its research is ignored.',
     next: /invalid risk range.+lrr=.+hrr=/i.test(product.detail || '')
       ? 'Get a corrected report before using these ranges.'
-      : product.id.startsWith('unsupported:') ? 'Register a parser for it in Systems.' : 'Repair the import in Systems.',
+      : 'Repair the import in Systems.',
     ...( /invalid risk range.+lrr=.+hrr=/i.test(product.detail || '')
       ? { context: 'Risk Range low ≥ high → report rejected.' } : {}),
   };
@@ -518,6 +516,12 @@ async function collectOperationalAttention({ fetchJson, now = new Date() }) {
     for (const product of matrix.products) {
       if (getResearchProduct(product.id)?.dashboardConsumer?.kind === 'published-book'
         && books.findings.some(item => item.incidentKey === `research-product:${product.id}:${product.marketDate}`)) continue;
+      // An email no registered product matches is a Systems coverage gap
+      // (Daily research product pipeline), not something to act on from the Inbox.
+      if (product.id.startsWith('unsupported:')) {
+        (diagnostics.unregisteredPublications ||= []).push({ id: product.id, marketDate: product.marketDate, detail: product.detail });
+        continue;
+      }
       if (product.errorCode === 'RESEARCH_PIPELINE_EVIDENCE_UNAVAILABLE' || unsafeEvidence(product)) {
         verificationMissing = true;
         continue;
@@ -527,7 +531,7 @@ async function collectOperationalAttention({ fetchJson, now = new Date() }) {
       if (!issue) continue;
       const item = finding({
         key: `product:${product.id}:${product.marketDate || newYorkParts(clock).date}`,
-        subject: product.id.startsWith('unsupported:') ? 'Unrecognized research' : product.label || getResearchProduct(product.id)?.label || 'Research product',
+        subject: product.label || getResearchProduct(product.id)?.label || 'Research product',
         ...issue,
         now: clock,
         firstObservedAt: issue.stage.startsWith('processing') ? product.observedAt : null,
