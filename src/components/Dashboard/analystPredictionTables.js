@@ -207,11 +207,11 @@ export function foldPredictionAlphaCode(markdown) {
 }
 
 // A sentence that names several markets ("Bearish Gold & Silver") is captured under each of them. It reads once,
-// under the first market that shows it anywhere in the review; a market left with nothing else says where it is.
+// under the first market that shows it anywhere in the review; a market left with nothing else reads Not mentioned.
 const researchKey = entry => [entry.product, entry.time, String(entry.source || entry.context || '').replace(/\s+/g, ' ').trim()].join('\u0000');
 export function onceAcrossPredictionResearch(markdown) {
   const lines = String(markdown || '').split('\n');
-  const seen = new Map();
+  const seen = new Set();
   for (let index = 0; index < lines.length; index += 1) {
     if (lines[index].trim() !== '```analyst-research' || lines[index + 2]?.trim() !== '```') continue;
     let block;
@@ -223,17 +223,13 @@ export function onceAcrossPredictionResearch(markdown) {
     if (!Array.isArray(block?.markets)) continue;
     const markets = block.markets.map(row => {
       if (!Array.isArray(row?.entries)) return row;
-      const shownWith = [];
       const entries = row.entries.filter(entry => {
         const key = researchKey(entry || {});
-        if (!seen.has(key)) {
-          seen.set(key, row.market);
-          return true;
-        }
-        if (!shownWith.includes(seen.get(key))) shownWith.push(seen.get(key));
-        return false;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
-      return { ...row, entries, ...(!entries.length && shownWith.length ? { mentionedWith: shownWith } : {}) };
+      return { ...row, entries };
     });
     lines[index + 1] = JSON.stringify({ ...block, markets });
     index += 2;

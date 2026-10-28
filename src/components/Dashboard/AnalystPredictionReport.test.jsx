@@ -485,7 +485,7 @@ test('an unavailable volume reads N/A in each window, and saved boards title As 
   expect(container.querySelectorAll('.is-lighter')).toHaveLength(1);
 });
 
-test('a market whose only mention reads under another market names it instead of Not mentioned', () => {
+test('a market whose only mention reads under another market is Not mentioned, including in saved reports', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Metals" />);
   const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
@@ -494,5 +494,5 @@ test('a market whose only mention reads under another market names it instead of
     children: [{ type: 'text', value: JSON.stringify(research) }] }] };
   render(<Pre node={node}><code>ignored</code></Pre>);
   const rows = within(screen.getByRole('region', { name: 'Morning research' })).getAllByRole('row').map(row => [...row.cells].map(cell => cell.textContent));
-  expect(rows.slice(1)).toEqual([['Palladium', 'Mentioned with Gold'], ['Copper', 'Not mentioned']]);
+  expect(rows.slice(1)).toEqual([['Palladium', 'Not mentioned'], ['Copper', 'Not mentioned']]);
 });

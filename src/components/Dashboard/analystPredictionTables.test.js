@@ -227,7 +227,7 @@ test('a sentence naming several markets reads once, under the first market that 
         { product: 'Early Look', time: '04:36', context: happy }] },
     ]),
     '## Crypto', ...block([
-      // Only the shared sentence: the market says where it reads instead of Not mentioned.
+      // Only the shared sentence: it already reads under Gold, so Palladium is left with nothing.
       { market: 'Palladium', entries: [{ product: 'Early Look', time: '04:36', context: 'about Bearish Gold & Silver', source: happy }] },
       { market: 'Ethereum', entries: [] },
     ]),
@@ -236,7 +236,7 @@ test('a sentence naming several markets reads once, under the first market that 
   expect(metals.markets.map(row => row.entries.map(entry => entry.context))).toEqual([
     [happy, 'Gold still sucks'], ['Don’t send them my Silver (SLV) shorts.']]);
   // The same full sentence under a later section counts as a repeat even when its trimmed context differs.
-  expect(crypto.markets).toEqual([{ market: 'Palladium', entries: [], mentionedWith: ['Gold'] }, { market: 'Ethereum', entries: [] }]);
+  expect(crypto.markets).toEqual([{ market: 'Palladium', entries: [] }, { market: 'Ethereum', entries: [] }]);
   // The same words in another product or at another time are a separate mention.
   const other = block([{ market: 'Gold', entries: [{ product: 'Early Look', time: '04:36', context: happy }] },
     { market: 'Silver', entries: [{ product: 'The Call', time: '07:04', context: happy }] }]).join('\n');

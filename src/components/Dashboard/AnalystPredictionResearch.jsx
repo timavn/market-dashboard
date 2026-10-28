@@ -34,8 +34,6 @@ export function parsePredictionResearch(raw) {
       section: text(value.section), marketDate: /^\d{4}-\d{2}-\d{2}$/.test(String(value.marketDate)) ? value.marketDate : null,
       markets: markets.map(row => ({
         market: row.market,
-        // Markets whose only mentions already read under another market name it instead of Not mentioned.
-        mentionedWith: Array.isArray(row.mentionedWith) ? row.mentionedWith.filter(text) : [],
         entries: Array.isArray(row.entries)
           ? row.entries.filter(entry => entry && text(entry.product) && text(entry.context)).map(entry => ({
             product: entry.product, time: text(entry.time), date: text(entry.date), context: entry.context, source: text(entry.source),
@@ -216,9 +214,8 @@ export default function AnalystPredictionResearch({ research: saved }) {
             first={index === 0} span={row.entries.length} />)
           : <tr key={row.market} className="analyst-research__first">
             <td className="analyst-research__market">{row.market}</td>
-            <td className="analyst-research__quiet" colSpan={3}>
-              {row.mentionedWith.length ? `Mentioned with ${row.mentionedWith.join(', ')}` : 'Not mentioned'}
-            </td>
+            {/* A sentence that already reads under another market adds nothing here. */}
+            <td className="analyst-research__quiet" colSpan={3}>Not mentioned</td>
           </tr>))}
       </tbody>
     </table>
