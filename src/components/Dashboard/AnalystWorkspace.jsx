@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, Search, Send, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, RefreshCw, Search, Send, Square, Trash2 } from 'lucide-react';
 import AnalystSpinner from './AnalystSpinner';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 import { Message, SourceLibrary } from './AnalystConversationPanel';
@@ -1072,6 +1072,9 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const optimisticMessage = selectedSend && !acceptedPendingTurn ? selectedSend.message : null;
   const responsePending = running || Boolean(selectedSend && !acceptedPendingTurn);
   const reviewBusy = isReview && (!conversation || (running && !primaryReady) || refreshingIds.includes(selected));
+  // Portfolio and Predictive reviews refresh in place from the bar above Sources, dated by the report it shows.
+  const refreshable = sourcesAnchoredReview(selectedKind) && Boolean(conversation) && !launchingReview;
+  const snapshotAt = reference?.asOf || messages.findLast(message => message.role === 'assistant' && message.reviewPostId)?.created_at;
   // Sources wait for the conversation record, then poll on its ID alone if
   // that read fails: reserved rows never stay Checking with nothing reading.
   const reviewSources = useAnalystReviewSources({ conversationId: isReview ? selected : null,
@@ -1299,11 +1302,12 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     finally { setSending(false); }
   };
   const groups = [];
+  // Each start opens its own chat, newest first. Only a review still running, or a chat with nothing in it yet,
+  // takes the start in place: present its Starting state in that one history slot while retaining the pending ID
+  // for exact receipt reconciliation. Other chats keep their own history rows.
   const existingDailyLaunch = opening => rows.find(row => !row.archived && row.kind === opening.kind
-    && row.trading_date === opening.trading_date && !removed.current.has(row.id) && !deletingIds.includes(row.id));
-  // A daily launch may reuse today's saved conversation. Present its Starting
-  // state in that one history slot while retaining the pending ID for exact
-  // receipt reconciliation. Other dates keep their own history rows.
+    && row.trading_date === opening.trading_date && !removed.current.has(row.id) && !deletingIds.includes(row.id)
+    && (entities[row.id]?.activeTurn || ['running', 'accepted'].includes(row.state) || sidebarMessageCount(entities[row.id] || row) === 0));
   const launchOwners = new Set([...launchesInFlight.current.values()].filter(opening => !opening.accepted
     && !(opening.restored && removed.current.has(opening.id))).map(opening => existingDailyLaunch(opening)?.id).filter(Boolean));
   const pendingDisplayRows = Object.values(pendingReviews).filter(opening => !opening.accepted).map(opening => {
@@ -1329,7 +1333,9 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       || Boolean(drafts[row.id]?.trim());
   });
   const today = pacificDate(new Date());
-  for (const row of visibleRows) { const group = dateGroup(conversationDay(row), today); let target = groups.find(g => g.key === group.key); if (!target) { target = { ...group, items: [] }; groups.push(target); } target.items.push(row); }
+  for (const row of visibleRows) { const day = conversationDay(row); const group = dateGroup(day, today); let target = groups.find(g => g.key === group.key); if (!target) { target = { ...group, day, items: [] }; groups.push(target); } target.items.push(row); }
+  // Days read newest first, whichever row arrived first (a remembered receipt can precede the list).
+  groups.sort((a, b) => b.day.localeCompare(a.day));
   for (const group of groups) group.items = placeDailyChats(group.items);
   const terminalError = conversation?.lastTurn && ['failed', 'interrupted'].includes(conversation.lastTurn.state) && !(reference && conversation.lastTurn.request_id?.startsWith('daily-')) ? conversation.lastTurn : null;
   const lastPrompt = conversation?.messages.find(m => m.turn_id === terminalError?.id && m.role === 'user')?.text;
@@ -1352,7 +1358,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
           <button type="button" className="analyst-chat-back" aria-label="Back to The Analyst" onClick={() => choose(null)}><ArrowLeft size={14} /><span>The Analyst</span></button>
           {selectedTitle && <span className="analyst-chat-title">{selectedTitle}</span>}
         </header>}
-        <div ref={transcript} onScroll={e => { const node = e.currentTarget; followReply.current = !sourcesAnchoredReview(selectedKind) && responsePending && node.scrollHeight - node.scrollTop - node.clientHeight < 80; scrolls.current[selected || 'landing'] = node.scrollTop; clearTimeout(scrollSaveTimer.current); scrollSaveTimer.current = setTimeout(() => save('scrolls', scrolls.current), 150); }} className={`analyst-transcript analyst-transcript-v2${selected || selectedSend || launchingReview ? '' : ' is-landing'}`} role="log" aria-label="Conversation" aria-live="polite">
+        <div ref={transcript} onScroll={e => { const node = e.currentTarget; followReply.current = !sourcesAnchoredReview(selectedKind) && responsePending && node.scrollHeight - node.scrollTop - node.clientHeight < 80; scrolls.current[selected || 'landing'] = node.scrollTop; clearTimeout(scrollSaveTimer.current); scrollSaveTimer.current = setTimeout(() => save('scrolls', scrolls.current), 150); }} className={`analyst-transcript analyst-transcript-v2${selected || selectedSend || launchingReview ? '' : ' is-landing'}${sourcesAnchoredReview(launchingReview?.kind || selectedKind) ? ' is-composer-width' : ''}`} role="log" aria-label="Conversation" aria-live="polite">
           {launchingReview ? <div className="analyst-message-list"><AnalystReviewSources reviewKind={launchingReview.kind} loading phase="Starting…" />
             {launchingReview.kind === 'portfolio-review' && <PortfolioReviewPlaceholder />}</div>
             : !selected && !selectedSend ? <header className="analyst-landing">
@@ -1360,6 +1366,13 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
               <AnalystLandingStatus holdingsCount={holdingsCount} />
             </header>
               : <div className="analyst-message-list">
+                {refreshable && <div className="analyst-review-refresh">
+                  {snapshotAt && <span>As of <time dateTime={snapshotAt}>{formatAnalystReportDate(snapshotAt, { year: false })}</time></span>}
+                  <button type="button" className="analyst-review-refresh-button" aria-label={`Refresh ${selectedTitle}`}
+                    disabled={running || refreshingIds.includes(selected)} onClick={() => refreshReview(conversation)}>
+                    <RefreshCw size={11} aria-hidden="true" /><span>Refresh</span>
+                  </button>
+                </div>}
                 {isReview && <AnalystReviewSources reviewKind={selectedKind} sources={reviewSources.sources} loading={reviewSources.loading}
                   readFailed={reviewSources.readFailed} reconnecting={reviewSources.reconnecting} phase={sourcesPhase} modelPhase={summarizing} />}
                 {selectedKind === 'portfolio-review' && !renderedMessages.some(message => message.role === 'assistant')
@@ -1376,6 +1389,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
                 {portfolioBrief && !portfolioBrief.reviewedAt && reference && (reference.tradingDate !== reference.targetDate || !reference.afterClose) && <p className="portfolio-brief-caption" role="note">Last verified holdings: {reference.tradingDate}. Start a new Portfolio review to check all positions against the latest research.</p>}
                 {renderedMessages.map(message => (
                   <Message key={message.id} reviewKind={selectedKind} message={message} onCitation={openCitation}
+                    inboxFindings={selectedKind === 'portfolio-review' && message === newestPortfolioPost ? inbox.findings : undefined}
                     captureUnavailable={unavailableCapturedBodies.has(`${selected}:${message.id}:${message.reviewRunId}`)}
                     historical={selectedKind === 'portfolio-review' && Boolean(message.portfolioBrief) && message !== newestPortfolioPost} />
                 ))}

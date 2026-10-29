@@ -25,10 +25,13 @@ function DirectionalText({ children }) {
 }
 
 // "Oct 23 09:41" in the viewer's local time. A midnight-UTC stamp stands in for a
-// date-only publication, so it shows the date alone.
-function publicationLabel(time, date) {
+// date-only publication, so it shows when the alert reached the Inbox instead, and
+// the date alone only when that is unknown too.
+const timed = time => time && Number.isFinite(new Date(time).getTime()) && !/T00:00:00(?:\.0+)?Z$/.test(time);
+function publicationLabel(time, date, receivedAt) {
+  if (!timed(time) && timed(receivedAt)) return publicationLabel(receivedAt);
   const at = new Date(time);
-  if (time && Number.isFinite(at.getTime()) && !/T00:00:00(?:\.0+)?Z$/.test(time)) {
+  if (timed(time)) {
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
     }).formatToParts(at).map(part => [part.type, part.value]));
@@ -87,11 +90,12 @@ function attentionContent(finding, now) {
 const signed = (value, digits = 1) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value).toFixed(digits)}%`;
 const toneClass = tone => tone ? `analyst-inbox-signal--${tone}` : undefined;
 
-// Price windows are colored against the held side; volatility only when it runs
-// well above its one-year level. Volume carries no direction of its own.
-function horizonRows(stats, side) {
+// Price windows are colored by their own sign, whichever side is held: down is
+// always red. Volatility is red only when it runs well above its one-year level.
+// Volume carries no direction of its own.
+function horizonRows(stats) {
   const columns = stats?.columns || HORIZONS.map(label => ({ label }));
-  const against = value => !side || value == null || value === 0 ? null : value * side > 0 ? 'positive' : 'negative';
+  const against = value => value == null || value === 0 ? null : value > 0 ? 'positive' : 'negative';
   const cell = (value, format, tone) => value == null ? { text: '—', tone: 'muted' } : { text: format(value), tone };
   return [
     ['Price', columns.map(column => cell(column.priceChangePct, signed, against(column.priceChangePct)))],
@@ -103,16 +107,18 @@ function horizonRows(stats, side) {
   ];
 }
 
-function HorizonTable({ durations, stats, side }) {
+function HorizonTable({ durations, stats }) {
   return <table className="analyst-inbox-horizons">
     <colgroup><col className="analyst-inbox-horizons-label" />{HORIZONS.map(label => <col key={label} className="analyst-inbox-horizons-column" />)}</colgroup>
     <thead><tr><td />{durations.map(row => <th key={row.label} scope="col">{row.label}</th>)}</tr></thead>
     <tbody>
+      {/* Each duration reads Bullish, Neutral, Bearish or N/A. Where a reading came from
+          (stated, or RTA / ETF Pro list membership) is in its tooltip only. */}
       <tr className="analyst-inbox-bias"><td />{durations.map(row => <td key={row.label}>
-        <span className={`analyst-inbox-bias-cell is-${BIAS_TONES[row.text] || 'unavailable'}`}>{row.text}</span>
+        <span className={`analyst-inbox-bias-cell is-${BIAS_TONES[row.text] || 'unavailable'}`} title={row.note}>{BIAS_TONES[row.text] ? row.text : 'N/A'}</span>
       </td>)}</tr>
       <tr className="analyst-inbox-horizon-head"><td />{(stats?.columns || HORIZONS.map(label => ({ label }))).map(column => <th key={column.label} scope="col">{column.label}</th>)}</tr>
-      {horizonRows(stats, side).map(([label, cells]) => <tr key={label}>
+      {horizonRows(stats).map(([label, cells]) => <tr key={label}>
         <th scope="row" title={label === 'Range position' ? 'Close between the window low (0%) and high (100%)' : undefined}>{label}</th>
         {cells.map((cell, index) => <td key={index} className={toneClass(cell.tone)}>{cell.text}</td>)}
       </tr>)}
@@ -120,11 +126,45 @@ function HorizonTable({ durations, stats, side }) {
   </table>;
 }
 
+const STANCE_TONES = { LONG: 'positive', SHORT: 'negative', BUY: 'positive', SELL: 'negative', BULLISH: 'positive', BEARISH: 'negative', NEUTRAL: 'neutral' };
+const callDate = date => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
+const amount = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+const Toned = ({ value }) => <span className={toneClass(STANCE_TONES[value])}>{value}</span>;
+function stancePosition(position) {
+  if (position.quantity === 0) return '0 · 0.00%';
+  const weight = position.weightPct === null || position.weightPct === undefined ? '' : ` · ${position.weightPct.toFixed(2)}%`;
+  return position.quantity === null ? <><Toned value={position.side} /> · lower</> : <><Toned value={position.side} /> {amount(position.quantity)}{weight}</>;
+}
+
+// Stance alerts: the latest product calls, then the move from the current
+// position to the target and the order that gets there.
+function StanceCopy({ ticker, stance, freshHoldings }) {
+  const { calls, current, target, order } = stance;
+  return <div className="analyst-inbox-copy analyst-inbox-stance">
+    <div className="analyst-inbox-stance-title"><span className="analyst-inbox-stance-ticker">{ticker}</span>{stance.name && <span>{stance.name}</span>}</div>
+    <table className="analyst-inbox-stance-table">
+      <colgroup><col style={{ width: '38%' }} /><col style={{ width: '20%' }} /><col style={{ width: '18%' }} /><col style={{ width: '24%' }} /></colgroup>
+      <thead><tr><th scope="col">Product</th><th scope="col">Action</th><th scope="col">Date</th><th scope="col">Bias</th></tr></thead>
+      <tbody>{calls.map((call, index) => <tr key={index}>
+        <td>{call.product}</td><td><Toned value={call.action} /></td><td>{callDate(call.date)}</td><td><Toned value={call.bias} /></td>
+      </tr>)}</tbody>
+    </table>
+    <table className="analyst-inbox-stance-table analyst-inbox-stance-order">
+      <colgroup><col style={{ width: '32%' }} /><col style={{ width: '32%' }} /><col style={{ width: '36%' }} /></colgroup>
+      <thead><tr><th scope="col">Current</th><th scope="col">Target</th><th scope="col">Order</th></tr></thead>
+      <tbody><tr>{freshHoldings ? <>
+        <td>{stancePosition(current)}</td><td>{stancePosition(target)}</td>
+        <td><Toned value={order.verb} />{order.upTo ? ' up to' : ''}{order.quantity === null ? '' : ` ${amount(order.quantity)}`} {order.note}</td>
+      </> : <><td className="analyst-inbox-signal--neutral">Unavailable</td><td>—</td><td>—</td></>}</tr></tbody>
+    </table>
+  </div>;
+}
+
 // The alert as the user reads it, so the Analyst discusses this exact card.
 function alertSummary(finding, content, modern, date) {
   const payload = finding.payload || finding;
   const title = `${modern ? content.subject : finding.symbol || payload.symbol}${date ? ` (${date})` : ''}`;
-  const lines = modern ? content.rows.map(row => `${row.label}: ${row.text}`) : [
+  const lines = modern ? content.rows.map(row => `${row.label}: ${row.text}${row.note ? ` (${row.note})` : ''}`) : [
     `Current position: ${content.currentPosition?.label || 'Unavailable'}`,
     `Action: ${content.positionAction || 'Unavailable'}`,
     content.headline && `${content.updateLabel || 'Signal'}: ${content.headline}`,
@@ -175,18 +215,19 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
     {urgent.length > 0 && <h2 className="analyst-inbox-urgent-heading">Alerts</h2>}
     {[...urgent, ...ordinary].map(({ finding, content, modern }, index) => {
       const payload = finding.payload || finding;
-      const date = publicationLabel(payload.publicationTime, content.publicationDate);
+      const date = publicationLabel(payload.publicationTime, content.publicationDate, payload.receivedAt);
       const subject = modern ? content.subject : finding.symbol || payload.symbol;
       const ticker = modern ? TICKER_KINDS.has(payload.kind) && subject : subject;
       // Centered in the footer between Source and Dismiss.
-      const stamp = date && <time className="analyst-inbox-time" dateTime={payload.publicationTime || content.publicationDate}>{date}</time>;
+      const shownAt = !timed(payload.publicationTime) && timed(payload.receivedAt) ? payload.receivedAt : payload.publicationTime || content.publicationDate;
+      const stamp = date && <time className="analyst-inbox-time" dateTime={shownAt}>{date}</time>;
       const updateParts = content.updateParts || [{ text: content.headline, tone: content.tone }];
       const contextLines = [content.detail, ...(content.sourceContext || [])].filter(Boolean);
       const required = isActionRequired(finding);
+      const stance = modern && content.stance?.calls?.length ? content.stance : null;
       // Every linked publication opens from one Source popover beside the button.
       const durations = modern ? DURATIONS.map(label => content.rows.find(row => row.label === label)).filter(Boolean) : [];
       const rows = modern ? content.rows.filter(row => !DURATIONS.includes(row.label)) : [];
-      const side = Math.sign(Number(payload.quantity) || 0) || null;
       const citations = content.sourceLinks?.length ? content.sourceLinks.filter(link => link?.citation && link.label).map(link => link.citation)
         : payload.citation ? [payload.citation] : [];
       return <React.Fragment key={finding.id}>
@@ -194,7 +235,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}`}>
         <h3 className="sr-only">{subject}</h3>
         <div className={durations.length ? 'analyst-inbox-body has-horizons' : 'analyst-inbox-body'}>
-        <dl className="analyst-inbox-copy">
+        {stance ? <StanceCopy ticker={subject} stance={stance} freshHoldings={attentionEvidenceFreshness(finding, now).holdings} /> : <dl className="analyst-inbox-copy">
           {ticker && <div className="analyst-inbox-ticker">
             <dt>Ticker: </dt><dd>{ticker}</dd>
           </div>}
@@ -231,8 +272,8 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
             </dd>
           </div>}
           </>}
-        </dl>
-        {durations.length > 0 && <HorizonTable durations={durations} stats={horizonStats[content.subject]} side={side} />}
+        </dl>}
+        {durations.length > 0 && <HorizonTable durations={durations} stats={horizonStats[content.subject]} />}
         </div>
         <AnalystAlertThread findingId={finding.id} alert={alertSummary(finding, content, modern, date)}
           conversationId={threads[finding.id] || null} onCitation={onCitation} MessageComponent={MessageComponent}

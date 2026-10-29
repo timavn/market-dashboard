@@ -1270,6 +1270,20 @@
   box-shadow: none;
 }
 .analyst-panel-v2 .analyst-composer:focus-within { border-color: #64748b; }
+/* Portfolio and Predictive reviews run edge to edge with the composer: the transcript takes the composer's gutters at
+   every width, less the 2px scrollbar on the right, and the reports drop their reading-width caps. */
+.analyst-panel-v2 .analyst-transcript-v2.is-composer-width { scrollbar-gutter: stable; padding-right: calc(max(24px, calc((100% - 1080px) / 2)) - 2px); }
+.analyst-panel-v2 .analyst-transcript-v2.is-composer-width .analyst-message-list { max-width: 1080px; }
+.analyst-panel-v2 .analyst-transcript-v2.is-composer-width :is(.analyst-message.analyst-prediction-report, .analyst-message--assistant, .analyst-portfolio-markdown, .portfolio-brief-centered) { max-width: none; }
+@media (max-width: 900px) {
+  .analyst-panel-v2 .analyst-transcript-v2.is-composer-width { padding-left: 14px; padding-right: 12px; }
+}
+@container balance-panel (max-width: 520px) {
+  .analyst-panel-v2 .analyst-transcript-v2.is-composer-width { padding-left: 10px; padding-right: 8px; }
+}
+@container balance-panel (max-width: 360px) {
+  .analyst-panel-v2 .analyst-transcript-v2.is-composer-width { padding-left: 8px; padding-right: 6px; }
+}
 .analyst-panel-v2 .analyst-send-button {
   color: #405066;
   background: #fff;

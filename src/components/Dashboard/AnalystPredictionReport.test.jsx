@@ -448,12 +448,46 @@ test('volume draws under Tick, Trade and Trend as one shaded cell per window, an
   const volume = under.querySelector('td');
   expect(volume.colSpan).toBe(3);
   expect([...volume.querySelectorAll('.analyst-prediction-volume__window')].map(cell => cell.textContent))
-    .toEqual(['vs prior day+54%', 'vs 15D avg+35%', 'vs 30D avg+35%', 'vs 90D avg+8%']);
+    .toEqual(['1D+54%', '15D+35%', '30D+35%', '90D+8%']);
   expect(volume.querySelector('.analyst-prediction-volume__window')).toHaveClass('is-heavier');
   expect(volume).toHaveAttribute('title', 'IBIT volume on 2026-10-21 vs the prior session and its 15-, 30- and 90-day averages');
   // A saved board without the day's direction shows AV with the plain outline when it isn't against the Trend.
   expect(within(top).getByText('AV', { selector: '.analyst-prediction-structure-move' })).toHaveClass('analyst-prediction-structure-move', { exact: true });
   expect(container).not.toHaveTextContent(/VOL\(|STRUCT\(/);
+});
+
+test('the Z column joins Tick, Trade and Trend on top, each over one volume window', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Metals" />);
+  const { td: Cell, tr: Row, table: Table } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const text = value => ({ type: 'text', value });
+  const headers = ['Market', 'Z', 'Tick', 'Trade', 'Trend', 'Volume', 'Price and Risk Range', 'Structure', 'Status'];
+  const values = ['WTI', 'Z(-2.3)', 'BIAS(Neutral;;)', 'BIAS(N/A;;)', 'BIAS(Bullish;;)', 'VOL(-36;-31;-30;-33;2026-10-27;USO)',
+    'RR(97.31;104.98;101.73;2;)', 'STRUCT(+;+1;+;+1;147.27;Mar 2022;-31;0;;AV;)', 'ASOF(Oct 28 06:32;,;,;,)'];
+  const headNode = { tagName: 'tr', children: headers.map(value => ({ tagName: 'th', children: [text(value)] })) };
+  const rowNode = { tagName: 'tr', children: values.map(value => ({ tagName: 'td', children: [text(value)] })) };
+  const table = { children: [{ tagName: 'thead', children: [headNode] }, { tagName: 'tbody', children: [rowNode] }] };
+  const { container } = render(<Table node={table}>
+    <thead><Row node={headNode}>{headers.map(value => <th key={value}>{value}</th>)}</Row></thead>
+    <tbody><Row node={rowNode}>{rowNode.children.map((node, index) => <Cell key={index} node={node}>{values[index]}</Cell>)}</Row></tbody>
+  </Table>);
+  expect(container.querySelector('.analyst-table-frame')).toHaveClass('has-z');
+  expect(container.querySelectorAll('col')).toHaveLength(8);
+  const [top, under] = container.querySelectorAll('tbody tr');
+  // Market and the cells after Trend run the full height; Z, Tick, Trade and Trend take the top half.
+  expect([...top.children].map(cell => [cell.className, cell.rowSpan])).toEqual([['', 2], ['analyst-prediction-z-cell', 1],
+    ['analyst-prediction-bias-cell', 1], ['analyst-prediction-bias-cell', 1], ['analyst-prediction-bias-cell', 1],
+    ['analyst-prediction-range-cell', 2], ['analyst-prediction-structure-cell', 2], ['analyst-prediction-as-of-cell', 2]]);
+  const z = top.children[1];
+  expect(z).toHaveTextContent(/^−2\.3$/);
+  expect(z).toHaveAttribute('title', 'Z-score -2.3 vs. the prior 20 daily closes');
+  expect(z.querySelector('.analyst-prediction-z--stretched')).toHaveTextContent('−2.3');
+  // One volume window to a cell, under Z, Tick, Trade and Trend.
+  expect([...under.children].map(cell => [cell.className, cell.colSpan, cell.textContent])).toEqual([
+    ['analyst-prediction-volume-cell is-window', 1, '1D−36%'], ['analyst-prediction-volume-cell is-window', 1, '15D−31%'],
+    ['analyst-prediction-volume-cell is-window', 1, '30D−30%'], ['analyst-prediction-volume-cell is-window', 1, '90D−33%']]);
+  expect(under.children[0]).toHaveAttribute('title', 'USO volume on 2026-10-27 vs the prior session and its 15-, 30- and 90-day averages');
+  expect(container).not.toHaveTextContent(/Z\(|VOL\(/);
 });
 
 test.each([
@@ -485,7 +519,7 @@ test('an unavailable volume reads N/A in each window, and saved boards title As 
   expect(container.querySelectorAll('.is-lighter')).toHaveLength(1);
 });
 
-test('a market whose only mention reads under another market names it instead of Not mentioned', () => {
+test('a market whose only mention reads under another market is Not mentioned, including in saved reports', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Metals" />);
   const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
@@ -494,5 +528,5 @@ test('a market whose only mention reads under another market names it instead of
     children: [{ type: 'text', value: JSON.stringify(research) }] }] };
   render(<Pre node={node}><code>ignored</code></Pre>);
   const rows = within(screen.getByRole('region', { name: 'Morning research' })).getAllByRole('row').map(row => [...row.cells].map(cell => cell.textContent));
-  expect(rows.slice(1)).toEqual([['Palladium', 'Mentioned with Gold'], ['Copper', 'Not mentioned']]);
+  expect(rows.slice(1)).toEqual([['Palladium', 'Not mentioned'], ['Copper', 'Not mentioned']]);
 });

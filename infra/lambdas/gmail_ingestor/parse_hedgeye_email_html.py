@@ -2568,40 +2568,82 @@ def _extract_real_time_alert(headline: Optional[str], text: str, html_body: str)
 
 
 _POSITION_CHANGE_BODY_TOKEN = re.compile(
-    r"\bWe have\s+(ADDED|REMOVED)\b"
+    r"\bWe (?:have|are)\s+(ADD(?:ED|ING)|REMOV(?:ED|ING))\b"
     r"|^\s*(Long|Short)s?\s*:"
     r"|\b([A-Z][A-Z0-9./-]{0,9})\s*\(\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*\)",
-    re.MULTILINE,
 )
+# A heading can instead list bare tickers on the lines under it, with no range:
+# "We are ADDING the following to Investing Ideas:" / "Short:" / "GS".
+_POSITION_CHANGE_BARE_TICKER = re.compile(r"\s*([A-Z][A-Z0-9./-]{0,9})\s*")
 
 
 def _extract_position_change_body(text: str) -> Dict[str, Dict[str, Any]]:
-    """Read the side and range of each change from the email body.
+    """Read the side (and range, when published) of each change from the body.
 
-    The subject ("3 Changes: Remove SNOW, DELL, WING") never states the side;
-    the body lists each ticker under its "We have ADDED/REMOVED" block and its
-    "Long:" or "Short:" heading, followed by the published risk range.
+    A multi-change subject ("3 Changes: Remove SNOW, DELL, WING") rarely states
+    the side; the body lists each ticker under its "We have ADDED/REMOVED" or
+    "We are ADDING/REMOVING" block and its "Long:" or "Short:" heading, either
+    with the published risk range or as a bare ticker directly under the heading.
     """
     changes: Dict[str, Dict[str, Any]] = {}
     action: Optional[str] = None
     side: Optional[str] = None
-    for match in _POSITION_CHANGE_BODY_TOKEN.finditer(text or ""):
-        if match.group(1):
-            action = "ADD" if match.group(1).upper() == "ADDED" else "REMOVE"
-            side = None
-        elif match.group(2):
-            side = match.group(2).lower()
-        elif action and side:
-            low, high = float(match.group(4)), float(match.group(5))
-            if not 0 < low < high:
-                continue
-            changes.setdefault(match.group(3).upper(), {
-                "action": action,
-                "side": side,
-                "riskRangeLow": low,
-                "riskRangeHigh": high,
-            })
+    # Bare tickers count only in the run of lines right under a heading, so a
+    # later sign-off ("KM") is never read as a position.
+    listing = False
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        bare = _POSITION_CHANGE_BARE_TICKER.fullmatch(line)
+        if listing and bare and action and side:
+            changes.setdefault(bare.group(1), {"action": action, "side": side})
+            continue
+        listing = False
+        for match in _POSITION_CHANGE_BODY_TOKEN.finditer(line):
+            if match.group(1):
+                action = "ADD" if match.group(1).upper().startswith("ADD") else "REMOVE"
+                side = None
+            elif match.group(2):
+                side = match.group(2).lower()
+                listing = True
+                inline = _POSITION_CHANGE_BARE_TICKER.fullmatch(line[match.end():])
+                if inline and action:
+                    changes.setdefault(inline.group(1), {"action": action, "side": side})
+            elif action and side:
+                low, high = float(match.group(4)), float(match.group(5))
+                if not 0 < low < high:
+                    continue
+                changes.setdefault(match.group(3).upper(), {
+                    "action": action,
+                    "side": side,
+                    "riskRangeLow": low,
+                    "riskRangeHigh": high,
+                })
     return changes
+
+
+def _position_change_range(detail: Dict[str, Any]) -> Dict[str, Any]:
+    if "riskRangeLow" not in detail:
+        return {}
+    return {"riskRangeLow": detail["riskRangeLow"], "riskRangeHigh": detail["riskRangeHigh"]}
+
+
+_MULTI_POSITION_CHANGE_SUBJECT = re.compile(r"\b\d+\s+Changes?:\s*(.+)$", re.IGNORECASE)
+# A single change names the side in the subject instead:
+# "Add Airbnb Inc. (ABNB) to LONG Side" / "Remove ... (TICKER) from SHORT Side".
+_SINGLE_POSITION_CHANGE_SUBJECT = re.compile(
+    r"^(Add|Remove)\s+.+?\(\s*([A-Z][A-Z0-9./-]{0,9})\s*\)\s+(?:to|from)\s+(?:the\s+)?(LONG|SHORT)\s+Side\b",
+    re.IGNORECASE,
+)
+
+
+def is_position_change_subject(subject: Optional[str]) -> bool:
+    """True for an Investing Ideas position-change subject, multi or single."""
+    normalized = re.sub(r"\s+", " ", str(subject or "")).strip()
+    return bool(
+        _MULTI_POSITION_CHANGE_SUBJECT.search(normalized)
+        or _SINGLE_POSITION_CHANGE_SUBJECT.search(normalized)
+    )
 
 
 def _extract_position_change_alerts(
@@ -2612,17 +2654,43 @@ def _extract_position_change_alerts(
         return []
     body = _extract_position_change_body(body_text)
     normalized = re.sub(r"\s+", " ", headline).strip()
-    match = re.search(r"\b\d+\s+Changes?:\s*(.+)$", normalized, re.IGNORECASE)
+    match = _MULTI_POSITION_CHANGE_SUBJECT.search(normalized)
+    single = None if match else _SINGLE_POSITION_CHANGE_SUBJECT.search(normalized)
+    if single and re.search(r"\binvesting ideas\b", body_text or "", re.IGNORECASE):
+        action = single.group(1).upper()
+        ticker = single.group(2).upper()
+        side = single.group(3).lower()
+        detail = body.get(ticker) or {}
+        ranged = detail.get("action") == action and detail.get("side") == side
+        return [{
+            "headline": normalized,
+            "signalFamily": "Position Changes",
+            "signalPhrase": f"{single.group(1).title()} {ticker}",
+            "action": action,
+            "side": side,
+            "context": "position-change",
+            "ticker": ticker,
+            "name": ticker,
+            "analyst": None,
+            **(_position_change_range(detail) if ranged else {}),
+        }]
     if not match:
         return []
 
     alerts: List[Dict[str, Any]] = []
     active_action: Optional[str] = None
     for clause in re.split(r"\s*,\s*", match.group(1)):
-        item = re.search(r"\b(Add|Remove)\s+([A-Z][A-Z0-9./-]{1,9})\b", clause, re.IGNORECASE)
+        # A clause may name its side before the ticker: "Add Short GS".
+        item = re.search(
+            r"\b(Add|Remove)\s+(?:(Long|Short)\s+)?([A-Z][A-Z0-9./-]{1,9})\b",
+            clause,
+            re.IGNORECASE,
+        )
+        stated_side: Optional[str] = None
         if item:
             active_action = "ADD" if item.group(1).upper() == "ADD" else "REMOVE"
-            ticker = item.group(2).upper()
+            stated_side = item.group(2).lower() if item.group(2) else None
+            ticker = item.group(3).upper()
         else:
             continuation = re.fullmatch(r"\s*([A-Z][A-Z0-9./-]{1,9})\s*", clause, re.IGNORECASE)
             if not continuation or not active_action:
@@ -2631,8 +2699,10 @@ def _extract_position_change_alerts(
         action = active_action
         detail = body.get(ticker) or {}
         # Never assume a side: a removed short is the opposite instruction to a
-        # removed long. Only the body's Long/Short heading establishes it.
-        side = detail.get("side") if detail.get("action") == action else None
+        # removed long. Only the clause itself or the body's Long/Short heading
+        # establishes it.
+        body_side = detail.get("side") if detail.get("action") == action else None
+        side = stated_side or body_side
         alerts.append({
             "headline": normalized,
             "signalFamily": "Position Changes",
@@ -2643,7 +2713,7 @@ def _extract_position_change_alerts(
             "ticker": ticker,
             "name": ticker,
             "analyst": None,
-            **({"riskRangeLow": detail["riskRangeLow"], "riskRangeHigh": detail["riskRangeHigh"]} if side else {}),
+            **(_position_change_range(detail) if body_side and body_side == side else {}),
         })
     # A long subject can be truncated; the body still lists every change.
     listed = {alert["ticker"] for alert in alerts}
@@ -2659,8 +2729,7 @@ def _extract_position_change_alerts(
                 "ticker": ticker,
                 "name": ticker,
                 "analyst": None,
-                "riskRangeLow": detail["riskRangeLow"],
-                "riskRangeHigh": detail["riskRangeHigh"],
+                **_position_change_range(detail),
             })
     return alerts
 

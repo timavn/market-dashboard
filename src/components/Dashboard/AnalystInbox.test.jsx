@@ -58,6 +58,16 @@ test('retained Research delivery, Quant Analyst and Security checks warnings are
   expect(screen.queryByText('A scheduled check is unavailable.')).not.toBeInTheDocument();
 });
 
+test('a date-only alert shows when it reached the Inbox, and the date alone only when that is unknown', () => {
+  const dated = { publicationTime: '2026-10-27T00:00:00.000Z', presentation: { subject: 'IB Gateway', date: '2026-10-27', rows: [{ label: 'Issue', text: 'Above MAX.' }] } };
+  const { unmount } = render(<AnalystInbox findings={[attention('sized', { ...dated, receivedAt: '2026-10-27T15:00:00Z' })]} />);
+  expect(screen.getByRole('group', { name: 'Alert actions' })).toHaveTextContent('Oct 27 08:00');
+  expect(screen.getByText('Oct 27 08:00')).toHaveAttribute('dateTime', '2026-10-27T15:00:00Z');
+  unmount();
+  render(<AnalystInbox findings={[attention('legacy', dated)]} />);
+  expect(screen.getByText('Oct 27')).toBeInTheDocument();
+});
+
 test('operational attention describes the issue and consequence without position filler and acknowledges its revision', () => {
   const item = attention('gateway', { materialRevision: 2 });
   const onCitation = jest.fn();
@@ -510,4 +520,75 @@ test('a security alert puts Tick, Trade, Trend and Tail beside its 1D–90D wind
   expect(within(table).getByText('31%')).toHaveClass('analyst-inbox-signal--negative');
   expect(within(table).getByText('1.6×')).not.toHaveClass('analyst-inbox-signal--negative');
   expect(within(table).getByText('—')).toHaveClass('analyst-inbox-signal--muted');
+});
+
+test('price and range colors follow their own sign for a short exactly as for a long', async () => {
+  const stats = { asOf: '2026-10-20', baselineVolPct: 20, columns: [
+    { label: '1D', priceChangePct: -4.0, realizedVolPct: 8, volumeRatio: 1.7, rangePct: 87 },
+    { label: '15D', priceChangePct: 2.5, realizedVolPct: 4, volumeRatio: 0.4, rangePct: 11 },
+    { label: '30D', priceChangePct: -1.6, realizedVolPct: 4, volumeRatio: 0.4, rangePct: 50 },
+    { label: '90D', priceChangePct: -2.7, realizedVolPct: 5, volumeRatio: 0.6, rangePct: 35 },
+  ] };
+  const alert = attention('emif', { kind: 'portfolio', severity: 'action-required', quantity: -112.5, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    presentation: { subject: 'EMIF', date: '2026-08-31', sourceLinks: [], rows: [
+      { label: 'Action', text: 'Cover' }, { label: 'Tick', text: 'N/A' }, { label: 'Trade', text: 'Unknown' }, { label: 'Trend', text: 'N/A' }, { label: 'Tail', text: 'N/A' },
+    ] } });
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} loadHorizonStats={jest.fn().mockResolvedValue({ EMIF: stats })} />);
+  const table = within(screen.getByRole('heading', { name: 'EMIF' }).closest('article')).getByRole('table');
+  expect(within(table).getAllByText('N/A')).toHaveLength(4);
+  await waitFor(() => expect(within(table).getByText('−4.0%')).toBeInTheDocument());
+  expect(within(table).getByText('−4.0%')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(table).getByText('+2.5%')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(table).getByText('87%')).toHaveClass('analyst-inbox-signal--positive');
+  expect(within(table).getByText('11%')).toHaveClass('analyst-inbox-signal--negative');
+});
+
+test('a stance alert lists the latest product calls, then current → target → order, with a trim framed red like an exit', () => {
+  const stanceAlert = (id, symbol, quantity, stance) => attention(id, { kind: 'portfolio', severity: 'action-required', quantity,
+    holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    presentation: { subject: symbol, date: '2026-10-26', sourceLinks: [], stance, rows: [
+      { label: 'Real-Time Alert', text: 'filler' }, { label: 'Tick', text: 'N/A' }, { label: 'Trade', text: 'N/A' }, { label: 'Trend', text: 'N/A' }, { label: 'Tail', text: 'N/A' },
+    ] } });
+  const lcid = stanceAlert('lcid', 'LCID', -650, { verdict: 'exit', calls: [
+    { product: 'Real-Time Alert', action: 'COVER', date: '2026-10-26', bias: 'BULLISH' },
+    { product: 'Signal Strength Shorts', action: 'SHORT', date: '2026-08-19', bias: 'BEARISH' },
+  ], current: { side: 'SHORT', quantity: 650, weightPct: 1.16 }, target: { side: null, quantity: 0, weightPct: 0 }, order: { verb: 'BUY', quantity: 650, note: 'to close short' } });
+  const mpc = stanceAlert('mpc', 'MPC', 7.5, { verdict: 'trim', name: 'Marathon Petroleum Corporation', calls: [
+    { product: 'Real-Time Alert', action: 'TRIM', date: '2026-10-26', bias: 'BULLISH' },
+    { product: 'Signal Strength', action: 'LONG', date: '2026-09-22', bias: 'BULLISH' },
+  ], current: { side: 'LONG', quantity: 7.5, weightPct: 4.25 }, target: { side: 'LONG', quantity: 5.74, weightPct: 3.25 }, order: { verb: 'SELL', quantity: 1.76, upTo: true, note: 'stays long' } });
+  render(<AnalystInbox findings={[lcid, mpc]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  const card = screen.getByRole('heading', { name: 'LCID' }).closest('article');
+  const [calls, order] = within(card).getAllByRole('table');
+  expect(within(calls).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Product', 'Action', 'Date', 'Bias']);
+  expect(within(calls).getAllByRole('row').slice(1).map(row => row.textContent)).toEqual(['Real-Time AlertCOVEROct 26BULLISH', 'Signal Strength ShortsSHORTAug 19BEARISH']);
+  expect(within(calls).getByText('SHORT')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(calls).getByText('COVER')).not.toHaveClass('analyst-inbox-signal--positive');
+  expect(within(calls).getByText('BEARISH')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(order).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Current', 'Target', 'Order']);
+  expect(within(order).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['SHORT 650 · 1.16%', '0 · 0.00%', 'BUY 650 to close short']);
+  expect(within(card).queryByText(/filler/)).not.toBeInTheDocument();
+  const trim = screen.getByRole('heading', { name: 'MPC' }).closest('article');
+  expect(trim).toHaveClass('is-action-required');
+  expect(within(trim).getByText('Marathon Petroleum Corporation')).toBeInTheDocument();
+  expect(within(within(trim).getAllByRole('table')[1]).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['LONG 7.5 · 4.25%', 'LONG 5.74 · 3.25%', 'SELL up to 1.76 stays long']);
+});
+
+test('a Trade/Trend read from list membership looks like a stated one, with its source in the tooltip', () => {
+  const alert = attention('hyp', { kind: 'portfolio', severity: 'action-required', quantity: 150, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    presentation: { subject: 'HYP', date: '2026-10-15', sourceLinks: [], rows: [
+      { label: 'Action', text: 'Exit Long' },
+      { label: 'Tick', text: 'N/A' },
+      { label: 'Trade', text: 'Bullish', basis: 'inferred', note: 'Inferred from list membership (ETF Pro LONG Oct 14); not stated by the source' },
+      { label: 'Trend', text: 'N/A', basis: 'removed', note: 'ETF Pro REMOVE Oct 15: Trade and/or Trend broke; which is not stated' },
+      { label: 'Tail', text: 'N/A' },
+    ] } });
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  const table = within(screen.getByRole('heading', { name: 'HYP' }).closest('article')).getByRole('table');
+  expect(within(table).getByText('Bullish')).toHaveClass('analyst-inbox-bias-cell is-positive', { exact: true });
+  expect(within(table).getByText('Bullish')).toHaveAttribute('title', expect.stringMatching(/^Inferred from list membership/));
+  expect(within(table).getAllByText('N/A')).toHaveLength(3);
+  within(table).getAllByText('N/A').forEach(cell => expect(cell).toHaveClass('analyst-inbox-bias-cell is-unavailable', { exact: true }));
+  expect(within(table).queryByText('from list')).not.toBeInTheDocument();
+  expect(within(table).queryByText('removed')).not.toBeInTheDocument();
 });

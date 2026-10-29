@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from workspace import WorkspaceStore
 
@@ -48,6 +49,24 @@ class AttentionWorkspaceTests(unittest.TestCase):
         self.publish([finding()], ['portfolio'])
         self.assertEqual(self.row()['unread'], 0)
         self.assertEqual(self.row()['payload']['materialRevision'], 1)
+
+    def test_received_time_marks_each_material_version_and_backfills_older_alerts(self):
+        with unittest.mock.patch('workspace.now', return_value='2026-10-27T15:00:00Z'):
+            self.publish([finding()], ['portfolio'])
+        self.assertEqual(self.row()['payload']['receivedAt'], '2026-10-27T15:00:00Z')
+        with unittest.mock.patch('workspace.now', return_value='2026-10-27T16:00:00Z'):
+            self.publish([finding()], ['portfolio'])
+        self.assertEqual(self.row()['payload']['receivedAt'], '2026-10-27T15:00:00Z')
+        with unittest.mock.patch('workspace.now', return_value='2026-10-27T17:00:00Z'):
+            self.publish([finding('changed')], ['portfolio'])
+        self.assertEqual(self.row()['payload']['receivedAt'], '2026-10-27T17:00:00Z')
+        # An alert stored before the stamp takes its last material change.
+        with self.store.connect() as db:
+            payload = self.row()['payload']
+            payload.pop('receivedAt')
+            db.execute('UPDATE findings SET payload=? WHERE id=?', (json.dumps(payload), payload['id']))
+        self.publish([finding('changed')], ['portfolio'])
+        self.assertEqual(self.row()['payload']['receivedAt'], '2026-10-27T17:00:00Z')
 
     def test_legacy_monitor_finishing_after_cutover_cannot_restore_old_queue(self):
         old = finding()

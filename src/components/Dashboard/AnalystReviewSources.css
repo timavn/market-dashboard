@@ -1,3 +1,33 @@
+/* The review's Refresh bar above Sources: the shown report's time on the left, Refresh on the right. */
+.analyst-review-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+  color: #667085;
+  font-size: 9px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.analyst-review-refresh time { color: var(--analyst-ink, #172033); }
+.analyst-review-refresh-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--analyst-border, #dbe1e8);
+  border-radius: 3px;
+  background: #fff;
+  color: var(--portfolio-review-blue, #2563eb);
+  font: inherit;
+  cursor: pointer;
+}
+.analyst-review-refresh-button:hover:not(:disabled) { background: #eff6ff; }
+.analyst-review-refresh-button:focus-visible { outline: 1px solid var(--portfolio-review-blue, #2563eb); outline-offset: 1px; }
+.analyst-review-refresh-button:disabled { color: #98a2b3; cursor: default; }
+
 .analyst-review-sources {
   container: analyst-sources / inline-size;
   margin: 0;

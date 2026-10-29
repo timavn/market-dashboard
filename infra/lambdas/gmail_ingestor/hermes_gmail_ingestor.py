@@ -44,7 +44,12 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from parse_hedgeye_email_html import parse_html_snapshot, save_snapshot_to_dynamodb, validate_research_ranges
+from parse_hedgeye_email_html import (
+    is_position_change_subject,
+    parse_html_snapshot,
+    save_snapshot_to_dynamodb,
+    validate_research_ranges,
+)
 from global_quads import QuadStore, eligible as global_quads_eligible
 from hedgai_signals import is_publication_subject as is_hedgai_publication_subject, is_nonpublication_subject as is_hedgai_nonpublication_subject
 from research_intelligence import (
@@ -1186,6 +1191,18 @@ def link_only_notice_reason(subject: str) -> Optional[str]:
     normalized = re.sub(r"\s+", " ", str(subject or "")).strip().casefold()
     if normalized.startswith("macro week summary notes"):
         return "macro-week-summary-link"
+    # Webcast invites, countdowns and replay recaps: "HAPPENING NOW | ...",
+    # "HAPPENING IN ONE HOUR | ...", "SUBMIT YOUR QUESTIONS FOR KEITH | ...",
+    # "GEOPOLITICAL EVENT IN ONE HOUR | ...", "Keith Q&A | Read the Answers ...".
+    if re.match(
+        r"(?:happening (?:now|in)\b|submit your questions\b|[\w .&-]*\bevent in (?:one|\d+)\b|keith q&a\s*\|)",
+        normalized,
+    ):
+        return "event-notice"
+    # "L1 Watch | Weekly Update" is a crypto chart book: images plus a
+    # download link, with no positions or levels in the body.
+    if normalized.startswith("l1 watch"):
+        return "chart-book-link"
     return None
 
 
@@ -2860,9 +2877,7 @@ def backfill_html_snapshot(
         return False
     if link_only_notice_reason(str(item.get("subject") or "")):
         return False
-    is_investing_ideas_change = bool(
-        re.search(r"\b\d+\s+Changes?:", str(item.get("subject") or ""), re.IGNORECASE)
-    )
+    is_investing_ideas_change = is_position_change_subject(str(item.get("subject") or ""))
     if (
         item.get("snapshotType")
         and report_type not in {
@@ -3067,9 +3082,7 @@ def _should_backfill_materialized_snapshot(
         *RESEARCH_EVENT_SNAPSHOT_TYPES,
         "inflation-nowcast",
         "global-quads",
-    } or bool(
-        re.search(r"\b\d+\s+Changes?:", subject, re.IGNORECASE)
-    )
+    } or is_position_change_subject(subject)
     if not is_materializable:
         return False
     if item.get("materializationAttemptVersion") != MATERIALIZED_DATA_VERSION:

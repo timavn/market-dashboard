@@ -28,6 +28,7 @@ function fixture() {
   const failedReads = new Map();
   const deleted = new Set();
   const missing = new Set();
+  const dailyIds = new Map();
   const lines = [];
   const clone = value => structuredClone(value);
   const workspace = {
@@ -44,10 +45,13 @@ function fixture() {
         return { value: settings.get(body.key) || null };
       }
       if (operation === 'daily') {
-        if (!conversations.has(body.kind)) conversations.set(body.kind, {
-          id: body.kind, kind: body.kind, messages: [], activeTurn: null, lastTurn: null,
+        let id = dailyIds.get(body.kind) || body.kind;
+        // Mirrors workspace.py: a fresh start leaves the day's earlier chat as it is and takes the day itself.
+        if (body.fresh && conversations.has(id)) dailyIds.set(body.kind, id = `${body.kind}#${dailyIds.size + 1}`);
+        if (!conversations.has(id)) conversations.set(id, {
+          id, kind: body.kind, messages: [], activeTurn: null, lastTurn: null,
         });
-        return { conversation: clone(conversations.get(body.kind)) };
+        return { conversation: clone(conversations.get(id)) };
       }
       // Deletion removes the conversation row, so it leaves every list.
       if (operation === 'list') return { conversations: [...conversations.values()].filter(row => !deleted.has(row.id) && !missing.has(row.id))
@@ -82,7 +86,8 @@ function fixture() {
         const conversation = [...conversations.values()].find(row => row.activeTurn?.id === body.turnId);
         assert.ok(conversation, 'only the owning active turn is completed');
         const message = conversation.messages.find(row => row.turn_id === body.turnId);
-        const update = { role: 'assistant', text: body.text, citations: body.citations, turn_id: body.turnId, state: body.type === 'progress' ? 'reviewing' : body.type };
+        const update = { role: 'assistant', text: body.text, citations: body.citations, turn_id: body.turnId, state: body.type === 'progress' ? 'reviewing' : body.type,
+          reviewPostId: settings.get(`daily-run:${conversation.id}`)?.reviewPostId };
         // Mirrors workspace.py: a failure after a published revision keeps
         // that report and its citations and appends the one status line.
         if (body.type === 'failed' && body.partialStatus && message?.state === 'reviewing' && message.text.trim()) {
@@ -769,16 +774,18 @@ test('initial and recent saved daily receipts skip report hydration and preserve
     subject.completed();
     await subject.daily.tick();
     const start = subject.calls.length;
-    const saved = await subject.prepare(id, true, { requestId: 'open-saved-review' });
-    assert.equal(saved.messages.at(-1).text, 'Verified Silver report');
-    assert.equal(saved.briefsIncluded, false);
-    assert.ok(subject.calls.slice(start).filter(call => call.operation === 'daily' || call.operation === 'get')
-      .every(call => call.body.includeBriefs === false));
+    // A start addressed to the saved chat within a minute reopens it without hydrating its report.
+    const requested = await subject.prepare(id, true, { conversationId: initial.id, requestId: 'open-saved-by-id' });
     assert.equal(subject.calls.slice(start).filter(call => call.operation === 'accept').length, 0);
-    const requested = await subject.prepare(id, true, { conversationId: id, requestId: 'open-saved-by-id' });
     assert.equal(requested.briefsIncluded, false);
     assert.equal(requested.briefsProjected, false);
     assert.equal(requested.messages.at(-1).text, 'Verified Silver report');
+    // The review button always runs, in a chat of its own, and still reads it without hydration.
+    const again = await subject.prepare(id, true, { requestId: 'start-again' });
+    assert.notEqual(again.id, initial.id);
+    assert.equal(again.briefsIncluded, false);
+    assert.ok(subject.calls.slice(start).filter(call => call.operation === 'daily' || call.operation === 'get')
+      .every(call => call.body.includeBriefs === false));
   } finally { subject.daily.stop(); }
 });
 
@@ -1422,4 +1429,36 @@ test('dated review chats are filed under the Pacific calendar day while session 
     assert.deepEqual([launched.filedDate, launched.id], ['2026-10-09', 'portfolio-review:2026-10-09']);
     assert.equal(launched.record.fingerprint, fingerprint(['portfolio-review', '2026-10-10', 'closed']));
   } finally { daily.stop(); subject.daily.stop(); }
+});
+
+test('a second start on the same day runs in a new chat and the earlier report keeps its own', async () => {
+  const subject = fixture();
+  const kind = 'prediction-markets-review';
+  let clock = new Date('2026-09-19T15:00:00Z');
+  let runs = 0;
+  const daily = attachDailyWorkflow({ workspace: subject.workspace, request: subject.request, now: () => clock,
+    createRunId: () => `review-run-${++runs}` });
+  subject.daily.stop();
+  subject.scan.resolve({ events: [] });
+  try {
+    const first = await daily.prepare(kind, true, { requestId: 'first-start' });
+    await turn();
+    subject.completed('review-run-1');
+    await daily.tick();
+    assert.equal(subject.conversations.get(first.id).messages[0].text, 'Verified Silver report');
+    clock = new Date('2026-09-19T16:00:00Z');
+    const second = await daily.prepare(kind, true, { requestId: 'second-start' });
+    await turn();
+    assert.notEqual(second.id, first.id);
+    assert.equal(second.reviewRunId, 'review-run-2');
+    assert.ok(second.activeTurn);
+    assert.deepEqual(subject.conversations.get(first.id).messages.map(message => message.text), ['Verified Silver report']);
+    assert.equal(subject.conversations.get(first.id).activeTurn, null);
+    assert.equal(subject.calls.filter(call => call.operation === 'daily' && call.body.fresh).length, 1);
+    // Replaying the second start returns its own chat, and refreshing the earlier chat posts there.
+    assert.equal((await daily.prepare(kind, true, { requestId: 'second-start' })).id, second.id);
+    const refreshed = await daily.prepare(kind, true, { refresh: true, conversationId: first.id, requestId: 'refresh-first' });
+    assert.equal(refreshed.id, first.id);
+    assert.equal(subject.calls.filter(call => call.operation === 'daily' && call.body.fresh).length, 1);
+  } finally { daily.stop(); }
 });

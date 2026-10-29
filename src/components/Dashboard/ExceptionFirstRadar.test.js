@@ -274,7 +274,8 @@ describe('Exception-First header', () => {
       'us', 'europe', 'asia', 'commodities', 'rates', 'crypto',
     ]);
     expect(BACKDROP_GROUPS.flatMap(({ rows }) => rows.map(({ symbols }) => symbols[0]))).toEqual([
-      'SPX', 'RSP', 'MID', 'RUT', 'NDX', 'DJI', 'IXIC', 'SMH', 'XLF', 'VNQ',
+      'SPX', 'RSP', 'MID', 'RUT', 'NDX', 'DJI', 'IXIC', 'SMH',
+      'XLK', 'XLC', 'XLY', 'XLF', 'XLV', 'XLI', 'XLE', 'XLB', 'XLP', 'XLU', 'VNQ',
       'STOXX600', 'SX5E', 'FTSE', 'DAX', 'CAC', 'FTSEMIB', 'IBEX', 'SMI',
       'N225', 'HSI', 'CSI300', 'NIFTY50', 'SSEC', 'KOSPI', 'TAIEX', 'AXJO', 'JKSE', 'KLSE',
       'CRB', 'CL', 'BZ', 'NG', 'RB', 'GC', 'HG', 'SI', 'PL', 'PA', 'ZC', 'ZW', 'ZS',
@@ -282,7 +283,7 @@ describe('Exception-First header', () => {
       'OAT10Y', 'BTP10Y', 'ACGB10Y', 'CAN10Y', 'KTB10Y', 'IG_OAS', 'HY_OAS',
       'BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK', 'TRX',
     ]);
-    expect(BACKDROP_GROUPS.flatMap(({ rows }) => rows)).toHaveLength(64);
+    expect(BACKDROP_GROUPS.flatMap(({ rows }) => rows)).toHaveLength(73);
     expect(BACKDROP_GROUPS.map(({ rows }) => rows
       .filter(({ summary }) => summary).map(({ symbols }) => symbols[0])))
       .toEqual([
@@ -334,7 +335,7 @@ describe('Exception-First header', () => {
     const status = onDashboardStatusChange.mock.calls.at(-1)[0]
       .find(({ id }) => id === 'market-backdrop');
     expect(status.diagnostics).toEqual(expect.arrayContaining([
-      { label: 'Coverage', value: '0/64 markets' },
+      { label: 'Coverage', value: '0/73 markets' },
     ]));
   });
 
@@ -352,10 +353,12 @@ describe('Exception-First header', () => {
     expect(dialog.parentElement).toHaveClass('efr-backdrop-overlay');
     expect(dialog.parentElement.parentElement).toBe(document.body);
     expect(dialog).not.toHaveAttribute('data-open-direction');
-    expect(within(dialog).getAllByRole('row')).toHaveLength(11);
+    expect(within(dialog).getAllByRole('row')).toHaveLength(20);
     expect(within(dialog).getByRole('button', { name: 'US', exact: true })).toHaveClass('dashboard-table-dialog__title');
     expect(within(dialog).getByText('S&P MidCap 400')).toBeInTheDocument();
     expect(within(dialog).getByText('Dow 30')).toBeInTheDocument();
+    expect(within(dialog).getByText('Health Care')).toBeInTheDocument();
+    expect(within(usSection).queryByText('Health Care')).not.toBeInTheDocument();
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
 
     fireEvent.keyDown(document, { key: 'Escape' });

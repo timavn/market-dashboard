@@ -120,8 +120,9 @@ export function portfolioPositionNeedsAttention(row, { includeStopIssues = false
 // Apply within each Long/Short group. Verified exceptions precede ordinary
 // rows; missing research or unverified stop coverage does not create a breach.
 export function sortPortfolioPositions(rows, options = {}) {
+  // A red Inbox alert attached to the row ranks with a REDUCE conflict.
   const priority = row => row.status === 'conflict' ? row.action === 'EXIT' ? 0 : row.action === 'REDUCE' ? 1 : 2
-    : portfolioPositionNeedsAttention(row, options) ? 2 : 3;
+    : row.alerts?.length ? 1 : portfolioPositionNeedsAttention(row, options) ? 2 : 3;
   const preferWeight = ['overweight', 'underweight'].includes(options.preferredWeightStatus);
   const weightPriority = row => !['overweight', 'underweight'].includes(row.weightStatus) ? 2
     : row.weightStatus === options.preferredWeightStatus ? 0 : 1;

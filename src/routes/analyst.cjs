@@ -735,6 +735,18 @@ function createAnalystRoutes({
     }
   });
 
+  // History for the attention stance book: Signal Strength, ETF Pro and Real-Time Alert ledger rows.
+  router.get('/stance-ledger', async (req, res) => {
+    const days = req.query.days === undefined ? 90 : Number(req.query.days);
+    if (!Number.isInteger(days) || days < 1 || days > 120) return res.status(400).json({ error: 'days must be an integer from 1 to 120' });
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(await require('../services/analyst/stanceBook.cjs').loadStanceLedger(dynamodb, { days }));
+    } catch (error) {
+      return res.status(503).json({ error: error.message || 'Research ledger unavailable.' });
+    }
+  });
+
   router.get('/status', async (_req, res) => {
     const base = (process.env.ANALYST_SIDECAR_URL || 'http://127.0.0.1:6951').replace(/\/$/, '');
     const hermesBase = (process.env.ANALYST_HERMES_HTTP_URL || 'http://127.0.0.1:9121').replace(/\/$/, '');

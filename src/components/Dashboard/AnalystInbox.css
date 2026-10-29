@@ -81,16 +81,18 @@
 .analyst-inbox-ordinary-heading { margin-top: 6px; color: var(--analyst-muted, #6b7280); }
 .analyst-inbox-finding.is-action-required { border-color: #d64545; }
 
-/* Security alerts: instruction on the left, one centered bias and price-window
-   table on the right. The duration and window columns share widths only. */
+/* Security alerts: instruction on the left, one bias and price-window table on
+   the right, each taking half the card. The duration and window columns share
+   widths only. */
 .analyst-inbox-body.has-horizons {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
 }
-.analyst-inbox-body.has-horizons .analyst-inbox-copy { flex: 1 1 260px; min-width: 0; }
+.analyst-inbox-body.has-horizons .analyst-inbox-copy { flex: 1 1 0; min-width: 260px; }
 .analyst-inbox-horizons {
-  flex: 1.2 1 300px;
+  flex: 1 1 0;
+  min-width: 300px;
   margin: 8px 10px 8px 0;
   padding-left: 12px;
   border-collapse: collapse;
@@ -118,3 +120,16 @@
 .analyst-inbox-bias-cell.is-negative { background: #fbe4e2; color: #a32d2d; }
 .analyst-inbox-bias-cell.is-neutral { background: #f3f4f6; color: #4b5563; }
 .analyst-inbox-bias-cell.is-unavailable { background: #f3f4f6; color: #9ca3af; }
+
+/* Stance alerts: product calls, then current → target → order, in bordered cells. */
+.analyst-inbox-stance { display: grid; gap: 6px; }
+.analyst-inbox-stance-title { display: flex; gap: 6px; align-items: baseline; color: var(--analyst-muted, #6b7280); }
+.analyst-inbox-stance-ticker { color: var(--portfolio-review-blue, #2563eb); font-size: 11px; font-weight: 600; }
+.analyst-inbox-stance-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+.analyst-inbox-stance-table th,
+.analyst-inbox-stance-table td { overflow: hidden; padding: 2px 6px; border: 1px solid #cdd5dd; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.analyst-inbox-stance-table th { background: #f3f4f6; color: var(--analyst-muted, #6b7280); font-size: 9px; font-weight: 500; }
+.analyst-inbox-stance-table td span { font-weight: 600; }
+.analyst-inbox-stance-order { margin-top: 2px; }
+/* Calls, positions and the order wrap rather than clip in the half-width column. */
+.analyst-inbox-stance-table td { white-space: normal; overflow-wrap: anywhere; }

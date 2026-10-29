@@ -270,6 +270,11 @@ class WorkspaceStore:
             db.execute('INSERT INTO finding_revisions VALUES(?,?,?,?,?)',
                        (str(uuid4()), row['id'], observed, reason, json.dumps(row)))
 
+        def received_before(row):
+            changed = db.execute("SELECT MAX(recorded_at) AS at FROM finding_revisions WHERE finding_id=? AND reason='material-change'",
+                                 (row['id'],)).fetchone()
+            return (changed and changed['at']) or row['created_at']
+
         # Current publication evidence updates the incident even when its
         # original saved review was deleted or never opened again. A successful
         # import is not a correction to the disputed publisher values.
@@ -371,6 +376,15 @@ class WorkspaceStore:
             finding['firstReportedAt'] = (promotion or {}).get('firstReportedAt') or old_payload.get('firstReportedAt') or finding.get('publicationTime') or observed
             finding['lastEvaluatedAt'] = observed
             finding['materialRevision'] = (promotion or {}).get('materialRevision') or ((old_payload.get('materialRevision') or 0) + int(material))
+            # When this version of the alert reached the Inbox. A date-only source
+            # shows this time; an alert from before the stamp takes its last
+            # material change, else its creation.
+            if old and not material:
+                finding['receivedAt'] = old_payload.get('receivedAt') or received_before(old)
+            elif promotion:
+                finding['receivedAt'] = promotion.get('firstReportedAt') or observed
+            else:
+                finding['receivedAt'] = observed
             affected_reviews = (promotion or {}).get('affectedReviews') or old_payload.get('affectedReviews')
             if affected_reviews:
                 finding['affectedReviews'] = affected_reviews
@@ -1045,7 +1059,12 @@ class WorkspaceStore:
                 removed = db.execute('SELECT 1 FROM deleted_conversations WHERE kind=? AND trading_date=?', (p['kind'], p['date'])).fetchone()
                 if removed and not existing and not p.get('reopen'):
                     return {'conversation': None}
-                cid = existing['id'] if existing else str(uuid4()) if removed else stable(p['kind'] + ':' + p['date'])
+                fresh = bool(existing and p.get('fresh'))
+                if fresh:
+                    # A new review leaves the day's earlier one as its own chat, filed by when it was created.
+                    db.execute('UPDATE conversations SET trading_date=NULL WHERE id=?', (existing['id'],))
+                    existing = None
+                cid = existing['id'] if existing else str(uuid4()) if removed or fresh else stable(p['kind'] + ':' + p['date'])
                 changed = db.execute('INSERT OR IGNORE INTO conversations(id,kind,title,created_at,updated_at,trading_date) VALUES(?,?,?,?,?,?)', (cid, p['kind'], p['title'], now(), now(), p['date'])).rowcount
                 if changed:
                     self.event(db, 'created', cid)

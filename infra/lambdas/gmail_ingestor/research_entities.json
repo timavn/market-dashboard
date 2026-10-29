@@ -7,6 +7,7 @@
   "reservedTokens": [
     "ADD",
     "ADDED",
+    "ADDING",
     "BUY",
     "CALL",
     "CLOSE",
@@ -17,6 +18,7 @@
     "LONGS",
     "REMOVE",
     "REMOVED",
+    "REMOVING",
     "SELL",
     "SHORT",
     "SHORTS",

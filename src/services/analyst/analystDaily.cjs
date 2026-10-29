@@ -217,7 +217,7 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
       // await a readiness scan, provider checks, or the model gateway.
       gate = { ...gate, fingerprint: fingerprint([kind, date, marketSession(observed)]) };
     }
-    const { conversation } = requestedConversation
+    let { conversation } = requestedConversation
       ? { conversation: requestedConversation }
       : await call('daily', { kind, date: conversationDate, title: TITLES[kind], reopen: force, includeBriefs: false });
     if (!conversation) return null;
@@ -235,13 +235,20 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
       await rememberRefresh(conversation.id, { turnId: current.activeTurn?.id || null });
       return readReceiptConversation(conversation.id);
     }
-    const key = `daily-run:${conversation.id}`;
-    const previous = (requestedReads ? readValue(requestedReads[2]) : await call('setting', { key })).value;
+    let key = `daily-run:${conversation.id}`;
+    let previous = (requestedReads ? readValue(requestedReads[2]) : await call('setting', { key })).value;
     if (requestedSnapshot && previous?.fingerprint) gate.fingerprint = previous.fingerprint;
-    // Button opens refresh expired inputs; background triggers only a new publication revision.
+    // A start addressed to a chat within a minute of its last run reopens it; the review buttons always run.
     const expired = !previous?.completedAt || observed.getTime() - Date.parse(previous.completedAt) > 60000;
-    if (!explicitRefresh && previous?.fingerprint === gate.fingerprint && (!force || !expired) && !previous?.error) {
-      return requestedConversation ? readReceiptConversation(conversation.id) : { ...conversation, briefsIncluded: false };
+    if (!explicitRefresh && requestedConversation && previous?.fingerprint === gate.fingerprint && !expired && !previous?.error) {
+      return readReceiptConversation(conversation.id);
+    }
+    // Each started review is a chat of its own, newest first: once the day's chat holds a review, it keeps it, filed
+    // under the day it was created, and this run opens a new one. Refreshing a chat still posts into that chat.
+    if (!requestedConversation && !explicitRefresh && current.messages?.some(message => message.role === 'assistant' && message.reviewPostId)) {
+      ({ conversation } = await call('daily', { kind, date: conversationDate, title: TITLES[kind], reopen: true, fresh: true, includeBriefs: false }));
+      key = `daily-run:${conversation.id}`;
+      previous = null;
     }
     // Active captures were returned above. An incomplete legacy binding with
     // no active turn was interrupted; a new user request may retry it.
@@ -249,9 +256,9 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
       ? `daily-refresh:${fingerprint([kind, conversation.id, refreshRequestId])}`
       : `daily-request:${fingerprint([kind, conversation.id, refreshRequestId])}`;
     const runId = createRunId();
-    // A requested new post counts once; background revisions and its notes
-    // continue the same post. Older saved revisions belong to the base post.
-    const newPost = explicitRefresh || options.newPost === true;
+    // Refresh replaces the chat's report in its own post, so the chat stays one message; a refresh asked in
+    // the chat's text posts beside that question. Older saved revisions belong to the base post.
+    const newPost = options.newPost === true;
     const reviewPostId = newPost ? runId : previous?.reviewPostId || 'base';
     const balanceReferenceDate = kind === 'balance-review' && !gate.marketDay ? previousTradingDateKey(gate.date) : null;
     const record = { fingerprint: gate.fingerprint, runId, reviewPostId, newPost, kind, balanceReferenceDate,
@@ -562,7 +569,7 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
   router.post('/daily/:kind', async (req, res) => {
     if (!TITLES[req.params.kind]) return res.status(400).json({ error: 'Unknown review kind' });
     // The browser tells a verified deletion (410) apart only by its typed code.
-    try { await workspace.initialize(); return res.json({ conversation: await prepare(req.params.kind, true, { newPost: req.params.kind !== 'portfolio-review' || req.body?.refresh === true, refresh: req.body?.refresh === true, conversationId: req.body?.conversationId, requestId: req.body?.requestId }) }); } catch (e) { return res.status(e.statusCode || 503).json({ error: e.message, code: e.code }); }
+    try { await workspace.initialize(); return res.json({ conversation: await prepare(req.params.kind, true, { refresh: req.body?.refresh === true, conversationId: req.body?.conversationId, requestId: req.body?.requestId }) }); } catch (e) { return res.status(e.statusCode || 503).json({ error: e.message, code: e.code }); }
   });
   router.get('/monitor', async (req, res) => {
     if (req.query.reviewStages === 'true') return res.json({ reviewDiagnostics: getReviewDiagnostics(),

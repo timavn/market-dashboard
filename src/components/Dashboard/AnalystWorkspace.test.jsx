@@ -740,8 +740,8 @@ test('Portfolio launch reserves account tables before acceptance without display
   expect(body).toHaveAttribute('aria-busy', 'true');
   expect(within(body).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
   expect(within(body).getByRole('table', { name: 'Portfolio exposure' }).querySelectorAll('tbody tr')).toHaveLength(4);
-  expect(within(body).getByRole('region', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
-  expect(within(body).getByRole('table', { name: 'Position exceptions' })).toBeVisible();
+  expect(within(body).getByRole('region', { name: 'Action required' })).toHaveTextContent('Loading…');
+  expect(within(body).getByRole('table', { name: 'Action required' })).toBeVisible();
   expect(body).not.toHaveTextContent(/\$|\d+\.\d+%/);
 });
 
@@ -1021,10 +1021,10 @@ test('a Predictive launch does not adopt another review request from the sidebar
   expect(historyRows().getByRole('button', { name: 'Open conversation: Other Predictive review' })).toBeVisible();
 });
 
-test.each(['accepted', 'failed'])('starting today\'s Predictive review uses its existing sidebar slot before the POST is %s', async outcome => {
+async function startOverSavedPredictive() {
   const today = pacificToday();
   const captured = { ...make('today', 'Saved current-day Predictive capture'), title: 'Predictive Markets Review',
-    kind: 'prediction-markets-review', trading_date: today, reviewRequestId: 'review-start:previous-capture' };
+    kind: 'prediction-markets-review', trading_date: today, created_at: new Date().toISOString(), reviewRequestId: 'review-start:previous-capture' };
   conversations = { today: captured, prior: { ...make('prior', 'Saved previous-day Predictive capture'),
     title: 'Previous Predictive Review', kind: 'prediction-markets-review', trading_date: '2025-01-02' } };
   const pending = deferred();
@@ -1033,30 +1033,60 @@ test.each(['accepted', 'failed'])('starting today\'s Predictive review uses its 
   render(<AnalystPanel />);
   await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
-  const row = historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
-  expect(row).toHaveTextContent('Starting…');
-  expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+  home();
+  // The new start sits at the top; the earlier report keeps its own row.
+  const [starting, saved] = historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  expect(starting).toHaveTextContent('Starting…');
+  expect(saved).not.toHaveTextContent('Starting…');
   expect(screen.getByRole('button', { name: 'Open conversation: Previous Predictive Review' })).toBeVisible();
   expect(conversations.today).toBe(captured);
-  // The history slot reopens the pending start.
-  fireEvent.click(row);
+  fireEvent.click(starting);
   expectReviewProgress();
-  if (outcome === 'accepted') {
-    await act(async () => pending.resolve({ conversation: captured }));
-    await screen.findByText('Saved current-day Predictive capture');
-  } else {
-    await act(async () => pending.reject(new Error('Could not start the review.')));
-  }
-  expect(screen.queryByRole('alert')?.textContent || '').toBe(outcome === 'failed' ? 'Could not start the review.' : '');
-  if (outcome === 'failed') {
-    fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
-    await screen.findByText('Saved current-day Predictive capture');
-  }
+  return { today, captured, pending };
+}
+
+test('starting today\'s Predictive review again files the new run in its own chat above the saved one', async () => {
+  const { today, captured, pending } = await startOverSavedPredictive();
+  const fresh = { ...make('fresh', 'New current-day Predictive capture'), title: 'Predictive Markets Review',
+    kind: 'prediction-markets-review', trading_date: today, created_at: new Date().toISOString() };
+  conversations = { fresh, ...conversations, today: { ...captured, trading_date: null } };
+  await act(async () => pending.resolve({ conversation: fresh }));
+  await screen.findByText('New current-day Predictive capture');
+  home();
+  await waitFor(() => expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(2));
+  fireEvent.click(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })[1]);
+  await screen.findByText('Saved current-day Predictive capture');
+});
+
+test('a Predictive start that fails leaves only the saved report', async () => {
+  const { pending } = await startOverSavedPredictive();
+  await act(async () => pending.reject(new Error('Could not start the review.')));
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not start the review.');
   expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+  await screen.findByText('Saved current-day Predictive capture');
+  home();
   expect(historyRows().getByRole('button', { name: 'Open conversation: Previous Predictive Review' })).toBeVisible();
 });
 
-test('a review started after 9 p.m. Pacific reuses the Pacific day\'s slot and history groups by Pacific day', async () => {
+test('starting today\'s Predictive review while it is still running stays in its row', async () => {
+  const today = pacificToday();
+  const running = { ...make('today', 'Running Predictive capture'), title: 'Predictive Markets Review', kind: 'prediction-markets-review',
+    trading_date: today, created_at: new Date().toISOString(), state: 'running', activeTurn: { id: 'capture-turn', state: 'running' } };
+  conversations = { today: running };
+  const pending = deferred();
+  const request = api.request.getMockImplementation();
+  api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review' ? pending.promise : request(path, body, method));
+  render(<AnalystPanel />);
+  await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+  await act(async () => pending.resolve({ conversation: running }));
+  home();
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+});
+
+test('a review started after 9 p.m. Pacific files under the Pacific day and history groups by Pacific day', async () => {
   // 21:30 PDT on Oct 9 is already Oct 10 in New York.
   jest.useFakeTimers({ now: new Date('2026-10-10T04:30:00Z') });
   try {
@@ -1077,14 +1107,11 @@ test('a review started after 9 p.m. Pacific reuses the Pacific day\'s slot and h
     expect(group('Yesterday')).toEqual(['Open conversation: Chat earlier']);
     fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
     expect(JSON.parse(localStorage.getItem('analyst.workspace.launches'))).toEqual([expect.objectContaining({ tradingDate: '2026-10-09' })]);
-    expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
-    fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
-    await act(async () => { pending.resolve({ conversation: conversations.today }); await jest.advanceTimersByTimeAsync(300); });
-    expect(screen.getByText('Saved Pacific-day Predictive capture')).toBeInTheDocument();
+    // The new start files under the Pacific day, above the earlier report.
     home();
-    expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
-    expect(group('Today')).toContain('Open conversation: Predictive Markets Review');
+    expect(group('Today')).toEqual(['Open conversation: Predictive Markets Review', 'Open conversation: Predictive Markets Review',
+      'Open conversation: Chat morning']);
+    expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })[0]).toHaveTextContent('Starting…');
   } finally { jest.useRealTimers(); }
 });
 
@@ -1178,7 +1205,7 @@ test('a rejected compact capture clears previously verified metrics even when it
   await findPortfolioExposureAmount('$1,234');
   const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
   const exposureTable = within(exposure).getByRole('table', { name: 'Portfolio exposure' });
-  const exceptions = screen.getByRole('region', { name: 'Position exceptions' });
+  const exceptions = screen.getByRole('region', { name: 'Action required' });
   conversations.a = { ...conversations.a, revision: 2, briefsIncluded: false,
     messages: [{ ...conversations.a.messages[0], portfolioBrief: { ...capturedBrief,
       presentation: 'compact', available: false, metrics: {} } }] };
@@ -1190,7 +1217,7 @@ test('a rejected compact capture clears previously verified metrics even when it
   expect(exposureTable.querySelectorAll('tbody tr')).toHaveLength(4);
   expect(exposureTable.querySelectorAll('tbody td')).toHaveLength(16);
   expect([...exposureTable.querySelectorAll('tbody td')].every(cell => cell.textContent === '—')).toBe(true);
-  expect(screen.getByRole('region', { name: 'Position exceptions' })).toBe(exceptions);
+  expect(screen.getByRole('region', { name: 'Action required' })).toBe(exceptions);
   expect(exceptions).toHaveTextContent('Unavailable');
 });
 
@@ -1207,7 +1234,7 @@ test('Portfolio sections keep their slots and tables from an empty loading post 
   const article = transcript.querySelector('[data-message-id="stable-post"]');
   const slots = [...article.querySelectorAll('.portfolio-review-section')];
   const exposure = within(article).getByRole('table', { name: 'Portfolio exposure' });
-  const positions = within(article).getByRole('table', { name: 'Position exceptions' });
+  const positions = within(article).getByRole('table', { name: 'Action required' });
   expect(slots.length).toBeGreaterThanOrEqual(3);
   expect(article).toHaveAttribute('aria-busy', 'true');
   expect(within(article).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
@@ -1218,7 +1245,7 @@ test('Portfolio sections keep their slots and tables from an empty loading post 
     expect(current).toHaveLength(slots.length);
     current.forEach((slot, index) => expect(slot).toBe(slots[index]));
     expect(within(article).getByRole('table', { name: 'Portfolio exposure' })).toBe(exposure);
-    expect(within(article).getByRole('table', { name: 'Position exceptions' })).toBe(positions);
+    expect(within(article).getByRole('table', { name: 'Action required' })).toBe(positions);
   };
   fireEvent.scroll(transcript, { target: { scrollTop: 180 } });
   const partial = { presentation: 'compact', available: false, runId: 'stable-run', metrics: {}, holdings: [],
@@ -1330,7 +1357,7 @@ test('opening a cold completed Portfolio reads its latest compact primary withou
   expect(placeholder).toHaveClass('analyst-captured-report-placeholder', 'portfolio-brief-centered');
   expect(placeholder).toHaveAttribute('aria-busy', 'true');
   expect(within(placeholder).getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Loading…');
-  expect(within(placeholder).getByRole('table', { name: 'Position exceptions' })).toHaveTextContent('Loading…');
+  expect(within(placeholder).getByRole('table', { name: 'Action required' })).toHaveTextContent('Loading…');
   expect(placeholder).not.toHaveTextContent('$250');
   expect(api.request.mock.calls.filter(([path]) => path === '/conversations/a?includeBriefs=false&briefScope=latest')).toHaveLength(1);
   expect(api.request.mock.calls.some(([path]) => path === '/conversations/a')).toBe(false);
@@ -1405,7 +1432,7 @@ test('a rejected exact saved-body read settles its existing report slots without
     const placeholder = transcript.querySelector('[data-message-id="old-post"]');
     const sections = [...placeholder.querySelectorAll('.portfolio-review-section')];
     const exposure = within(placeholder).getByRole('table', { name: 'Portfolio exposure' });
-    const positions = within(placeholder).getByRole('table', { name: 'Position exceptions' });
+    const positions = within(placeholder).getByRole('table', { name: 'Action required' });
     expect(placeholder).toHaveClass('analyst-captured-report-placeholder');
     expect(placeholder).toHaveAttribute('aria-busy', 'true');
     await waitFor(() => expect(observers.length).toBeGreaterThan(0));
@@ -1418,7 +1445,7 @@ test('a rejected exact saved-body read settles its existing report slots without
     expect(settledSections).toHaveLength(sections.length);
     settledSections.forEach((section, index) => expect(section).toBe(sections[index]));
     expect(within(placeholder).getByRole('table', { name: 'Portfolio exposure' })).toBe(exposure);
-    expect(within(placeholder).getByRole('table', { name: 'Position exceptions' })).toBe(positions);
+    expect(within(placeholder).getByRole('table', { name: 'Action required' })).toBe(positions);
     expect(placeholder).not.toHaveAttribute('aria-busy', 'true');
     expect(placeholder).not.toHaveTextContent(/Loading|\$|\d+\.\d+%/);
     expect(positions).toHaveTextContent('Unavailable');
@@ -1894,7 +1921,7 @@ test.each([true, false])('a historical portfolio review makes an older or intrad
   expect(screen.queryByText(/market.*closed|reviews resume/i)).not.toBeInTheDocument();
 });
 
-test('a disconnected refresh retains saved position exceptions until a verified review replaces them', async () => {
+test('a disconnected refresh retains saved Action required positions until a verified review replaces them', async () => {
   const brief = holding => ({ available: true, asOf: '2026-09-04T20:05:00Z', metrics: {},
     holdings: [{ holding, heldSide: 'LONG', weightPct: 4, trade: 'BEARISH', trend: 'BULLISH', sizingInputs: {}, sources: {} }], nextSession: [] });
   conversations.a.kind = 'portfolio-review';
@@ -1908,7 +1935,7 @@ test('a disconnected refresh retains saved position exceptions until a verified 
   await screen.findByRole('row', { name: /IGV/ });
   expect(screen.getByRole('note')).toHaveTextContent('The latest refresh could not verify holdings. Showing the last saved portfolio below.');
   expect(screen.queryByText('Verified portfolio evidence is unavailable for this saved review.')).not.toBeInTheDocument();
-  expect(screen.getAllByRole('table', { name: 'Position exceptions' })).toHaveLength(1);
+  expect(screen.getAllByRole('table', { name: 'Action required' })).toHaveLength(1);
   conversations.a.messages.push({ id: 'refreshed', role: 'assistant', state: 'complete', text: 'New report', portfolioBrief: brief('AMZN') });
   act(() => stream.onmessage({ data: JSON.stringify({ seq: 1, conversation_id: 'a' }) }));
   await screen.findByRole('row', { name: /AMZN/ });
@@ -3127,6 +3154,8 @@ test('a progressive Portfolio capture renders its structured report without pars
   expect(prepare).not.toHaveBeenCalled();
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Review sources' })).toBeVisible();
+  // The review runs edge to edge with the composer, as Predictive boards do.
+  expect(screen.getByRole('log', { name: 'Conversation' })).toHaveClass('is-composer-width');
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/conversations/a?includeBriefs=false'))).toBe(true);
   expect(conversations.a.messages[0].text).toBe(saved);
   prepare.mockRestore();
@@ -3455,4 +3484,53 @@ describe('review starts across a reload', () => {
       expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
     } finally { jest.useRealTimers(); }
   });
+});
+
+test('a Predictive review refreshes in place from the bar above Sources, dated by the report it shows', async () => {
+  const saved = { ...make('today', 'Saved Predictive report'), title: 'Predictive Markets Review', kind: 'prediction-markets-review',
+    trading_date: pacificToday(), created_at: '2026-10-28T16:40:00Z',
+    messages: [{ id: 'report', role: 'assistant', state: 'complete', text: 'Saved Predictive report', reviewPostId: 'base',
+      reviewRunId: 'run-1', created_at: '2026-10-28T16:46:00Z' }] };
+  conversations = { today: saved };
+  const request = api.request.getMockImplementation();
+  api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review'
+    ? Promise.resolve({ conversation: { ...saved, activeTurn: { id: 'refresh-turn', state: 'running' } } }) : request(path, body, method));
+  render(<AnalystPanel />);
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+  const refresh = await screen.findByRole('button', { name: 'Refresh Predictive Markets Review' });
+  const time = refresh.parentElement.querySelector('time');
+  expect(time).toHaveAttribute('dateTime', '2026-10-28T16:46:00Z');
+  expect(time).toHaveTextContent(/Oct 28.* 09:46 PDT/);
+  // The bar sits right above Sources.
+  expect(refresh.parentElement.nextElementSibling).toBe(screen.getByRole('region', { name: 'Review sources' }));
+  // The boards run edge to edge with the composer.
+  expect(screen.getByRole('log', { name: 'Conversation' })).toHaveClass('is-composer-width');
+  fireEvent.click(refresh);
+  await waitFor(() => expect(api.request).toHaveBeenCalledWith('/daily/prediction-markets-review',
+    expect.objectContaining({ refresh: true, conversationId: 'today' })));
+  // A running refresh cannot be started twice.
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh Predictive Markets Review' })).toBeDisabled());
+  home();
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+});
+
+test('ordinary chats have no review Refresh bar', async () => {
+  render(<AnalystPanel />);
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
+  await screen.findByText('Only answer A');
+  expect(screen.queryByRole('button', { name: /^Refresh / })).toBeNull();
+  expect(screen.getByRole('log', { name: 'Conversation' })).not.toHaveClass('is-composer-width');
+});
+
+test('history days read newest first even when an older row arrives first', async () => {
+  conversations = {
+    older: { ...make('older', 'Older answer'), created_at: new Date(Date.now() - 2 * 86_400_000).toISOString() },
+    newer: { ...make('newer', 'Newer answer'), created_at: new Date().toISOString() },
+  };
+  render(<AnalystPanel />);
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat newer' });
+  const headings = [...document.querySelectorAll('.analyst-conversation-item')].map(item => item.closest('section').querySelector('h2, h3')?.textContent);
+  expect(headings[0]).toBe('Today');
+  expect(screen.getAllByRole('button', { name: /^Open conversation: Chat (?:older|newer)$/ }).map(button => button.getAttribute('aria-label')))
+    .toEqual(['Open conversation: Chat newer', 'Open conversation: Chat older']);
 });

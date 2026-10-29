@@ -12,7 +12,16 @@
       { "symbol": "DJI", "label": "Dow 30", "summary": false, "provider": { "provider": "auto", "ibkrSymbol": "INDU", "yahooSymbol": "^DJI", "conId": 1935181, "secType": "IND", "exchange": "CME", "currency": "USD" } },
       { "symbol": "IXIC", "label": "Nasdaq Composite", "summary": false, "provider": { "provider": "auto", "ibkrSymbol": "COMP", "yahooSymbol": "^IXIC", "conId": 18342287, "secType": "IND", "exchange": "NASDAQ", "currency": "USD" } },
       { "symbol": "SMH", "label": "Semiconductors", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "SMH", "secType": "ETF" } },
+      { "symbol": "XLK", "label": "Technology", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLK", "secType": "ETF" } },
+      { "symbol": "XLC", "label": "Communication Services", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLC", "secType": "ETF" } },
+      { "symbol": "XLY", "label": "Consumer Discretionary", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLY", "secType": "ETF" } },
       { "symbol": "XLF", "label": "Financials", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "XLF", "secType": "ETF" } },
+      { "symbol": "XLV", "label": "Health Care", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLV", "secType": "ETF" } },
+      { "symbol": "XLI", "label": "Industrials", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLI", "secType": "ETF" } },
+      { "symbol": "XLE", "label": "Energy", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLE", "secType": "ETF" } },
+      { "symbol": "XLB", "label": "Materials", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLB", "secType": "ETF" } },
+      { "symbol": "XLP", "label": "Consumer Staples", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLP", "secType": "ETF" } },
+      { "symbol": "XLU", "label": "Utilities", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "XLU", "secType": "ETF" } },
       { "symbol": "VNQ", "label": "Real Estate", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "VNQ", "secType": "ETF" } }
     ]
   },
