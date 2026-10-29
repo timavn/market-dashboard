@@ -47,6 +47,7 @@ const exchangeVolumeService = createRegionalVolumeService({
 });
 const { buildMomoTrackerCsvRows } = require('./src/utils/momoTrackerCsv.cjs');
 const { determineEtfProSnapshotDate } = require('./src/utils/etfProSnapshotDate.cjs');
+const { currentResearchEvents } = require('./src/utils/researchEventRevisions.cjs');
 const {
   parseEtfProActionEmail,
   parseEtfProFullBookEmail,
@@ -785,7 +786,7 @@ async function getResearchEventLedgerItems(
         error: 'RESEARCH_EVENT_LEDGER_CACHE_STALE',
       };
     }
-    return { items: cacheResult.value || [], error: null };
+    return { items: currentResearchEvents(cacheResult.value || []), error: null };
   } catch (error) {
     // During migration the retained Gmail ledger/S3 archive remains a complete,
     // immutable fallback. Surface the V2 read failure in diagnostics; do not

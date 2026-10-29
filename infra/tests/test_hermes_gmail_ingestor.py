@@ -4370,6 +4370,51 @@ class HermesGmailIngestorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "RESEARCH_EVENT_CONFLICT"):
             ingestor.persist_research_event_ledger(corrected, database, content_sha256="b" * 64)
 
+    def test_corrected_reparse_appends_a_revision_that_supersedes_the_original(self):
+        database = FakeEventDynamoDb()
+        original = rta_snapshot("gmail-rta", "2026-07-15T16:00:00+00:00", "BUY")
+        corrected = rta_snapshot("gmail-rta", "2026-07-15T16:00:00+00:00", "SELL")
+        ingestor.persist_research_event_ledger(original, database)
+        [original_event] = database.table.items.values()
+
+        written = ingestor.persist_research_event_ledger(corrected, database, allow_revision=True)
+        again = ingestor.persist_research_event_ledger(corrected, database, allow_revision=True)
+
+        self.assertEqual((written, again), (1, 0))
+        events = list(database.table.items.values())
+        self.assertEqual(len(events), 2)
+        self.assertIn(original_event, events)  # the original is never rewritten
+        [revision] = [event for event in events if event.get("parseRevision")]
+        self.assertTrue(revision["eventKey"].endswith(f"#revision-{revision['parseRevision']}"))
+        self.assertEqual(ingestor.current_research_events(events), [revision])
+        self.assertEqual(
+            ingestor.verify_research_event_ledger(database)["products"]["real-time-alert"],
+            {"eventCount": 1, "unverifiedEventCount": 0},
+        )
+
+    def test_unchanged_reparse_with_revision_allowed_writes_nothing_new(self):
+        database = FakeEventDynamoDb()
+        snapshot = rta_snapshot("gmail-rta", "2026-07-15T16:00:00+00:00", "BUY")
+        ingestor.persist_research_event_ledger(snapshot, database)
+
+        self.assertEqual(ingestor.persist_research_event_ledger(snapshot, database, allow_revision=True), 0)
+        self.assertEqual(len(database.table.items), 1)
+        self.assertFalse(any(event.get("parseRevision") for event in database.table.items.values()))
+
+    def test_newest_revision_wins_and_other_emails_are_untouched(self):
+        events = [
+            {"productKey": "investing-ideas", "sourceMessageId": "a", "eventKey": "t#a#0000"},
+            {"productKey": "investing-ideas", "sourceMessageId": "a", "eventKey": "t#a#0000#revision-r1",
+             "parseRevision": "r1", "revisedAt": "2026-10-29T01:00:00+00:00"},
+            {"productKey": "investing-ideas", "sourceMessageId": "a", "eventKey": "t#a#0000#revision-r2",
+             "parseRevision": "r2", "revisedAt": "2026-10-29T02:00:00+00:00"},
+            {"productKey": "investing-ideas", "sourceMessageId": "b", "eventKey": "t#b#0000"},
+        ]
+        self.assertEqual(
+            [event["eventKey"] for event in ingestor.current_research_events(events)],
+            ["t#a#0000#revision-r2", "t#b#0000"],
+        )
+
     def test_investing_ideas_materializes_one_typed_event_per_position(self):
         database = FakeEventDynamoDb()
         snapshot = ingestor.parse_html_snapshot(

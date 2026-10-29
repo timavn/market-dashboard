@@ -1746,13 +1746,66 @@ def _research_event_payloads(snapshot: Dict[str, Any]) -> List[Tuple[str, Any]]:
     return []
 
 
+def current_research_events(items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop events a corrected re-parse of the same email superseded.
+
+    Events are never rewritten. A corrected parse appends a complete new set
+    marked with ``parseRevision``/``revisedAt``; for each source email only the
+    newest such set is current. Emails never re-parsed keep their original set.
+    """
+    items = list(items)
+    latest: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    for item in items:
+        revision = str(item.get("parseRevision") or "")
+        if not revision:
+            continue
+        key = (str(item.get("productKey") or ""), str(item.get("sourceMessageId") or ""))
+        candidate = (str(item.get("revisedAt") or ""), revision)
+        if candidate > latest.get(key, ("", "")):
+            latest[key] = candidate
+    return [
+        item
+        for item in items
+        if (key := (str(item.get("productKey") or ""), str(item.get("sourceMessageId") or ""))) not in latest
+        or str(item.get("parseRevision") or "") == latest[key][1]
+    ]
+
+
+def _source_research_events(table: Any, product_key: str, key_prefix: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    exclusive_start_key = None
+    while True:
+        query: Dict[str, Any] = {
+            "KeyConditionExpression": "#productKey = :productKey AND begins_with(#eventKey, :prefix)",
+            "ExpressionAttributeNames": {"#productKey": "productKey", "#eventKey": "eventKey"},
+            "ExpressionAttributeValues": {":productKey": product_key, ":prefix": key_prefix},
+            "ConsistentRead": True,
+        }
+        if exclusive_start_key:
+            query["ExclusiveStartKey"] = exclusive_start_key
+        response = table.query(**query)
+        items.extend(
+            item for item in response.get("Items") or []
+            if str(item.get("eventKey") or "").startswith(key_prefix)
+        )
+        exclusive_start_key = response.get("LastEvaluatedKey")
+        if not exclusive_start_key:
+            return items
+
+
 def persist_research_event_ledger(
     snapshot: Dict[str, Any],
     db: Any,
     *,
     content_sha256: Optional[str] = None,
+    allow_revision: bool = False,
 ) -> int:
-    """Persist immutable, idempotent parsed events before projection writes."""
+    """Persist immutable, idempotent parsed events before projection writes.
+
+    ``allow_revision`` is for operator replays only: when a corrected parser
+    produces different events for an email already in the ledger, the new
+    events are appended as a revision instead of failing as a conflict.
+    """
     snapshot = validate_research_ranges(snapshot)
     payloads = _research_event_payloads(snapshot)
     if not payloads:
@@ -1765,17 +1818,40 @@ def persist_research_event_ledger(
     table = db.Table(RESEARCH_EVENT_LEDGER_TABLE)
     written = 0
 
-    for sequence, (event_type, payload) in enumerate(payloads):
-        canonical = {
-            "eventType": event_type,
-            "payload": _canonical_value(payload),
-        }
-        event_hash = hashlib.sha256(
+    def event_hash_of(event_type: str, payload: Any) -> str:
+        canonical = {"eventType": event_type, "payload": _canonical_value(payload)}
+        return hashlib.sha256(
             json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         ).hexdigest()
+
+    parse_revision: Optional[str] = None
+    revised_at: Optional[str] = None
+    if allow_revision:
+        new_hashes = [event_hash_of(event_type, payload) for event_type, payload in payloads]
+        current = sorted(
+            current_research_events(
+                _source_research_events(table, product_key, f"{event_time}#{message_id}#")
+            ),
+            key=lambda item: int(item.get("sequence") or 0),
+        )
+        if current and [item.get("eventHash") for item in current] == new_hashes:
+            # Same events as the current set: re-confirm it in place (the
+            # original, or the revision already written by an earlier replay).
+            parse_revision = current[0].get("parseRevision") or None
+            revised_at = current[0].get("revisedAt") if parse_revision else None
+        elif current:
+            parse_revision = hashlib.sha256("".join(new_hashes).encode("utf-8")).hexdigest()[:24]
+            revised_at = utc_now().isoformat()
+
+    for sequence, (event_type, payload) in enumerate(payloads):
+        event_hash = event_hash_of(event_type, payload)
         verification_hash = _research_event_verification_hash(event_type, payload)
         revision = (snapshot.get("sourceQuality") or {}).get("revision")
-        event_key = f"{event_time}#{message_id}#{sequence:04d}" + (f"#quality-{revision}" if revision else "")
+        event_key = (
+            f"{event_time}#{message_id}#{sequence:04d}"
+            + (f"#quality-{revision}" if revision else "")
+            + (f"#revision-{parse_revision}" if parse_revision else "")
+        )
         default_source_kind = {
             "POSITION_ACTION": "position-action",
             "FULL_BOOK_CHECKPOINT": "full-book-checkpoint",
@@ -1805,6 +1881,7 @@ def persist_research_event_ledger(
             "immutable": True,
             **({"sourceQualityRevision": revision} if revision else {}),
             **({"sourceQuality": snapshot["sourceQuality"]} if snapshot.get("sourceQuality") else {}),
+            **({"parseRevision": parse_revision, "revisedAt": revised_at} if parse_revision else {}),
         }
         if event_type == "INVESTING_IDEA_POSITION" or product_key == "hedgai-signals":
             item["decisionEligible"] = False
@@ -1888,6 +1965,7 @@ def verify_research_event_ledger(db: Any) -> Dict[str, Any]:
             exclusive_start_key = response.get("LastEvaluatedKey")
             if not exclusive_start_key:
                 break
+        items = current_research_events(items)
         unverified_keys = set()
         for index, item in enumerate(items):
             expected = _research_event_verification_hash(
@@ -2949,6 +3027,7 @@ def backfill_html_snapshot(
             snapshot,
             dynamodb,
             content_sha256=item.get("contentSha256"),
+            allow_revision=replace_entity_projection,
         )
         entity_event_count = persist_snapshot_intelligence(
             snapshot,

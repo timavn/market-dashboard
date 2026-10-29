@@ -30,6 +30,7 @@ const SERVICE_MANIFEST = require('../ops/services.json');
 const { preflightAwsProfile } = require('./ops/aws_profile_preflight');
 const { scanAllPages } = require('../src/utils/dynamoScanAllPages.cjs');
 const { materializeRtaLedgerItems } = require('../src/utils/rtaLedgerMaterialization.cjs');
+const { currentResearchEvents } = require('../src/utils/researchEventRevisions.cjs');
 const {
   materializeRtaResearchEvents,
   mergeRtaMaterializations,
@@ -197,7 +198,7 @@ async function queryResearchEvents(dynamodb, productKey) {
       items.push(...(result.Items || []));
       exclusiveStartKey = result.LastEvaluatedKey;
     } while (exclusiveStartKey);
-    return { items, error: null };
+    return { items: currentResearchEvents(items), error: null };
   } catch (error) {
     return { items: [], error: error.code || error.message || 'research-event-ledger-unavailable' };
   }
