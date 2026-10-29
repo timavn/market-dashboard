@@ -5331,6 +5331,35 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertNotIn("riskRangeLow", alert)
         self.assertNotIn("ADDING", {event["entityId"] for event in research_intelligence.build_entity_events(snapshot)})
 
+    def test_multi_change_subject_side_word_is_not_a_ticker(self):
+        subject = "2 Changes: Add Short GS, Add COST"
+        html_body = """
+            <h1>2 Changes: Add Short GS, Add COST</h1>
+            <p>We are <strong>ADDING</strong> the following to <em>Investing Ideas</em>:</p>
+            <p><strong>Long:</strong></p><ul><li><abbr name="Costco">COST</abbr></li></ul>
+            <p>We are <strong>ADDING</strong> the following to <em>Investing Ideas</em>:</p>
+            <p><strong>Short:</strong></p><ul><li><abbr name="Goldman Sachs">GS</abbr></li></ul>
+            <p>Been waiting, patiently, for this relatively new Signal Strength Stock,</p>
+            <p>KM</p>
+        """
+        snapshot = ingestor.parse_html_snapshot(
+            report_type=ingestor.infer_report_type("message-body.html", subject),
+            html_body=html_body,
+            received_at=datetime(2026, 10, 28, 19, 29, tzinfo=timezone.utc),
+            s3_key="gmail/unknown/gs-cost.html",
+            message_id="gs-cost",
+            subject=subject,
+        )
+
+        self.assertEqual(snapshot["snapshotType"], "investing-ideas")
+        alerts = {row["ticker"]: row for row in snapshot["data"]["alerts"]}
+        self.assertEqual(list(alerts), ["GS", "COST"])
+        self.assertEqual({ticker: (row["action"], row["side"]) for ticker, row in alerts.items()},
+                         {"GS": ("ADD", "short"), "COST": ("ADD", "long")})
+        self.assertFalse(any("riskRangeLow" in row for row in alerts.values()))
+        entities = {event["entityId"] for event in research_intelligence.build_entity_events(snapshot)}
+        self.assertNotIn("SHORT", entities)
+
     ABNB_LEDGER_ROW = {
         "messageId": "1a17ec8a530b21d0",
         "attachmentId": "message-body-html-1",
