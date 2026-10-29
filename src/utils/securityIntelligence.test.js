@@ -953,6 +953,48 @@ describe('security intelligence projection', () => {
     });
   });
 
+  test('reads Signal Strength Shorts as its own decision, never as the long list', () => {
+    const response = buildSecurityIntelligence({
+      symbols: ['SKHY'],
+      marketDate: MARKET_DATE,
+      historyDays: 0,
+      now: NOW,
+      productManifests: [
+        indexedManifest('signal-strength', MARKET_DATE, { artifactCount: 1, eventCount: 1 }),
+        indexedManifest('signal-strength-shorts', MARKET_DATE, { artifactCount: 1, eventCount: 1 }),
+      ],
+      entityEvents: [
+        {
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength-shorts',
+          entityKey: 'ticker#SKHY',
+          eventType: 'signal_strength_short_removed',
+          excerpt: 'SKHY',
+          publishedAt: '2026-07-23T13:00:00Z',
+          sourceEventId: 'shorts-remove',
+        },
+        {
+          // Recorded under the long product before Shorts became its own.
+          marketDate: MARKET_DATE,
+          productKey: 'signal-strength',
+          entityKey: 'ticker#SKHY',
+          eventType: 'signal_strength_short_removed',
+          excerpt: 'SKHY',
+          publishedAt: '2026-07-23T13:00:00Z',
+          sourceEventId: 'shorts-remove-legacy',
+        },
+      ],
+      riskRangeEnvelope: verifiedRiskEnvelope({}),
+    });
+
+    expect(response.bySymbol.SKHY.decision.signalStrength).toMatchObject({ status: 'unavailable', value: null });
+    expect(response.bySymbol.SKHY.decision.signalStrengthShorts).toMatchObject({
+      status: 'available',
+      value: 'REMOVED',
+      sourceId: 'signal-strength-shorts',
+    });
+  });
+
   test('fails closed on conflicting Signal Strength events with the same publication time', () => {
     const response = buildSecurityIntelligence({
       symbols: ['AAPL'],

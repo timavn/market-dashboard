@@ -3299,9 +3299,17 @@ class HermesGmailIngestorTests(unittest.TestCase):
         })
         self.assertEqual(snapshot["data"]["stocks"][1]["entryPrice"], Decimal("1010.50"))
 
-    def test_signal_strength_shorts_list_is_its_own_book(self):
+    def test_signal_strength_shorts_list_is_its_own_product(self):
+        self.assertEqual(
+            ingestor.infer_report_type("message-body.html", "Signal Strength Shorts: 67 Stocks (5 added, 11 removed)"),
+            "signal-strength-shorts",
+        )
+        self.assertEqual(
+            ingestor.infer_report_type("message-body.html", "Signal Strength Stocks: 51 Stocks (0 added, 3 removed)"),
+            "signal-strength",
+        )
         snapshot = email_parser.parse_html_snapshot(
-            report_type="signal-strength",
+            report_type="signal-strength-shorts",
             html_body=self._signal_strength_html(
                 book="Shorts", count=1, adding=None, removing="BRBR, DECK",
                 rows=[("LULU", "lululemon athletica inc.", "Retail", "Brian McGough", "02/15/26", "$177.72", "$100.10", "+44.02%", "25/30", "249")],
@@ -3312,14 +3320,15 @@ class HermesGmailIngestorTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(snapshot)
-        self.assertNotIn("stockCount", snapshot)
-        self.assertEqual(snapshot["shortCount"], 1)
-        self.assertEqual(set(snapshot["data"]), {"shorts"})
-        shorts = snapshot["data"]["shorts"]
+        self.assertEqual(snapshot["snapshotType"], "signal-strength-shorts")
+        self.assertEqual(snapshot["reportType"], "signal-strength-shorts")
+        self.assertEqual(snapshot["stockCount"], 1)
+        self.assertNotIn("shortCount", snapshot)
+        shorts = snapshot["data"]
+        self.assertNotIn("shorts", shorts)
         self.assertEqual(shorts["added"], [])
         self.assertEqual(shorts["removed"], ["BRBR", "DECK"])
         self.assertTrue(shorts["membershipComplete"])
-        self.assertEqual(shorts["gmailMessageId"], "signal-strength-shorts")
         # A short position's total return is not the price change since the signal.
         self.assertEqual(shorts["stocks"][0]["side"], "short")
         self.assertEqual(shorts["stocks"][0]["totalReturn"], Decimal("44.02"))
@@ -3341,10 +3350,10 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(snapshot["data"]["added"], [])
         self.assertEqual(snapshot["data"]["removed"], ["VREOF"])
 
-    def test_signal_strength_long_and_short_emails_share_one_daily_snapshot(self):
-        def parsed(book, message_id, minute, ticker):
+    def test_signal_strength_long_and_short_emails_materialize_separate_products(self):
+        def parsed(book, message_id, minute, ticker, report_type="signal-strength"):
             return email_parser.parse_html_snapshot(
-                report_type="signal-strength",
+                report_type=report_type,
                 html_body=self._signal_strength_html(
                     book=book, count=1, adding=ticker, removing=None,
                     rows=[(ticker, f"{ticker} Inc.", "Retail", "Analyst", "10/22/26", "$10.00", "$11.00", "+10.00%", "Bench", "0")],
@@ -3355,19 +3364,22 @@ class HermesGmailIngestorTests(unittest.TestCase):
             )
 
         longs = parsed("Stocks", "longs-1113", 13, "MCK")
-        shorts = parsed("Shorts", "shorts-1114", 14, "SMCI")
+        shorts = parsed("Shorts", "shorts-1114", 14, "SMCI", "signal-strength-shorts")
         for order in ((longs, shorts), (shorts, longs)):
             table = FakeSnapshotTable()
             db = FakeDynamoDb(table)
             for snapshot in order:
                 ingestor.materialize_email_snapshot(deepcopy(snapshot), db)
-            stored = table.items[("2026-10-22", "signal-strength")]
-            self.assertEqual([row["ticker"] for row in stored["data"]["stocks"]], ["MCK"])
-            self.assertEqual([row["ticker"] for row in stored["data"]["shorts"]["stocks"]], ["SMCI"])
-            self.assertEqual(stored["stockCount"], 1)
-            self.assertEqual(stored["shortCount"], 1)
-            self.assertEqual(stored["gmailMessageId"], "longs-1113")
-            self.assertEqual(stored["sourceMessageIds"], ["longs-1113", "shorts-1114"])
+            stored_longs = table.items[("2026-10-22", "signal-strength")]
+            stored_shorts = table.items[("2026-10-22", "signal-strength-shorts")]
+            self.assertEqual([row["ticker"] for row in stored_longs["data"]["stocks"]], ["MCK"])
+            self.assertEqual([row["ticker"] for row in stored_shorts["data"]["stocks"]], ["SMCI"])
+            self.assertNotIn("shorts", stored_longs["data"])
+            self.assertEqual(stored_longs["sourceMessageIds"], ["longs-1113"])
+            self.assertEqual(stored_shorts["sourceMessageIds"], ["shorts-1114"])
+
+        # The body's book heading decides even when the subject named the long list.
+        self.assertEqual(parsed("Shorts", "shorts-1115", 15, "SMCI")["snapshotType"], "signal-strength-shorts")
 
         # Replaying an earlier long edition never replaces a later one.
         later_longs = parsed("Stocks", "longs-1130", 30, "PR")
@@ -3375,9 +3387,8 @@ class HermesGmailIngestorTests(unittest.TestCase):
         db = FakeDynamoDb(table)
         for snapshot in (later_longs, shorts, longs):
             ingestor.materialize_email_snapshot(deepcopy(snapshot), db)
-        stored = table.items[("2026-10-22", "signal-strength")]
-        self.assertEqual([row["ticker"] for row in stored["data"]["stocks"]], ["PR"])
-        self.assertEqual([row["ticker"] for row in stored["data"]["shorts"]["stocks"]], ["SMCI"])
+        self.assertEqual([row["ticker"] for row in table.items[("2026-10-22", "signal-strength")]["data"]["stocks"]], ["PR"])
+        self.assertEqual([row["ticker"] for row in table.items[("2026-10-22", "signal-strength-shorts")]["data"]["stocks"]], ["SMCI"])
 
     def test_momo_tracker_extracts_the_approved_range_and_trend_table(self):
         source_root = "https://d1yhils6iwh5l5.cloudfront.net/charts/momo"

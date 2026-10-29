@@ -25,14 +25,15 @@ PRODUCTS = {
     "top-3-things": "Top 3 Things", "risk-ranges": "Risk Ranges",
     "early-look": "Early Look", "the-call": "The Call",
     "the-macro-show": "Macro Show", "signal-strength": "Signal Strength",
-    "market-structure": "Market Structure",
+    "signal-strength-shorts": "Signal Strength Shorts", "market-structure": "Market Structure",
 }
 ALIASES = {"top3": "top-3-things", "riskranges": "risk-ranges", "earlylook": "early-look",
            "thecall": "the-call", "macroshow": "the-macro-show", "signalstrength": "signal-strength",
-           "marketstructure": "market-structure"}
+           "signalstrengthshorts": "signal-strength-shorts", "marketstructure": "market-structure"}
 # Event-driven Signal Strength keeps its latest eligible publication inside the
 # immutable capture. Other daily products retain their exact-edition policy.
-CAPTURE_SELECTION = {"signal-strength": "latest-captured-publication"}
+CAPTURE_SELECTION = {"signal-strength": "latest-captured-publication",
+                     "signal-strength-shorts": "latest-captured-publication"}
 HEADINGS = {
     "key takeaways", "the big picture", "macro grind", "quad path", "our levels",
     "top 5 most actionable", "macro commentary", "sector summary", "signal divergence",
@@ -697,8 +698,9 @@ def _early_levels(report, section, snapshot, cid):
     report.table(section, ["Ticker", "Security", "Published range", "Trend"], rows)
 
 
-def _signal_strength(report, snapshot, cid):
-    section = report.section("signal-strength", "Signal Strength")
+def _signal_strength(report, snapshot, cid, product="signal-strength"):
+    shorts = product == "signal-strength-shorts"
+    section = report.section(product, PRODUCTS[product])
     data, meta = _dict(snapshot.get("data")), _dict(snapshot.get("meta"))
     identities = _published_security_identities(snapshot)
     changes = []
@@ -717,10 +719,12 @@ def _signal_strength(report, snapshot, cid):
         for stock in stocks:
             stock = stock if isinstance(stock, dict) else {"ticker": stock}
             days = next((stock.get(key) for key in ("daysOn", "days_on", "days") if stock.get(key) is not None), None)
-            change = next((stock.get(key) for key in ("percentChangeSinceSignal", "percent_change_since_signal", "percentSinceSignal", "signalReturn", "percentChange") if stock.get(key) is not None), None)
+            # A short's published Total Return is its gain, not the price change since the signal.
+            keys = ("totalReturn",) if shorts else ("percentChangeSinceSignal", "percent_change_since_signal", "percentSinceSignal", "signalReturn", "percentChange")
+            change = next((stock.get(key) for key in keys if stock.get(key) is not None), None)
             rows.append(_row([*report.security(stock, _symbol(stock.get("ticker") or stock.get("symbol")), identities), _num(days),
                               f"{_num(change)}%" if _number(change) is not None else "—"], [cid]))
-        report.table(section, ["Ticker", "Security", "Days on", "Since signal"], rows)
+        report.table(section, ["Ticker", "Security", "Days on", "Total return" if shorts else "Since signal"], rows)
 
 
 def _market_structure(report, snapshot, cid):
@@ -840,8 +844,9 @@ def build_daily_research_rollup(evidence: dict[str, Any], *, as_of=None, holding
             cid = citations[product]
             _prose(report, section, snapshot, cid)
             _positions(report, section, snapshot, previous.get(product), cid, prior_citations.get(product))
-    if snapshot := snapshots.get("signal-strength"):
-        _signal_strength(report, snapshot, citations["signal-strength"])
+    for product in ("signal-strength", "signal-strength-shorts"):
+        if snapshot := snapshots.get(product):
+            _signal_strength(report, snapshot, citations[product], product)
     if snapshot := snapshots.get("market-structure"):
         _market_structure(report, snapshot, citations["market-structure"])
     sections = [section for section in report.sections if section["blocks"]]

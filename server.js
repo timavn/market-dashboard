@@ -1468,6 +1468,8 @@ const RISK_RANGE_DATA_TABLE = process.env.HEDGEYE_RISK_RANGES_TABLE
 const RESEARCH_EVENT_LEDGER_TABLE = process.env.RESEARCH_EVENT_LEDGER_TABLE
   || AWS_RESOURCE_DEFAULTS.researchEventLedgerTable
   || 'ResearchEventLedgerV2';
+// Signal Strength (longs) and Signal Strength Shorts are separate products with the same book shape.
+const isSignalStrengthType = (type) => type === 'signal-strength' || type === 'signal-strength-shorts';
 const RESEARCH_ENTITY_EVENTS_TABLE = process.env.RESEARCH_ENTITY_EVENTS_TABLE
   || AWS_RESOURCE_DEFAULTS.researchEntityEventsTable
   || 'ResearchEntityEventsV1';
@@ -4686,7 +4688,7 @@ app.get('/api/hedgeye/freshness', async (req, res) => {
 
     // 2. Processing Snapshots (HedgeyeDailySnapshot Table)
     // Other types are stored as single snapshot items per day
-    const snapshotTypes = ['top-3-things', 'early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'market-structure', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
+    const snapshotTypes = ['top-3-things', 'early-look', 'bitcoin-trend-tracker', 'momo-tracker', 'signal-strength', 'signal-strength-shorts', 'portfolio-solutions', 'the-macro-show', 'the-call', 'real-time-alert', 'market-structure', 'cftc-positioning', 'etf-pro', 'inflation-nowcast'];
 
     // Query one bounded latest row per product through the metadata-only GSI.
     // This replaced the previous full-table scan on every status refresh.
@@ -5911,6 +5913,7 @@ async function buildHedgeyeChangelogResponse() {
       'bitcoin-trend-tracker',
       'momo-tracker',
       'signal-strength',
+      'signal-strength-shorts',
       'portfolio-solutions',
       'the-macro-show',
       'the-call',
@@ -5982,7 +5985,7 @@ async function buildHedgeyeChangelogResponse() {
           }
 
           // For signal-strength, use explicit added/removed from the PDF even with just 1 snapshot
-          if (type === 'signal-strength' && recentSnapshots.length === 1) {
+          if (isSignalStrengthType(type) && recentSnapshots.length === 1) {
             const current = recentSnapshots[0];
             const explicitAdded = (current.data?.added && Array.isArray(current.data.added)) ? current.data.added : [];
             const explicitRemoved = (current.data?.removed && Array.isArray(current.data.removed)) ? current.data.removed : [];
@@ -6088,7 +6091,7 @@ async function buildHedgeyeChangelogResponse() {
             const cryptos = snapshot.data.cryptos ? Object.keys(snapshot.data.cryptos) : [];
             const stocks = snapshot.data.stocks ? Object.keys(snapshot.data.stocks) : [];
             return [...cryptos, ...stocks];
-          } else if (type === 'signal-strength') {
+          } else if (isSignalStrengthType(type)) {
             return (snapshot.data.stocks || []).map(s => s.ticker);
           } else if (type === 'portfolio-solutions') {
             return (snapshot.data.rankings || []).map(r => r.ticker);
@@ -6172,7 +6175,7 @@ async function buildHedgeyeChangelogResponse() {
           }
 
           // Explicit Added/Removed for Signal Strength (if available)
-          if (type === 'signal-strength') {
+          if (isSignalStrengthType(type)) {
             if (current.data.added && Array.isArray(current.data.added) && current.data.added.length > 0) {
               // Since the PDF explicitly lists "Added", we trust that as the definitive source for additions
               // The diff method might pick up noise or re-ordering

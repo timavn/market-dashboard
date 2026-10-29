@@ -28,7 +28,7 @@ jest.mock('../../hooks/useMarketStructureReport', () => ({
   useMarketStructureReport: (options) => mockUseMarketStructureReport(options),
 }));
 
-const productIds = ['top-3-things', 'risk-ranges', 'early-look', 'the-call', 'the-macro-show', 'signal-strength'];
+const productIds = ['top-3-things', 'risk-ranges', 'early-look', 'the-call', 'the-macro-show', 'signal-strength', 'signal-strength-shorts'];
 const sectionIds = [...productIds, 'market-structure'];
 const dates = [
   '2026-08-06', '2026-08-05', '2026-08-04', '2026-08-03', '2026-07-31',
@@ -131,6 +131,17 @@ const makeDay = (date, { missing = [] } = {}) => {
       },
       meta: { stockCount: 3 },
     },
+    'signal-strength-shorts': {
+      date,
+      snapshotType: 'signal-strength-shorts',
+      stockCount: 1,
+      data: {
+        added: ['E'],
+        removed: ['F'],
+        membershipComplete: true,
+        stocks: [{ ticker: 'E', side: 'short', daysOn: 3, totalReturn: 4.2 }],
+      },
+    },
   };
   const previousDate = '2026-08-05';
   const previousSnapshots = Object.fromEntries(productIds.map((id) => [id, {
@@ -215,14 +226,15 @@ describe('MorningTldrPanel', () => {
       '4The Call',
       '5Macro Show',
       '6Signal Strength',
-      '7Market Structure',
+      '7Signal Strength Shorts',
+      '8Market Structure',
     ]);
     expect(screen.getAllByTestId(/^morning-tldr-section-/).map((section) => (
       section.dataset.sectionId
     ))).toEqual(sectionIds);
     expect(screen.getByTestId('morning-tldr-section-market-structure'))
       .toHaveTextContent('Exact-date Market Structure narrative for 2026-08-06.');
-    expect(screen.getByText(/August 6, 2026 · 7 of 7 publications saved/i))
+    expect(screen.getByText(/August 6, 2026 · 8 of 8 publications saved/i))
       .toBeInTheDocument();
     const topThree = screen.getByTestId('top-three-things-list');
     expect(within(topThree).getAllByRole('listitem')).toHaveLength(3);
@@ -244,7 +256,14 @@ describe('MorningTldrPanel', () => {
     expect(within(comparisonTable).getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
       'Instrument', 'Trend', 'LRR', 'Prior close (Aug 5, 2026)Actionable ↓', 'HRR',
     ]);
-    expect(screen.getAllByRole('table')).toHaveLength(2);
+    expect(screen.getAllByRole('table')).toHaveLength(3);
+    const shortsTable = screen.getByTestId('signal-strength-shorts-table');
+    expect(within(shortsTable).getAllByRole('columnheader').map((cell) => cell.textContent))
+      .toEqual(['Days On', 'Ticker', 'Total Return']);
+    expect(within(shortsTable).getByText('+4.2%')).toBeInTheDocument();
+    const shortsSection = screen.getByTestId('morning-tldr-section-signal-strength-shorts');
+    expect(shortsSection.querySelector('.tldr-wiki-position-list--negative')).toHaveTextContent('E');
+    expect(shortsSection.querySelector('.tldr-wiki-position-list--neutral')).toHaveTextContent('F');
     const comparisonRows = screen.getAllByTestId(/^risk-comparison-row-/);
     expect(comparisonRows).toHaveLength(5);
     expect(comparisonRows[0]).toHaveAttribute('data-key', 'GOOGL');
@@ -582,7 +601,7 @@ describe('MorningTldrPanel', () => {
     }));
     expect(screen.getByText('Exact-date Market Structure narrative for 2026-08-05.'))
       .toBeInTheDocument();
-    expect(screen.getByText(/August 5, 2026 · 7 of 7 publications saved/i)).toBeInTheDocument();
+    expect(screen.getByText(/August 5, 2026 · 8 of 8 publications saved/i)).toBeInTheDocument();
   });
 
   test('shows Market Structure missing without carrying another date forward', async () => {
@@ -607,7 +626,7 @@ describe('MorningTldrPanel', () => {
     expect(section).toHaveTextContent('Not published');
     expect(section).not.toHaveTextContent('Market Structure status API unavailable');
     expect(section).not.toHaveTextContent('2026-08-06');
-    expect(await screen.findByText(/August 5, 2026 · 6 of 7 publications saved/i))
+    expect(await screen.findByText(/August 5, 2026 · 7 of 8 publications saved/i))
       .toBeInTheDocument();
   });
 

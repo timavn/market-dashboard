@@ -815,7 +815,9 @@ class BriefingPacketTests(TempIndexTestCase):
                 self.assertLessEqual(len(citation["excerpt"]), analyst_app.MAX_BRIEFING_CITATION_PREVIEW_CHARS)
         self.assertNotIn("\n", packet_result.content[0].text)
         self.assertEqual(json.loads(packet_result.content[0].text), packet)
-        self.assertLess(len(packet_result.content[0].text), 50_000)
+        # Each registered product adds about 2.5k characters (two cited excerpts);
+        # 20 products, including Signal Strength Shorts, fit under 55k.
+        self.assertLess(len(packet_result.content[0].text), 55_000)
         self.assertLess(len(packet_result.model_dump_json(exclude_none=True)), 110_000)
 
     def test_market_situation_context_returns_complete_cited_research_and_spx_vol(self):

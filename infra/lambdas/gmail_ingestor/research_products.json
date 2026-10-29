@@ -20,6 +20,7 @@
         "entity_rows": "At least one valid ticker/entity row or structured addition/removal must be retained.",
         "portfolio_rankings": "At least one Portfolio Solutions row must contain a valid ticker and rank.",
         "signal_strength_membership": "At least one valid security must be present in the full Signal Strength membership.",
+        "signal_strength_short_membership": "At least one valid security must be present in the full Signal Strength Shorts membership.",
         "volume_metrics": "Both total-market and exchange metric groups must contain parsed percentage data.",
         "cftc_metrics": "At least one CFTC row must contain a metric name and parsed latest value."
     },
@@ -180,6 +181,28 @@
       "authorities": {
         "trade": false,
         "trend": true,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "signal-strength-shorts",
+      "label": "Signal Strength Shorts",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "signal strength shorts",
+        "signal-strength-shorts"
+      ],
+            "parserModes": [
+                "html"
+            ],
+            "parsers": {
+                "html": "hedgeye_html_dispatch"
+            },
+            "validationRule": "signal_strength_short_membership",
+      "authorities": {
+        "trade": false,
+        "trend": false,
         "riskRange": false,
         "supplementalRiskRange": false
       }

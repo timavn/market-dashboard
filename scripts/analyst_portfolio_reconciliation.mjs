@@ -71,6 +71,7 @@ Research scope:
 - Use a separate search_research call for each action-bearing product. Filter each call to that product, search from seven calendar days before its latestPublicationDate through its latestPublicationDate, and request no more than 8 results so every returned citation stays inside the validated-citation budget. Use these short queries:
   - risk-ranges: ticker TREND BULLISH BEARISH NEUTRAL
   - signal-strength: added removed securities membership
+  - signal-strength-shorts: added removed short securities membership
   - etf-pro: ADD REMOVE LONG SHORT changes
   - real-time-alert: add remove long short ticker
   - portfolio-solutions: rank ticker

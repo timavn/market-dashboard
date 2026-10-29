@@ -148,6 +148,7 @@ const HEDGEYE_PRODUCT_DEFINITIONS = [
   { id: 'bitcoin-trend-tracker', label: 'Bitcoin Trend Tracker', summary: 'Crypto and related-equity Trend changes.' },
   { id: 'momo-tracker', label: 'MOMO Tracker', summary: 'Momentum coverage and Trend changes.' },
   { id: 'signal-strength', label: 'Signal Strength', summary: 'Security rankings plus added and removed names.' },
+  { id: 'signal-strength-shorts', label: 'Signal Strength Shorts', summary: 'The short list: members plus added and removed names.' },
   { id: 'portfolio-solutions', label: 'Portfolio Solutions', summary: 'Rankings and top or bottom movers.' },
   { id: 'the-macro-show', label: 'The Macro Show', summary: 'Long, short, and neutral macro summary notes.' },
   { id: 'the-call', label: 'The Call', summary: 'Long, short, and neutral call summary notes.' },

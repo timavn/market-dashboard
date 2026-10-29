@@ -26,6 +26,9 @@ const RESEARCH_REFERENCE_KIND_PRIORITY = Object.freeze({
   signal_strength_removed: 125,
   signal_strength_listed: 125,
   signal_strength_membership: 125,
+  signal_strength_short_added: 125,
+  signal_strength_short_removed: 125,
+  signal_strength_short_membership: 125,
   etf_pro_change: 120,
   real_time_alert: 120,
   investing_idea_position: 125,
@@ -604,7 +607,7 @@ const selectResearchProductDetails = (productId, references) => {
       ? item.kindPriority >= top.kindPriority - 15
       : item.score >= top.score - 32
   ));
-  const limit = ['portfolio-solutions', 'real-time-alert', 'etf-pro', 'signal-strength'].includes(productId)
+  const limit = ['portfolio-solutions', 'real-time-alert', 'etf-pro', 'signal-strength', 'signal-strength-shorts'].includes(productId)
     ? 4
     : 3;
   const selected = [];

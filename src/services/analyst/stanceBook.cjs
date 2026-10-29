@@ -4,7 +4,7 @@
 // an update happened to be published.
 // Version 2 reads SOME from alert bodies; an older book is rebuilt from the ledger.
 const STANCE_BOOK_VERSION = 2;
-const STANCE_PRODUCTS = new Set(['signal-strength', 'etf-pro', 'real-time-alert']);
+const STANCE_PRODUCTS = new Set(['signal-strength', 'signal-strength-shorts', 'etf-pro', 'real-time-alert']);
 const SLOT_LABELS = {
   'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts',
   'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro Shorts', 'real-time-alert': 'Real-Time Alert',
@@ -107,8 +107,11 @@ function stancesFromEvent(event, now) {
   const bare = text(event.excerpt).toUpperCase() === symbol || !event.fieldPath;
   const out = (slot, stance, label, extra = {}) => ({ symbol, slot, entry: { ...base, stance, label, ...extra } });
 
-  if (event.productKey === 'signal-strength') {
+  // Signal Strength Shorts is its own product; before 2026-10-29 its events were
+  // recorded under the long product. The event kind alone names the list.
+  if (event.productKey === 'signal-strength' || event.productKey === 'signal-strength-shorts') {
     const type = event.eventType;
+    if (event.productKey === 'signal-strength-shorts' && !String(type).startsWith('signal_strength_short_')) return [];
     if (['signal_strength_membership', 'signal_strength_short_membership'].includes(type)) {
       if (!source) return [];
       const short = type === 'signal_strength_short_membership';

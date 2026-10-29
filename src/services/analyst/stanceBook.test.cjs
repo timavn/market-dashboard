@@ -155,7 +155,7 @@ test('the ledger history reads only the stance products, one projected query per
   const history = await loadStanceLedger(dynamodb, { days: 3, now: NOW });
   assert.deepEqual([history.from, history.through, history.events.length], ['2026-10-25', '2026-10-27', 3]);
   assert.deepEqual(calls.map(call => call.ExpressionAttributeValues[':date']).sort(), ['2026-10-25', '2026-10-26', '2026-10-27']);
-  assert.deepEqual(Object.entries(calls[0].ExpressionAttributeValues).filter(([key]) => key.startsWith(':p')).map(([, value]) => value), ['signal-strength', 'etf-pro', 'real-time-alert']);
+  assert.deepEqual(Object.entries(calls[0].ExpressionAttributeValues).filter(([key]) => key.startsWith(':p')).map(([, value]) => value), ['signal-strength', 'signal-strength-shorts', 'etf-pro', 'real-time-alert']);
   assert.match(calls[0].KeyConditionExpression, /^#f\d+ = :date$/);
   assert.equal(calls[0].ExpressionAttributeNames[calls[0].KeyConditionExpression.split(' ')[0]], 'marketDate');
 });
@@ -206,4 +206,16 @@ test('a SOME that names another ticker does not make this alert partial', () => 
     const own = [ewl[0], { ...ewl[1], excerpt: said }];
     assert.equal(foldStanceEvents(undefined, own, NOW).book.tickers.EWL['real-time-alert'].action, 'SELL-SOME', said);
   }
+});
+
+test('a Signal Strength Shorts event folds the same under its own product and under the long product it was recorded in before', () => {
+  const legacy = ledger('SKHY', 'signal-strength', 'signal_strength_short_removed', 'data.shorts.removed[8]', 'SKHY', '2026-10-27');
+  const replayed = ledger('SKHY', 'signal-strength-shorts', 'signal_strength_short_removed', 'data.removed[8]', 'SKHY', '2026-10-27',
+    { sourceMessageId: legacy.sourceMessageId, sourceUrl: legacy.sourceUrl });
+  assert.deepEqual(stancesFromEvent(replayed, NOW).map(item => [item.slot, item.entry.stance]), [['signal-strength:short', 'EXIT_SHORT']]);
+  const { book } = foldStanceEvents(undefined, [legacy, replayed], NOW);
+  assert.equal(Object.keys(book.tickers.SKHY).length, 1);
+  assert.equal(book.tickers.SKHY['signal-strength:short'].stance, 'EXIT_SHORT');
+  // A long kind never reads from the Shorts product.
+  assert.deepEqual(stancesFromEvent(ledger('SKHY', 'signal-strength-shorts', 'signal_strength_added', 'data.added[0]', 'SKHY', '2026-10-27'), NOW), []);
 });

@@ -142,6 +142,7 @@ const dailySectionSlots = [
   { id: 'macro-show', title: 'Macro Show' },
   { id: 'company-catalysts', title: 'Company catalysts & sector research' },
   { id: 'signal-strength', title: 'Signal Strength' },
+  { id: 'signal-strength-shorts', title: 'Signal Strength Shorts' },
   { id: 'market-structure', title: 'Market structure & flows' },
 ];
 const modelSectionSlots = [

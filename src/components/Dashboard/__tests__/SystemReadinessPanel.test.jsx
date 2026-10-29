@@ -130,6 +130,7 @@ function productsPayload({
       'bitcoin-trend-tracker': { status, date: '2026-07-29' },
       'momo-tracker': { status, date: '2026-07-29' },
       'signal-strength': { status, date: '2026-07-29' },
+      'signal-strength-shorts': { status, date: '2026-07-29' },
       'portfolio-solutions': { status, date: '2026-07-29' },
       'the-macro-show': { status, date: '2026-07-29' },
       'the-call': { status, date: '2026-07-29' },
@@ -580,7 +581,7 @@ describe('SystemReadinessPanel', () => {
     const productsList = screen.getByRole('list', {
       name: 'Hedgeye products pulled by the dashboard',
     });
-    expect(within(productsList).getAllByText('Closed')).toHaveLength(14);
+    expect(within(productsList).getAllByText('Closed')).toHaveLength(15);
   });
 
   test('puts attention product reasons behind a second disclosure', async () => {

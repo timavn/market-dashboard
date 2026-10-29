@@ -77,6 +77,15 @@ class ConsistentSnapshotTable(FakeSnapshotTable):
     def get_item(self, *, Key, ConsistentRead=False):
         return super().get_item(Key=Key)
 
+    def update_item(self, *, Key, UpdateExpression, ConditionExpression, ExpressionAttributeValues):
+        item = self.items[(Key["date"], Key["snapshotType"])]
+        values = ExpressionAttributeValues
+        assert UpdateExpression == "SET sourceMessageIds = :kept"
+        if item.get("dataVersion") != values[":version"] or item.get("sourceMessageIds") != values[":sources"]:
+            raise AssertionError("condition failed")
+        item["sourceMessageIds"] = list(values[":kept"])
+        return {}
+
 
 class FakeBody:
     def __init__(self, value: bytes) -> None:
@@ -119,7 +128,7 @@ class MaterializingLambda:
         for message_id in event["messageIds"]:
             row = self.ledger.items[(message_id, f"message-body-{message_id}")]
             snapshot = backfill.parse_html_snapshot(
-                report_type="signal-strength",
+                report_type=backfill.infer_report_type(row["filename"], row["subject"]),
                 html_body=self.s3.objects[(row["s3Bucket"], row["s3Key"])].decode(),
                 received_at=datetime.fromisoformat(row["receivedAt"]),
                 s3_key=row["s3Key"],
@@ -127,7 +136,7 @@ class MaterializingLambda:
             )
             ingestor.materialize_email_snapshot(snapshot, self.db)
             row.update({
-                "status": "INDEXED", "materializationStatus": "INDEXED", "snapshotType": "signal-strength",
+                "status": "INDEXED", "materializationStatus": "INDEXED", "snapshotType": snapshot["snapshotType"],
                 "researchParserVersion": ingestor.RESEARCH_PARSER_VERSION,
                 "securityIntelligenceParserVersion": backfill.SECURITY_PARSER_VERSION,
             })
@@ -195,7 +204,8 @@ class SignalStrengthBackfillTests(unittest.TestCase):
         self.assertEqual(days[0]["long"]["messageId"], "1a0d932a1ffdfb54")
         self.assertNotIn("short", days[0])
         self.assertEqual(days[1]["short"]["stockCount"], 3)
-        self.assertEqual(days[0]["sourceMessageIds"], ["1a0d932436401752", "1a0d932a1ffdfb54"])
+        self.assertEqual(days[0]["long"]["sourceMessageIds"], ["1a0d932436401752", "1a0d932a1ffdfb54"])
+        self.assertEqual(days[1]["short"]["sourceMessageIds"], ["1a140473308a7f9c"])
 
     def test_an_edition_short_of_its_published_count_is_refused(self):
         content = signal_strength_html("Stocks", "10/15/2026 11:55 AM EDT", ["SNOW", "V"]).replace(
@@ -221,7 +231,15 @@ class SignalStrengthBackfillTests(unittest.TestCase):
                 backfill.load_receipt(receipt, key)
             self.assertEqual(raised.exception.code, "SIGNAL_STRENGTH_RECEIPT_AUTHENTICATION_FAILED")
 
-    def test_replay_materializes_both_books_and_verifies_every_day(self):
+    def replay(self, ledger, s3, editions, table):
+        client = MaterializingLambda(ledger, s3, FakeDynamoDb(table))
+        pending = [edition for edition in editions if backfill.needs_replay(ledger, s3, edition)]
+        for offset in range(0, len(pending), backfill.OPERATOR_BATCH_SIZE):
+            backfill.invoke_batch_until_complete(client, [item["messageId"] for item in pending[offset:offset + 8]])
+        self.assertFalse(any(backfill.needs_replay(ledger, s3, edition) for edition in editions))
+        return pending
+
+    def test_replay_materializes_each_book_as_its_own_product(self):
         ledger, s3 = fixture()
         editions = prepared_editions(ledger, s3)
         days = backfill.expected_books(editions)
@@ -232,23 +250,46 @@ class SignalStrengthBackfillTests(unittest.TestCase):
             "scrapedAt": "2026-10-15T15:55:00+00:00", "gmailMessageId": "1a14047012d65241",
             "data": {"added": [], "removed": [], "stocks": []},
         }
-        client = MaterializingLambda(ledger, s3, FakeDynamoDb(table))
 
-        pending = [edition for edition in editions if backfill.needs_replay(ledger, s3, edition)]
-        self.assertEqual(len(pending), 4)
-        for offset in range(0, len(pending), backfill.OPERATOR_BATCH_SIZE):
-            backfill.invoke_batch_until_complete(client, [item["messageId"] for item in pending[offset:offset + 8]])
-
-        self.assertFalse(any(backfill.needs_replay(ledger, s3, edition) for edition in editions))
+        self.assertEqual(len(self.replay(ledger, s3, editions, table)), 4)
+        self.assertEqual(backfill.retire_legacy_short_sources(table, days), 0)
         backfill.verify_snapshots(table, days)
-        stored = table.items[("2026-10-15", "signal-strength")]
-        self.assertEqual([row["ticker"] for row in stored["data"]["stocks"]], ["SNOW", "V"])
-        self.assertEqual([row["ticker"] for row in stored["data"]["shorts"]["stocks"]], ["LULU", "MCD", "NKE"])
+        longs = table.items[("2026-10-15", "signal-strength")]
+        shorts = table.items[("2026-10-15", "signal-strength-shorts")]
+        self.assertEqual([row["ticker"] for row in longs["data"]["stocks"]], ["SNOW", "V"])
+        self.assertEqual([row["ticker"] for row in shorts["data"]["stocks"]], ["LULU", "MCD", "NKE"])
+        self.assertEqual(shorts["stockCount"], 3)
+        self.assertNotIn("shorts", longs["data"])
 
-        stored["data"]["shorts"]["stocks"].pop()
+        shorts["data"]["stocks"].pop()
         with self.assertRaises(backfill.SignalStrengthBackfillFailure) as raised:
             backfill.verify_snapshots(table, days)
         self.assertEqual(raised.exception.code, "SIGNAL_STRENGTH_SNAPSHOT_VERIFICATION_FAILED")
+
+    def test_replay_moves_a_pre_split_short_book_out_of_the_long_row(self):
+        ledger, s3 = fixture()
+        editions = prepared_editions(ledger, s3)
+        days = backfill.expected_books(editions)
+        table = ConsistentSnapshotTable()
+        # Before the split both editions shared one row, the short book under data.shorts.
+        table.items[("2026-10-15", "signal-strength")] = {
+            "date": "2026-10-15", "snapshotType": "signal-strength", "stockCount": 2, "shortCount": 3,
+            "scrapedAt": "2026-10-15T15:55:00+00:00", "gmailMessageId": "1a14047012d65241",
+            "sourceMessageIds": ["1a14047012d65241", "1a140473308a7f9c"],
+            "data": {"added": ["V"], "removed": [], "stocks": [{"ticker": "SNOW"}, {"ticker": "V"}],
+                     "shorts": {"stocks": [{"ticker": "LULU"}, {"ticker": "MCD"}, {"ticker": "NKE"}]}},
+        }
+
+        self.replay(ledger, s3, editions, table)
+        longs = table.items[("2026-10-15", "signal-strength")]
+        self.assertNotIn("shorts", longs["data"])
+        self.assertNotIn("shortCount", longs)
+        # Until retired, the long row still names the short edition as a source.
+        with self.assertRaises(backfill.SignalStrengthBackfillFailure):
+            backfill.verify_snapshots(table, days)
+        self.assertEqual(backfill.retire_legacy_short_sources(table, days), 1)
+        self.assertEqual(table.items[("2026-10-15", "signal-strength")]["sourceMessageIds"], ["1a14047012d65241"])
+        backfill.verify_snapshots(table, days)
 
     def test_changed_immutable_artifact_is_refused(self):
         ledger, s3 = fixture()

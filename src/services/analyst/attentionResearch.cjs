@@ -463,7 +463,7 @@ function accountFindings(context, now) {
   }
   return { findings: output, complete: fresh && account.historyVerified === true };
 }
-const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
+const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'signal-strength-shorts': 'Signal Strength Shorts', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 const STANCE_SLOT_NAMES = { 'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts', 'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 const monthDay = date => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 // Each product call as the card's Action and Bias columns read it. Bias is the
