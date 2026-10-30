@@ -13,6 +13,7 @@
   margin: 14px 0 6px;
   padding: 0;
   font-size: 14px;
+  text-align: center;
 }
 .analyst-panel-v2 .analyst-prediction-report .analyst-markdown h2:first-child { margin-top: 0; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-markdown h3 {
@@ -203,7 +204,8 @@
 .analyst-panel-v2 .analyst-prediction-report .is-range-board.has-z td.analyst-prediction-bias-cell { text-align: center; }
 .analyst-panel-v2 .analyst-prediction-report .is-range-board td.analyst-prediction-z-cell { text-align: center; }
 .analyst-prediction-z--stretched { font-weight: 600; }
-/* As of lines: key and product on the left, the date right-aligned. */
+/* As of lines: the pull time centered over them; each line's key and product on the left, the date right-aligned. */
+.analyst-prediction-as-of-pulled { text-align: center; }
 .analyst-prediction-as-of-line { display: flex; align-items: baseline; gap: 4px; }
 .analyst-prediction-as-of-line__product { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .analyst-prediction-as-of-line__date { flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
@@ -223,13 +225,14 @@
 .analyst-prediction-volume { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; line-height: 13px; }
 .analyst-prediction-volume__window { display: flex; flex-direction: column; padding: 2px 0; border-left: 1px solid var(--analyst-border, #dbe1e8); }
 .analyst-prediction-volume__window:first-child { border-left: 0; }
-/* One window to a cell: the rule between windows stays, the first cell's left edge doesn't. */
+/* One window to a cell, centered under its column: the rule between windows stays, the first cell's left edge doesn't. */
+.analyst-panel-v2 .analyst-prediction-report .is-range-board td.analyst-prediction-volume-cell.is-window { text-align: center; }
 .analyst-panel-v2 .analyst-prediction-report .is-range-board td.analyst-prediction-volume-cell.is-window + td.is-window .analyst-prediction-volume__window { border-left: 1px solid var(--analyst-border, #dbe1e8); }
 .analyst-prediction-volume__key { color: var(--dashboard-muted-text, #667085); }
 .analyst-prediction-volume__value { color: var(--analyst-ink, #172033); white-space: nowrap; }
-/* Heavier than the window reads green and lighter red, as signed readings do elsewhere on the board. */
-.analyst-prediction-volume__window.is-heavier .analyst-prediction-volume__value { color: var(--dashboard-positive, #059669); }
-.analyst-prediction-volume__window.is-lighter .analyst-prediction-volume__value { color: var(--dashboard-negative, #dc2626); }
+/* Good for the Trend's side reads green and bad red, as the Structure moves do. */
+.analyst-prediction-volume__window.is-on .analyst-prediction-volume__value { color: var(--dashboard-positive, #059669); }
+.analyst-prediction-volume__window.is-against .analyst-prediction-volume__value { color: var(--dashboard-negative, #dc2626); }
 .analyst-prediction-stack--muted { color: var(--dashboard-muted-text, #667085); }
 .analyst-panel-v2 .analyst-prediction-report .is-setup-board :is(td, th) { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: break-word; vertical-align: middle; }
 .analyst-panel-v2 .analyst-prediction-report .is-setup-board td.analyst-prediction-range-cell { padding: 5px 6px 6px; vertical-align: bottom; }
@@ -352,6 +355,9 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-panel-v2 .analyst-prediction-report .analyst-research table { border: 1px solid var(--analyst-border, #dbe1e8); }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research td.analyst-research__market { color: var(--analyst-ink, #172033); font-weight: 500; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-research tbody tr:has(+ tr:not(.analyst-research__first)) td:not(.analyst-research__market) { border-bottom-color: #eef0f3; }
+/* A product's further points share its block: no rule between them, a gap instead. */
+.analyst-panel-v2 .analyst-prediction-report .analyst-research tbody tr:has(+ tr.analyst-research__continued) td:not(.analyst-research__market) { border-bottom-color: transparent; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-research tr.analyst-research__continued td { padding-top: 6px; }
 .analyst-research__product,
 .analyst-research__quiet { color: var(--dashboard-muted-text, #667085); }
 /* Reported data (Market Structure signals and levels, Alpha Codes) lists one fact per line, values aligned, no bullets. */

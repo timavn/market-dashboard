@@ -289,7 +289,7 @@ test('Structure cells stack today’s range moves, run counts with each session,
   expect(container).not.toHaveTextContent(/STRUCT\(/);
 });
 
-test('analyst-research blocks list one row per mention, its context and source, and each quiet market', () => {
+test('analyst-research blocks list one row per mention under its product, named once, and each quiet market', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Crypto" />);
   const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
@@ -297,6 +297,7 @@ test('analyst-research blocks list one row per mention, its context and source, 
     { market: 'Bitcoin', entries: [
       { product: 'The Macro Show', time: '07:55', date: 'Oct 22', context: 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend',
         source: 'Cooper noted that Keith sold all Ethereum on Tuesday. Bitcoin remained a minimum-sized long with bearish trade but bullish trend' },
+      { product: 'Early Look', time: '06:10', context: 'Bitcoin led the risk-on move' },
       // An entry saved before dates keeps its Pacific time.
       { product: 'The Macro Show', time: '07:55', context: 'Long Bitcoin (BTC)' }] },
     { market: 'Ethereum', entries: [] },
@@ -311,12 +312,16 @@ test('analyst-research blocks list one row per mention, its context and source, 
   expect(rows).toEqual([
     ['Market', 'Product', 'Context', ''],
     ['Bitcoin', 'The Macro Show', 'Bitcoin remained a minimum-sized long with bearish trade but bullish trend', 'Source'],
-    ['The Macro Show', 'Long Bitcoin (BTC)', ''],
+    // A product's later point joins its block, ahead of the next product.
+    ['', 'Long Bitcoin (BTC)', ''],
+    ['Early Look', 'Bitcoin led the risk-on move', ''],
     ['Ethereum', 'Not mentioned'],
     ['Solana', 'Crypto Quant', 'Trend Bullish', 'Source'],
   ]);
   // The publication time reads on the product; a block saved without its section and date has no day picker.
-  expect(within(table).getAllByText('The Macro Show')[0]).toHaveAttribute('title', 'Oct 22 07:55 PT');
+  expect(within(table).getByText('The Macro Show')).toHaveAttribute('title', 'Oct 22 07:55 PT');
+  expect(within(table).getAllByRole('row')[2]).toHaveClass('analyst-research__continued');
+  expect(within(table).getAllByRole('row')[3]).not.toHaveClass('analyst-research__continued');
   expect(within(table).queryByRole('button', { name: /choose another day/ })).not.toBeInTheDocument();
   expect(within(table).getByText('bearish')).toHaveClass('analyst-process--negative');
   expect(within(table).getByText('Long')).toHaveClass('analyst-process--positive');
@@ -449,7 +454,8 @@ test('volume draws under Tick, Trade and Trend as one shaded cell per window, an
   expect(volume.colSpan).toBe(3);
   expect([...volume.querySelectorAll('.analyst-prediction-volume__window')].map(cell => cell.textContent))
     .toEqual(['1D+54%', '15D+35%', '30D+35%', '90D+8%']);
-  expect(volume.querySelector('.analyst-prediction-volume__window')).toHaveClass('is-heavier');
+  // A saved board without the Trend side leaves the windows uncolored.
+  expect(volume.querySelector('.analyst-prediction-volume__window')).toHaveClass('analyst-prediction-volume__window', { exact: true });
   expect(volume).toHaveAttribute('title', 'IBIT volume on 2026-10-21 vs the prior session and its 15-, 30- and 90-day averages');
   // A saved board without the day's direction shows AV with the plain outline when it isn't against the Trend.
   expect(within(top).getByText('AV', { selector: '.analyst-prediction-structure-move' })).toHaveClass('analyst-prediction-structure-move', { exact: true });
@@ -495,6 +501,7 @@ test.each([
   ['+', 'AV', 'warns', '↑AV', 'is-against', 'Up day on volume above its 30-day average (against the Trend: warning)'],
   ['+', 'DV', '', '↑DV', null, 'Up day on volume below its 30-day average (not against the Trend)'],
   ['+', 'AV', '', '↑AV', null, 'Up day on volume above its 30-day average (not against the Trend)'],
+  ['+', 'AV', 'confirms', '↑AV', 'is-on', 'Up day on volume above its 30-day average (with the Trend: confirmation)'],
 ])('a %s day on %s against the Trend reads as a setup (green), warning (red) or neither (outline)', (direction, volume, tone, text, tint, sentence) => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Crypto" />);
@@ -516,7 +523,23 @@ test('an unavailable volume reads N/A in each window, and saved boards title As 
   const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
   const { container } = render(<table><tbody><tr><Cell node={{ children: [{ type: 'text', value: 'VOL(;;;-12;;)' }] }} /></tr></tbody></table>);
   expect([...container.querySelectorAll('.analyst-prediction-volume__value')].map(cell => cell.textContent)).toEqual(['N/A', 'N/A', 'N/A', '−12%']);
-  expect(container.querySelectorAll('.is-lighter')).toHaveLength(1);
+  expect(container.querySelectorAll('.is-on, .is-against')).toHaveLength(0);
+});
+
+test.each([
+  // A pullback against the Trend: lighter is the setup (green), heavier a warning (red).
+  ['-', ['is-on', 'is-against', 'is-on', ''], 'Against the Trend: lighter volume reads green, heavier red'],
+  // A move with the Trend: heavier confirms (green), lighter says nothing.
+  ['+', ['', 'is-on', '', ''], 'With the Trend: heavier volume reads green'],
+])('volume windows on a day %s the Trend read green when good for its side and red when bad', (side, tones, sentence) => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Metals" />);
+  const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const value = `VOL(-12;+8;-30;0;2026-10-27;GLD;${side})`;
+  const { container } = render(<table><tbody><tr><Cell node={{ children: [{ type: 'text', value }] }} /></tr></tbody></table>);
+  expect([...container.querySelectorAll('.analyst-prediction-volume__window')].map(window => window.className.replace('analyst-prediction-volume__window', '').trim()))
+    .toEqual(tones);
+  expect(container.querySelector('td').title).toContain(sentence);
 });
 
 test('a market whose only mention reads under another market is Not mentioned, including in saved reports', () => {

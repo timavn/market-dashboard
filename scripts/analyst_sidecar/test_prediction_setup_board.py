@@ -215,15 +215,16 @@ class SetupBoardRenderTests(unittest.TestCase):
         data["structureSessions"] = 10
         gold = next(row for row in data["rows"] if row["id"] == "gold")
         gold["volume"] = {"symbol": "GLD", "date": "2026-10-09", "d1": 13.6, "d15": -4.6, "d30": -15.2, "d90": -21.4,
-                          "changePct": 0.3, "signal": {"move": "DV", "tone": None, "direction": "up"}}
+                          "changePct": 0.3, "signal": {"move": "DV", "tone": "supports", "direction": "up", "side": "against"}}
         gold["structure"] = {"sessions": 1, "low": {"steps": "+", "direction": 1, "run": 1},
                              "high": {"steps": "-", "direction": -1, "run": 1}, "allTimeHigh": None}
         report = render_setup_board(data)
         self.assertIn("| Market | Tick | Trade | Trend | Volume | Price and Risk Range | Structure | Status |", report)
-        self.assertIn("| BIAS(Bearish;;) | VOL(+14;-5;-15;-21;2026-10-09;GLD) | RR(", report)
-        self.assertIn("STRUCT(+;+1;-;-1;;;;0;;DV;;+) |", report)
+        # An up day in gold's Bearish Trend is against it, so the windows read for a bounce to short.
+        self.assertIn("| BIAS(Bearish;;) | VOL(+14;-5;-15;-21;2026-10-09;GLD;-) | RR(", report)
+        self.assertIn("STRUCT(+;+1;-;-1;;;;0;;DV;supports;+) |", report)
         # A market whose volume could not be read keeps an empty token, so its row still splits.
-        self.assertIn("| BIAS(Bullish;;) | VOL(;;;;;) | RR(", report)
+        self.assertIn("| BIAS(Bullish;;) | VOL(;;;;;;) | RR(", report)
         self.assertNotIn("Volume", render_setup_board(board()))
 
     def test_cpi_lists_every_nowcast_month_with_its_kalshi_event_or_na(self):

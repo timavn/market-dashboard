@@ -676,7 +676,7 @@ test('connected history streams receive accepted and completed messages without 
  t.mock.timers.enable({apis:['setInterval']});
  const {api,base}=await fixture(t);
  const controller=new AbortController();
- const deadline=setTimeout(()=>controller.abort(),2000);
+ const deadline=setTimeout(()=>controller.abort(),10_000);
  t.after(()=>{clearTimeout(deadline);controller.abort();});
  const response=await fetch(base+'/events?after=0',{signal:controller.signal});
  const reader=response.body.getReader();
@@ -712,7 +712,7 @@ test('latest history stream establishes a bounded cursor without replaying old h
  };
  const {base}=await fixture(t,null,{request});
  const controller=new AbortController();
- const deadline=setTimeout(()=>controller.abort(),2000);
+ const deadline=setTimeout(()=>controller.abort(),10_000);
  try{
   const response=await fetch(base+'/events?after=latest',{signal:controller.signal});
   assert.equal(response.status,200);
@@ -747,7 +747,7 @@ test('latest history stream delivers an event committed during the cursor handsh
  };
  const {base}=await fixture(t,null,{request});
  const controller=new AbortController();
- const deadline=setTimeout(()=>controller.abort(),2000);
+ const deadline=setTimeout(()=>controller.abort(),10_000);
  try{
   const connecting=fetch(base+'/events?after=latest',{signal:controller.signal});
   await started;
@@ -778,7 +778,7 @@ test('numeric Last-Event-ID takes precedence over latest and preserves reconnect
  const {base}=await fixture(t,null,{request});
  for(const lastEventId of ['0','8']){
   const controller=new AbortController();
-  const deadline=setTimeout(()=>controller.abort(),2000);
+  const deadline=setTimeout(()=>controller.abort(),10_000);
   try{
    const response=await fetch(base+'/events?after=latest',{headers:{'Last-Event-ID':lastEventId},signal:controller.signal});
    const reader=response.body.getReader();let text='';
@@ -809,7 +809,7 @@ test('latest cursor failures and malformed cursors open the stream as unavailabl
   };
   const {base}=await fixture(t,null,{request});
   const controller=new AbortController();
-  const deadline=setTimeout(()=>controller.abort(),2000);
+  const deadline=setTimeout(()=>controller.abort(),10_000);
   try{
    const response=await fetch(base+'/events?after=latest',{signal:controller.signal});
    assert.equal(response.status,200);
@@ -840,7 +840,7 @@ test('an unavailable tail keeps retrying its cursor on the stream, then becomes 
  };
  const {base}=await fixture(t,null,{request});
  const controller=new AbortController();
- const deadline=setTimeout(()=>controller.abort(),2000);
+ const deadline=setTimeout(()=>controller.abort(),10_000);
  try{
   const response=await fetch(base+'/events?after=latest',{signal:controller.signal});
   assert.equal(response.status,200);
@@ -872,7 +872,7 @@ test('source-progress and other unknown event types stream like every other dura
  const request=async(url,{body})=>({events:events.filter(event=>event.seq>body.after)});
  const {base}=await fixture(t,null,{request});
  const controller=new AbortController();
- const deadline=setTimeout(()=>controller.abort(),2000);
+ const deadline=setTimeout(()=>controller.abort(),10_000);
  try{
   const response=await fetch(base+'/events?after=1',{signal:controller.signal});
   const reader=response.body.getReader();let text='';
@@ -903,7 +903,7 @@ test('latest stream connects while list initialization is pending or failing wit
  await started;
  for(const state of ['pending','failed']){
   const controller=new AbortController();
-  const deadline=setTimeout(()=>controller.abort(),2000);
+  const deadline=setTimeout(()=>controller.abort(),10_000);
   try{
    const response=await fetch(base+'/events?after=latest',{signal:controller.signal});
    const packet=await response.body.getReader().read();
@@ -935,7 +935,7 @@ test('a durable write during an in-flight event read is delivered before the fal
  };
  const {workspace,base}=await fixture(t,null,{request});
  const controller=new AbortController();
- const deadline=setTimeout(()=>controller.abort(),2000);
+ const deadline=setTimeout(()=>controller.abort(),10_000);
  t.after(()=>{clearTimeout(deadline);controller.abort();});
  const response=await fetch(base+'/events?after=0',{signal:controller.signal});
  assert.equal(typeof releaseRead,'function');

@@ -104,6 +104,9 @@
 }
 .analyst-inbox-horizons-label { width: 28%; }
 .analyst-inbox-horizons-column { width: 18%; }
+/* Tick–Tail have no row label, so they sit centered across the panel: back by half the label column. */
+.analyst-inbox-horizons thead tr,
+.analyst-inbox-horizons tr.analyst-inbox-bias { transform: translateX(-14%); }
 .analyst-inbox-horizons th,
 .analyst-inbox-horizons td { padding: 3px 2px; text-align: center; vertical-align: middle; }
 .analyst-inbox-horizons thead th,

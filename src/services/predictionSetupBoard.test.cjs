@@ -401,19 +401,27 @@ test('volume compares the latest completed session with the prior one and its 15
   // 90 calendar days reach back 64 sessions: 21 at 200 and 43 at 100.
   assert.equal(Math.round(volume.d90), Math.round((150 / ((21 * 200 + 43 * 100) / 64) - 1) * 100));
   // Up day in a Bullish Trend on lighter volume: DV, neither supporting nor warning.
-  assert.deepEqual(volume.signal, { move: 'DV', tone: null, direction: 'up' });
+  assert.deepEqual(volume.signal, { move: 'DV', tone: null, direction: 'up', side: 'with' });
   assert.equal(board.rows.find((row) => row.id === 'sp500').volume, null);
 });
 
-test('a move against the Trend on decelerating volume supports adding; on accelerating volume it warns', () => {
+test('against the Trend, decelerating volume supports adding and accelerating volume warns; with it, accelerating confirms', () => {
   const down = (volumes) => sessions('2026-10-21', volumes).map((bar, index, all) => ({ ...bar, rawClose: 200 - index - (index === all.length - 1 ? 5 : 0) }));
   const board = buildSetupBoard({
     riskRanges: { ranges: { WTIC: { lrr: 94, hrr: 103, trend: 'BULLISH', date: '2026-10-21' },
-      SILVER: { lrr: 53, hrr: 58, trend: 'BEARISH', date: '2026-10-21' } } },
-    volumeHistory: { USO: down([...Array(30).fill(100), 140]), SLV: sessions('2026-10-21', [...Array(30).fill(100), 60]) },
+      SILVER: { lrr: 53, hrr: 58, trend: 'BEARISH', date: '2026-10-21' }, GLD: { lrr: 380, hrr: 400, trend: 'BULLISH', date: '2026-10-21' },
+      COPPER: { lrr: 5, hrr: 5.5, trend: 'BEARISH', date: '2026-10-21' }, BRENT: { lrr: 60, hrr: 70, date: '2026-10-21' } } },
+    volumeHistory: { USO: down([...Array(30).fill(100), 140]), SLV: sessions('2026-10-21', [...Array(30).fill(100), 60]),
+      GLD: sessions('2026-10-21', [...Array(30).fill(100), 140]), CPER: down([...Array(30).fill(100), 140]),
+      BNO: sessions('2026-10-21', [...Array(30).fill(100), 140]) },
   });
-  assert.deepEqual(board.rows.find((row) => row.id === 'wti').volume.signal, { move: 'AV', tone: 'warns', direction: 'down' });
-  assert.deepEqual(board.rows.find((row) => row.id === 'silver').volume.signal, { move: 'DV', tone: 'supports', direction: 'up' });
+  const signal = (id) => board.rows.find((row) => row.id === id).volume.signal;
+  assert.deepEqual(signal('wti'), { move: 'AV', tone: 'warns', direction: 'down', side: 'against' });
+  assert.deepEqual(signal('silver'), { move: 'DV', tone: 'supports', direction: 'up', side: 'against' });
+  assert.deepEqual(signal('gold'), { move: 'AV', tone: 'confirms', direction: 'up', side: 'with' });
+  assert.deepEqual(signal('copper'), { move: 'AV', tone: 'confirms', direction: 'down', side: 'with' });
+  // Without a Trend there is no side to read the volume for.
+  assert.deepEqual(signal('brent'), { move: 'AV', tone: null, direction: 'up', side: null });
 });
 
 test('the loader asks for each market ETF and the Dollar’s UUP volume; boards without it keep their shape', async () => {
@@ -439,8 +447,8 @@ test('a bond ETF falling is its yield rising, so in a Bullish yield Trend it is 
       UST30Y: { lrr: 5.36, hrr: 5.67, trend: 'BEARISH', date: '2026-10-21' } } },
     volumeHistory: { SHY: falling, TLT: falling },
   });
-  assert.deepEqual(board.rows.find((row) => row.id === 'ust2y').volume.signal, { move: 'DV', tone: null, direction: 'up' });
-  assert.deepEqual(board.rows.find((row) => row.id === 'ust30y').volume.signal, { move: 'DV', tone: 'supports', direction: 'up' });
+  assert.deepEqual(board.rows.find((row) => row.id === 'ust2y').volume.signal, { move: 'DV', tone: null, direction: 'up', side: 'with' });
+  assert.deepEqual(board.rows.find((row) => row.id === 'ust30y').volume.signal, { move: 'DV', tone: 'supports', direction: 'up', side: 'against' });
   assert.equal(board.rows.find((row) => row.id === 'ust2y').volume.inverse, true);
 });
 

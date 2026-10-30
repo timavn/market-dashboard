@@ -1338,6 +1338,11 @@
 .analyst-source-detail.is-anchored .analyst-source-publication-entry > strong { margin: 0 0 2px; }
 .analyst-source-detail.is-anchored .analyst-source-publication-entry > p { color: #64748b; }
 .analyst-source-detail.is-anchored blockquote { margin-top: 8px; }
+/* With the original email the popover widens for it: a fixed window onto the email, the link under it. */
+.analyst-source-detail.is-anchored:has(.analyst-source-email) { width: min(560px, calc(100% - 16px)); max-height: min(460px, 80%); }
+.analyst-source-email { display: block; width: 100%; height: 300px; margin-top: 8px; background: #fff; border: 1px solid #ced9e2; border-radius: 6px; }
+.analyst-source-email.is-loading { display: grid; place-items: center; height: 80px; }
+.analyst-source-detail.is-anchored .analyst-source-email-link { margin: 6px 0 0; }
 .dark .analyst-markdown,
 .dark .analyst-drawer h2 { color: #e5edf5; }
 .dark .analyst-markdown h1,

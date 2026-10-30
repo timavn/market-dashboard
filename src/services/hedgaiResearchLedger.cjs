@@ -1,6 +1,7 @@
 'use strict';
 
 const { createAsyncTtlCache } = require('../utils/serverResponseCache.cjs');
+const { currentResearchEvents } = require('../utils/researchEventRevisions.cjs');
 
 // The HedgAI worker keeps the API's existing full-product query and cache
 // policy. Published editions, repairs and reviewed checkpoints stay intact.
@@ -42,7 +43,7 @@ function createHedgaiLedgerLoader({ dynamodb, tableName, now = Date.now,
       try { onDiagnostic({ stage: 'ledger', itemCount: result.value?.length || 0, pages, cacheStatus: result.status }); }
       catch { /* Diagnostics cannot change captured evidence. */ }
       if (result.status === 'stale') return { items: [], error: 'RESEARCH_EVENT_LEDGER_CACHE_STALE' };
-      return { items: result.value || [], error: null };
+      return { items: currentResearchEvents(result.value || []), error: null };
     } catch (error) {
       return { items: [], error: error.code || error.message || 'research-event-ledger-unavailable' };
     }

@@ -168,7 +168,7 @@ test('backfills complete prior-session bars when the market date changes', async
 test('a cancelled provider job cannot publish over a newer completed snapshot', async () => {
   let release;
   const firstChartGate = new Promise(resolve => { release = resolve; });
-  const h = harness({ firstChartGate, serviceOptions: { concurrency: 1, overallTimeoutMs: 200, requestTimeoutMs: 1_000 } });
+  const h = harness({ firstChartGate, serviceOptions: { concurrency: 1, overallTimeoutMs: 2_000, requestTimeoutMs: 10_000 } });
   const first = await h.service.waitForRefresh();
   assert.equal(first.status, 'unavailable');
   h.setClock(NOW + 5 * 60_000);

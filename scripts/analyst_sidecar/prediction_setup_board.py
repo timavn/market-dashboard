@@ -267,7 +267,7 @@ def _structure_cell(row: dict[str, Any]) -> str:
 
     STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone;direction]) — steps oldest
     first as + (higher), - (lower) or = (unchanged); runs signed (+8 = eight higher in a row ending today). Boards with
-    volume add DV/AV, whether the move against the Trend is supported or warned by it, and the day's direction (+/-).
+    volume add DV/AV, how it reads for the Trend (supports, warns or confirms), and the day's direction (+/-).
     """
     structure = row.get("structure")
     if not isinstance(structure, dict):
@@ -299,13 +299,16 @@ def _volume_cell(row: dict[str, Any]) -> str:
     """Token the report UI draws under Tick, Trade and Trend: the latest session's ETF volume against the prior
     session and its 15-, 30- and 90-calendar-day averages, as signed whole percents.
 
-    VOL(d1;d15;d30;d90;date;symbol) — empty readings when the market's volume is unavailable, so the row keeps its shape.
+    VOL(d1;d15;d30;d90;date;symbol;side) — side is the day's move with (+) or against (-) the Trend, empty without one.
+    Empty readings when the market's volume is unavailable, so the row keeps its shape.
     """
     volume = row.get("volume")
     if not isinstance(volume, dict):
-        return "VOL(;;;;;)"
+        return "VOL(;;;;;;)"
     pct = lambda key: f"{round(volume[key]):+d}" if isinstance(volume.get(key), (int, float)) else ""
-    return f"VOL({pct('d1')};{pct('d15')};{pct('d30')};{pct('d90')};{volume.get('date') or ''};{volume.get('symbol') or ''})"
+    side = {"with": "+", "against": "-"}.get((volume.get("signal") or {}).get("side"), "")
+    return (f"VOL({pct('d1')};{pct('d15')};{pct('d30')};{pct('d90')};{volume.get('date') or ''};"
+            f"{volume.get('symbol') or ''};{side})")
 
 
 TONE = {"Bullish": "positive", "Bearish": "negative", "Long": "positive", "Short": "negative",

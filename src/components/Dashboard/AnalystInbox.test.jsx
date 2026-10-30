@@ -112,7 +112,9 @@ test('fresh holdings expiry removes portfolio actions while retaining research i
     ] } });
     render(<AnalystInbox findings={[portfolio, idea]} />);
     expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
-    expect(screen.getByText(/^@ 1\.25%$/).closest('dd')).toHaveTextContent(/^Long @ 1\.25%$/);
+    // The position reads as its weight alone, green for Long.
+    expect(screen.getByText('Current position:').nextSibling).toHaveTextContent(/^1\.25%$/);
+    expect(screen.getByText('Current position:').nextSibling).toHaveClass('analyst-inbox-signal--positive');
     act(() => jest.advanceTimersByTime(65_000));
     expect(screen.queryByRole('heading', { name: 'AMZN' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'ABC' })).toBeInTheDocument();
@@ -499,14 +501,15 @@ test('a security alert puts Tick, Trade, Trend and Tail beside its 1D–90D wind
   const loadHorizonStats = jest.fn().mockResolvedValue({ XLK: stats });
   const alert = attention('xlk', { kind: 'portfolio', severity: 'action-required', quantity: 10, holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
     presentation: { subject: 'XLK', date: '2026-10-21', sourceLinks: [], rows: [
-      { label: 'Action', text: 'Reduce to MIN 1.50%' }, { label: 'Order', text: 'Sell 2.39 / 10 → 7.61' },
+      { label: 'Action', text: 'Reduce to MIN 1.50%' }, { label: 'Order', text: 'Sell 2.39 shares' },
       { label: 'Context', text: 'Trend broke → reduce to MIN.' },
       { label: 'Tick', text: 'Bearish' }, { label: 'Trade', text: 'Bullish' }, { label: 'Trend', text: 'Neutral' }, { label: 'Tail', text: 'N/A' },
     ] } });
   render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} loadHorizonStats={loadHorizonStats} />);
   const card = screen.getByRole('heading', { name: 'XLK' }).closest('article');
   expect(within(card).queryByText('Tick:')).not.toBeInTheDocument();
-  expect(within(card).getByText('Order:').nextSibling).toHaveTextContent(/^Sell 2\.39 \/ 10 → 7\.61$/);
+  expect(within(card).getByText('Order:').nextSibling).toHaveTextContent(/^Sell 2\.39 shares$/);
+  expect(within(card).getByText('Sell')).toHaveClass('analyst-inbox-signal--negative');
   const table = within(card).getByRole('table');
   expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Tick', 'Trade', 'Trend', 'Tail', '1D', '15D', '30D', '90D']);
   expect(within(table).getByText('Bearish')).toHaveClass('is-negative');
@@ -566,12 +569,15 @@ test('a stance alert lists the latest product calls, then current → target →
   expect(within(calls).getByText('COVER')).not.toHaveClass('analyst-inbox-signal--positive');
   expect(within(calls).getByText('BEARISH')).toHaveClass('analyst-inbox-signal--negative');
   expect(within(order).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Current', 'Target', 'Order']);
-  expect(within(order).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['SHORT 650 · 1.16%', '0 · 0.00%', 'BUY 650 to close short']);
+  expect(within(order).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['1.16%', '0.00%', 'BUY 650 shares']);
+  expect(within(order).getByText('1.16%')).toHaveClass('analyst-inbox-signal--negative');
+  expect(within(order).getByText('BUY')).toHaveClass('analyst-inbox-signal--positive');
   expect(within(card).queryByText(/filler/)).not.toBeInTheDocument();
   const trim = screen.getByRole('heading', { name: 'MPC' }).closest('article');
   expect(trim).toHaveClass('is-action-required');
   expect(within(trim).getByText('Marathon Petroleum Corporation')).toBeInTheDocument();
-  expect(within(within(trim).getAllByRole('table')[1]).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['LONG 7.5 · 4.25%', 'LONG 5.74 · 3.25%', 'SELL up to 1.76 stays long']);
+  expect(within(within(trim).getAllByRole('table')[1]).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['4.25%', '3.25%', 'SELL 1.76 shares']);
+  expect(within(trim).getByText('4.25%')).toHaveClass('analyst-inbox-signal--positive');
 });
 
 test('a Trade/Trend read from list membership looks like a stated one, with its source in the tooltip', () => {

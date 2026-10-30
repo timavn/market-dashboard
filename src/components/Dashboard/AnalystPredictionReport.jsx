@@ -25,22 +25,29 @@ const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([
 const ALPHA_TOKEN = /^ALPHA\(([^;()]*);([^;()]*);(above|below|at|);(above|below|at|);(%?);([01]);([^;()]*)\)$/;
 // STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone[;direction]]): the Risk Range
 // against its earlier publications. Steps run oldest to today as + (higher), - (lower) or = (unchanged); runs are signed
-// counts ending today. Boards with volume add DV/AV, whether a move against the Trend is supported or warned by it, and
+// counts ending today. Boards with volume add DV/AV, how it reads for the Trend (supports, warns or confirms), and
 // later boards the day's direction (+ up, - down).
-const STRUCTURE_TOKEN = /^STRUCT\(([-+=]*);([-+]?\d+);([-+=]*);([-+]?\d+);([^;()]*);([^;()]*);([-+]?\d*);([01]);(%?)(?:;(DV|AV)?;(supports|warns)?(?:;([-+]?))?)?\)$/;
-// VOL(d1;d15;d30;d90;date;symbol): the latest session's ETF volume against the prior session and its 15-, 30- and
+const STRUCTURE_TOKEN = /^STRUCT\(([-+=]*);([-+]?\d+);([-+=]*);([-+]?\d+);([^;()]*);([^;()]*);([-+]?\d*);([01]);(%?)(?:;(DV|AV)?;(supports|warns|confirms)?(?:;([-+]?))?)?\)$/;
+// VOL(d1;d15;d30;d90;date;symbol[;side]): the latest session's ETF volume against the prior session and its 15-, 30- and
 // 90-calendar-day averages, in signed whole percents. Drawn under Tick, Trade and Trend, or one window to a cell
-// under Z, Tick, Trade and Trend when the board has a Z column.
-const VOLUME_TOKEN = /^VOL\(([-+]?\d*);([-+]?\d*);([-+]?\d*);([-+]?\d*);([^;()]*);([^;()]*)\)$/;
+// under Z, Tick, Trade and Trend when the board has a Z column. Side is the day's move with (+) or against (-) the Trend.
+const VOLUME_TOKEN = /^VOL\(([-+]?\d*);([-+]?\d*);([-+]?\d*);([-+]?\d*);([^;()]*);([^;()]*)(?:;([-+]?))?\)$/;
 const VOLUME_WINDOWS = ['1D', '15D', '30D', '90D'];
+// Each window reads green when it is good for the Trend's side and red when it is bad, like HL/HH: against the Trend
+// lighter volume is the pullback to add on and heavier a warning; with it heavier confirms and lighter says nothing.
+// Without a side (no Trend, or a saved board) the windows stay uncolored.
+const windowTone = (value, side) => (side === '-' ? (value < 0 ? ' is-on' : value > 0 ? ' is-against' : '')
+  : side === '+' && value > 0 ? ' is-on' : '');
+const VOLUME_SIDE = { '-': ' · Against the Trend: lighter volume reads green, heavier red',
+  '+': ' · With the Trend: heavier volume reads green' };
 function VolumeCell({ match, split, ...span }) {
-  const [, d1, d15, d30, d90, date, symbol] = match;
+  const [, d1, d15, d30, d90, date, symbol, side] = match;
   const values = [d1, d15, d30, d90];
   const label = values.every(value => value === '') ? 'Volume unavailable'
-    : `${symbol} volume${date ? ` on ${date}` : ''} vs the prior session and its 15-, 30- and 90-day averages`;
+    : `${symbol} volume${date ? ` on ${date}` : ''} vs the prior session and its 15-, 30- and 90-day averages${VOLUME_SIDE[side] || ''}`;
   const windows = VOLUME_WINDOWS.map((key, index) => {
     const value = values[index] === '' ? null : Number(values[index]);
-    const tone = value > 0 ? ' is-heavier' : value < 0 ? ' is-lighter' : '';
+    const tone = value === null ? '' : windowTone(value, side);
     return <span key={key} className={`analyst-prediction-volume__window${tone}`}>
       <span className="analyst-prediction-volume__key">{key}</span>
       <span className="analyst-prediction-volume__value">{value === null ? 'N/A' : `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value)}%`}</span>
@@ -96,12 +103,13 @@ function AthLine({ level, distance, date }) {
   </span>;
 }
 // Hedgeye reads volume against the Trend: a move against it on DV is a buy (Bullish) or short (Bearish) setup,
-// on AV a warning. A move with the Trend says nothing either way and keeps the plain outline.
-const VOLUME_TONE = { supports: ' is-on', warns: ' is-against' };
+// on AV a warning. A move with the Trend on AV confirms it; on DV it says nothing either way and keeps the plain outline.
+const VOLUME_TONE = { supports: ' is-on', warns: ' is-against', confirms: ' is-on' };
 const VOLUME_ARROW = { '+': '↑', '-': '↓' };
 const VOLUME_SENTENCE = { DV: 'volume below its 30-day average', AV: 'volume above its 30-day average' };
 const VOLUME_DAY = { '+': 'Up day on ', '-': 'Down day on ' };
-const VOLUME_READING = { supports: ' (against the Trend: setup)', warns: ' (against the Trend: warning)' };
+const VOLUME_READING = { supports: ' (against the Trend: setup)', warns: ' (against the Trend: warning)',
+  confirms: ' (with the Trend: confirmation)' };
 function StructureCell({ match, ...span }) {
   const [, lowSteps, lowRun, highSteps, highRun, ath, athDate, athPct, topAbove, unit, volume, volumeTone, direction] = match;
   const legs = [['high', highSteps, highRun], ['low', lowSteps, lowRun]];
@@ -195,7 +203,7 @@ function cellFor({ node, children }) {
     const lines = [['Ti', rest[0], rest[1]], ['Ta', rest[2], rest[3]], ['Te', rest[4], rest[5]]];
     const label = [pulled, ...lines.map(([key, date, product]) => `${key} ${date ? `${date} ${product}`.trim() : 'N/A'}`)].join(' · ');
     return <td className="analyst-prediction-as-of-cell" title={label}>
-      <span className="analyst-prediction-stack analyst-process--key">{pulled}</span>
+      <span className="analyst-prediction-stack analyst-process--key analyst-prediction-as-of-pulled">{pulled}</span>
       {lines.map(([key, date, product]) => <span key={key} className="analyst-prediction-stack analyst-prediction-as-of-line">
         <span className="analyst-prediction-stack__key">{key}</span>{' '}
         <span className="analyst-prediction-as-of-line__product analyst-prediction-stack--muted">{date ? product : ''}</span>{date && product ? ' ' : ''}

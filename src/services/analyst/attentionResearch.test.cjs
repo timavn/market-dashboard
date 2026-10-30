@@ -25,7 +25,7 @@ test('fresh full-book process conflicts are evaluated without a new research eve
   assert.equal(finding.action, 'exit'); assert.equal(finding.kind, 'portfolio');
   assert.equal(finding.holdingsVerified, true); assert.equal(finding.quantity, 10);
   assert.match(finding.presentation.rows.find(row => row.label === 'Context').text, /Trade turned Bearish vs Long → exit/);
-  assert.equal(finding.presentation.rows.find(row => row.label === 'Order').text, 'Sell 10 / 10 → 0');
+  assert.equal(finding.presentation.rows.find(row => row.label === 'Order').text, 'Sell 10 shares');
   assert.equal(result.complete, true);
 });
 test('fresh holdings cannot upgrade an undated or unlinked Trade into a conflict', () => {
@@ -381,7 +381,7 @@ test('a Trend-break sizing alert states the security\'s own MIN, MAX, ATR, stop 
   assert.equal(rows.Trim, '1.00 pts (4.25% → 3.25%)');
   assert.ok(finding.presentation.rows.find(item => item.label === 'Trim').requiresFreshHoldings);
   // 10 shares at 4.25% → 3.25% keeps 7.65 shares.
-  assert.equal(rows.Order, 'Sell 2.35 / 10 → 7.65');
+  assert.equal(rows.Order, 'Sell 2.35 shares');
   assert.ok(finding.presentation.rows.find(item => item.label === 'Order').requiresFreshHoldings);
   assert.deepEqual(finding.presentation.rows.slice(-4), [['Tick', 'N/A'], ['Trade', 'N/A'], ['Trend', 'Neutral'], ['Tail', 'N/A']].map(([label, text]) => ({ label, text })));
 });
@@ -409,7 +409,7 @@ test('a quiet security notes the ATR floor, and an ATR too large to size exits',
   assert.equal(rows.ATR, '60.00% of price');
   assert.equal(rows.Stop, undefined);
   assert.equal(rows.Context, 'Too volatile to size → exit.');
-  assert.equal(rows.Order, 'Sell 10 / 10 → 0');
+  assert.equal(rows.Order, 'Sell 10 shares');
   assert.deepEqual(finding.presentation.sourceLinks.map(link => link.label), ['Trade source', 'Trend source', 'atr14 evidence', 'referencePrice evidence']);
 });
 test('a published Tick fills the Tick line; a stale or future one stays N/A', () => {

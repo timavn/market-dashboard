@@ -73,13 +73,14 @@ function attentionContent(finding, now) {
       if (row.label === 'Position size') return { ...row, text: freshHoldings && holding.currentHolding?.label || 'Unavailable' };
       return row;
     })
-    // One line reads "Long @ 1.97%"; a size that is unavailable is left off.
+    // The position reads as its weight alone, colored by side ("1.97%" in green for Long);
+    // without a verified weight it falls back to side and shares.
     .reduce((merged, row) => {
       const index = merged.findIndex(item => item.label === 'Current position');
       if (row.label !== 'Position size' || index < 0) return [...merged, row];
       const position = merged[index];
       if (row.text === 'Unavailable' || !['Long', 'Short'].includes(position.text)) return merged;
-      return merged.map((item, i) => i === index ? { ...position, text: `${position.text} @ ${row.text}` } : item);
+      return merged.map((item, i) => i === index ? { ...position, text: row.text, side: position.text } : item);
     }, [])
     .map(row => row.label === 'Current position' ? { ...row, text: heldShares(row.text, payload.quantity) } : row);
   if (!rows.length) return null;
@@ -130,11 +131,21 @@ const STANCE_TONES = { LONG: 'positive', SHORT: 'negative', BUY: 'positive', SEL
 const callDate = date => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
 const amount = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
 const Toned = ({ value }) => <span className={toneClass(STANCE_TONES[value])}>{value}</span>;
+// A position reads as its weight, green Long and red Short; shares belong to the order.
+// Without a verified weight the share count stands in.
 function stancePosition(position) {
-  if (position.quantity === 0) return '0 · 0.00%';
-  const weight = position.weightPct === null || position.weightPct === undefined ? '' : ` · ${position.weightPct.toFixed(2)}%`;
-  return position.quantity === null ? <><Toned value={position.side} /> · lower</> : <><Toned value={position.side} /> {amount(position.quantity)}{weight}</>;
+  if (position.quantity === 0) return '0.00%';
+  const tone = toneClass(STANCE_TONES[position.side]);
+  if (position.weightPct === null || position.weightPct === undefined) return <span className={tone}>{position.quantity === null ? 'lower' : `${amount(position.quantity)} sh`}</span>;
+  return <span className={tone}>{position.weightPct.toFixed(2)}%</span>;
 }
+// "Sell 150 shares": the verb carries the color, as in the stance order cell.
+function OrderText({ children }) {
+  const [verb, ...rest] = String(children).split(' ');
+  const tone = STANCE_TONES[verb.toUpperCase()];
+  return tone ? <><span className={toneClass(tone)}>{verb}</span>{rest.length ? ` ${rest.join(' ')}` : ''}</> : children;
+}
+const orderShares = order =>order.quantity === null ? 'some' : `${amount(order.quantity)} ${order.quantity === 1 ? 'share' : 'shares'}`;
 
 // Stance alerts: the latest product calls, then the move from the current
 // position to the target and the order that gets there.
@@ -154,7 +165,7 @@ function StanceCopy({ ticker, stance, freshHoldings }) {
       <thead><tr><th scope="col">Current</th><th scope="col">Target</th><th scope="col">Order</th></tr></thead>
       <tbody><tr>{freshHoldings ? <>
         <td>{stancePosition(current)}</td><td>{stancePosition(target)}</td>
-        <td><Toned value={order.verb} />{order.upTo ? ' up to' : ''}{order.quantity === null ? '' : ` ${amount(order.quantity)}`} {order.note}</td>
+        <td><Toned value={order.verb} /> {orderShares(order)}</td>
       </> : <><td className="analyst-inbox-signal--neutral">Unavailable</td><td>—</td><td>—</td></>}</tr></tbody>
     </table>
   </div>;
@@ -164,7 +175,7 @@ function StanceCopy({ ticker, stance, freshHoldings }) {
 function alertSummary(finding, content, modern, date) {
   const payload = finding.payload || finding;
   const title = `${modern ? content.subject : finding.symbol || payload.symbol}${date ? ` (${date})` : ''}`;
-  const lines = modern ? content.rows.map(row => `${row.label}: ${row.text}${row.note ? ` (${row.note})` : ''}`) : [
+  const lines = modern ? content.rows.map(row => `${row.label}: ${row.side ? `${row.side} ` : ''}${row.text}${row.note ? ` (${row.note})` : ''}`) : [
     `Current position: ${content.currentPosition?.label || 'Unavailable'}`,
     `Action: ${content.positionAction || 'Unavailable'}`,
     content.headline && `${content.updateLabel || 'Signal'}: ${content.headline}`,
@@ -240,7 +251,8 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
             <dt>Ticker: </dt><dd>{ticker}</dd>
           </div>}
           {modern ? rows.map((row, index) => <div key={`${row.label}-${index}`}>
-            <dt>{row.label}: </dt><dd className={['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}><DirectionalText>{row.text}</DirectionalText></dd>
+            <dt>{row.label}: </dt><dd className={row.side ? toneClass(STANCE_TONES[row.side.toUpperCase()]) : ['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}>
+              {row.label === 'Order' ? <OrderText>{row.text}</OrderText> : <DirectionalText>{row.text}</DirectionalText>}</dd>
           </div>) : <>
           <div className="analyst-inbox-position">
             <dt>Current position: </dt><dd><DirectionalText>{content.currentPosition.label}</DirectionalText>

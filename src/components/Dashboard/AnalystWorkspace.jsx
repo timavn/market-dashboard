@@ -14,6 +14,7 @@ import AnalystReviewSources from './AnalystReviewSources';
 import AnalystLandingStatus from './AnalystLandingStatus';
 import useAnalystReviewSources from '../../hooks/useAnalystReviewSources';
 import AnalystSourceExcerpt from './AnalystSourceExcerpt';
+import AnalystSourceEmail from './AnalystSourceEmail';
 import { formatResearchSourceDate } from '../../utils/researchDateFormat';
 import { formatAnalystReportDate } from '../../utils/analystReportDates';
 import { reuseAnalystEvidence } from '../../services/analyst/analystEvidenceIdentity';
@@ -283,21 +284,33 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       const button = citationAnchor.getBoundingClientRect();
       const gap = 6;
       const margin = 8;
+      surface.style.maxHeight = '';
+      const height = surface.offsetHeight;
       const below = button.bottom - bounds.top + gap;
-      const above = button.top - bounds.top - gap - surface.offsetHeight;
-      const top = below + surface.offsetHeight <= bounds.height - margin || above < margin ? below : above;
+      const roomBelow = bounds.height - margin - below;
+      const roomAbove = button.top - bounds.top - gap - margin;
+      // Below when it fits, else above; when neither fits, the roomier side, shortened to fit there.
+      const under = height <= roomBelow || (height > roomAbove && roomBelow >= roomAbove);
+      const room = under ? roomBelow : roomAbove;
+      if (height > room) surface.style.maxHeight = `${Math.max(120, room)}px`;
+      const top = under ? below : button.top - bounds.top - gap - Math.min(height, room);
       const left = Math.max(margin, Math.min(button.left - bounds.left, bounds.width - surface.offsetWidth - margin));
       surface.style.top = `${Math.max(margin, top)}px`;
       surface.style.left = `${left}px`;
     };
     place();
+    // An original email arrives after the popover opens and makes it taller.
+    const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
+    for (const entry of surface.children) grown?.observe(entry);
     window.addEventListener('resize', place);
     document.addEventListener('scroll', place, true);
     return () => {
+      grown?.disconnect();
       window.removeEventListener('resize', place);
       document.removeEventListener('scroll', place, true);
       surface.style.top = '';
       surface.style.left = '';
+      surface.style.maxHeight = '';
     };
   }, [citation, citationAnchor]);
   const { inbox, inboxError, loadInbox, acknowledge } = useAnalystInbox();
@@ -1446,12 +1459,17 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       {citation && <aside ref={citationSurface} className={`analyst-source-detail${citationAnchor ? ' is-anchored' : ''}`} role="dialog" aria-label="Citation source">{!citationAnchor && <header><span>Source evidence</span></header>}{citation.map((source, index) => {
         const title = source.title || source.product;
         const href = source.sourceUri && source.product !== 'dashboard-health' ? safeResearchUrl(source.sourceUri) : null;
+        // An emailed publication shows the original, clipped around its ticker, with the report link under it.
+        const email = citationAnchor && source.sourceMessageId && source.clipTicker;
         return <article className="analyst-source-publication-entry" key={source.id || index} aria-busy={source.evidenceLoading || undefined}>
         {/* The anchored popover is just the publication, its date and the excerpt; its title opens the report. */}
-        <strong>{citationAnchor && href ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">{title} ↗</a> : title}</strong>
+        <strong>{citationAnchor && href && !email ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">{title} ↗</a> : title}</strong>
         {(source.publicationDate || source.publishedAt) && <p>{formatResearchSourceDate(source.publicationDate || source.publishedAt)}</p>}
         {!citationAnchor && source.sourceUri && source.product !== 'dashboard-health' && <p>{href ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a> : source.sourceUri}</p>}
-        <AnalystSourceExcerpt excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
+        {email ? <>
+          <AnalystSourceEmail messageId={source.sourceMessageId} ticker={source.clipTicker} title={title} excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
+          {href && <p className="analyst-source-email-link"><a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a></p>}
+        </> : <AnalystSourceExcerpt excerpt={source.excerpt} highlightTexts={source.highlightTexts} />}
         {source.evidenceError && <p>Source evidence unavailable.</p>}
       </article>;
       })}</aside>}

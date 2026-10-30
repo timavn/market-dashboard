@@ -618,6 +618,46 @@ test('operational inbox source evidence shows the concern without raw API plumbi
   expect(within(evidence).queryByRole('link')).not.toBeInTheDocument();
 });
 
+// Opens an Inbox Source whose citation names a stored email; `stored` says whether the server has it.
+async function openEmailedSource(stored) {
+  const request = api.request.getMockImplementation();
+  const citation = { id: 'cite_vlo', title: 'Signal Strength: VLO Removed', product: 'signal-strength', publicationDate: '2026-10-29',
+    sourceUri: 'https://app.hedgeye.com/feed_items/189162', excerpt: 'VLO Removed', sourceMessageId: '1a1882c17cfb415f', clipTicker: 'VLO' };
+  const alert = { id: 'vlo', unread: 1, payload: { attentionVersion: 1, kind: 'operational', state: 'open',
+    presentation: { subject: 'VLO', date: '2026-10-29', rows: [{ label: 'Action', text: 'Removed' }], sourceLinks: [{ label: 'Signal Strength', citation }] } } };
+  const email = '<html><head></head><body><b>REMOVING:</b> MPC, NOW, <mark id="analyst-source-hit">VLO</mark></body></html>';
+  api.request.mockImplementation((path, body, method) => {
+    if (path === '/inbox') return Promise.resolve({ attentionVersion: 1, findings: [alert], unread: 1 });
+    if (path.startsWith('/source-email/')) return stored ? Promise.resolve({ html: email, found: true }) : Promise.reject(Object.assign(new Error('Source email not stored'), { code: 'HTTP_404' }));
+    return request(path, body, method);
+  });
+  render(<AnalystPanel />);
+  fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Source', exact: true }));
+  const popover = screen.getByRole('dialog', { name: 'Citation source' });
+  expect(api.request).toHaveBeenCalledWith('/source-email/1a1882c17cfb415f?find=VLO');
+  // The title reads plainly; the report opens from the link under the email.
+  expect(within(popover).getByText('Signal Strength: VLO Removed')).not.toHaveAttribute('href');
+  expect(within(popover).getByRole('link', { name: 'Open original report ↗' })).toHaveAttribute('href', citation.sourceUri);
+  return { popover, email };
+}
+
+test('an emailed inbox Source shows the original email clipped around the ticker, with the report link under it', async () => {
+  const { popover, email } = await openEmailedSource(true);
+  const frame = await within(popover).findByTitle('Original email: Signal Strength: VLO Removed');
+  expect(frame.tagName).toBe('IFRAME');
+  expect(frame.getAttribute('srcdoc')).toBe(email);
+  // Nothing in the email runs; its links open in a new tab.
+  expect(frame.getAttribute('sandbox')).toBe('allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+  expect(popover.querySelector('blockquote')).toBeNull();
+});
+
+test('an emailed inbox Source keeps the excerpt when the original email was never stored', async () => {
+  const { popover } = await openEmailedSource(false);
+  await waitFor(() => expect(popover.querySelector('blockquote')).toHaveTextContent('VLO Removed'));
+  expect(popover.querySelector('iframe')).toBeNull();
+});
+
 test('inbox shows the named source signal and preserves acknowledgment and citation actions', async () => {
   const dispatch = jest.spyOn(window, 'dispatchEvent');
   const request = api.request.getMockImplementation();

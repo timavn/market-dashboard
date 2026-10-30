@@ -119,12 +119,19 @@ function Facts({ facts, names }) {
   </ul>;
 }
 
-function Entry({ entry, market, first, span }) {
+// A product reads once per market: its points stack under it in the order they were said, each with its own Source.
+function byProduct(entries) {
+  const groups = new Map();
+  entries.forEach(entry => groups.set(entry.product, [...(groups.get(entry.product) || []), entry]));
+  return [...groups.values()].flat();
+}
+
+function Entry({ entry, market, first, continued, span }) {
   const [open, setOpen] = useState(false);
   const names = [market];
-  return <tr className={first ? 'analyst-research__first' : undefined}>
+  return <tr className={first ? 'analyst-research__first' : continued ? 'analyst-research__continued' : undefined}>
     {first && <td className="analyst-research__market" rowSpan={span}>{market}</td>}
-    <td className="analyst-research__product" title={entry.time ? `${entry.date ? `${entry.date} ` : ''}${entry.time} PT` : undefined}>{entry.product}</td>
+    <td className="analyst-research__product" title={entry.time ? `${entry.date ? `${entry.date} ` : ''}${entry.time} PT` : undefined}>{continued ? null : entry.product}</td>
     <td className="analyst-research__context">
       {entry.facts ? <Facts facts={entry.facts} names={names} /> : <ResearchText value={entry.context} names={names} />}
       {open && <blockquote className="analyst-research__quote"><ResearchText value={entry.source} names={names} /></blockquote>}
@@ -159,7 +166,7 @@ function DayPicker({ days, shown, onPick }) {
   return <th ref={cell} className="analyst-research__day">
     <button type="button" className="analyst-research__day-button" aria-haspopup="listbox" aria-expanded={open}
       aria-label={`Research for ${dayLabel(shown)}; choose another day`} onClick={() => setOpen(value => !value)}>
-      {dayLabel(shown)} <span aria-hidden="true">▾</span>
+      {dayLabel(shown)}
     </button>
     {open && <ul className="analyst-research__days" role="listbox" aria-label="Earlier market days">
       {days.filter(day => day !== shown).map(day => <li key={day} role="option" aria-selected="false">
@@ -210,8 +217,8 @@ export default function AnalystPredictionResearch({ research: saved }) {
           <td className="analyst-research__quiet" colSpan={4}>{reading.status === 'loading' ? `Reading ${dayLabel(shown)}…`
             : reading.status === 'empty' ? `No research read for ${dayLabel(shown)}.` : `Research for ${dayLabel(shown)} is unavailable.`}</td>
         </tr> : research.markets.map(row => (row.entries.length
-          ? row.entries.map((entry, index) => <Entry key={`${row.market}-${index}`} entry={entry} market={row.market}
-            first={index === 0} span={row.entries.length} />)
+          ? byProduct(row.entries).map((entry, index, entries) => <Entry key={`${row.market}-${index}`} entry={entry} market={row.market}
+            first={index === 0} continued={index > 0 && entries[index - 1].product === entry.product} span={entries.length} />)
           : <tr key={row.market} className="analyst-research__first">
             <td className="analyst-research__market">{row.market}</td>
             {/* A sentence that already reads under another market adds nothing here. */}

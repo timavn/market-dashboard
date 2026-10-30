@@ -14,6 +14,9 @@ const SLOT_LABELS = {
 const EXIT_RETENTION_DAYS = 90;
 const ALERT_RETENTION_DAYS = 30;
 const PARTIAL_RETENTION_DAYS = 7;
+// Each ticker keeps its latest calls, whichever product made them, so an alert can show
+// the last few times it was added or removed. A few spare cover calls on the side not held.
+const HISTORY_LIMIT = 6;
 const DAY_MS = 86400000;
 // The stance a held side reads from each entry: what it supports, what it opposes, and whether partially.
 const EFFECTS = {
@@ -32,7 +35,7 @@ const days = (from, to) => (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T
 const untrusted = event => ['mock', 'isMock', 'seed', 'seeded', 'fixture', 'synthetic', 'inferred', 'fallback', 'stale', 'cacheOnly'].some(flag => event[flag] === true);
 
 function emptyStanceBook() {
-  return { version: STANCE_BOOK_VERSION, updatedAt: null, backfill: null, rosters: {}, partialAlerts: {}, tickers: {} };
+  return { version: STANCE_BOOK_VERSION, updatedAt: null, backfill: null, rosters: {}, partialAlerts: {}, tickers: {}, history: {} };
 }
 function parsedExcerpt(event, symbol) {
   try {
@@ -172,10 +175,36 @@ function prune(book, today) {
     if (!Object.keys(slots).length) delete book.tickers[symbol];
   }
 }
+// One call per product, stance and day, newest first: a listing is dated by its entry
+// and cites the first edition that listed it, and on the same day a change outranks the
+// listing it starts. An alert is one call per instant, whichever way it was restated, and
+// keeps its SOME.
+const callDay = entry => (entry.roster ? entry.since : entry.date);
+const sameCall = (slot, entry) => call => call.slot === slot
+  && (slot === 'real-time-alert' ? call.at === entry.at : call.stance === entry.stance && callDay(call) === callDay(entry));
+function replaces(entry, kept) {
+  if (Boolean(kept.roster) !== Boolean(entry.roster)) return Boolean(kept.roster);
+  const some = /SOME/.test(entry.action || ''), keptSome = /SOME/.test(kept.action || '');
+  if (some !== keptSome) return some;
+  return entry.at < kept.at || (entry.at === kept.at && (entry.sourceUri || '') < (kept.sourceUri || ''));
+}
+function record(book, symbol, slot, entry) {
+  const calls = book.history[symbol] || (book.history[symbol] = []);
+  const same = calls.findIndex(sameCall(slot, entry));
+  if (same >= 0) {
+    if (!replaces(entry, calls[same])) return;
+    calls.splice(same, 1);
+  }
+  calls.push({ ...entry, slot });
+  calls.sort((a, b) => callDay(b).localeCompare(callDay(a)) || b.at.localeCompare(a.at));
+  calls.splice(HISTORY_LIMIT);
+}
 // Folding is idempotent: the same events can be replayed every scan.
 function foldStanceEvents(stored, events = [], now = new Date()) {
   const book = stored?.version === STANCE_BOOK_VERSION ? JSON.parse(JSON.stringify(stored)) : emptyStanceBook();
-  const before = JSON.stringify([book.rosters, book.partialAlerts, book.tickers]);
+  // History started after version 2; such a book fills it from the events it folds from now on.
+  book.history ||= {};
+  const before = JSON.stringify([book.rosters, book.partialAlerts, book.tickers, book.history]);
   for (const event of events) {
     const targets = partialAlertTargets(event);
     if (!targets.length) continue;
@@ -184,6 +213,8 @@ function foldStanceEvents(stored, events = [], now = new Date()) {
   }
   for (const event of events) {
     for (const { symbol, slot, entry } of stancesFromEvent(event, now)) {
+      // Every call reaches the history, even one older than its slot's latest, so folding order never matters.
+      record(book, symbol, slot, entry);
       const slots = book.tickers[symbol] || (book.tickers[symbol] = {});
       const current = slots[slot];
       const dropped = current?.roster && book.rosters[slot] && (current.seen || current.date) < book.rosters[slot];
@@ -208,10 +239,15 @@ function foldStanceEvents(stored, events = [], now = new Date()) {
     const alert = slots['real-time-alert'];
     if (alert && partialFor(book.partialAlerts[alert.sourceMessageId], symbol)) slots['real-time-alert'] = asPartial(alert);
   }
+  for (const [symbol, calls] of Object.entries(book.history)) {
+    const marked = calls.map(call => (call.slot === 'real-time-alert' && partialFor(book.partialAlerts[call.sourceMessageId], symbol) ? asPartial(call) : call));
+    book.history[symbol] = [];
+    for (const call of marked) record(book, symbol, call.slot, call);
+  }
   const today = now.toISOString().slice(0, 10);
   for (const [message, marks] of Object.entries(book.partialAlerts)) if (days(marks.date, today) > ALERT_RETENTION_DAYS) delete book.partialAlerts[message];
   prune(book, today);
-  const changed = JSON.stringify([book.rosters, book.partialAlerts, book.tickers]) !== before;
+  const changed = JSON.stringify([book.rosters, book.partialAlerts, book.tickers, book.history]) !== before;
   if (changed) book.updatedAt = now.toISOString();
   return { book, changed };
 }
@@ -243,7 +279,10 @@ function scanHoldings(book, positions = []) {
     // outranks a newer change; an opposing listing stands while it is still listed.
     const latestSupport = supporting.map(item => item.since).sort().at(-1) || '';
     const standing = opposing.filter(item => !(latestSupport > item.date)).sort((a, b) => b.date.localeCompare(a.date) || a.slot.localeCompare(b.slot));
-    rows.push({ symbol, side, quantity, opposing: standing, supporting });
+    // Earlier calls for or against the held side, newest first.
+    const history = (book?.history?.[symbol] || []).filter(entry => [EFFECTS[entry.stance]?.supports, EFFECTS[entry.stance]?.opposes].includes(side))
+      .map(entry => ({ ...entry, productLabel: SLOT_LABELS[entry.slot], partial: Boolean(EFFECTS[entry.stance].partial) }));
+    rows.push({ symbol, side, quantity, opposing: standing, supporting, history });
   }
   return rows;
 }

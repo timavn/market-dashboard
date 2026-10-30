@@ -49,8 +49,9 @@ test('the first verified read after Gateway connects raises every standing contr
   const call = (product, action, date, bias) => ({ product, action, date, bias });
   assert.deepEqual(Object.fromEntries(findings.map(item => [item.symbol, item.action])), { EFX: 'exit', GIII: 'exit', BRBR: 'exit', LCID: 'trim', MPC: 'trim' });
   assert.deepEqual(stance('EFX').calls, [call('Signal Strength', 'LONG', '2026-10-26', 'BULLISH')]);
-  assert.deepEqual(stance('GIII').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-23', 'NEUTRAL')]);
-  assert.deepEqual(stance('BRBR').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-22', 'NEUTRAL')]);
+  // A removal reads above the listing it ended, from the book's history.
+  assert.deepEqual(stance('GIII').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-23', 'NEUTRAL'), call('Signal Strength Shorts', 'SHORT', '2026-08-04', 'BEARISH')]);
+  assert.deepEqual(stance('BRBR').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-22', 'NEUTRAL'), call('Signal Strength Shorts', 'SHORT', '2026-07-14', 'BEARISH')]);
   // Booking SOME of a short keeps it short: both calls stay bearish, newest first.
   assert.deepEqual(stance('LCID').calls, [call('Real-Time Alert', 'COVER SOME', '2026-10-26', 'BEARISH'), call('Signal Strength Shorts', 'SHORT', '2026-05-02', 'BEARISH')]);
   assert.deepEqual(stance('LCID').order, { verb: 'BUY', quantity: null, note: 'some · stays short' });
@@ -81,6 +82,33 @@ test('folding is idempotent and order-independent', () => {
   assert.equal(foldStanceEvents(once, OCTOBER, NOW).changed, false);
   const reversed = foldStanceEvents(undefined, [...OCTOBER].reverse(), NOW).book;
   assert.deepEqual(reversed.tickers, once.tickers);
+  assert.deepEqual(reversed.history, once.history);
+});
+
+test('an alert shows the last three calls on its security, newest first, as the book builds them', () => {
+  const at = NOW;
+  const etfPro = (action, date) => ledger('DRAM', 'etf-pro', 'position_change', 'data.changes[0]', action, date, { sourceMessageId: `msg-etf-${date}` });
+  const rta = (action, headline, date) => ledger('DRAM', 'real-time-alert', 'position_change', 'data.alert', JSON.stringify({ action, headline, ticker: 'DRAM' }), date,
+    { sourceMessageId: `1a187f5de689${date.slice(5).replace('-', '')}`, publishedAt: `${date}T13:00:00Z` });
+  // A book from before history began fills it from the events it folds next.
+  const { history, ...older } = foldStanceEvents(undefined, [], at).book;
+  assert.deepEqual(history, {});
+  const events = [rta('SHORT', 'Real-Time Alert: Short Signal (Q4): DRAM -KM', '2026-10-02'), etfPro('ADD SHORT', '2026-10-21'),
+    rta('COVER-SOME', 'Real-Time Alert: Cover-SOME Signal (Q4): DRAM -KM', '2026-10-26'), rta('SHORT', 'Real-Time Alert: Short Signal (Q4): DRAM -KM', '2026-09-15')];
+  const { book } = foldStanceEvents(older, events, at);
+  assert.deepEqual(book.history.DRAM.map(item => [item.slot, item.action || item.label, item.date]), [['real-time-alert', 'COVER-SOME', '2026-10-26'],
+    ['etf-pro:short', 'Added Short', '2026-10-21'], ['real-time-alert', 'SHORT', '2026-10-02'], ['real-time-alert', 'SHORT', '2026-09-15']]);
+  // The slot keeps only the latest alert; the alert card shows the three newest calls.
+  assert.equal(book.tickers.DRAM['real-time-alert'].date, '2026-10-26');
+  const findings = evaluateResearchAttention({ ...verified([{ symbol: 'DRAM', quantity: -40 }], book), marketDate: '2026-10-26' }, at).findings;
+  assert.deepEqual(findings.find(item => item.symbol === 'DRAM').presentation.stance.calls, [
+    { product: 'Real-Time Alert', action: 'COVER SOME', date: '2026-10-26', bias: 'BEARISH' },
+    { product: 'ETF Pro', action: 'SHORT', date: '2026-10-21', bias: 'BEARISH' },
+    { product: 'Real-Time Alert', action: 'SHORT', date: '2026-10-02', bias: 'BEARISH' }]);
+  assert.equal(foldStanceEvents(book, events, at).changed, false);
+  // Its Source names the stored email, so the popover can show the original around DRAM.
+  const [link] = findings.find(item => item.symbol === 'DRAM').presentation.sourceLinks;
+  assert.deepEqual([link.citation.sourceMessageId, link.citation.clipTicker], ['1a187f5de6891026', 'DRAM']);
 });
 
 test('a restated alert keeps its explicit SOME; field fragments never become tickers', () => {
