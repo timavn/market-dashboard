@@ -379,6 +379,8 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
         return None
     products = research.get("products") or []
     published = {product.get("label"): product.get("publishedAt") for product in products}
+    # Each product's email, which its Source shows clipped to the quoted line.
+    messages = {product.get("label"): product.get("messageId") for product in products}
     order = {product.get("label"): index for index, product in enumerate(products)}
     clock = lambda value: (lambda when: when.rsplit(" ", 1)[-1] if ":" in when else None)(_pacific(value)) if value else None
     # The Pacific date the product was published, e.g. Oct 22.
@@ -393,7 +395,8 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
             excerpt = finding.get("excerpt")
             if excerpt:
                 context = finding.get("context") or excerpt
-                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context, "source": excerpt, "date": date})
+                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context, "source": excerpt, "date": date,
+                                                      "messageId": messages.get(label)})
                 continue
             facts = _fact_text(finding, row)
             if not facts:
@@ -409,7 +412,8 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
                 context = f"{verb} {finding['name']}" + (" (inverse to yield)" if finding.get("inverse") else "")
             else:
                 context = " · ".join(fact["text"] for fact in facts)
-            entry = {"product": label, "time": time, "context": context, "source": finding.get("sourceText"), "date": date}
+            entry = {"product": label, "time": time, "context": context, "source": finding.get("sourceText"), "date": date,
+                     "messageId": messages.get(label)}
             # Reported data ("Label: value" readings) lists as one line per fact rather than a sentence.
             if finding.get("kind") != "position" and all(": " in fact["text"] for fact in facts):
                 entry["facts"] = [fact["text"] for fact in facts]

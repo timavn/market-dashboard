@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import AnalystPredictionReport from './AnalystPredictionReport';
 import { remarkAnalystProcessColors } from './analystProcessColors';
 import { analystWorkspaceApi } from '../../services/analyst/analystClient';
+import { findQuote } from './AnalystSourceEmail';
 
 jest.mock('../../services/analyst/analystClient', () => ({ analystWorkspaceApi: { request: jest.fn() } }));
 
@@ -540,6 +541,48 @@ test.each([
   expect([...container.querySelectorAll('.analyst-prediction-volume__window')].map(window => window.className.replace('analyst-prediction-volume__window', '').trim()))
     .toEqual(tones);
   expect(container.querySelector('td').title).toContain(sentence);
+});
+
+test('a research Source opens the product\'s own email at the quoted line, and the line alone without one', async () => {
+  ReactMarkdown.renderSpy.mockClear();
+  analystWorkspaceApi.request.mockReset();
+  render(<AnalystPredictionReport markdown="## Crypto" />);
+  const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const quote = 'Trend change: BITCOIN changed from Bullish to Bearish';
+  const research = { markets: [{ market: 'Bitcoin', entries: [
+    { product: 'Risk Ranges', context: 'Trend: Bullish → Bearish', facts: ['Trend: Bullish → Bearish'], source: quote, messageId: '1a18c949d0c80bdd' },
+    { product: 'Crypto Quant', context: 'BTC is bearish', source: 'BTC is bearish', messageId: '1a18cad975d8a888' },
+    // A report saved before entries named their email.
+    { product: 'The Macro Show', context: 'Long Bitcoin', source: 'Long Bitcoin (BTC)' },
+  ] }] };
+  const node = { children: [{ tagName: 'code', properties: { className: ['language-analyst-research'] },
+    children: [{ type: 'text', value: JSON.stringify(research) }] }] };
+  analystWorkspaceApi.request.mockImplementation(path => (path === '/source-email/1a18c949d0c80bdd'
+    ? Promise.resolve({ messageId: '1a18c949d0c80bdd', html: '<html><body><p>Our Levels</p></body></html>', found: false })
+    : Promise.reject(Object.assign(new Error('Source email not stored'), { code: 'HTTP_404' }))));
+  render(<Pre node={node}><code>ignored</code></Pre>);
+  const table = within(screen.getByRole('region', { name: 'Morning research' })).getByRole('table');
+  const [ranges, quant, macro] = within(table).getAllByRole('button', { name: 'Source' });
+  fireEvent.click(ranges);
+  expect(analystWorkspaceApi.request).toHaveBeenCalledWith('/source-email/1a18c949d0c80bdd');
+  expect(await within(table).findByTitle('Original email: Risk Ranges')).toHaveAttribute('srcdoc', expect.stringContaining('Our Levels'));
+  // An email that was not stored falls back to the quoted line.
+  fireEvent.click(quant);
+  await waitFor(() => expect(table.querySelectorAll('blockquote.analyst-research__quote')).toHaveLength(1));
+  fireEvent.click(macro);
+  expect(analystWorkspaceApi.request).toHaveBeenCalledTimes(2);
+  expect(table.querySelectorAll('blockquote.analyst-research__quote')).toHaveLength(2);
+});
+
+test('findQuote finds a quoted line across the email\'s markup, without the label the dashboard added', () => {
+  const doc = new DOMParser().parseFromString(`<html><head><style>td { color: red }</style></head><body>
+    <p>BITCOIN Risk Range 104,000-112,000</p>
+    <table><tr><td>BITCOIN</td> <td>changed from <b>Bullish</b> to Bearish</td></tr></table></body></html>`, 'text/html');
+  expect(findQuote(doc, 'Trend change: BITCOIN changed from Bullish to Bearish').toString()).toBe('BITCOIN changed from Bullish to Bearish');
+  // Curly quotes and dashes in the email still match a plain quote; a line the email never printed finds nothing.
+  const prose = new DOMParser().parseFromString('<p>Keith’s view – Gold is down another 1.1%.</p>', 'text/html');
+  expect(findQuote(prose, "Keith's view - Gold is down another 1.1%").toString()).toBe('Keith’s view – Gold is down another 1.1%.');
+  expect(findQuote(prose, 'Silver broke its TREND line today')).toBeNull();
 });
 
 test('a market whose only mention reads under another market is Not mentioned, including in saved reports', () => {

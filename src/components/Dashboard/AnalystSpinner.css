@@ -1,20 +1,18 @@
-/* A ring that turns while the Analyst works. It keeps turning under reduced motion:
-   a fading icon read as blinking rather than loading. */
+/* Muted digits rolling where the value will land. They keep rolling under reduced motion:
+   a still or fading mark read as data or blinking rather than loading. Sized from the ring
+   they replaced, so every call site keeps its size. */
 .analyst-spinner {
   display: inline-block;
   flex: 0 0 auto;
-  box-sizing: border-box;
-  width: var(--analyst-spinner-size, 14px);
-  height: var(--analyst-spinner-size, 14px);
-  border: 2px solid #dfe5ea;
-  border-top-color: #087b80;
-  border-radius: 50%;
+  min-width: 4ch;
+  color: #9ca3af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: max(10px, calc(var(--analyst-spinner-size, 14px) * 0.8));
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  line-height: 1;
+  text-align: right;
   vertical-align: middle;
-  animation: analyst-spinner-turn 0.8s linear infinite;
-}
-
-@keyframes analyst-spinner-turn {
-  to { transform: rotate(360deg); }
 }
 
 .analyst-spinner-group { display: inline-flex; align-items: center; gap: 6px; }

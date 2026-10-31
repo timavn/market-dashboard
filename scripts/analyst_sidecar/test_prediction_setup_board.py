@@ -107,7 +107,8 @@ class SetupBoardRenderTests(unittest.TestCase):
             {"key": "the-macro-show", "label": "The Macro Show", "status": "read", "publishedAt": "2026-10-16T14:55:00.000Z"},
             {"key": "etf-pro", "label": "ETF Pro", "status": "missing"}]}
         excerpt = "UST 2yr holding TRADE/TREND Signal Supports (TREND all the way down at 4.40%)"
-        data["research"]["products"] += [{"key": "risk-ranges", "label": "Risk Ranges", "status": "read", "publishedAt": "2026-10-16T11:28:00.000Z"},
+        data["research"]["products"] += [{"key": "risk-ranges", "label": "Risk Ranges", "status": "read", "publishedAt": "2026-10-16T11:28:00.000Z",
+                                          "messageId": "1a18c949d0c80bdd"},
                                          {"key": "market-structure", "label": "Market Structure", "status": "read",
                                           "publishedAt": "2026-10-16T10:30:29+00:00"}]
         data["rows"][1]["research"] = {"findings": [
@@ -163,7 +164,8 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertIn('{"market":"Ethereum","entries":[]}', report)
         # Published data reads "Label: value", with the line it was printed in as its source.
         self.assertIn('{"market":"WTI","entries":[{"product":"Risk Ranges","time":"04:28","context":"Trend: Neutral → Bullish",'
-                      '"source":"Trend change: COPPER changed from Neutral to Bullish","date":"Oct 16","facts":["Trend: Neutral → Bullish"]}]}', report)
+                      '"source":"Trend change: COPPER changed from Neutral to Bullish","date":"Oct 16","messageId":"1a18c949d0c80bdd",'
+                      '"facts":["Trend: Neutral → Bullish"]}]}', report)
         self.assertIn('{"product":"Market Structure","time":"03:30","context":"SPX Gamma Exposure: Neutral",'
                       '"source":"Market makers remain broadly neutral.","date":"Oct 16","facts":["SPX Gamma Exposure: Neutral"]}', report)
         self.assertIn('"context":"Zero gamma: 7,736 · PV band: 7,660–7,886 · Strikes in play: 7,700, 7,750 · Gamma throttle: 0.64 · '

@@ -559,7 +559,9 @@ function buildMorningResearch({ snapshots = {}, marketDate = null, references = 
   const products = PRODUCTS.map(({ key, label }) => {
     const snapshot = snapshots[key];
     const current = snapshot && (!marketDate || snapshot.date === marketDate);
-    return { key, label, date: snapshot?.date || null, publishedAt: current ? publishedAt(snapshot) : null, status: current ? 'read' : 'missing' };
+    // The email the product was read from, so its Source can show the original.
+    const messageId = current ? snapshot.gmailMessageId || snapshot.sourceMessageId || null : null;
+    return { key, label, date: snapshot?.date || null, publishedAt: current ? publishedAt(snapshot) : null, messageId, status: current ? 'read' : 'missing' };
   });
   const findings = [];
   for (const product of products) {

@@ -102,7 +102,7 @@ describe('Volatility spreadsheet presentation', () => {
     expect(within(row).getByText('16.7')).toHaveClass('efr-vol-regime-value--green');
     expect(within(row).getByText('16.7').closest('td')).toHaveAttribute('title', `Level 16.65 · ibkr · live · as of ${OBSERVED_AT}`);
     expect(within(row).getByText('Investable')).toBeInTheDocument();
-    expect(within(row).getByText('<20')).toBeInTheDocument();
+    expect(within(row).getByText('<19')).toBeInTheDocument();
     expect(within(row).getByText('+12.50%')).toHaveAttribute('title', expect.stringContaining('15D prior level 14.80'));
     expect(within(row).getByText('-25.07%')).toHaveClass('is-falling');
     expect(within(row).queryByRole('button', { name: /Delayed quote/ })).not.toBeInTheDocument();
@@ -127,8 +127,8 @@ describe('Volatility spreadsheet presentation', () => {
   });
 
   test.each([
-    ['VIX', 19.99, '20', 'green', 'Investable'],
-    ['VIX', 20, '20', 'yellow', 'Chop'],
+    ['VIX', 18.99, '19', 'green', 'Investable'],
+    ['VIX', 19, '19', 'yellow', 'Chop'],
     ['VVIX', 114.99, '115', 'yellow', 'Chop'],
     ['VVIX', 115, '115', 'red', 'Uninvestable'],
   ])('rounds %s %s for display while preserving its exact reading and regime', (symbol, level, display, bucket, regime) => {
@@ -232,7 +232,7 @@ describe('Volatility spreadsheet presentation', () => {
     const row = screen.getByRole('row', { name: 'VIX current volatility' });
     expect(row).toHaveAttribute('data-status', 'live');
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent))
-      .toEqual(['16.7', '+10.78%', '+12.50%', '-25.07%', '—', '+7.77%', 'Investable<20']);
+      .toEqual(['16.7', '+10.78%', '+12.50%', '-25.07%', '—', '+7.77%', 'Investable<19']);
   });
 
   test.each(['spreadsheet', 'map'])('shows the original observation time in %s when verification happened later', (layout) => {
@@ -307,7 +307,7 @@ describe('Volatility spreadsheet presentation', () => {
       vixRiskRangeState: { status: 'available', range },
     });
     const row = screen.getByRole('row', { name: 'VIX current volatility' });
-    expect(within(row).getAllByRole('cell').at(-1)).toHaveTextContent(/^Investable<20$/);
+    expect(within(row).getAllByRole('cell').at(-1)).toHaveTextContent(/^Investable<19$/);
     expect(screen.queryByLabelText('VIX Risk Range')).not.toBeInTheDocument();
     rerender(<VolatilityMapPanel layout="spreadsheet" volatilityState={{ snapshot: { VIX: CURRENT_ROW } }}
       vixRiskRangeState={{ status: 'available', range: { ...range, source: 'cache_only' } }} />);

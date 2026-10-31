@@ -123,12 +123,16 @@ test('summarises each market with the highest-priority Alpha Code and the price 
   const research = buildMorningResearch({
     marketDate: '2026-10-16', references, prices: { ust10y: 5.08, bitcoin: 81300 },
     snapshots: {
-      'top-3-things': article('RATES – UST 10yr Alpha Code = 5.10/4.76\nRATES – TREND for the UST 10yr Yield is 4.76%'),
+      'top-3-things': { ...article('RATES – UST 10yr Alpha Code = 5.10/4.76\nRATES – TREND for the UST 10yr Yield is 4.76%'), gmailMessageId: '1a18ccb24523e419' },
       'the-macro-show': article('The ten-year yield’s trade/trend reference levels were 5.10%/4.76% .\nBitcoin held approximately $83,000 as trade support and $78,000 as trend support.'),
       'early-look': { date: '2026-10-15', article: { bodyText: 'UST 10yr Alpha Code = 5.20/4.80' } },
     },
   });
   assert.equal(research.products.find((item) => item.key === 'early-look').status, 'missing');
+  // Each product read names its email, for the Source to show; one from another day names none.
+  assert.equal(research.products.find((item) => item.key === 'top-3-things').messageId, '1a18ccb24523e419');
+  assert.equal(research.products.find((item) => item.key === 'the-macro-show').messageId, null);
+  assert.equal(research.products.find((item) => item.key === 'early-look').messageId, null);
   const ust10y = research.markets.ust10y;
   assert.deepEqual({ trade: ust10y.alphaCode.trade, trend: ust10y.alphaCode.trend, product: ust10y.alphaCode.productLabel,
     confirmedBy: ust10y.alphaCode.confirmedBy, priceVsTrade: ust10y.alphaCode.priceVsTrade, priceVsTrend: ust10y.alphaCode.priceVsTrend },

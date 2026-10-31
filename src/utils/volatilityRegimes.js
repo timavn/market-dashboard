@@ -28,8 +28,8 @@ export const VOL_RANGES = Object.freeze({
     name: 'VIX (S&P 500 Implied Vol)',
     source: 'The Process',
     ranges: Object.freeze([
-      Object.freeze({ min: 0, max: 20, label: 'Investable', color: 'green', desc: 'Buy dips, normal risk' }),
-      Object.freeze({ min: 20, max: 29, label: 'Chop', color: 'yellow', desc: 'Trade ranges, be aggressive on longs' }),
+      Object.freeze({ min: 0, max: 19, label: 'Investable', color: 'green', desc: 'Buy dips, normal risk' }),
+      Object.freeze({ min: 19, max: 29, label: 'Chop', color: 'yellow', desc: 'Trade ranges, be aggressive on longs' }),
       Object.freeze({ min: 29, max: null, label: 'Uninvestable', color: 'red', desc: 'Defensive, preserve capital' }),
     ]),
   }),
