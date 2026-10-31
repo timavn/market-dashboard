@@ -1543,7 +1543,11 @@ async function queryLatestSnapshotsByType(
         throw error;
       }
     }
-    return fullRows.length > 0 ? fullRows : rows;
+    if (fullRows.length === 0) return rows;
+    // BatchGetItem returns items in no particular order; callers rely on the
+    // index's newest-first order (current vs previous edition).
+    const rank = new Map(keys.map((key, index) => [key.date, index]));
+    return fullRows.sort((a, b) => (rank.get(a.date) ?? Infinity) - (rank.get(b.date) ?? Infinity));
   } catch (error) {
     // During the one-time GSI build (or a local environment without the
     // migration), keep the active path bounded by exact-key reads. Never
