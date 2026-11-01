@@ -887,7 +887,7 @@ test('the launch and deferred-history placeholder keeps the full report without 
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveClass('analyst-captured-report-placeholder', 'analyst-historical-report');
   expect(report).toHaveAttribute('data-message-id', 'deferred-post');
-  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(13);
+  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(14);
   expect(report).not.toHaveTextContent('$');
   expect(screen.getByRole('table', { name: 'Portfolio exposure' })).toBeVisible();
   expect(screen.getByRole('table', { name: 'Action required' })).toHaveTextContent('Loading…');

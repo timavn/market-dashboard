@@ -19,6 +19,7 @@ const SOURCE_DEFINITIONS = [
   { id: 'bitcoin-trend-tracker', label: 'Bitcoin Tracker', cadence: 'event_driven' },
   { id: 'momo-tracker', label: 'MOMO Tracker', cadence: 'event_driven' },
   { id: 'signal-strength', label: 'Signal Strength', cadence: 'event_driven' },
+  { id: 'signal-strength-shorts', label: 'Signal Strength Shorts', cadence: 'event_driven' },
   { id: 'the-macro-show', label: 'Macro Show', cadence: 'event_driven' },
   { id: 'the-call', label: 'The Call', cadence: 'event_driven' },
   { id: 'cftc-positioning', label: 'CFTC Positioning', cadence: 'weekly' },

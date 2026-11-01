@@ -5,6 +5,12 @@ import { analystWorkspaceApi as api } from '../../services/analyst/analystClient
 
 const HIT_ID = 'analyst-source-hit';
 const QUOTE_HIGHLIGHT = 'analyst-source-quote';
+// The dashboard's thin black scrollbar (index.css), which the email's own page does not inherit;
+// drawn wider by the email's zoom so it still shows at 2px.
+const frameScrollbar = scale => `::-webkit-scrollbar{width:${2 / scale}px;height:${2 / scale}px}`
+  + '::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}'
+  + '::-webkit-scrollbar-button{display:none}::-webkit-scrollbar-thumb{background:#111;border-radius:999px}'
+  + '@supports (-moz-appearance:none){*{scrollbar-width:thin;scrollbar-color:#111 transparent}}';
 // The stored email fits the frame's width; past this it would be too small to read, and scrolls instead.
 const MIN_SCALE = 0.55;
 
@@ -58,15 +64,17 @@ function frameEmail(frame, quote) {
   const doc = frame?.contentDocument;
   if (!doc?.documentElement) return;
   const width = doc.documentElement.scrollWidth;
-  if (width > frame.clientWidth) doc.documentElement.style.zoom = String(Math.max(MIN_SCALE, frame.clientWidth / width));
+  const scale = width > frame.clientWidth ? Math.max(MIN_SCALE, frame.clientWidth / width) : 1;
+  if (scale < 1) doc.documentElement.style.zoom = String(scale);
+  const style = doc.createElement('style');
+  style.textContent = frameScrollbar(scale);
+  (doc.head || doc.documentElement).appendChild(style);
   const hit = doc.getElementById(HIT_ID);
   const range = hit ? null : findQuote(doc, quote);
   // The quoted line takes the ticker's highlight where the browser can paint one without changing the email.
   const view = doc.defaultView;
   if (range && view?.CSS?.highlights && view.Highlight) {
-    const style = doc.createElement('style');
-    style.textContent = `::highlight(${QUOTE_HIGHLIGHT}){background-color:#fde68a;color:#111827}`;
-    doc.head?.appendChild(style);
+    style.textContent += `::highlight(${QUOTE_HIGHLIGHT}){background-color:#fde68a;color:#111827}`;
     view.CSS.highlights.set(QUOTE_HIGHLIGHT, new view.Highlight(range));
   }
   const target = hit || range;

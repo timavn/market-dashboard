@@ -3769,22 +3769,27 @@ def parse_html_snapshot(
         snapshot["article"]["summary"] = _extract_main_summary(text)
         return snapshot
 
-    if report_type == "signal-strength":
+    if report_type in {"signal-strength", "signal-strength-shorts"}:
         # Since 2026-10-15 Hedgeye sends the long list ("Signal Strength
-        # Stocks: N Stocks") and a separate short list ("Signal Strength
-        # Shorts: N Stocks"). The short book is kept under data.shorts so no
-        # consumer of the long list can read a short as a long.
+        # Stocks: N Stocks") and a separate product, the short list ("Signal
+        # Strength Shorts: N Stocks"). Each is its own snapshot type, so no
+        # consumer of the long list can read a short as a long. The body's
+        # book heading decides; the subject decides only when it is missing.
         book_match = re.search(r"Signal Strength (Stocks|Shorts):\s*(\d+)\s+Stocks", text, re.IGNORECASE)
-        side = "short" if book_match and book_match.group(1).lower() == "shorts" else "long"
+        if book_match:
+            side = "short" if book_match.group(1).lower() == "shorts" else "long"
+        else:
+            side = "short" if report_type == "signal-strength-shorts" else "long"
         added = _signal_strength_change_symbols(text, ("Added", "ADDING"))
         removed = _signal_strength_change_symbols(text, ("Removed", "REMOVING"))
         stock_count = int(book_match.group(2)) if book_match else len(added)
         if not added and not removed and not stock_count:
             return None
         table_rows = _signal_strength_html_rows(html_body, side=side)
+        snapshot_type = "signal-strength-shorts" if side == "short" else "signal-strength"
         snapshot = _base_snapshot(
-            snapshot_type="signal-strength",
-            report_type=report_type,
+            snapshot_type=snapshot_type,
+            report_type=snapshot_type,
             html_body=html_body,
             text=text,
             received_at=received_at,
@@ -3805,26 +3810,13 @@ def parse_html_snapshot(
                 # extraction into an inferred full membership list.
                 print(f"Signal Strength chart extraction unavailable: {error}")
         membership_complete = bool(stock_count and len(source_rows) == stock_count)
-        book = {
+        snapshot["stockCount"] = stock_count
+        snapshot["data"] = {
             "added": added,
             "removed": removed,
             "stocks": source_rows or [{"ticker": ticker} for ticker in added],
             "membershipComplete": membership_complete,
         }
-        if side == "short":
-            snapshot["shortCount"] = stock_count
-            snapshot["data"] = {
-                "shorts": {
-                    **book,
-                    "stockCount": stock_count,
-                    "publishedAt": snapshot["publishedAt"],
-                    "receivedAt": snapshot["scrapedAt"],
-                    "gmailMessageId": message_id,
-                },
-            }
-        else:
-            snapshot["stockCount"] = stock_count
-            snapshot["data"] = book
         return snapshot
 
     if report_type == "portfolio-solutions":

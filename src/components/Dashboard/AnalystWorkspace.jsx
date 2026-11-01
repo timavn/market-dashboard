@@ -174,6 +174,11 @@ const recoveryDelay = attempt => Math.min(1000 * 2 ** attempt, 15_000);
 const EVENT_SOURCE_CLOSED = 2;
 // A repeated click must land on the disabled row being deleted, never on the row below it.
 const DELETE_ROW_HOLD_MS = 1000;
+// An Inbox Source docks in the empty space left of the Analyst window when there is room for it.
+const DOCKED_SOURCE_WIDTH = 420;
+const DOCKED_SOURCE_MIN_WIDTH = 320;
+// The product a publication came from: its title up to the colon ("Real-Time Alert: UNH Sell").
+const sourceProduct = source => String(source?.title || source?.product || 'Source').split(':')[0];
 const highlightTexts = value => Array.isArray(value) ? value.filter(text => typeof text === 'string') : [];
 function citationPublications(source, context) {
   const publications = [];
@@ -251,6 +256,8 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   // An anchored citation (Inbox Source) opens beside its button; a second click closes it.
   const [citationAnchor, setCitationAnchor] = useState(null);
   const citationAnchorRef = useRef(null);
+  // An anchored Source with several publications shows one at a time, paged from its header or its squares.
+  const [citationPage, setCitationPage] = useState(0);
   const openCitation = useCallback((source, context) => {
     const anchor = context?.anchor || null;
     if (anchor && citationAnchorRef.current === anchor) {
@@ -260,6 +267,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     }
     citationAnchorRef.current = anchor;
     setCitationAnchor(anchor);
+    setCitationPage(0);
     const generation = ++citationGeneration.current;
     const publications = citationPublications(source, context).map(publication => ({ ...publication,
       ...(publication.evidenceIncluded === false ? { evidenceLoading: true } : {}) }));
@@ -276,9 +284,28 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   useLayoutEffect(() => {
     const surface = citationSurface.current;
     if (!citation || !citationAnchor || !surface) return undefined;
+    const card = citationAnchor.closest('.analyst-inbox-finding');
+    card?.setAttribute('data-cited', '');
+    // A docked popover sits centered beside the Analyst window, no taller than it, and ignores scrolling.
+    const dock = () => {
+      const analyst = surface.parentElement.getBoundingClientRect();
+      const gap = 12;
+      const margin = 8;
+      const width = Math.min(DOCKED_SOURCE_WIDTH, analyst.left - gap - margin);
+      if (width < DOCKED_SOURCE_MIN_WIDTH) return false;
+      surface.classList.add('is-docked');
+      surface.style.width = `${width}px`;
+      surface.style.left = `${analyst.left - gap - width}px`;
+      surface.style.maxHeight = `${analyst.height}px`;
+      surface.style.top = `${analyst.top + (analyst.height - surface.offsetHeight) / 2}px`;
+      return true;
+    };
     const place = () => {
       // A dismissed alert takes its button with it, so its popover closes too.
       if (!citationAnchor.isConnected) { setCitation(null); return; }
+      if (dock()) return;
+      surface.classList.remove('is-docked');
+      surface.style.width = '';
       const container = surface.offsetParent || surface.parentElement;
       const bounds = container.getBoundingClientRect();
       const button = citationAnchor.getBoundingClientRect();
@@ -302,17 +329,25 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     // An original email arrives after the popover opens and makes it taller.
     const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
     for (const entry of surface.children) grown?.observe(entry);
+    // Only the in-panel popover follows its button; the docked one holds still.
+    const scrolled = () => { if (!surface.classList.contains('is-docked')) place(); };
     window.addEventListener('resize', place);
-    document.addEventListener('scroll', place, true);
+    document.addEventListener('scroll', scrolled, true);
     return () => {
       grown?.disconnect();
       window.removeEventListener('resize', place);
-      document.removeEventListener('scroll', place, true);
+      document.removeEventListener('scroll', scrolled, true);
+      card?.removeAttribute('data-cited');
+      surface.classList.remove('is-docked');
       surface.style.top = '';
       surface.style.left = '';
+      surface.style.width = '';
       surface.style.maxHeight = '';
     };
-  }, [citation, citationAnchor]);
+  }, [citation, citationAnchor, citationPage]);
+  const pagedCitation = Boolean(citationAnchor && citation?.length > 1);
+  const shownCitationPage = pagedCitation ? Math.min(citationPage, citation.length - 1) : 0;
+  const turnCitationPage = step => setCitationPage(page => (page + step + citation.length) % citation.length);
   const { inbox, inboxError, loadInbox, acknowledge } = useAnalystInbox();
   const [refreshingIds, setRefreshingIds] = useState([]);
   // An unacknowledged review start survives a reload as the same Starting slot.
@@ -1456,7 +1491,13 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
           </section>
         </div>}
       </main>
-      {citation && <aside ref={citationSurface} className={`analyst-source-detail${citationAnchor ? ' is-anchored' : ''}`} role="dialog" aria-label="Citation source">{!citationAnchor && <header><span>Source evidence</span></header>}{citation.map((source, index) => {
+      {citation && <aside ref={citationSurface} className={`analyst-source-detail${citationAnchor ? ' is-anchored' : ''}`} role="dialog" aria-label="Citation source">{!citationAnchor && <header><span>Source evidence</span></header>}
+      {pagedCitation && <div className="analyst-source-pager">
+        <button type="button" aria-label="Previous source" onClick={() => turnCitationPage(-1)}>‹</button>
+        <span>{shownCitationPage + 1} of {citation.length} · {sourceProduct(citation[shownCitationPage])}</span>
+        <button type="button" aria-label="Next source" onClick={() => turnCitationPage(1)}>›</button>
+      </div>}
+      {(pagedCitation ? [citation[shownCitationPage]] : citation).map((source, index) => {
         const title = source.title || source.product;
         const href = source.sourceUri && source.product !== 'dashboard-health' ? safeResearchUrl(source.sourceUri) : null;
         // An emailed publication shows the original, clipped around its ticker, with the report link under it.
@@ -1472,7 +1513,11 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
         </> : <AnalystSourceExcerpt excerpt={source.excerpt} highlightTexts={source.highlightTexts} />}
         {source.evidenceError && <p>Source evidence unavailable.</p>}
       </article>;
-      })}</aside>}
+      })}
+      {pagedCitation && <div className="analyst-source-dots" role="group" aria-label="Sources">{citation.map((source, index) =>
+        <button key={source.id || index} type="button" className={index === shownCitationPage ? 'is-current' : undefined} aria-current={index === shownCitationPage || undefined}
+          aria-label={`Source ${index + 1}: ${source.title || source.product}`} onClick={() => setCitationPage(index)} />)}</div>}
+      </aside>}
     </div>
   </section>;
 }

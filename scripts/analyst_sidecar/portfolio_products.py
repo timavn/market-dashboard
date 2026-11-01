@@ -19,7 +19,8 @@ from portfolio_refresh import _action_comment
 
 MEMBERSHIP_KINDS = {"position_mention", "position_reference", "investing_idea_position",
                     "signal_strength_added", "signal_strength_removed", "signal_strength_listed",
-                    "signal_strength_membership", "portfolio_solutions_rank", "portfolio_rank", "etf_pro_rank"}
+                    "signal_strength_membership", "signal_strength_short_added", "signal_strength_short_removed",
+                    "signal_strength_short_membership", "portfolio_solutions_rank", "portfolio_rank", "etf_pro_rank"}
 ACTION_KINDS = {"real_time_alert", "etf_pro_change", "position_change", "source_action"}
 READING_KINDS = {"source-position", "action", "membership", "rank", "commentary", "trade", "trend", "tick"}
 
@@ -32,10 +33,12 @@ def _membership(reference):
         if isinstance(rank, (int, float)) and not isinstance(rank, bool) and math.isfinite(rank) and rank > 0:
             return "rank", f"Rank #{rank:g}"
         return None
-    if kind == "signal_strength_added":
+    if kind in {"signal_strength_added", "signal_strength_short_added"}:
         return "membership", "Added"
-    if kind == "signal_strength_removed":
+    if kind in {"signal_strength_removed", "signal_strength_short_removed"}:
         return "membership", "Removed"
+    if kind == "signal_strength_short_membership":
+        return "membership", "Listed"
     value = reference.get("value")
     explicit = (_obj(value).get("side") or _obj(value).get("position")
                 or (value if isinstance(value, str) else None) or reference.get("direction"))
@@ -47,6 +50,14 @@ def _membership(reference):
     if side in {"BULLISH", "BEARISH"}:
         return "source-position", side.title()
     return None
+
+
+def _product(reference, citation):
+    """Signal Strength Shorts is its own product, also for its events recorded
+    under the long product before the split (2026-10-29)."""
+    if str(reference.get("kind") or "").startswith("signal_strength_short_"):
+        return "signal-strength-shorts", "Signal Strength Shorts"
+    return reference["productId"], citation["productLabel"]
 
 
 def portfolio_product_readings(holdings, intelligence, daily_research, *, as_of):
@@ -88,10 +99,11 @@ def portfolio_product_readings(holdings, intelligence, daily_research, *, as_of)
                 continue
             kind, reading = label if label else ("action", action["reading"])
             date = _reference_date(reference)
-            candidate = {"product": reference["productId"], "productLabel": citation["productLabel"],
+            product, product_label = _product(reference, citation)
+            candidate = {"product": product, "productLabel": product_label,
                          "reading": reading, "kind": kind, "date": date,
                          "relation": relation, "sourceTicker": source_ticker, "citations": [citation]}
-            key = (reference["productId"], "membership" if label else "action")
+            key = (product, "membership" if label else "action")
             prior = latest_membership.get(key, [])
             newest = str(prior[0]["date"]) if prior else ""
             if str(date) > newest:

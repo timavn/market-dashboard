@@ -160,6 +160,7 @@ const SignalStrengthPanel = ({
         const range = getCanonicalRiskRange(entry, { primaryOnly: true });
         const status = canonicalProductState(product);
         const signalProduct = entry?.products?.['signal-strength'] || null;
+        const shortsProduct = entry?.products?.['signal-strength-shorts'] || null;
         nextRanges[ticker] = range
           ? { ...range, date: range.date, status }
           : { lrr: null, hrr: null, trend: null, date: null, status };
@@ -167,6 +168,7 @@ const SignalStrengthPanel = ({
           health: entry?.health?.status || 'unavailable',
           rangeStatus: status,
           action: signalProduct?.fields?.action?.value || null,
+          shortsAction: shortsProduct?.fields?.action?.value || null,
           marketDate: entry?.marketDate || payload.marketDate || null,
         };
       });
@@ -218,13 +220,18 @@ const SignalStrengthPanel = ({
     if (!SECURITY_INTELLIGENCE_V2_ENABLED) return null;
     const added = [];
     const removed = [];
+    const shortsAdded = [];
+    const shortsRemoved = [];
     Object.entries(securityIntelligence).forEach(([ticker, value]) => {
       if (value?.action === 'ADDED') added.push(ticker);
       if (value?.action === 'REMOVED') removed.push(ticker);
+      if (value?.shortsAction === 'ADDED') shortsAdded.push(ticker);
+      if (value?.shortsAction === 'REMOVED') shortsRemoved.push(ticker);
     });
     return {
       added: added.sort(),
       removed: removed.sort(),
+      shorts: { added: shortsAdded.sort(), removed: shortsRemoved.sort() },
       currentDate: Object.values(securityIntelligence)
         .map((value) => value?.marketDate)
         .filter(Boolean)
@@ -233,6 +240,8 @@ const SignalStrengthPanel = ({
     };
   }, [securityIntelligence]);
   const changeData = (SECURITY_INTELLIGENCE_V2_ENABLED ? canonicalChangeData : changelog?.['signal-strength']) || {};
+  // Signal Strength Shorts is its own product; its changes never join the long list's.
+  const shortsChangeData = (SECURITY_INTELLIGENCE_V2_ENABLED ? canonicalChangeData?.shorts : changelog?.['signal-strength-shorts']) || {};
   const riskRangeDate = useMemo(() => {
     const dates = Object.values(riskRanges).map((row) => row?.date).filter(Boolean).sort();
     return dates[dates.length - 1] || null;
@@ -477,9 +486,11 @@ const SignalStrengthPanel = ({
       <div className="reference-change-grid">
         <div className="reference-card reference-change-card">
           <div className="reference-card__header"><span>Signal Strength Changes</span><span>{formatDate(snapshotDate)}</span></div>
-          <div className="reference-change-card__body">
+          <div className="reference-change-card__body reference-change-card__body--four">
             <div><div className="reference-change-group__label">Added</div><ChangePills values={changeData.added || []} tone="positive" /></div>
             <div><div className="reference-change-group__label">Removed</div><ChangePills values={changeData.removed || []} tone="negative" /></div>
+            <div><div className="reference-change-group__label">Shorts added</div><ChangePills values={shortsChangeData.added || []} tone="negative" /></div>
+            <div><div className="reference-change-group__label">Shorts removed</div><ChangePills values={shortsChangeData.removed || []} tone="neutral" /></div>
           </div>
         </div>
         <div className="reference-card reference-change-card">

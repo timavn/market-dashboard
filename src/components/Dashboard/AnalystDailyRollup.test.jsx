@@ -740,9 +740,9 @@ test('empty and unsupported block types do not leave empty report headings', () 
 
 test('Portfolio Review keeps each research section through absent, partial, ready and unavailable captures without reserved heights', () => {
   const titles = ['PCA risk', 'Factor exposure', "Today's market drivers", 'Tick', 'Trend/Ranges/Coverage/Outbucket',
-    'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Market structure & flows'];
+    'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Signal Strength Shorts', 'Market structure & flows'];
   const ids = ['pca-risk', 'factor-exposure', 'market-drivers', 'hedgai-signals', 'risk-ranges',
-    'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'market-structure'];
+    'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'signal-strength-shorts', 'market-structure'];
   const { rerender } = render(<AnalystDailyRollup stableLayout loading />);
   const cards = screen.getAllByRole('region');
   const datelines = cards.map(card => card.querySelector('.portfolio-review-dateline'));
@@ -758,7 +758,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
     });
   };
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(10);
+  expect(screen.getAllByText('Loading…')).toHaveLength(11);
   cards.forEach(card => {
     expect(card).toHaveAttribute('aria-busy', 'true');
     expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
@@ -771,7 +771,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
   const onCitation = jest.fn();
   rerender(<AnalystDailyRollup stableLayout loading rollup={partial} onCitation={onCitation} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(9);
+  expect(screen.getAllByText('Loading…')).toHaveLength(10);
   const drivers = screen.getByRole('region', { name: "Today's market drivers" });
   expect(drivers).not.toHaveAttribute('aria-busy');
   expect(within(drivers.querySelector('.portfolio-review-section-body')).getByText('Captured market reading.')).toBeVisible();
@@ -793,7 +793,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
 
   rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [] }} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Unavailable')).toHaveLength(10);
+  expect(screen.getAllByText('Unavailable')).toHaveLength(11);
   expect(screen.queryByText(/Captured reading|Captured market reading/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });

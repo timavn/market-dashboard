@@ -8,8 +8,13 @@ Shorts edition was quarantined. Prepare parses each archived edition since
 the format change with the tested parser, records the membership it must
 produce, and writes an authenticated private receipt. Apply runs against the
 deployed tested release while the Gmail schedule is disabled, replays at most
-eight messages per invocation, and verifies every daily snapshot's long and
-short books against the receipt.
+eight messages per invocation, and verifies every day's long and short books
+against the receipt.
+
+Signal Strength Shorts is its own product (snapshot type
+``signal-strength-shorts``). Editions materialized before the split kept the
+short book under the long row's ``data.shorts``; replaying them moves it to
+its own row, and apply retires the short editions from the long row.
 
 Receipt, session, schedule, release and invocation guards are shared with the
 Top 3 Things replay.
@@ -69,12 +74,14 @@ SCAN_PAGE_LIMIT = 1000
 MAX_EDITIONS = 120
 RECEIPT_SCHEMA_VERSION = 1
 RECEIPT_KIND = "market-dashboard-signal-strength-backfill"
-INCIDENT_PROFILE = "signal-strength-books-v1"
+INCIDENT_PROFILE = "signal-strength-shorts-product-v1"
 ALLOWED_SOURCE_STATUSES = frozenset({"INDEXED", "STORED", "ERROR"})
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 DATE = re.compile(r"^20\d{2}-\d{2}-\d{2}$")
 MESSAGE_ID = re.compile(r"^[0-9a-f]{16,32}$")
 SIDES = ("long", "short")
+SNAPSHOT_TYPES = {"long": "signal-strength", "short": "signal-strength-shorts"}
+SIDE_BY_SNAPSHOT_TYPE = {value: key for key, value in SNAPSHOT_TYPES.items()}
 
 
 class SignalStrengthBackfillFailure(RuntimeError):
@@ -92,10 +99,8 @@ def _translated(error: TopThreeBackfillFailure) -> SignalStrengthBackfillFailure
 
 
 def edition_book(snapshot: Mapping[str, Any]) -> tuple[str, Mapping[str, Any], int]:
-    data = snapshot.get("data") or {}
-    if isinstance(data.get("shorts"), Mapping):
-        return "short", data["shorts"], int(snapshot.get("shortCount") or 0)
-    return "long", data, int(snapshot.get("stockCount") or 0)
+    side = SIDE_BY_SNAPSHOT_TYPE.get(str(snapshot.get("snapshotType") or ""), "long")
+    return side, snapshot.get("data") or {}, int(snapshot.get("stockCount") or 0)
 
 
 def scan_candidate_rows(ledger: Any, start_date: str) -> list[Mapping[str, Any]]:
@@ -140,7 +145,7 @@ def scan_candidate_rows(ledger: Any, start_date: str) -> list[Mapping[str, Any]]
                 str(row.get("filename") or ""),
                 str(row.get("subject") or ""),
             )
-            != "signal-strength"
+            not in SIDE_BY_SNAPSHOT_TYPE
         ):
             continue
         candidates.append(row)
@@ -160,7 +165,7 @@ def parsed_edition(s3: Any, row: Mapping[str, Any]) -> dict[str, Any] | None:
     except TopThreeBackfillFailure as error:
         raise _translated(error) from error
     snapshot = parse_html_snapshot(
-        report_type="signal-strength",
+        report_type=infer_report_type(str(row.get("filename") or ""), str(row.get("subject") or "")),
         html_body=body.decode("utf-8", errors="replace"),
         received_at=received_at,
         s3_key=str(row["s3Key"]),
@@ -212,12 +217,13 @@ def expected_books(editions: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
     """Each day's books are its latest long and latest short editions."""
     days: dict[str, dict[str, Any]] = {}
     for edition in sorted(editions, key=lambda item: (item["receivedAt"], item["messageId"])):
-        day = days.setdefault(edition["snapshotDate"], {"date": edition["snapshotDate"], "sourceMessageIds": []})
-        day["sourceMessageIds"].append(edition["messageId"])
+        day = days.setdefault(edition["snapshotDate"], {"date": edition["snapshotDate"]})
+        sources = [*(day.get(edition["side"]) or {}).get("sourceMessageIds", []), edition["messageId"]]
         day[edition["side"]] = {
             "messageId": edition["messageId"],
             "stockCount": edition["stockCount"],
             "membershipSha256": edition["membershipSha256"],
+            "sourceMessageIds": sources,
         }
     return [days[date] for date in sorted(days)]
 
@@ -402,7 +408,7 @@ def needs_replay(ledger: Any, s3: Any, edition: Mapping[str, Any]) -> bool:
         current.get("status") == "INDEXED"
         and current.get("materializationStatus") == "INDEXED"
         and current.get("materializationAttemptVersion") == MATERIALIZED_DATA_VERSION
-        and current.get("snapshotType") == "signal-strength"
+        and current.get("snapshotType") == SNAPSHOT_TYPES[edition["side"]]
         and current.get("researchParserVersion") == RESEARCH_PARSER_VERSION
         and current.get("securityIntelligenceParserVersion") == SECURITY_PARSER_VERSION
     ):
@@ -422,44 +428,73 @@ def needs_replay(ledger: Any, s3: Any, edition: Mapping[str, Any]) -> bool:
     return True
 
 
+def retire_legacy_short_sources(snapshots: Any, days: Sequence[Mapping[str, Any]]) -> int:
+    """Drop the short editions a pre-split long row still names as sources.
+
+    Replaying a long edition replaces the row's book but keeps every source it
+    had named, including the short edition that now has its own row.
+    """
+    retired = 0
+    for day in days:
+        short_sources = set((day.get("short") or {}).get("sourceMessageIds") or [])
+        if not short_sources or not day.get("long"):
+            continue
+        key = {"date": day["date"], "snapshotType": SNAPSHOT_TYPES["long"]}
+        row = snapshots.get_item(Key=key, ConsistentRead=True).get("Item") or {}
+        sources = list(row.get("sourceMessageIds") or [])
+        kept = [source for source in sources if source not in short_sources]
+        if kept == sources:
+            continue
+        snapshots.update_item(
+            Key=key,
+            UpdateExpression="SET sourceMessageIds = :kept",
+            ConditionExpression="dataVersion = :version AND sourceMessageIds = :sources",
+            ExpressionAttributeValues={
+                ":kept": kept,
+                ":sources": sources,
+                ":version": row.get("dataVersion"),
+            },
+        )
+        retired += 1
+    return retired
+
+
 def verify_snapshots(snapshots: Any, days: Sequence[Mapping[str, Any]]) -> None:
     for day in days:
-        snapshot = snapshots.get_item(
-            Key={"date": day["date"], "snapshotType": "signal-strength"},
-            ConsistentRead=True,
-        ).get("Item") or {}
-        data = snapshot.get("data") or {}
-        stored = {
-            "long": (data, snapshot.get("stockCount")),
-            "short": (data.get("shorts") or {}, snapshot.get("shortCount")),
-        }
         for side in SIDES:
             expected = day.get(side)
             if expected is None:
                 continue
-            book, count = stored[side]
+            snapshot = snapshots.get_item(
+                Key={"date": day["date"], "snapshotType": SNAPSHOT_TYPES[side]},
+                ConsistentRead=True,
+            ).get("Item") or {}
+            book = snapshot.get("data") or {}
             stocks = book.get("stocks") or []
             if (
-                int(count or 0) != expected["stockCount"]
+                int(snapshot.get("stockCount") or 0) != expected["stockCount"]
                 or len(stocks) != expected["stockCount"]
                 or book.get("membershipComplete") is not True
                 or hashlib.sha256(
                     ",".join(str(stock.get("ticker")) for stock in stocks).encode("utf-8")
                 ).hexdigest()
                 != expected["membershipSha256"]
+                # A pre-split row must not keep the short book beside the long.
+                or "shorts" in book
+                or "shortCount" in snapshot
             ):
                 raise SignalStrengthBackfillFailure(
                     "SIGNAL_STRENGTH_SNAPSHOT_VERIFICATION_FAILED",
                     f"The {day['date']} {side} book does not match its latest edition.",
                 )
-        if (
-            not set(day["sourceMessageIds"]) <= set(snapshot.get("sourceMessageIds") or [])
-            or not str(snapshot.get("dataVersion") or "").startswith(f"{MATERIALIZED_DATA_VERSION}:")
-        ):
-            raise SignalStrengthBackfillFailure(
-                "SIGNAL_STRENGTH_SNAPSHOT_VERIFICATION_FAILED",
-                f"The {day['date']} snapshot is missing a replayed edition.",
-            )
+            if (
+                set(snapshot.get("sourceMessageIds") or []) != set(expected["sourceMessageIds"])
+                or not str(snapshot.get("dataVersion") or "").startswith(f"{MATERIALIZED_DATA_VERSION}:")
+            ):
+                raise SignalStrengthBackfillFailure(
+                    "SIGNAL_STRENGTH_SNAPSHOT_VERIFICATION_FAILED",
+                    f"The {day['date']} {side} snapshot does not name exactly its own editions.",
+                )
 
 
 def apply(
@@ -512,7 +547,9 @@ def apply(
                 "SIGNAL_STRENGTH_REPLAY_POSTCHECK_FAILED",
                 "A selected ledger row did not reach the tested Signal Strength state.",
             )
-    verify_snapshots(session.resource("dynamodb").Table(SNAPSHOT_TABLE), payload["days"])
+    snapshots = session.resource("dynamodb").Table(SNAPSHOT_TABLE)
+    retired = retire_legacy_short_sources(snapshots, payload["days"])
+    verify_snapshots(snapshots, payload["days"])
     require_idle_runtime(ledger)
     return {
         "passed": True,
@@ -522,6 +559,7 @@ def apply(
         "replayedCount": len(pending),
         "skippedCount": len(editions) - len(pending),
         "verifiedDayCount": len(payload["days"]),
+        "retiredLegacyShortSourceCount": retired,
         "operatorBatchCount": batch_count,
         "invocationCount": invocation_count,
         "status": "SUCCESS",

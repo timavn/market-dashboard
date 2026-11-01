@@ -31,7 +31,7 @@ PRODUCT_MANIFEST_TABLE = os.environ.get(
     "RESEARCH_PRODUCT_MANIFEST_TABLE",
     "ResearchProductManifestsV1",
 )
-PARSER_VERSION = "security-intelligence-v5-signal-strength-books"
+PARSER_VERSION = "security-intelligence-v6-signal-strength-shorts-product"
 MAX_MANIFEST_WRITE_RETRIES = 4
 # Artifacts that matched no registered product are filed under this key. A
 # later recovery under a registered product must be able to move them out.
@@ -329,10 +329,12 @@ def _etf_pro_typed_value(value: Any) -> Optional[Dict[str, str]]:
     return {"action": action, "side": side}
 
 
+SIGNAL_STRENGTH_PRODUCTS = {"signal-strength", "signal-strength-shorts"}
+
+
 def _has_signal_strength_book(data: Any) -> bool:
-    return isinstance(data, dict) and (
-        isinstance(data.get("shorts"), dict)
-        or any(isinstance(data.get(key), list) for key in ("added", "removed", "stocks"))
+    return isinstance(data, dict) and any(
+        isinstance(data.get(key), list) for key in ("added", "removed", "stocks")
     )
 
 
@@ -342,10 +344,10 @@ def _event_kind(product_id: str, path: str) -> str:
         return "risk_range"
     if product_id == "early-look":
         return "supplemental_risk_range"
-    if product_id == "signal-strength":
-        # The short list is a separate book; its events must never carry the
-        # long-list kinds that consumers read as ADDED/LISTED.
-        prefix = "signal_strength_short" if lowered.startswith("data.shorts") else "signal_strength"
+    if product_id in SIGNAL_STRENGTH_PRODUCTS:
+        # The short list is a separate product; its events must never carry
+        # the long-list kinds that consumers read as ADDED/LISTED.
+        prefix = "signal_strength_short" if product_id == "signal-strength-shorts" else "signal_strength"
         if "added" in lowered:
             return f"{prefix}_added"
         if "removed" in lowered:
@@ -417,33 +419,29 @@ def _structured_ticker_references(
     data = snapshot.get("data")
     references: List[Dict[str, Any]] = []
 
-    if product_id == "signal-strength" and _has_signal_strength_book(data):
+    if product_id in SIGNAL_STRENGTH_PRODUCTS and _has_signal_strength_book(data):
         # One typed reference per listed security. Name, sector and analyst
         # columns must not steer direction the way the generic walker would.
-        books = [("data", data, ("positive", "negative", None))]
-        if isinstance(data.get("shorts"), dict):
-            books.append(("data.shorts", data["shorts"], ("negative", None, "negative")))
-        for book_path, book, (added_direction, removed_direction, listed_direction) in books:
-            for field, direction in (
-                ("added", added_direction),
-                ("removed", removed_direction),
-                ("stocks", listed_direction),
-            ):
-                rows = book.get(field) if isinstance(book, dict) else None
-                for index, row in enumerate(rows if isinstance(rows, list) else []):
-                    ticker = canonical_ticker(row, allow_structured_only=True)
-                    if not ticker:
-                        continue
-                    references.append(_reference(
-                        entity_type="ticker",
-                        entity_id=ticker,
-                        match_type="structured_membership",
-                        matched_text=ticker,
-                        excerpt=row if isinstance(row, str) else json.dumps(row, sort_keys=True, default=str),
-                        field_path=f"{book_path}.{field}[{index}]",
-                        product_id=product_id,
-                        direction=direction,
-                    ))
+        if product_id == "signal-strength-shorts":
+            directions = (("added", "negative"), ("removed", None), ("stocks", "negative"))
+        else:
+            directions = (("added", "positive"), ("removed", "negative"), ("stocks", None))
+        for field, direction in directions:
+            rows = data.get(field)
+            for index, row in enumerate(rows if isinstance(rows, list) else []):
+                ticker = canonical_ticker(row, allow_structured_only=True)
+                if not ticker:
+                    continue
+                references.append(_reference(
+                    entity_type="ticker",
+                    entity_id=ticker,
+                    match_type="structured_membership",
+                    matched_text=ticker,
+                    excerpt=row if isinstance(row, str) else json.dumps(row, sort_keys=True, default=str),
+                    field_path=f"data.{field}[{index}]",
+                    product_id=product_id,
+                    direction=direction,
+                ))
         return references
 
     if product_id == "bitcoin-trend-tracker":
@@ -773,7 +771,7 @@ def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
             if _is_authoritative_tracker_reference(reference)
         )
     searchable_data = snapshot.get("data") or {}
-    if product_id == "signal-strength" and _has_signal_strength_book(searchable_data):
+    if product_id in SIGNAL_STRENGTH_PRODUCTS and _has_signal_strength_book(searchable_data):
         # The email body repeats the published table. Its typed rows are the
         # only authority, and a short-list body must not read as membership.
         return references

@@ -39,6 +39,9 @@ const STRUCTURED_TICKER_EVENT_KINDS = new Set([
   'signal_strength_removed',
   'signal_strength_listed',
   'signal_strength_membership',
+  'signal_strength_short_added',
+  'signal_strength_short_removed',
+  'signal_strength_short_membership',
   'portfolio_rank',
   'portfolio_solutions_rank',
   'portfolio_solutions_mover',
@@ -49,6 +52,27 @@ const STRUCTURED_TICKER_EVENT_KINDS = new Set([
   'etf_pro_change',
   'investing_idea_position',
 ]);
+// Each Signal Strength product's event kinds, and the value each kind reads as.
+// Before Shorts became its own product (2026-10-29) its events were recorded
+// under the long product, so a short kind is read from either product; the
+// kinds alone keep the two books apart.
+const SIGNAL_STRENGTH_SOURCE_PRODUCTS = Object.freeze({
+  'signal-strength': ['signal-strength'],
+  'signal-strength-shorts': ['signal-strength-shorts', 'signal-strength'],
+});
+const SIGNAL_STRENGTH_KINDS = Object.freeze({
+  'signal-strength': {
+    signal_strength_added: 'ADDED',
+    signal_strength_removed: 'REMOVED',
+    signal_strength_listed: null,
+    signal_strength_membership: null,
+  },
+  'signal-strength-shorts': {
+    signal_strength_short_added: 'ADDED',
+    signal_strength_short_removed: 'REMOVED',
+    signal_strength_short_membership: null,
+  },
+});
 const BOILERPLATE_PATTERN = /\b(click here|unsubscribe|manage (?:your )?preferences|view (?:this )?email in (?:your )?browser)\b/i;
 
 const ALIAS_TO_CANONICAL = (() => {
@@ -1100,10 +1124,12 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
     }));
   }
 
-  if (productId === 'signal-strength') {
+  if (productId === 'signal-strength' || productId === 'signal-strength-shorts') {
+    const prefix = productId === 'signal-strength-shorts' ? 'signal_strength_short' : 'signal_strength';
+    const label = productId === 'signal-strength-shorts' ? 'Signal Strength Shorts' : 'Signal Strength';
     [
-      ['added', 'signal_strength_added', 'ADDED'],
-      ['removed', 'signal_strength_removed', 'REMOVED'],
+      ['added', `${prefix}_added`, 'ADDED'],
+      ['removed', `${prefix}_removed`, 'REMOVED'],
     ].forEach(([field, kind, direction]) => {
       asArray(data[field]).forEach((entry) => {
         const ticker = extractTicker(entry);
@@ -1113,7 +1139,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
           productId,
           kind,
           direction,
-          excerpt: `${ticker} ${direction.toLowerCase()} ${direction === 'ADDED' ? 'to' : 'from'} Signal Strength`,
+          excerpt: `${ticker} ${direction.toLowerCase()} ${direction === 'ADDED' ? 'to' : 'from'} ${label}`,
           ticker,
           requestedSymbols,
           qualityStatus,
@@ -1293,6 +1319,7 @@ function decisionInputs({
       decisionEligible: false,
     },
     signalStrength: unavailableDecision('no-explicit-signal-strength-event'),
+    signalStrengthShorts: unavailableDecision('no-explicit-signal-strength-shorts-event'),
   };
 
   const riskTrusted = (
@@ -1406,28 +1433,19 @@ function decisionInputs({
     decision.trade = { status: 'available', ...selected, reason: null };
   }
 
-  const signalReferences = references.filter((reference) => (
-    researchProjectionVerified &&
-    reference.productId === 'signal-strength' &&
-    reference.marketDate === marketDate &&
-    productsById[reference.productId] === 'indexed' &&
-    reference.qualityStatus === 'indexed' &&
-    ['direct', 'direct_alias'].includes(reference.matchType) &&
-    [
-      'signal_strength_added',
-      'signal_strength_removed',
-      'signal_strength_listed',
-      'signal_strength_membership',
-    ].includes(reference.kind)
-  ));
-  const signalValueForReference = (reference) => (
-    reference.kind === 'signal_strength_added'
-      ? 'ADDED'
-      : reference.kind === 'signal_strength_removed'
-        ? 'REMOVED'
-        : reference.value || 'LISTED'
-  );
-  if (signalReferences.length > 0) {
+  for (const [productId, field] of [['signal-strength', 'signalStrength'], ['signal-strength-shorts', 'signalStrengthShorts']]) {
+    const kinds = SIGNAL_STRENGTH_KINDS[productId];
+    const signalReferences = references.filter((reference) => (
+      researchProjectionVerified &&
+      SIGNAL_STRENGTH_SOURCE_PRODUCTS[productId].includes(reference.productId) &&
+      reference.marketDate === marketDate &&
+      productsById[reference.productId] === 'indexed' &&
+      reference.qualityStatus === 'indexed' &&
+      ['direct', 'direct_alias'].includes(reference.matchType) &&
+      Object.hasOwn(kinds, reference.kind)
+    ));
+    if (signalReferences.length === 0) continue;
+    const signalValueForReference = (reference) => kinds[reference.kind] || reference.value || 'LISTED';
     const signalTimestamps = signalReferences.map((reference) => Date.parse(reference.publishedAt || ''));
     const allDated = signalTimestamps.every(Number.isFinite);
     const latestSignalTimestamp = allDated ? Math.max(...signalTimestamps) : null;
@@ -1440,18 +1458,18 @@ function decisionInputs({
       ...new Set(latestSignalReferences.map(signalValueForReference)),
     ];
     if (signalValues.length > 1) {
-      decision.signalStrength = {
-        ...unavailableDecision('conflicting-signal-strength-events'),
+      decision[field] = {
+        ...unavailableDecision(`conflicting-${productId}-events`),
         status: 'conflict',
       };
-      return decision;
+      continue;
     }
     const signalReference = latestSignalReferences[0];
-    decision.signalStrength = {
+    decision[field] = {
       status: 'available',
       value: signalValues[0],
-      sourceId: signalReference.productId,
-      sourceLabel: signalReference.productLabel,
+      sourceId: productId,
+      sourceLabel: RESEARCH_PRODUCT_BY_ID[productId]?.label || signalReference.productLabel,
       sourceDate: signalReference.marketDate,
       publishedAt: signalReference.publishedAt,
       reason: null,
@@ -1554,40 +1572,35 @@ function buildLastVerifiedDecision({
     }
   }
 
-  const signalReferences = dates.flatMap(referencesForDate)
-    .filter((reference) => (
-      reference.productId === 'signal-strength'
-      && verifiedQuality.has(reference.qualityStatus)
-      && ['direct', 'direct_alias'].includes(reference.matchType)
-      && [
-        'signal_strength_added',
-        'signal_strength_removed',
-        'signal_strength_listed',
-        'signal_strength_membership',
-      ].includes(reference.kind)
-    ));
-  if (signalReferences.length > 0) {
+  for (const [productId, field] of [['signal-strength', 'signalStrength'], ['signal-strength-shorts', 'signalStrengthShorts']]) {
+    const kinds = SIGNAL_STRENGTH_KINDS[productId];
+    const signalReferences = dates.flatMap(referencesForDate)
+      .filter((reference) => (
+        SIGNAL_STRENGTH_SOURCE_PRODUCTS[productId].includes(reference.productId)
+        && verifiedQuality.has(reference.qualityStatus)
+        && ['direct', 'direct_alias'].includes(reference.matchType)
+        && Object.hasOwn(kinds, reference.kind)
+      ));
+    if (signalReferences.length === 0) continue;
     const selected = latestReference(signalReferences);
     const selectedTimestamp = selected?.publishedAt || selected?.marketDate;
     const contemporaneous = signalReferences.filter((reference) => (
       (reference.publishedAt || reference.marketDate) === selectedTimestamp
     ));
-    const values = [...new Set(contemporaneous.map((reference) => (
-      reference.kind === 'signal_strength_added'
-        ? 'ADDED'
-        : reference.kind === 'signal_strength_removed'
-          ? 'REMOVED'
-          : reference.value || 'LISTED'
-    )))];
-    result.signalStrength = values.length > 1
+    const values = [...new Set(contemporaneous.map((reference) => kinds[reference.kind] || reference.value || 'LISTED'))];
+    result[field] = values.length > 1
       ? {
-        ...unavailableDecision('conflicting-last-verified-signal-strength-events'),
+        ...unavailableDecision(`conflicting-last-verified-${productId}-events`),
         status: 'conflict',
         referenceOnly: true,
         executable: false,
         currentDecisionEligible: false,
       }
-      : historicalDecision(selected, values[0], { changeOnly: true });
+      : historicalDecision(selected, values[0], {
+        changeOnly: true,
+        sourceId: productId,
+        sourceLabel: RESEARCH_PRODUCT_BY_ID[productId]?.label || selected.productLabel,
+      });
   }
 
   return result;

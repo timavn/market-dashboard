@@ -45,14 +45,10 @@ function publicationLabel(time, date, receivedAt) {
 // Security alerts lead with their ticker; operational subjects are not tickers.
 const TICKER_KINDS = new Set(['portfolio', 'opportunity']);
 
-// Without a verified weight, the verified share count still sizes the position.
-const heldShares = (side, quantity) => ['Long', 'Short'].includes(side) && Number.isFinite(quantity) && quantity
-  ? `${side} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Math.abs(quantity))} sh` : side;
-
 // An urgent instruction remains visible during a holdings outage; say which
 // verification it rests on instead of presenting the position as current.
 function staleHoldingLabel(payload) {
-  const side = heldShares(payload.quantity > 0 ? 'Long' : payload.quantity < 0 ? 'Short' : 'Not held', payload.quantity);
+  const side = payload.quantity > 0 ? 'Long' : payload.quantity < 0 ? 'Short' : 'Not held';
   const at = new Date(payload.holdingsVerifiedAt);
   return Number.isFinite(at.getTime())
     ? `${side} (last verified ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(at)}; holdings currently unavailable)`
@@ -81,8 +77,7 @@ function attentionContent(finding, now) {
       const position = merged[index];
       if (row.text === 'Unavailable' || !['Long', 'Short'].includes(position.text)) return merged;
       return merged.map((item, i) => i === index ? { ...position, text: row.text, side: position.text } : item);
-    }, [])
-    .map(row => row.label === 'Current position' ? { ...row, text: heldShares(row.text, payload.quantity) } : row);
+    }, []);
   if (!rows.length) return null;
   return { ...presentation, rows, publicationDate: presentation.date || payload.publicationTime,
     sortTime: Date.parse(payload.publicationTime) || Date.parse(presentation.date) || 0 };
@@ -131,13 +126,12 @@ const STANCE_TONES = { LONG: 'positive', SHORT: 'negative', BUY: 'positive', SEL
 const callDate = date => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
 const amount = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
 const Toned = ({ value }) => <span className={toneClass(STANCE_TONES[value])}>{value}</span>;
-// A position reads as its weight, green Long and red Short; shares belong to the order.
-// Without a verified weight the share count stands in.
+// A position reads as its % of the portfolio, green Long and red Short; shares
+// belong only to the order. Without a verified weight it reads —.
 function stancePosition(position) {
   if (position.quantity === 0) return '0.00%';
-  const tone = toneClass(STANCE_TONES[position.side]);
-  if (position.weightPct === null || position.weightPct === undefined) return <span className={tone}>{position.quantity === null ? 'lower' : `${amount(position.quantity)} sh`}</span>;
-  return <span className={tone}>{position.weightPct.toFixed(2)}%</span>;
+  if (position.weightPct === null || position.weightPct === undefined) return '—';
+  return <span className={toneClass(STANCE_TONES[position.side])}>{position.weightPct.toFixed(2)}%</span>;
 }
 // "Sell 150 shares": the verb carries the color, as in the stance order cell.
 function OrderText({ children }) {
@@ -154,7 +148,7 @@ function StanceCopy({ ticker, stance, freshHoldings }) {
   return <div className="analyst-inbox-copy analyst-inbox-stance">
     <div className="analyst-inbox-stance-title"><span className="analyst-inbox-stance-ticker">{ticker}</span>{stance.name && <span>{stance.name}</span>}</div>
     <table className="analyst-inbox-stance-table">
-      <colgroup><col style={{ width: '38%' }} /><col style={{ width: '20%' }} /><col style={{ width: '18%' }} /><col style={{ width: '24%' }} /></colgroup>
+      <colgroup><col style={{ width: '35%' }} /><col style={{ width: '24%' }} /><col style={{ width: '16%' }} /><col style={{ width: '25%' }} /></colgroup>
       <thead><tr><th scope="col">Product</th><th scope="col">Action</th><th scope="col">Date</th><th scope="col">Bias</th></tr></thead>
       <tbody>{calls.map((call, index) => <tr key={index}>
         <td>{call.product}</td><td><Toned value={call.action} /></td><td>{callDate(call.date)}</td><td><Toned value={call.bias} /></td>

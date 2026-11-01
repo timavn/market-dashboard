@@ -2,7 +2,7 @@ import copy
 from datetime import datetime, timezone
 import unittest
 
-from inbox_holdings import current_holding_weights
+from inbox_holdings import current_holding_weights, session_close_marks
 
 
 NOW = datetime(2026, 9, 15, 17, 0, tzinfo=timezone.utc)
@@ -78,6 +78,56 @@ class InboxHoldingsTests(unittest.TestCase):
                 source = copy.deepcopy(portfolio())
                 source["data"]["accountSummaries"][0].update(change)
                 self.assertEqual(current_holding_weights(source, NOW), [])
+
+
+# Saturday 2026-10-31 10:47 ET: the book is frozen at Friday's close.
+WEEKEND = datetime(2026, 10, 31, 14, 47, tzinfo=timezone.utc)
+WEEKEND_OBSERVED = "2026-10-31T14:46:50Z"
+
+
+def unquoted_weekend_book():
+    """UNH held long, its live quote timed out; NLV is the broker's own."""
+    source = portfolio()
+    source["asOf"] = WEEKEND_OBSERVED
+    source["data"]["accountSummaries"][0]["observedAt"] = WEEKEND_OBSERVED
+    source["data"]["positions"] = [{"account": "U1", "symbol": "UNH", "conId": 13272, "quantity": 12,
+        "instrumentCategory": "other", "marketValue": None, "currency": "USD",
+        "currentValuesLiveVerified": False, "valuationBasis": "unavailable", "portfolioWeightVerified": False,
+        "valuationSource": None, "quoteObservedAt": None}]
+    return source
+
+
+def reference_marks(**change):
+    mark = {"account": "U1", "conId": 13272, "symbol": "UNH", "position": 12.0, "referenceClose": 406.97,
+            "referenceCloseSource": "ibkr_historical_daily_close", "referenceCloseSessionDate": "2026-10-30",
+            **change.pop("mark", {})}
+    return {"ok": True, "connected": True, "source": "ibkr_portfolio_reference_marks", "account": "U1",
+            "observed_at": WEEKEND_OBSERVED, "marks": [mark], **change}
+
+
+class SessionCloseWeightTests(unittest.TestCase):
+    def test_unquoted_position_is_weighted_at_the_official_close_while_the_book_is_frozen(self):
+        closes = session_close_marks(reference_marks(), ["U1"], WEEKEND)
+        row = current_holding_weights(unquoted_weekend_book(), WEEKEND, closes)[0]
+        self.assertAlmostEqual(row["currentHolding"]["weightPct"], 12 * 406.97 / 100000 * 100)
+        self.assertEqual(row["currentHolding"]["closeSession"], "2026-10-30")
+        self.assertEqual(row["currentHolding"]["asOf"], "2026-10-31T14:46:50Z")
+        self.assertIsNone(current_holding_weights(unquoted_weekend_book(), WEEKEND)[0]["currentHolding"])
+
+    def test_a_close_is_never_used_while_the_session_can_trade(self):
+        # Monday 10:00 ET (open) and 05:00 ET (pre-market): holdings and prices can move.
+        for now in [datetime(2026, 11, 2, 15, 0, tzinfo=timezone.utc), datetime(2026, 11, 2, 10, 0, tzinfo=timezone.utc)]:
+            with self.subTest(now=now):
+                self.assertEqual(session_close_marks(reference_marks(observed_at=now.isoformat()), ["U1"], now), {})
+
+    def test_close_from_another_session_source_quantity_or_account_is_refused(self):
+        for change in [{"mark": {"referenceCloseSessionDate": "2026-10-29"}}, {"mark": {"referenceCloseSource": "cache"}},
+                       {"mark": {"referenceClose": 0}}, {"account": "U2"}, {"connected": False},
+                       {"source": "mock"}, {"observed_at": "2026-10-31T14:40:00Z"}]:
+            with self.subTest(change=change):
+                self.assertEqual(session_close_marks(reference_marks(**change), ["U1"], WEEKEND), {})
+        closes = session_close_marks(reference_marks(mark={"position": 10.0}), ["U1"], WEEKEND)
+        self.assertIsNone(current_holding_weights(unquoted_weekend_book(), WEEKEND, closes)[0]["currentHolding"])
 
 
 class InboxHoldingsReaderTests(unittest.IsolatedAsyncioTestCase):

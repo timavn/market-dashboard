@@ -703,6 +703,59 @@ test('inbox shows the named source signal and preserves acknowledgment and citat
   dispatch.mockRestore();
 });
 
+test('with room left of the Analyst window, an inbox Source docks there centered on the window and holds still on scroll', async () => {
+  const request = api.request.getMockImplementation();
+  const alert = { id: 'alert', symbol: 'IBIT', action: 'signal change', state: 'pending verification', unread: 1,
+    payload: { action: 'signal change', event: { eventType: 'trade_signal', signalValue: 'BULLISH', qualityStatus: 'validated', productLabel: 'Bitcoin Tracker', marketDate: '2026-09-14',
+      entityId: 'IBIT', signalProvenance: { field: 'trade', method: 'explicit-field', sourceField: 'data.IBIT.trade', sourceText: 'IBIT trade BULLISH' } },
+    citation: { title: 'Bitcoin Tracker', excerpt: 'IBIT trade BULLISH', publicationDate: '2026-09-14', sourceUri: 'https://app.hedgeye.com/feed_items/source' } } };
+  api.request.mockImplementation(async (path, body, method) => (path === '/inbox' ? { findings: [alert], unread: 1 } : request(path, body, method)));
+  render(<AnalystPanel />);
+  fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
+  await screen.findByRole('heading', { name: 'IBIT' });
+  const card = screen.getByRole('heading', { name: 'IBIT' }).closest('.analyst-inbox-finding');
+  const rect = (left, top) => ({ left, top, right: left + 440, bottom: top + 400, width: 440, height: 400, x: left, y: top });
+  const bounds = jest.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function bounds() {
+    if (this.classList.contains('analyst-workspace')) return rect(600, 8);
+    return rect(0, 0);
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+  const popover = screen.getByRole('dialog', { name: 'Citation source' });
+  expect(popover).toHaveClass('is-docked');
+  expect(popover.style).toMatchObject({ width: '420px', left: '168px', top: '208px', maxHeight: '400px' });
+  expect(card).toHaveAttribute('data-cited');
+  fireEvent.scroll(document);
+  expect(popover.style.top).toBe('208px');
+  fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+  expect(card).not.toHaveAttribute('data-cited');
+  bounds.mockRestore();
+});
+
+test('an inbox Source with several publications shows one at a time, paged by its arrows or its squares', async () => {
+  const request = api.request.getMockImplementation();
+  const citation = (title, excerpt) => ({ title, excerpt, publicationDate: '2026-10-30' });
+  const alert = { id: 'alert', unread: 1, payload: { attentionVersion: 1, state: 'open', kind: 'operational', priority: 0, fingerprint: 'alert-revision',
+    publicationTime: '2026-10-30T15:30:00Z', presentation: { subject: 'UNH', date: '2026-10-30', rows: [{ label: 'Issue', text: 'UNH changed.' }],
+      sourceLinks: [{ label: 'Alert', citation: citation('Real-Time Alert: UNH Sell', 'SELL SIGNAL UNH') },
+        { label: 'Signal', citation: citation('Signal Strength: UNH Removed', 'REMOVING: UNH') }] } } };
+  api.request.mockImplementation(async (path, body, method) => (path === '/inbox' ? { findings: [alert], unread: 1 } : request(path, body, method)));
+  render(<AnalystPanel />);
+  fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Source' }));
+  const popover = screen.getByRole('dialog', { name: 'Citation source' });
+  const shown = () => [popover.querySelector('.analyst-source-pager span').textContent, popover.querySelectorAll('article').length,
+    within(popover).getAllByRole('button', { name: /^Source \d/ }).map(square => square.getAttribute('aria-current'))];
+  expect(shown()).toEqual(['1 of 2 · Real-Time Alert', 1, ['true', null]]);
+  expect(popover).toHaveTextContent('SELL SIGNAL UNH');
+  fireEvent.click(within(popover).getByRole('button', { name: 'Source 2: Signal Strength: UNH Removed' }));
+  expect(shown()).toEqual(['2 of 2 · Signal Strength', 1, [null, 'true']]);
+  expect(popover).toHaveTextContent('REMOVING: UNH');
+  fireEvent.click(within(popover).getByRole('button', { name: 'Next source' }));
+  expect(shown()[0]).toBe('1 of 2 · Real-Time Alert');
+  fireEvent.click(within(popover).getByRole('button', { name: 'Previous source' }));
+  expect(shown()[0]).toBe('2 of 2 · Signal Strength');
+});
+
 test('new chat creates no row; search is server-side and review actions remain available', async () => {
   render(<AnalystPanel />);
   await screen.findByRole('button', { name: 'Portfolio Review' });
@@ -2188,7 +2241,7 @@ test('portfolio refresh progress and failure preserve the saved report and Sourc
   const header = sources.querySelector('header');
   const list = sources.querySelector('ul');
   const sourceRow = within(sources).getByText('IB Gateway').closest('li');
-  expect(within(sources).getAllByRole('listitem')).toHaveLength(22);
+  expect(within(sources).getAllByRole('listitem')).toHaveLength(23);
   expect(within(header).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
   expect(within(sourceRow).getByText('Checking')).toBeVisible();
   expect(within(sourceRow).queryByText('Sep 4 08:00 PDT')).not.toBeInTheDocument();

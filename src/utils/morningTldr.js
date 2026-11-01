@@ -43,6 +43,12 @@ export const TLDR_PRODUCT_DEFINITIONS = [
     cadence: 'event_driven',
   },
   {
+    id: 'signal-strength-shorts',
+    label: 'Signal Strength Shorts',
+    description: '',
+    cadence: 'event_driven',
+  },
+  {
     id: 'market-structure',
     label: 'Market Structure',
     description: '',
@@ -425,8 +431,13 @@ export const getSignalChanges = (snapshot, changelog = {}) => {
         ?? value.percentSinceSignal
         ?? value.signalReturn
         ?? value.percentChange;
+      // A short's published Total Return; a long's reading is the change since its signal.
+      const totalReturn = value.totalReturn == null || value.totalReturn === '' || !Number.isFinite(Number(value.totalReturn))
+        ? null
+        : Number(value.totalReturn);
       return {
         ticker,
+        ...(totalReturn == null ? {} : { totalReturn }),
         daysOn: daysOn == null || daysOn === '' || !Number.isFinite(Number(daysOn)) ? null : Number(daysOn),
         percentChangeSinceSignal: percentChangeSinceSignal == null
           || percentChangeSinceSignal === ''
@@ -510,7 +521,7 @@ export const getSourceStatus = (snapshot, { loading = false, error = null, now =
 
 export const countChanges = (productId, snapshot, previousSnapshot, changelog = {}) => {
   if (productId === 'risk-ranges') return buildRiskRangeComparison(snapshot, previousSnapshot, changelog).counts.changed;
-  if (productId === 'signal-strength') {
+  if (productId === 'signal-strength' || productId === 'signal-strength-shorts') {
     const changes = getSignalChanges(snapshot, changelog);
     return changes.added.length + changes.removed.length;
   }

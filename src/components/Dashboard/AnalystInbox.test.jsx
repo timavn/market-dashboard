@@ -321,7 +321,7 @@ test('expires current position and size after 60 seconds without a refresh and r
   }
 });
 
-test('a verified position without a weight is sized by its share count', () => {
+test('a verified position without a weight reads its side, never a share count', () => {
   jest.useFakeTimers();
   jest.setSystemTime(new Date('2026-09-14T19:00:00Z'));
   try {
@@ -330,7 +330,7 @@ test('a verified position without a weight is sized by its share count', () => {
         { label: 'Current position', text: 'Short' }, { label: 'Action', text: 'Signal Strength removed GIII (Short) → exit Short' },
       ] } });
     render(<AnalystInbox findings={[alert]} />);
-    expect(screen.getByText('Current position:').nextSibling).toHaveTextContent(/^Short 147.03 sh$/);
+    expect(screen.getByText('Current position:').nextSibling).toHaveTextContent(/^Short$/);
   } finally {
     jest.useRealTimers();
   }
@@ -578,6 +578,17 @@ test('a stance alert lists the latest product calls, then current → target →
   expect(within(trim).getByText('Marathon Petroleum Corporation')).toBeInTheDocument();
   expect(within(within(trim).getAllByRole('table')[1]).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['4.25%', '3.25%', 'SELL 1.76 shares']);
   expect(within(trim).getByText('4.25%')).toHaveClass('analyst-inbox-signal--positive');
+});
+
+test('a stance position without a verified weight reads —, never shares; the order keeps shares', () => {
+  const alert = attention('unh', { kind: 'portfolio', severity: 'action-required', quantity: 12,
+    holdingsVerified: true, holdingsVerifiedAt: new Date().toISOString(),
+    presentation: { subject: 'UNH', date: '2026-10-30', sourceLinks: [], rows: [{ label: 'Tick', text: 'N/A' }], stance: { verdict: 'trim', calls: [
+      { product: 'Real-Time Alert', action: 'SELL SOME', date: '2026-10-30', bias: 'BULLISH' },
+    ], current: { side: 'LONG', quantity: 12, weightPct: null }, target: { side: 'LONG', quantity: null, weightPct: null }, order: { verb: 'SELL', quantity: null, note: 'some · stays long' } } } });
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  const order = within(screen.getByRole('heading', { name: 'UNH' }).closest('article')).getAllByRole('table')[1];
+  expect(within(order).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['—', '—', 'SELL some']);
 });
 
 test('a Trade/Trend read from list membership looks like a stated one, with its source in the tooltip', () => {
