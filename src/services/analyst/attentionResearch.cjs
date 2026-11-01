@@ -2,10 +2,15 @@ const { createHash } = require('node:crypto');
 const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js');
 const { sourceActionEvidence, describeAnalystFinding } = require('../../utils/analystFindingPresentation.cjs');
 const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings } = require('./stanceBook.cjs');
+const { MESSAGE_ID, TERM } = require('../../utils/sourceEmailClip.cjs');
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
 const symbolOf = value => ({ 'BRK-B': 'BRK.B', 'BRK B': 'BRK.B', 'BF-B': 'BF.B' }[String(value).toUpperCase()] || String(value || '').toUpperCase());
+// A citation to an emailed publication names the stored email and its ticker, so the
+// Source popover can show the original clipped around that ticker.
+const emailClip = (messageId, ticker) => (MESSAGE_ID.test(String(messageId || '')) && TERM.test(ticker)
+  ? { sourceMessageId: messageId, clipTicker: ticker } : {});
 const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 const time = value => Date.parse(value);
 const invalid = value => !value || value.connected === false || ['stale', 'isStale', 'cacheOnly', 'cachedOnly', 'cached', 'fromCache', 'from_cache', 'mock', 'isMock', 'seed', 'seeded', 'fixture', 'synthetic', 'inferred', 'fallback', 'refreshFailed'].some(flag => value[flag] === true)
@@ -48,7 +53,7 @@ function orderText(quantity, keepRatio) {
   const remaining = Math.round(held * keepRatio * 100) / 100;
   const trade = Math.round((held - remaining) * 100) / 100;
   if (trade <= 0) return null;
-  return `${quantity > 0 ? 'Sell' : 'Buy'} ${shares(trade)} / ${shares(held)} → ${shares(remaining)}`;
+  return `${quantity > 0 ? 'Sell' : 'Buy'} ${shares(trade)} ${trade === 1 ? 'share' : 'shares'}`;
 }
 function positionRows(state) {
   if (!state.holdingsVerified) return [];
@@ -277,7 +282,7 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
     rows.push(...durationRows(context, symbol, now));
     const citation = { id: evidence.report?.citationId || `cite_${hash(event.sourceMessageId).slice(0, 24)}`, title: evidence.report?.title || event.productLabel,
       product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`,
-      excerpt: directive || evidence.report?.bodyText || event.excerpt };
+      excerpt: directive || evidence.report?.bodyText || event.excerpt, ...emailClip(event.sourceMessageId, symbol) };
     output.push(finding({ key: [symbol, 'source-action', event.productKey, actionKey],
       material: exit ? [evidence.action, text(directive), contextLines] : [actionKey, change.side, range, headline],
       symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: exit ? evidence.action.toLowerCase() : change.action === 'REMOVE' ? 'remove' : 'opposing position',
@@ -310,7 +315,8 @@ function pendingCheckFindings(context, now, verified) {
   const events = [...pending.values()].map(item => item.event);
   const publishedAt = events.map(event => event.publishedAt).sort((a, b) => time(a) - time(b)).at(-1);
   const sourceLinks = events.map(event => ({ label: event.productLabel || 'Source', citation: { id: `cite_${hash(event.sourceMessageId).slice(0, 24)}`, title: event.productLabel,
-    product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`, excerpt: event.excerpt } }));
+    product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`, excerpt: event.excerpt,
+    ...emailClip(event.sourceMessageId, symbolOf(event.entityId)) } }));
   return [finding({ key, material: symbols, symbol: 'Holdings check', kind: 'operational', action: 'pending holdings check', publishedAt, sourceLinks,
     state: { assessmentChannel: 'research', pendingHoldingsCheck: { marketDate: context.marketDate, symbols, checked: [...checked].sort() } },
     rows: [row('Pending', symbols.join(', ')),
@@ -493,7 +499,7 @@ function stanceOrder(context, symbol, state, side, partial, now) {
   return { verdict: 'trim', current, target: { side, quantity: remaining, weightPct: min },
     order: { verb, quantity: Math.round((quantity - remaining) * 100) / 100, upTo: true, note: `stays ${side.toLowerCase()}` } };
 }
-const orderLine = ({ order }) => `${order.verb}${order.upTo ? ' up to' : ''}${order.quantity === null ? '' : ` ${amount(order.quantity)}`} ${order.note}`;
+const orderLine = ({ order }) => `${order.verb} ${order.quantity === null ? 'some' : `${amount(order.quantity)} ${order.quantity === 1 ? 'share' : 'shares'}`}`;
 // The whole verified book against every product's standing stance. Unlike a
 // source event, a stance holds until the product changes it, so the first
 // verified read after Gateway connects sees every contradiction at once.
@@ -514,15 +520,19 @@ function stanceFindings(context, now, verified) {
       && !['resolved', 'superseded'].includes(item.state));
     const baseline = previous?.stanceBaseline?.date === latest.date ? previous.stanceBaseline : { date: latest.date, quantity: state.quantity };
     if (partial && Math.abs(state.quantity) < Math.abs(baseline.quantity)) continue;
-    // The three most recent product calls on this security, either way.
-    const calls = [...opposing, ...supporting].map(stanceCall).sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product)).slice(0, 3);
+    // The three most recent product calls on this security, either way: the standing ones and the book's
+    // earlier calls, one row per product, action and day.
+    const calls = [...new Map([...opposing, ...supporting, ...(scanned.history || [])].map(stanceCall)
+      .map(call => [[call.product, call.action, call.date].join('|'), call])).values()]
+      .sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product)).slice(0, 3);
     const plan = stanceOrder(context, symbol, state, scanned.side, partial, now);
     const rows = [...positionRows(state),
       ...calls.map(call => row(call.product, `${call.action} ${monthDay(call.date)} · ${call.bias}`)),
       { ...row('Order', orderLine(plan)), requiresFreshHoldings: true },
       ...durationRows(context, symbol, now)];
     const sourceLinks = opposing.map(item => ({ label: STANCE_PRODUCT_NAMES[item.product], citation: { id: `cite_${hash([item.sourceUri, item.slot, item.date, item.stance]).slice(0, 24)}`,
-      title: `${STANCE_PRODUCT_NAMES[item.product]}: ${symbol} ${item.label}`, product: item.product, publicationDate: item.date, sourceUri: item.sourceUri, excerpt: item.headline || `${symbol} ${item.label}` } }));
+      title: `${STANCE_PRODUCT_NAMES[item.product]}: ${symbol} ${item.label}`, product: item.product, publicationDate: item.date, sourceUri: item.sourceUri, excerpt: item.headline || `${symbol} ${item.label}`,
+      ...emailClip(item.sourceMessageId, symbol) } }));
     const result = finding({ key, material: [scanned.side, opposing.map(item => [item.slot, item.stance, item.date])],
       symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: plan.verdict,
       publishedAt: opposing.map(item => item.at).sort().at(-1), rows, sourceLinks, state: { ...state, stanceBaseline: baseline } });

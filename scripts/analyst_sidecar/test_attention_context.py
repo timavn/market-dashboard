@@ -90,6 +90,21 @@ class ContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result['holdings']['ruleHoldings'][0]['weightPct'])
         self.assertTrue(result['complete'])
 
+    async def test_unquoted_holding_takes_its_close_weight_only_through_the_closes_reader(self):
+        valuation = book()
+        valuation['data'].update(accountSummaries=[{'account': 'account', 'observedAt': ASOF,
+            'summary': {'NetLiquidation': {'value': 100000, 'currency': 'USD'}}}])
+        valuation['data']['positions'][0].update(conId=1, currency='USD', currentValuesLiveVerified=False)
+        closes_reader = AsyncMock(return_value=['response'])
+        mark = {('account', '1'): {'close': 250.0, 'quantity': 10, 'session': '2026-09-21', 'observedAt': ASOF}}
+        with patch('attention_context.session_close_marks', return_value=mark) as marks:
+            result = await self.capture(holdings_reader=AsyncMock(return_value=valuation), portfolio_reader=AsyncMock(return_value=valuation),
+                                        closes_reader=closes_reader)
+        closes_reader.assert_awaited_once_with(['account'])
+        marks.assert_called_once_with('response', ['account'], NOW)
+        self.assertEqual(result['holdings']['currentHoldings'][0]['currentHolding']['weightPct'], 2.5)
+        self.assertEqual(result['holdings']['ruleHoldings'][0]['weightPct'], 2.5)
+
     async def test_incomplete_valuation_cannot_hide_holdings_beyond_its_limit(self):
         symbols = tuple('S' + str(i) for i in range(205))
         calls = []

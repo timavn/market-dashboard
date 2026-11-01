@@ -1,4 +1,4 @@
-import { foldPredictionAlphaCode, onceAcrossPredictionResearch, pinPredictionDollar, predictionReportTables } from './analystPredictionTables';
+import { foldPredictionAlphaCode, onceAcrossPredictionResearch, pinPredictionDollar, predictionReportTables, splitPredictionZScore } from './analystPredictionTables';
 import { predictionReportSources } from './analystPredictionSources';
 
 test('CPI readings retain lower/base/upper together with publication and release dates at the right', () => {
@@ -241,4 +241,28 @@ test('a sentence naming several markets reads once, under the first market that 
   const other = block([{ market: 'Gold', entries: [{ product: 'Early Look', time: '04:36', context: happy }] },
     { market: 'Silver', entries: [{ product: 'The Call', time: '07:04', context: happy }] }]).join('\n');
   expect(onceAcrossPredictionResearch(other)).toBe(other.replace(/\n/g, '\n'));
+});
+
+test('the Z-score leaves the Market cell for a Z column before Tick', () => {
+  const board = [
+    '| Market | Tick | Trade | Trend | Volume | Price and Risk Range | Structure | Status |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| REF(US Dollar;DXY;+1.2) | BIAS(Neutral;;) | BIAS(Bullish;;) | BIAS(Bullish;;) | VOL(+23;-14;-29;-25;;UUP) | RR(1;2;1.5;2;) | x | y |',
+    '| NAME(Gold;;-1.4) | a | b | c | d | e | f | g |',
+    '| MKT(Nasdaq-100;COMPQ range;) | a | b | c | d | e | f | g |',
+    '| WTI | a | b | c | d | e | f | g |',
+  ].join('\n');
+  expect(splitPredictionZScore(`## Metals\n\n${board}\n\nAfter.`).split('\n')).toEqual(['## Metals', '',
+    '| Market | Z | Tick | Trade | Trend | Volume | Price and Risk Range | Structure | Status |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| REF(US Dollar;DXY) | Z(+1.2) | BIAS(Neutral;;) | BIAS(Bullish;;) | BIAS(Bullish;;) | VOL(+23;-14;-29;-25;;UUP) | RR(1;2;1.5;2;) | x | y |',
+    '| Gold | Z(-1.4) | a | b | c | d | e | f | g |',
+    '| MKT(Nasdaq-100;COMPQ range) | Z() | a | b | c | d | e | f | g |',
+    // A market captured without a score reads N/A in the Z column.
+    '| WTI | Z() | a | b | c | d | e | f | g |',
+    '', 'After.']);
+  // Boards saved before the Z-score keep their columns, and a split board is not split again.
+  const unscored = board.replace(/;[-+]\d\.\d\)|;\)(?= \| a)/g, ')').replace('NAME(Gold;)', 'Gold');
+  expect(splitPredictionZScore(unscored)).toBe(unscored);
+  expect(splitPredictionZScore(splitPredictionZScore(board))).toBe(splitPredictionZScore(board));
 });

@@ -38,6 +38,7 @@
 .portfolio-position-holding-col { width: 56px; }
 .portfolio-position-name-col { width: 120px; }
 .portfolio-position-signals-col { width: 90px; }
+.portfolio-position-weight-col { width: 48px; }
 .portfolio-position-limits-col { width: 64px; }
 .portfolio-position-review-col { width: 174px; }
 .portfolio-position-products-col { width: auto; }
@@ -45,8 +46,7 @@
 .portfolio-positions thead th { font-size: inherit; font-weight: 400; color: var(--analyst-ink, #172033); background: #f3f4f6; }
 .portfolio-position-row > th { font-weight: 400; }
 .portfolio-positions thead th { white-space: nowrap; }
-.portfolio-position-weight { display: block; }
-.portfolio-position-weight { font-weight: 400; }
+.portfolio-position-weight { white-space: nowrap; }
 .portfolio-position-section { outline: 1px solid var(--portfolio-position-section-color); outline-offset: -1px; }
 .portfolio-position-section.is-long {
   --portfolio-position-section-color: var(--dashboard-positive, #059669);
@@ -124,18 +124,20 @@
 .portfolio-brief-centered .portfolio-positions thead th { white-space: normal; }
 .portfolio-brief h2, .portfolio-brief h3, .portfolio-brief-takeaways > li > strong { color: var(--portfolio-review-blue, #2563eb); }
 @media (max-width: 760px) {
-  .portfolio-position-holding-col { width: 10%; }
+  .portfolio-position-holding-col { width: 8%; }
   .portfolio-position-name-col { width: 18%; }
   .portfolio-position-signals-col { width: 17%; }
+  .portfolio-position-weight-col { width: 8%; }
   .portfolio-position-limits-col { width: 15%; }
   .portfolio-position-review-col { width: 19%; }
   .portfolio-position-products-col { width: 21%; }
 }
 /* The Analyst panel can be narrow on a wide screen; fixed columns would leave Product no width. */
 @container balance-panel (max-width: 820px) {
-  .portfolio-position-holding-col { width: 10%; }
+  .portfolio-position-holding-col { width: 8%; }
   .portfolio-position-name-col { width: 18%; }
   .portfolio-position-signals-col { width: 17%; }
+  .portfolio-position-weight-col { width: 8%; }
   .portfolio-position-limits-col { width: 15%; }
   .portfolio-position-review-col { width: 19%; }
   .portfolio-position-products-col { width: 21%; }

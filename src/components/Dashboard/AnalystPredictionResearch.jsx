@@ -3,6 +3,7 @@ import { analystSemanticRanges } from './analystProcessColors';
 import { portfolioReviewTickers, portfolioTickerRanges } from '../../utils/portfolioReviewTypography';
 import { previousTradingDateKey } from '../../utils/usEquityMarketCalendar.cjs';
 import { analystWorkspaceApi } from '../../services/analyst/analystClient';
+import AnalystSourceEmail from './AnalystSourceEmail';
 
 // What this morning's Hedgeye products say about each market in a setup-board
 // section, emitted by the renderer as an ```analyst-research JSON block: one
@@ -10,6 +11,7 @@ import { analystWorkspaceApi } from '../../services/analyst/analystClient';
 // that market, and the full sentence when it was trimmed. Reported data
 // ("Label: value" readings) also carries its facts, listed one per line.
 const text = value => (typeof value === 'string' && value.trim() ? value : null);
+const MESSAGE_ID = /^[a-f0-9]{8,32}$/i;
 const FACT = /^([^:·]{1,48}):\s+(\S[\s\S]*)$/;
 const splitFact = value => {
   const match = String(value).match(FACT);
@@ -38,6 +40,8 @@ export function parsePredictionResearch(raw) {
           ? row.entries.filter(entry => entry && text(entry.product) && text(entry.context)).map(entry => ({
             product: entry.product, time: text(entry.time), date: text(entry.date), context: entry.context, source: text(entry.source),
             facts: factsOf(entry),
+            // Entries saved before they named their email show the quoted line alone.
+            messageId: MESSAGE_ID.test(String(entry.messageId || '')) ? entry.messageId : null,
           }))
           // Reports saved before entries listed each product's facts and quotes.
           : (Array.isArray(row.items) ? row.items : []).filter(item => item && text(item.product)).map(item => ({
@@ -47,6 +51,7 @@ export function parsePredictionResearch(raw) {
             context: (Array.isArray(item.facts) ? item.facts : []).map(fact => fact?.text).filter(text).join(' · '),
             source: (Array.isArray(item.quotes) ? item.quotes : []).filter(text).join(' ') || null,
             facts: null,
+            messageId: null,
           })).filter(entry => entry.context),
       })),
     } : null;
@@ -119,15 +124,26 @@ function Facts({ facts, names }) {
   </ul>;
 }
 
-function Entry({ entry, market, first, span }) {
+// A product reads once per market: its points stack under it in the order they were said, each with its own Source.
+function byProduct(entries) {
+  const groups = new Map();
+  entries.forEach(entry => groups.set(entry.product, [...(groups.get(entry.product) || []), entry]));
+  return [...groups.values()].flat();
+}
+
+function Entry({ entry, market, first, continued, span }) {
   const [open, setOpen] = useState(false);
   const names = [market];
-  return <tr className={first ? 'analyst-research__first' : undefined}>
+  const quote = <blockquote className="analyst-research__quote"><ResearchText value={entry.source} names={names} /></blockquote>;
+  return <tr className={first ? 'analyst-research__first' : continued ? 'analyst-research__continued' : undefined}>
     {first && <td className="analyst-research__market" rowSpan={span}>{market}</td>}
-    <td className="analyst-research__product" title={entry.time ? `${entry.date ? `${entry.date} ` : ''}${entry.time} PT` : undefined}>{entry.product}</td>
+    <td className="analyst-research__product" title={entry.time ? `${entry.date ? `${entry.date} ` : ''}${entry.time} PT` : undefined}>{continued ? null : entry.product}</td>
     <td className="analyst-research__context">
       {entry.facts ? <Facts facts={entry.facts} names={names} /> : <ResearchText value={entry.context} names={names} />}
-      {open && <blockquote className="analyst-research__quote"><ResearchText value={entry.source} names={names} /></blockquote>}
+      {/* The product's own email, scrolled to the quoted line; the line alone when the email was not stored. */}
+      {open && (entry.messageId
+        ? <AnalystSourceEmail messageId={entry.messageId} quote={entry.source} title={entry.product} excerpt={entry.source} fallback={quote} />
+        : quote)}
     </td>
     <td className="analyst-research__source">
       {entry.source && <button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>Source</button>}
@@ -159,7 +175,7 @@ function DayPicker({ days, shown, onPick }) {
   return <th ref={cell} className="analyst-research__day">
     <button type="button" className="analyst-research__day-button" aria-haspopup="listbox" aria-expanded={open}
       aria-label={`Research for ${dayLabel(shown)}; choose another day`} onClick={() => setOpen(value => !value)}>
-      {dayLabel(shown)} <span aria-hidden="true">▾</span>
+      {dayLabel(shown)}
     </button>
     {open && <ul className="analyst-research__days" role="listbox" aria-label="Earlier market days">
       {days.filter(day => day !== shown).map(day => <li key={day} role="option" aria-selected="false">
@@ -210,8 +226,8 @@ export default function AnalystPredictionResearch({ research: saved }) {
           <td className="analyst-research__quiet" colSpan={4}>{reading.status === 'loading' ? `Reading ${dayLabel(shown)}…`
             : reading.status === 'empty' ? `No research read for ${dayLabel(shown)}.` : `Research for ${dayLabel(shown)} is unavailable.`}</td>
         </tr> : research.markets.map(row => (row.entries.length
-          ? row.entries.map((entry, index) => <Entry key={`${row.market}-${index}`} entry={entry} market={row.market}
-            first={index === 0} span={row.entries.length} />)
+          ? byProduct(row.entries).map((entry, index, entries) => <Entry key={`${row.market}-${index}`} entry={entry} market={row.market}
+            first={index === 0} continued={index > 0 && entries[index - 1].product === entry.product} span={entries.length} />)
           : <tr key={row.market} className="analyst-research__first">
             <td className="analyst-research__market">{row.market}</td>
             {/* A sentence that already reads under another market adds nothing here. */}

@@ -25,10 +25,13 @@ function DirectionalText({ children }) {
 }
 
 // "Oct 23 09:41" in the viewer's local time. A midnight-UTC stamp stands in for a
-// date-only publication, so it shows the date alone.
-function publicationLabel(time, date) {
+// date-only publication, so it shows when the alert reached the Inbox instead, and
+// the date alone only when that is unknown too.
+const timed = time => time && Number.isFinite(new Date(time).getTime()) && !/T00:00:00(?:\.0+)?Z$/.test(time);
+function publicationLabel(time, date, receivedAt) {
+  if (!timed(time) && timed(receivedAt)) return publicationLabel(receivedAt);
   const at = new Date(time);
-  if (time && Number.isFinite(at.getTime()) && !/T00:00:00(?:\.0+)?Z$/.test(time)) {
+  if (timed(time)) {
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
     }).formatToParts(at).map(part => [part.type, part.value]));
@@ -42,14 +45,10 @@ function publicationLabel(time, date) {
 // Security alerts lead with their ticker; operational subjects are not tickers.
 const TICKER_KINDS = new Set(['portfolio', 'opportunity']);
 
-// Without a verified weight, the verified share count still sizes the position.
-const heldShares = (side, quantity) => ['Long', 'Short'].includes(side) && Number.isFinite(quantity) && quantity
-  ? `${side} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Math.abs(quantity))} sh` : side;
-
 // An urgent instruction remains visible during a holdings outage; say which
 // verification it rests on instead of presenting the position as current.
 function staleHoldingLabel(payload) {
-  const side = heldShares(payload.quantity > 0 ? 'Long' : payload.quantity < 0 ? 'Short' : 'Not held', payload.quantity);
+  const side = payload.quantity > 0 ? 'Long' : payload.quantity < 0 ? 'Short' : 'Not held';
   const at = new Date(payload.holdingsVerifiedAt);
   return Number.isFinite(at.getTime())
     ? `${side} (last verified ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(at)}; holdings currently unavailable)`
@@ -70,15 +69,15 @@ function attentionContent(finding, now) {
       if (row.label === 'Position size') return { ...row, text: freshHoldings && holding.currentHolding?.label || 'Unavailable' };
       return row;
     })
-    // One line reads "Long @ 1.97%"; a size that is unavailable is left off.
+    // The position reads as its weight alone, colored by side ("1.97%" in green for Long);
+    // without a verified weight it falls back to side and shares.
     .reduce((merged, row) => {
       const index = merged.findIndex(item => item.label === 'Current position');
       if (row.label !== 'Position size' || index < 0) return [...merged, row];
       const position = merged[index];
       if (row.text === 'Unavailable' || !['Long', 'Short'].includes(position.text)) return merged;
-      return merged.map((item, i) => i === index ? { ...position, text: `${position.text} @ ${row.text}` } : item);
-    }, [])
-    .map(row => row.label === 'Current position' ? { ...row, text: heldShares(row.text, payload.quantity) } : row);
+      return merged.map((item, i) => i === index ? { ...position, text: row.text, side: position.text } : item);
+    }, []);
   if (!rows.length) return null;
   return { ...presentation, rows, publicationDate: presentation.date || payload.publicationTime,
     sortTime: Date.parse(payload.publicationTime) || Date.parse(presentation.date) || 0 };
@@ -127,11 +126,20 @@ const STANCE_TONES = { LONG: 'positive', SHORT: 'negative', BUY: 'positive', SEL
 const callDate = date => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
 const amount = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
 const Toned = ({ value }) => <span className={toneClass(STANCE_TONES[value])}>{value}</span>;
+// A position reads as its % of the portfolio, green Long and red Short; shares
+// belong only to the order. Without a verified weight it reads —.
 function stancePosition(position) {
-  if (position.quantity === 0) return '0 · 0.00%';
-  const weight = position.weightPct === null || position.weightPct === undefined ? '' : ` · ${position.weightPct.toFixed(2)}%`;
-  return position.quantity === null ? <><Toned value={position.side} /> · lower</> : <><Toned value={position.side} /> {amount(position.quantity)}{weight}</>;
+  if (position.quantity === 0) return '0.00%';
+  if (position.weightPct === null || position.weightPct === undefined) return '—';
+  return <span className={toneClass(STANCE_TONES[position.side])}>{position.weightPct.toFixed(2)}%</span>;
 }
+// "Sell 150 shares": the verb carries the color, as in the stance order cell.
+function OrderText({ children }) {
+  const [verb, ...rest] = String(children).split(' ');
+  const tone = STANCE_TONES[verb.toUpperCase()];
+  return tone ? <><span className={toneClass(tone)}>{verb}</span>{rest.length ? ` ${rest.join(' ')}` : ''}</> : children;
+}
+const orderShares = order =>order.quantity === null ? 'some' : `${amount(order.quantity)} ${order.quantity === 1 ? 'share' : 'shares'}`;
 
 // Stance alerts: the latest product calls, then the move from the current
 // position to the target and the order that gets there.
@@ -140,7 +148,7 @@ function StanceCopy({ ticker, stance, freshHoldings }) {
   return <div className="analyst-inbox-copy analyst-inbox-stance">
     <div className="analyst-inbox-stance-title"><span className="analyst-inbox-stance-ticker">{ticker}</span>{stance.name && <span>{stance.name}</span>}</div>
     <table className="analyst-inbox-stance-table">
-      <colgroup><col style={{ width: '38%' }} /><col style={{ width: '20%' }} /><col style={{ width: '18%' }} /><col style={{ width: '24%' }} /></colgroup>
+      <colgroup><col style={{ width: '35%' }} /><col style={{ width: '24%' }} /><col style={{ width: '16%' }} /><col style={{ width: '25%' }} /></colgroup>
       <thead><tr><th scope="col">Product</th><th scope="col">Action</th><th scope="col">Date</th><th scope="col">Bias</th></tr></thead>
       <tbody>{calls.map((call, index) => <tr key={index}>
         <td>{call.product}</td><td><Toned value={call.action} /></td><td>{callDate(call.date)}</td><td><Toned value={call.bias} /></td>
@@ -151,7 +159,7 @@ function StanceCopy({ ticker, stance, freshHoldings }) {
       <thead><tr><th scope="col">Current</th><th scope="col">Target</th><th scope="col">Order</th></tr></thead>
       <tbody><tr>{freshHoldings ? <>
         <td>{stancePosition(current)}</td><td>{stancePosition(target)}</td>
-        <td><Toned value={order.verb} />{order.upTo ? ' up to' : ''}{order.quantity === null ? '' : ` ${amount(order.quantity)}`} {order.note}</td>
+        <td><Toned value={order.verb} /> {orderShares(order)}</td>
       </> : <><td className="analyst-inbox-signal--neutral">Unavailable</td><td>—</td><td>—</td></>}</tr></tbody>
     </table>
   </div>;
@@ -161,7 +169,7 @@ function StanceCopy({ ticker, stance, freshHoldings }) {
 function alertSummary(finding, content, modern, date) {
   const payload = finding.payload || finding;
   const title = `${modern ? content.subject : finding.symbol || payload.symbol}${date ? ` (${date})` : ''}`;
-  const lines = modern ? content.rows.map(row => `${row.label}: ${row.text}${row.note ? ` (${row.note})` : ''}`) : [
+  const lines = modern ? content.rows.map(row => `${row.label}: ${row.side ? `${row.side} ` : ''}${row.text}${row.note ? ` (${row.note})` : ''}`) : [
     `Current position: ${content.currentPosition?.label || 'Unavailable'}`,
     `Action: ${content.positionAction || 'Unavailable'}`,
     content.headline && `${content.updateLabel || 'Signal'}: ${content.headline}`,
@@ -212,11 +220,12 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
     {urgent.length > 0 && <h2 className="analyst-inbox-urgent-heading">Alerts</h2>}
     {[...urgent, ...ordinary].map(({ finding, content, modern }, index) => {
       const payload = finding.payload || finding;
-      const date = publicationLabel(payload.publicationTime, content.publicationDate);
+      const date = publicationLabel(payload.publicationTime, content.publicationDate, payload.receivedAt);
       const subject = modern ? content.subject : finding.symbol || payload.symbol;
       const ticker = modern ? TICKER_KINDS.has(payload.kind) && subject : subject;
       // Centered in the footer between Source and Dismiss.
-      const stamp = date && <time className="analyst-inbox-time" dateTime={payload.publicationTime || content.publicationDate}>{date}</time>;
+      const shownAt = !timed(payload.publicationTime) && timed(payload.receivedAt) ? payload.receivedAt : payload.publicationTime || content.publicationDate;
+      const stamp = date && <time className="analyst-inbox-time" dateTime={shownAt}>{date}</time>;
       const updateParts = content.updateParts || [{ text: content.headline, tone: content.tone }];
       const contextLines = [content.detail, ...(content.sourceContext || [])].filter(Boolean);
       const required = isActionRequired(finding);
@@ -236,7 +245,8 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
             <dt>Ticker: </dt><dd>{ticker}</dd>
           </div>}
           {modern ? rows.map((row, index) => <div key={`${row.label}-${index}`}>
-            <dt>{row.label}: </dt><dd className={['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}><DirectionalText>{row.text}</DirectionalText></dd>
+            <dt>{row.label}: </dt><dd className={row.side ? toneClass(STANCE_TONES[row.side.toUpperCase()]) : ['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}>
+              {row.label === 'Order' ? <OrderText>{row.text}</OrderText> : <DirectionalText>{row.text}</DirectionalText>}</dd>
           </div>) : <>
           <div className="analyst-inbox-position">
             <dt>Current position: </dt><dd><DirectionalText>{content.currentPosition.label}</DirectionalText>

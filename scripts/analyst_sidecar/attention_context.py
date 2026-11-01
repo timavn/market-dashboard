@@ -11,7 +11,7 @@ import math
 
 from finding_source_reports import attach_finding_source_reports
 from hedgai_review import portfolio_tick_readings
-from inbox_holdings import current_holding_weights
+from inbox_holdings import current_holding_weights, session_close_marks
 from portfolio_brief import rule_holdings
 from portfolio_review import portfolio_metrics, _unverified_evidence
 
@@ -47,7 +47,7 @@ def _signature(source):
 async def capture_attention_context(*, market_date_reader, holdings_reader, portfolio_reader,
                                     universe_reader, symbols_reader, documents_reader,
                                     projector, sizing_reader, research_index, events=(),
-                                    balance_reader=None, balance_exceptions=None, tick_reader=None, now=None):
+                                    balance_reader=None, balance_exceptions=None, tick_reader=None, closes_reader=None, now=None):
     diagnostics = []
 
     async def read(name, callback, timeout):
@@ -111,7 +111,15 @@ async def capture_attention_context(*, market_date_reader, holdings_reader, port
         # findings vanish, so a scan the source did not answer cannot be complete.
         sizing = await read("sizing", lambda: sizing_reader.read_current(held, source.get("asOf"), timeout=10), 12) or {}
     sizing_complete = not held or not valuation_ok or sizing.get("complete") is True
-    weights = current_holding_weights(valuation, current_time) if valuation_ok else []
+    # A position the market cannot quote after the close keeps that session's
+    # official close until the next pre-market open; see session_close_marks.
+    closes = {}
+    valued = (valuation.get("data") or {}) if valuation_ok else {}
+    if closes_reader and any(row.get("currentValuesLiveVerified") is not True for row in valued.get("positions") or []):
+        accounts = valued.get("accounts") or []
+        responses = await read("closes", lambda: closes_reader(accounts), 10) or []
+        closes = {key: mark for response in responses for key, mark in session_close_marks(response, accounts, current_time).items()}
+    weights = current_holding_weights(valuation, current_time, closes) if valuation_ok else []
     rules = rule_holdings(metrics, intelligence, (sizing or {}).get("bySymbol")) if book_ok else []
     # Weight and NLV must have full account/valuation provenance, not a first
     # account's summary or marks from a partly valued book.

@@ -1147,6 +1147,13 @@ class IbkrReader:
     async def open_orders(self) -> dict[str, Any]:
         return await self._request("/portfolio/open-orders")
 
+    async def session_closes(self, accounts: list[str]) -> list[Any]:
+        """IBKR official daily closes per account, from the bridge's reference marks."""
+        return await asyncio.gather(*(
+            self._request(f"/portfolio/reference-marks?account={quote(str(account))}&include_live=false")
+            for account in accounts
+        ), return_exceptions=True)
+
     async def holdings_context(self) -> dict[str, Any]:
         """Read the broker's current holdings without waiting for quote or P/L work.
 

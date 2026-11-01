@@ -4189,6 +4189,7 @@ async def workspace_route(request: Request) -> JSONResponse:
                 research_index=research_index, events=events, balance_reader=balance_context.context,
                 balance_exceptions=_balance_risk_exceptions,
                 tick_reader=lambda cutoff: read_hedgai_research(API_BASE_URL, cutoff),
+                closes_reader=ibkr.session_closes,
             )
             result["previousAttention"] = [{**row.get("payload", {}), "state": row.get("state")}
                                            for row in retained.get("findings", [])

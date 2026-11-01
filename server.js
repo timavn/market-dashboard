@@ -56,6 +56,12 @@ const {
   comparePayloadOrder: compareEtfPayloadOrder,
 } = require('./src/utils/etfProResolver.cjs');
 const {
+  MESSAGE_ID: SOURCE_EMAIL_ID,
+  TERM: SOURCE_EMAIL_TERM,
+  sourceEmailClip,
+  emailBodyItem,
+} = require('./src/utils/sourceEmailClip.cjs');
+const {
   HEDGEYE_BUCKET,
   resolveHedgeyeMedia,
   buildHedgeyeContentUrlFromRequest,
@@ -469,6 +475,27 @@ app.get('/api/analyst/horizon-stats', async (req, res) => {
     }
   });
   res.json({ rows: Object.fromEntries(entries.filter(([, stats]) => stats)), historicalOnly: true, executable: false });
+});
+// The stored original of a research email for the Source popover, made inert and with
+// the cited ticker marked. Read-only: one ledger query and the cached S3 artifact.
+app.get('/api/analyst/source-email/:messageId', async (req, res) => {
+  const messageId = String(req.params.messageId || '');
+  const term = String(req.query.find || '').toUpperCase();
+  if (!SOURCE_EMAIL_ID.test(messageId) || (term && !SOURCE_EMAIL_TERM.test(term))) return res.status(400).json({ error: 'Invalid source email' });
+  res.set('Cache-Control', 'no-store');
+  try {
+    const result = await dynamodb.query({
+      TableName: HERMES_EMAIL_LEDGER_TABLE,
+      KeyConditionExpression: 'messageId = :messageId',
+      ExpressionAttributeValues: { ':messageId': messageId },
+    }).promise();
+    const item = emailBodyItem(result.Items || []);
+    if (!item) return res.status(404).json({ error: 'Source email not stored' });
+    res.json({ messageId, ...sourceEmailClip(await getCachedHermesArtifactText(item), term) });
+  } catch (error) {
+    console.warn('[Analyst] Source email read failed:', messageId, error.message);
+    res.status(502).json({ error: 'Source email unavailable' });
+  }
 });
 app.use('/api/analyst', analystRoutes.router);
 const analystStagingCleanupTimer = setInterval(() => {

@@ -275,16 +275,19 @@ function zScoreReading(price, history) {
 }
 
 /**
- * DV when the session's volume is below its 30-day (1-month) average, AV above it. A move against the Trend
- * (a down day in a Bullish Trend, an up day in a Bearish one) on DV supports adding; on AV it warns.
+ * DV when the session's volume is below its 30-day (1-month) average, AV above it, read for the Trend's side.
+ * A move against the Trend (a down day in a Bullish Trend, an up day in a Bearish one) on DV supports adding;
+ * on AV it warns. A move with the Trend on AV confirms it; on DV it says nothing either way.
  * The direction is the day's move in what the Trend describes (a yield for bond ETFs).
  */
 function volumeSignal(volume, trend) {
   if (!volume || volume.d30 === null) return null;
   const move = volume.d30 < 0 ? 'DV' : 'AV';
-  const against = (trend === 'BULLISH' && volume.changePct < 0) || (trend === 'BEARISH' && volume.changePct > 0);
   const direction = volume.changePct > 0 ? 'up' : volume.changePct < 0 ? 'down' : null;
-  return { move, tone: against ? (move === 'DV' ? 'supports' : 'warns') : null, direction };
+  const side = !direction || !['BULLISH', 'BEARISH'].includes(trend) ? null
+    : (trend === 'BULLISH') === (direction === 'up') ? 'with' : 'against';
+  const tone = side === 'against' ? (move === 'DV' ? 'supports' : 'warns') : side === 'with' && move === 'AV' ? 'confirms' : null;
+  return { move, tone, direction, side };
 }
 
 /** Position of price within [low, high]: 0 = low end, 1 = high end. */

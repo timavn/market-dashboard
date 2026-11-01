@@ -206,6 +206,32 @@ export function foldPredictionAlphaCode(markdown) {
   return lines.join('\n');
 }
 
+// Boards captured with price history carry each market's 20-session Z-score in its Market cell (NAME(name;;z),
+// MKT(name;sub;z), REF(name;sub;z)). It reads in a Z column of its own before Tick, as Z(z).
+const SCORED_MARKET = /^(MKT|REF|NAME)\(([^;()]+);([^;()]*);([-+]\d+(?:\.\d+)?)?\)$/;
+export function splitPredictionZScore(markdown) {
+  const lines = String(markdown || '').split('\n');
+  for (let start = 0; start < lines.length; start += 1) {
+    const headings = /^\s*\|/.test(lines[start]) ? cells(lines[start]) : [];
+    if (!/^Market$/i.test(plain(headings[0] || '')) || !/^Tick$/i.test(plain(headings[1] || ''))) continue;
+    let end = start + 2;
+    while (end < lines.length && /^\s*\|/.test(lines[end])) end += 1;
+    const rows = lines.slice(start + 2, end).map(cells);
+    if (!rows.some(row => SCORED_MARKET.test(row[0])) || rows.some(row => row.length !== headings.length)) continue;
+    const split = rows.map(([market, ...rest]) => {
+      const scored = market.match(SCORED_MARKET);
+      if (!scored) return [market, 'Z()', ...rest];
+      const [, kind, name, sub, z = ''] = scored;
+      return [kind !== 'NAME' && sub ? `${kind}(${name};${sub})` : name, `Z(${z})`, ...rest];
+    });
+    const line = row => `| ${row.join(' | ')} |`;
+    const columns = [headings[0], 'Z', ...headings.slice(1)];
+    lines.splice(start, end - start, line(columns), line(columns.map(() => '---')), ...split.map(line));
+    start += split.length + 1;
+  }
+  return lines.join('\n');
+}
+
 // A sentence that names several markets ("Bearish Gold & Silver") is captured under each of them. It reads once,
 // under the first market that shows it anywhere in the review; a market left with nothing else reads Not mentioned.
 const researchKey = entry => [entry.product, entry.time, String(entry.source || entry.context || '').replace(/\s+/g, ' ').trim()].join('\u0000');

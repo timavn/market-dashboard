@@ -300,7 +300,7 @@ test('position tables keep compact headers and captured names without classifica
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const table = screen.getByRole('table', { name: 'Corrections' });
   expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
-    'Ticker', 'Security', 'T/T/T', 'M/M/S', 'Review', 'Product',
+    'Ticker', 'Security', 'T/T/T', '%', 'M/M/S', 'Review', 'Product',
   ]);
   expect(within(table).getByRole('columnheader', { name: 'T/T/T' })).toHaveAttribute('title', 'Tick / Trade / Trend');
   expect(within(table).getByRole('columnheader', { name: 'Ticker' }).children).toHaveLength(0);
@@ -329,12 +329,16 @@ test('missing security names remain empty instead of repeating the ticker', () =
   expect(within(position).getAllByRole('cell')[0]).toHaveTextContent('—');
 });
 
-test('a missing holding weight leaves the ticker cell without a placeholder dash', () => {
-  const data = brief(); data.holdings = [row('BWET', { weightPct: null, trade: 'BEARISH' })];
+test('the weight sits in its own % column after T/T/T, and a missing weight reads as a dash', () => {
+  const data = brief(); data.holdings = [row('BWET', { weightPct: null, trade: 'BEARISH' }), sizedRow('HELD', { weightPct: 1.73, trade: 'BEARISH' })];
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
-  const ticker = within(screen.getByRole('row', { name: /BWET/ })).getByRole('rowheader');
-  expect(ticker).toHaveTextContent(/^BWET$/);
-  expect(ticker.querySelector('.portfolio-position-weight')).toBeNull();
+  const missing = screen.getByRole('row', { name: /BWET/ });
+  expect(within(missing).getByRole('rowheader')).toHaveTextContent(/^BWET$/);
+  expect(within(missing).getAllByRole('cell')[2]).toHaveTextContent(/^—$/);
+  const held = screen.getByRole('row', { name: /HELD/ });
+  expect(within(held).getByRole('rowheader')).toHaveTextContent(/^HELD$/);
+  expect(within(held).getAllByRole('cell')[2]).toHaveClass('portfolio-position-weight');
+  expect(within(held).getAllByRole('cell')[2]).toHaveTextContent(/^1\.73%$/);
 });
 
 test('position tables show dated product calls beside Review and open all of that product’s evidence', () => {
@@ -352,14 +356,14 @@ test('position tables show dated product calls beside Review and open all of tha
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} onCitation={onCitation} />);
   const position = within(screen.getByRole('table', { name: 'Corrections' })).getByRole('row', { name: /ETHA/ });
   const cells = within(position).getAllByRole('cell');
-  expect(cells[3]).toHaveClass('portfolio-position-review');
-  expect(cells[4]).toHaveClass('portfolio-position-products');
+  expect(cells[4]).toHaveClass('portfolio-position-review');
+  expect(cells[5]).toHaveClass('portfolio-position-products');
   // A confirmed call keeps one line, dated by its latest publication.
-  const call = within(cells[4]).getByRole('button', { name: 'Sep 4 The Call: Long · View source' });
+  const call = within(cells[5]).getByRole('button', { name: 'Sep 4 The Call: Long · View source' });
   expect(call).toHaveTextContent(/^Sep 4 The Call: Long$/);
   expect(call.querySelector('.analyst-process--positive')).toHaveTextContent('Long');
   expect(call.querySelector('time.portfolio-position-product-date')).toHaveAttribute('dateTime', '2026-09-04');
-  expect(within(cells[4]).getByRole('button', { name: 'Sep 4 ETF Pro: Sell some · View source' })).toHaveTextContent('Sep 4 ETF Pro: Sell some');
+  expect(within(cells[5]).getByRole('button', { name: 'Sep 4 ETF Pro: Sell some · View source' })).toHaveTextContent('Sep 4 ETF Pro: Sell some');
   fireEvent.click(call);
   expect(onCitation).toHaveBeenCalledWith(first, { relatedSources: [first, confirmed] });
   expect(JSON.stringify(data)).toBe(original);
@@ -374,10 +378,10 @@ test('saved position products preserve the publisher label and visible proxy ins
   ] }] }] }] };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} historical />);
   const table = screen.getByRole('table', { name: 'Corrections' });
-  const productCell = within(within(table).getByRole('row', { name: /ETHA/ })).getAllByRole('cell')[4];
+  const productCell = within(within(table).getByRole('row', { name: /ETHA/ })).getAllByRole('cell')[5];
   expect(productCell).toHaveTextContent('Sep 4 Crypto Quant: Bullish Trend (ETH proxy)');
   expect(productCell.querySelector('.analyst-process--positive')).toHaveTextContent('Bullish');
-  const missingProduct = within(within(table).getByRole('row', { name: /UNKNOWN/ })).getAllByRole('cell')[4];
+  const missingProduct = within(within(table).getByRole('row', { name: /UNKNOWN/ })).getAllByRole('cell')[5];
   expect(missingProduct).toHaveTextContent(/^—$/);
 });
 
@@ -404,7 +408,7 @@ test('Tick precedes Trade and Trend in one signal cell while retaining separate 
   expect(Array.from(fields, field => field.parentElement)).toEqual([signalCell, signalCell, signalCell]);
   expect(within(signalCell).getByRole('button', { name: /XLE Trade: Bullish/ })).toHaveClass('signal-bullish');
   expect(within(signalCell).getByRole('button', { name: /XLE Trend: Bullish/ })).toHaveClass('signal-bullish');
-  expect(within(position).getAllByRole('cell')).toHaveLength(5);
+  expect(within(position).getAllByRole('cell')).toHaveLength(6);
   expect(position).toHaveTextContent('TradeBullishTrendBullish');
   expect(position).toHaveTextContent('Underweight');
   expect(position).not.toHaveTextContent(/Exit|Reduce|Cover/);
@@ -973,7 +977,7 @@ test('every red Inbox alert on a held position has an Action required row, sizin
   expect([...urgent.querySelectorAll('.portfolio-position-row th strong')].map(cell => cell.textContent)).toEqual(['GIII', 'EFX']);
   // Without a Trade or Trend break, Action required answers to its product calls alone.
   expect(within(urgent).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
-    'Ticker', 'Security', 'T/T/T', 'M/M/S', 'Product',
+    'Ticker', 'Security', 'T/T/T', '%', 'M/M/S', 'Product',
   ]);
   expect(urgent.querySelector('.portfolio-position-review')).toBeNull();
   expect(within(urgent).getByRole('row', { name: /EFX/ })).not.toHaveTextContent('Underweight');

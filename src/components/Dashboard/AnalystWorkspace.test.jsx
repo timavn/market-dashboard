@@ -618,6 +618,46 @@ test('operational inbox source evidence shows the concern without raw API plumbi
   expect(within(evidence).queryByRole('link')).not.toBeInTheDocument();
 });
 
+// Opens an Inbox Source whose citation names a stored email; `stored` says whether the server has it.
+async function openEmailedSource(stored) {
+  const request = api.request.getMockImplementation();
+  const citation = { id: 'cite_vlo', title: 'Signal Strength: VLO Removed', product: 'signal-strength', publicationDate: '2026-10-29',
+    sourceUri: 'https://app.hedgeye.com/feed_items/189162', excerpt: 'VLO Removed', sourceMessageId: '1a1882c17cfb415f', clipTicker: 'VLO' };
+  const alert = { id: 'vlo', unread: 1, payload: { attentionVersion: 1, kind: 'operational', state: 'open',
+    presentation: { subject: 'VLO', date: '2026-10-29', rows: [{ label: 'Action', text: 'Removed' }], sourceLinks: [{ label: 'Signal Strength', citation }] } } };
+  const email = '<html><head></head><body><b>REMOVING:</b> MPC, NOW, <mark id="analyst-source-hit">VLO</mark></body></html>';
+  api.request.mockImplementation((path, body, method) => {
+    if (path === '/inbox') return Promise.resolve({ attentionVersion: 1, findings: [alert], unread: 1 });
+    if (path.startsWith('/source-email/')) return stored ? Promise.resolve({ html: email, found: true }) : Promise.reject(Object.assign(new Error('Source email not stored'), { code: 'HTTP_404' }));
+    return request(path, body, method);
+  });
+  render(<AnalystPanel />);
+  fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Source', exact: true }));
+  const popover = screen.getByRole('dialog', { name: 'Citation source' });
+  expect(api.request).toHaveBeenCalledWith('/source-email/1a1882c17cfb415f?find=VLO');
+  // The title reads plainly; the report opens from the link under the email.
+  expect(within(popover).getByText('Signal Strength: VLO Removed')).not.toHaveAttribute('href');
+  expect(within(popover).getByRole('link', { name: 'Open original report ↗' })).toHaveAttribute('href', citation.sourceUri);
+  return { popover, email };
+}
+
+test('an emailed inbox Source shows the original email clipped around the ticker, with the report link under it', async () => {
+  const { popover, email } = await openEmailedSource(true);
+  const frame = await within(popover).findByTitle('Original email: Signal Strength: VLO Removed');
+  expect(frame.tagName).toBe('IFRAME');
+  expect(frame.getAttribute('srcdoc')).toBe(email);
+  // Nothing in the email runs; its links open in a new tab.
+  expect(frame.getAttribute('sandbox')).toBe('allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+  expect(popover.querySelector('blockquote')).toBeNull();
+});
+
+test('an emailed inbox Source keeps the excerpt when the original email was never stored', async () => {
+  const { popover } = await openEmailedSource(false);
+  await waitFor(() => expect(popover.querySelector('blockquote')).toHaveTextContent('VLO Removed'));
+  expect(popover.querySelector('iframe')).toBeNull();
+});
+
 test('inbox shows the named source signal and preserves acknowledgment and citation actions', async () => {
   const dispatch = jest.spyOn(window, 'dispatchEvent');
   const request = api.request.getMockImplementation();
@@ -661,6 +701,59 @@ test('inbox shows the named source signal and preserves acknowledgment and citat
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument());
   expect(screen.getByRole('tab', { name: /^Inbox/ })).toHaveTextContent(/^Inbox$/);
   dispatch.mockRestore();
+});
+
+test('with room left of the Analyst window, an inbox Source docks there centered on the window and holds still on scroll', async () => {
+  const request = api.request.getMockImplementation();
+  const alert = { id: 'alert', symbol: 'IBIT', action: 'signal change', state: 'pending verification', unread: 1,
+    payload: { action: 'signal change', event: { eventType: 'trade_signal', signalValue: 'BULLISH', qualityStatus: 'validated', productLabel: 'Bitcoin Tracker', marketDate: '2026-09-14',
+      entityId: 'IBIT', signalProvenance: { field: 'trade', method: 'explicit-field', sourceField: 'data.IBIT.trade', sourceText: 'IBIT trade BULLISH' } },
+    citation: { title: 'Bitcoin Tracker', excerpt: 'IBIT trade BULLISH', publicationDate: '2026-09-14', sourceUri: 'https://app.hedgeye.com/feed_items/source' } } };
+  api.request.mockImplementation(async (path, body, method) => (path === '/inbox' ? { findings: [alert], unread: 1 } : request(path, body, method)));
+  render(<AnalystPanel />);
+  fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
+  await screen.findByRole('heading', { name: 'IBIT' });
+  const card = screen.getByRole('heading', { name: 'IBIT' }).closest('.analyst-inbox-finding');
+  const rect = (left, top) => ({ left, top, right: left + 440, bottom: top + 400, width: 440, height: 400, x: left, y: top });
+  const bounds = jest.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function bounds() {
+    if (this.classList.contains('analyst-workspace')) return rect(600, 8);
+    return rect(0, 0);
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+  const popover = screen.getByRole('dialog', { name: 'Citation source' });
+  expect(popover).toHaveClass('is-docked');
+  expect(popover.style).toMatchObject({ width: '420px', left: '168px', top: '208px', maxHeight: '400px' });
+  expect(card).toHaveAttribute('data-cited');
+  fireEvent.scroll(document);
+  expect(popover.style.top).toBe('208px');
+  fireEvent.click(screen.getByRole('button', { name: 'Source' }));
+  expect(card).not.toHaveAttribute('data-cited');
+  bounds.mockRestore();
+});
+
+test('an inbox Source with several publications shows one at a time, paged by its arrows or its squares', async () => {
+  const request = api.request.getMockImplementation();
+  const citation = (title, excerpt) => ({ title, excerpt, publicationDate: '2026-10-30' });
+  const alert = { id: 'alert', unread: 1, payload: { attentionVersion: 1, state: 'open', kind: 'operational', priority: 0, fingerprint: 'alert-revision',
+    publicationTime: '2026-10-30T15:30:00Z', presentation: { subject: 'UNH', date: '2026-10-30', rows: [{ label: 'Issue', text: 'UNH changed.' }],
+      sourceLinks: [{ label: 'Alert', citation: citation('Real-Time Alert: UNH Sell', 'SELL SIGNAL UNH') },
+        { label: 'Signal', citation: citation('Signal Strength: UNH Removed', 'REMOVING: UNH') }] } } };
+  api.request.mockImplementation(async (path, body, method) => (path === '/inbox' ? { findings: [alert], unread: 1 } : request(path, body, method)));
+  render(<AnalystPanel />);
+  fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Source' }));
+  const popover = screen.getByRole('dialog', { name: 'Citation source' });
+  const shown = () => [popover.querySelector('.analyst-source-pager span').textContent, popover.querySelectorAll('article').length,
+    within(popover).getAllByRole('button', { name: /^Source \d/ }).map(square => square.getAttribute('aria-current'))];
+  expect(shown()).toEqual(['1 of 2 · Real-Time Alert', 1, ['true', null]]);
+  expect(popover).toHaveTextContent('SELL SIGNAL UNH');
+  fireEvent.click(within(popover).getByRole('button', { name: 'Source 2: Signal Strength: UNH Removed' }));
+  expect(shown()).toEqual(['2 of 2 · Signal Strength', 1, [null, 'true']]);
+  expect(popover).toHaveTextContent('REMOVING: UNH');
+  fireEvent.click(within(popover).getByRole('button', { name: 'Next source' }));
+  expect(shown()[0]).toBe('1 of 2 · Real-Time Alert');
+  fireEvent.click(within(popover).getByRole('button', { name: 'Previous source' }));
+  expect(shown()[0]).toBe('2 of 2 · Signal Strength');
 });
 
 test('new chat creates no row; search is server-side and review actions remain available', async () => {
@@ -1021,10 +1114,10 @@ test('a Predictive launch does not adopt another review request from the sidebar
   expect(historyRows().getByRole('button', { name: 'Open conversation: Other Predictive review' })).toBeVisible();
 });
 
-test.each(['accepted', 'failed'])('starting today\'s Predictive review uses its existing sidebar slot before the POST is %s', async outcome => {
+async function startOverSavedPredictive() {
   const today = pacificToday();
   const captured = { ...make('today', 'Saved current-day Predictive capture'), title: 'Predictive Markets Review',
-    kind: 'prediction-markets-review', trading_date: today, reviewRequestId: 'review-start:previous-capture' };
+    kind: 'prediction-markets-review', trading_date: today, created_at: new Date().toISOString(), reviewRequestId: 'review-start:previous-capture' };
   conversations = { today: captured, prior: { ...make('prior', 'Saved previous-day Predictive capture'),
     title: 'Previous Predictive Review', kind: 'prediction-markets-review', trading_date: '2025-01-02' } };
   const pending = deferred();
@@ -1033,30 +1126,60 @@ test.each(['accepted', 'failed'])('starting today\'s Predictive review uses its 
   render(<AnalystPanel />);
   await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' });
   fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
-  const row = historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' });
-  expect(row).toHaveTextContent('Starting…');
-  expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+  home();
+  // The new start sits at the top; the earlier report keeps its own row.
+  const [starting, saved] = historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  expect(starting).toHaveTextContent('Starting…');
+  expect(saved).not.toHaveTextContent('Starting…');
   expect(screen.getByRole('button', { name: 'Open conversation: Previous Predictive Review' })).toBeVisible();
   expect(conversations.today).toBe(captured);
-  // The history slot reopens the pending start.
-  fireEvent.click(row);
+  fireEvent.click(starting);
   expectReviewProgress();
-  if (outcome === 'accepted') {
-    await act(async () => pending.resolve({ conversation: captured }));
-    await screen.findByText('Saved current-day Predictive capture');
-  } else {
-    await act(async () => pending.reject(new Error('Could not start the review.')));
-  }
-  expect(screen.queryByRole('alert')?.textContent || '').toBe(outcome === 'failed' ? 'Could not start the review.' : '');
-  if (outcome === 'failed') {
-    fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
-    await screen.findByText('Saved current-day Predictive capture');
-  }
+  return { today, captured, pending };
+}
+
+test('starting today\'s Predictive review again files the new run in its own chat above the saved one', async () => {
+  const { today, captured, pending } = await startOverSavedPredictive();
+  const fresh = { ...make('fresh', 'New current-day Predictive capture'), title: 'Predictive Markets Review',
+    kind: 'prediction-markets-review', trading_date: today, created_at: new Date().toISOString() };
+  conversations = { fresh, ...conversations, today: { ...captured, trading_date: null } };
+  await act(async () => pending.resolve({ conversation: fresh }));
+  await screen.findByText('New current-day Predictive capture');
+  home();
+  await waitFor(() => expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(2));
+  fireEvent.click(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })[1]);
+  await screen.findByText('Saved current-day Predictive capture');
+});
+
+test('a Predictive start that fails leaves only the saved report', async () => {
+  const { pending } = await startOverSavedPredictive();
+  await act(async () => pending.reject(new Error('Could not start the review.')));
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not start the review.');
   expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+  fireEvent.click(historyRows().getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+  await screen.findByText('Saved current-day Predictive capture');
+  home();
   expect(historyRows().getByRole('button', { name: 'Open conversation: Previous Predictive Review' })).toBeVisible();
 });
 
-test('a review started after 9 p.m. Pacific reuses the Pacific day\'s slot and history groups by Pacific day', async () => {
+test('starting today\'s Predictive review while it is still running stays in its row', async () => {
+  const today = pacificToday();
+  const running = { ...make('today', 'Running Predictive capture'), title: 'Predictive Markets Review', kind: 'prediction-markets-review',
+    trading_date: today, created_at: new Date().toISOString(), state: 'running', activeTurn: { id: 'capture-turn', state: 'running' } };
+  conversations = { today: running };
+  const pending = deferred();
+  const request = api.request.getMockImplementation();
+  api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review' ? pending.promise : request(path, body, method));
+  render(<AnalystPanel />);
+  await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' });
+  fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+  await act(async () => pending.resolve({ conversation: running }));
+  home();
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+});
+
+test('a review started after 9 p.m. Pacific files under the Pacific day and history groups by Pacific day', async () => {
   // 21:30 PDT on Oct 9 is already Oct 10 in New York.
   jest.useFakeTimers({ now: new Date('2026-10-10T04:30:00Z') });
   try {
@@ -1077,14 +1200,11 @@ test('a review started after 9 p.m. Pacific reuses the Pacific day\'s slot and h
     expect(group('Yesterday')).toEqual(['Open conversation: Chat earlier']);
     fireEvent.click(screen.getByRole('button', { name: 'Predictive Markets Review', exact: true }));
     expect(JSON.parse(localStorage.getItem('analyst.workspace.launches'))).toEqual([expect.objectContaining({ tradingDate: '2026-10-09' })]);
-    expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveTextContent('Starting…');
-    fireEvent.click(screen.getByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
-    await act(async () => { pending.resolve({ conversation: conversations.today }); await jest.advanceTimersByTimeAsync(300); });
-    expect(screen.getByText('Saved Pacific-day Predictive capture')).toBeInTheDocument();
+    // The new start files under the Pacific day, above the earlier report.
     home();
-    expect(screen.getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
-    expect(group('Today')).toContain('Open conversation: Predictive Markets Review');
+    expect(group('Today')).toEqual(['Open conversation: Predictive Markets Review', 'Open conversation: Predictive Markets Review',
+      'Open conversation: Chat morning']);
+    expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })[0]).toHaveTextContent('Starting…');
   } finally { jest.useRealTimers(); }
 });
 
@@ -3127,6 +3247,8 @@ test('a progressive Portfolio capture renders its structured report without pars
   expect(prepare).not.toHaveBeenCalled();
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Review sources' })).toBeVisible();
+  // The review runs edge to edge with the composer, as Predictive boards do.
+  expect(screen.getByRole('log', { name: 'Conversation' })).toHaveClass('is-composer-width');
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/conversations/a?includeBriefs=false'))).toBe(true);
   expect(conversations.a.messages[0].text).toBe(saved);
   prepare.mockRestore();
@@ -3455,4 +3577,53 @@ describe('review starts across a reload', () => {
       expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
     } finally { jest.useRealTimers(); }
   });
+});
+
+test('a Predictive review refreshes in place from the bar above Sources, dated by the report it shows', async () => {
+  const saved = { ...make('today', 'Saved Predictive report'), title: 'Predictive Markets Review', kind: 'prediction-markets-review',
+    trading_date: pacificToday(), created_at: '2026-10-28T16:40:00Z',
+    messages: [{ id: 'report', role: 'assistant', state: 'complete', text: 'Saved Predictive report', reviewPostId: 'base',
+      reviewRunId: 'run-1', created_at: '2026-10-28T16:46:00Z' }] };
+  conversations = { today: saved };
+  const request = api.request.getMockImplementation();
+  api.request.mockImplementation((path, body, method) => path === '/daily/prediction-markets-review'
+    ? Promise.resolve({ conversation: { ...saved, activeTurn: { id: 'refresh-turn', state: 'running' } } }) : request(path, body, method));
+  render(<AnalystPanel />);
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+  const refresh = await screen.findByRole('button', { name: 'Refresh Predictive Markets Review' });
+  const time = refresh.parentElement.querySelector('time');
+  expect(time).toHaveAttribute('dateTime', '2026-10-28T16:46:00Z');
+  expect(time).toHaveTextContent(/Oct 28.* 09:46 PDT/);
+  // The bar sits right above Sources.
+  expect(refresh.parentElement.nextElementSibling).toBe(screen.getByRole('region', { name: 'Review sources' }));
+  // The boards run edge to edge with the composer.
+  expect(screen.getByRole('log', { name: 'Conversation' })).toHaveClass('is-composer-width');
+  fireEvent.click(refresh);
+  await waitFor(() => expect(api.request).toHaveBeenCalledWith('/daily/prediction-markets-review',
+    expect.objectContaining({ refresh: true, conversationId: 'today' })));
+  // A running refresh cannot be started twice.
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh Predictive Markets Review' })).toBeDisabled());
+  home();
+  expect(historyRows().getAllByRole('button', { name: 'Open conversation: Predictive Markets Review' })).toHaveLength(1);
+});
+
+test('ordinary chats have no review Refresh bar', async () => {
+  render(<AnalystPanel />);
+  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
+  await screen.findByText('Only answer A');
+  expect(screen.queryByRole('button', { name: /^Refresh / })).toBeNull();
+  expect(screen.getByRole('log', { name: 'Conversation' })).not.toHaveClass('is-composer-width');
+});
+
+test('history days read newest first even when an older row arrives first', async () => {
+  conversations = {
+    older: { ...make('older', 'Older answer'), created_at: new Date(Date.now() - 2 * 86_400_000).toISOString() },
+    newer: { ...make('newer', 'Newer answer'), created_at: new Date().toISOString() },
+  };
+  render(<AnalystPanel />);
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat newer' });
+  const headings = [...document.querySelectorAll('.analyst-conversation-item')].map(item => item.closest('section').querySelector('h2, h3')?.textContent);
+  expect(headings[0]).toBe('Today');
+  expect(screen.getAllByRole('button', { name: /^Open conversation: Chat (?:older|newer)$/ }).map(button => button.getAttribute('aria-label')))
+    .toEqual(['Open conversation: Chat newer', 'Open conversation: Chat older']);
 });

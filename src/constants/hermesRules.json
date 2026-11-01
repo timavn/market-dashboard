@@ -21,21 +21,21 @@
     "vixBuckets": [
       {
         "key": "investable",
-        "label": "Investable",
+        "label": "Low",
         "min": 9,
-        "max": 19.9999,
+        "max": 18.9999,
         "posture": "buy dips / normal risk"
       },
       {
         "key": "chop",
-        "label": "Chop",
-        "min": 20,
+        "label": "Moderate",
+        "min": 19,
         "max": 28.9999,
         "posture": "trade ranges / reduce conviction"
       },
       {
         "key": "fBucket",
-        "label": "Uninvestable",
+        "label": "High",
         "min": 29,
         "max": null,
         "posture": "defensive / preserve capital"

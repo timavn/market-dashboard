@@ -107,7 +107,8 @@ class SetupBoardRenderTests(unittest.TestCase):
             {"key": "the-macro-show", "label": "The Macro Show", "status": "read", "publishedAt": "2026-10-16T14:55:00.000Z"},
             {"key": "etf-pro", "label": "ETF Pro", "status": "missing"}]}
         excerpt = "UST 2yr holding TRADE/TREND Signal Supports (TREND all the way down at 4.40%)"
-        data["research"]["products"] += [{"key": "risk-ranges", "label": "Risk Ranges", "status": "read", "publishedAt": "2026-10-16T11:28:00.000Z"},
+        data["research"]["products"] += [{"key": "risk-ranges", "label": "Risk Ranges", "status": "read", "publishedAt": "2026-10-16T11:28:00.000Z",
+                                          "messageId": "1a18c949d0c80bdd"},
                                          {"key": "market-structure", "label": "Market Structure", "status": "read",
                                           "publishedAt": "2026-10-16T10:30:29+00:00"}]
         data["rows"][1]["research"] = {"findings": [
@@ -163,7 +164,8 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertIn('{"market":"Ethereum","entries":[]}', report)
         # Published data reads "Label: value", with the line it was printed in as its source.
         self.assertIn('{"market":"WTI","entries":[{"product":"Risk Ranges","time":"04:28","context":"Trend: Neutral → Bullish",'
-                      '"source":"Trend change: COPPER changed from Neutral to Bullish","date":"Oct 16","facts":["Trend: Neutral → Bullish"]}]}', report)
+                      '"source":"Trend change: COPPER changed from Neutral to Bullish","date":"Oct 16","messageId":"1a18c949d0c80bdd",'
+                      '"facts":["Trend: Neutral → Bullish"]}]}', report)
         self.assertIn('{"product":"Market Structure","time":"03:30","context":"SPX Gamma Exposure: Neutral",'
                       '"source":"Market makers remain broadly neutral.","date":"Oct 16","facts":["SPX Gamma Exposure: Neutral"]}', report)
         self.assertIn('"context":"Zero gamma: 7,736 · PV band: 7,660–7,886 · Strikes in play: 7,700, 7,750 · Gamma throttle: 0.64 · '
@@ -215,15 +217,16 @@ class SetupBoardRenderTests(unittest.TestCase):
         data["structureSessions"] = 10
         gold = next(row for row in data["rows"] if row["id"] == "gold")
         gold["volume"] = {"symbol": "GLD", "date": "2026-10-09", "d1": 13.6, "d15": -4.6, "d30": -15.2, "d90": -21.4,
-                          "changePct": 0.3, "signal": {"move": "DV", "tone": None, "direction": "up"}}
+                          "changePct": 0.3, "signal": {"move": "DV", "tone": "supports", "direction": "up", "side": "against"}}
         gold["structure"] = {"sessions": 1, "low": {"steps": "+", "direction": 1, "run": 1},
                              "high": {"steps": "-", "direction": -1, "run": 1}, "allTimeHigh": None}
         report = render_setup_board(data)
         self.assertIn("| Market | Tick | Trade | Trend | Volume | Price and Risk Range | Structure | Status |", report)
-        self.assertIn("| BIAS(Bearish;;) | VOL(+14;-5;-15;-21;2026-10-09;GLD) | RR(", report)
-        self.assertIn("STRUCT(+;+1;-;-1;;;;0;;DV;;+) |", report)
+        # An up day in gold's Bearish Trend is against it, so the windows read for a bounce to short.
+        self.assertIn("| BIAS(Bearish;;) | VOL(+14;-5;-15;-21;2026-10-09;GLD;-) | RR(", report)
+        self.assertIn("STRUCT(+;+1;-;-1;;;;0;;DV;supports;+) |", report)
         # A market whose volume could not be read keeps an empty token, so its row still splits.
-        self.assertIn("| BIAS(Bullish;;) | VOL(;;;;;) | RR(", report)
+        self.assertIn("| BIAS(Bullish;;) | VOL(;;;;;;) | RR(", report)
         self.assertNotIn("Volume", render_setup_board(board()))
 
     def test_cpi_lists_every_nowcast_month_with_its_kalshi_event_or_na(self):

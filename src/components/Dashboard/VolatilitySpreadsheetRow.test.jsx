@@ -46,7 +46,7 @@ describe('Volatility spreadsheet presentation', () => {
     const row = screen.getByRole('row', { name: /G5RV G5 FX 1M realized vol as of SEP 11/ });
     expect(row).toHaveAttribute('data-status', 'historical');
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent))
-      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%', 'Investable<8']);
+      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%', 'Low<8']);
     expect(within(row).getByText('5.87').closest('td')).toHaveAttribute('title', expect.stringContaining('yahoo'));
     expect(within(row).getByRole('button', { name: /Historical reference/ }))
       .toHaveAttribute('aria-label', expect.stringContaining(OBSERVED_AT));
@@ -65,7 +65,7 @@ describe('Volatility spreadsheet presentation', () => {
     const row = screen.getByRole('row', { name: 'G5RV last verified volatility; refresh delayed' });
     expect(row).toHaveAttribute('data-status', 'refresh-delayed');
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent))
-      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%', 'Investable<8']);
+      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%', 'Low<8']);
     expect(within(row).getByRole('button', { name: /Refresh delayed/ }))
       .toHaveAccessibleName(expect.stringContaining(OBSERVED_AT));
   });
@@ -74,7 +74,7 @@ describe('Volatility spreadsheet presentation', () => {
     renderSpreadsheet(null, { fxvlSnapshot: { ...G5RV_ROW, month6Ago: null, sixMonthChangePct: null } });
     const row = screen.getByRole('row', { name: /G5RV G5 FX 1M realized vol/ });
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent))
-      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '—', 'Investable<8']);
+      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '—', 'Low<8']);
   });
 
   test.each([
@@ -101,8 +101,8 @@ describe('Volatility spreadsheet presentation', () => {
     expect(row).toHaveAttribute('data-status', 'live');
     expect(within(row).getByText('16.7')).toHaveClass('efr-vol-regime-value--green');
     expect(within(row).getByText('16.7').closest('td')).toHaveAttribute('title', `Level 16.65 · ibkr · live · as of ${OBSERVED_AT}`);
-    expect(within(row).getByText('Investable')).toBeInTheDocument();
-    expect(within(row).getByText('<20')).toBeInTheDocument();
+    expect(within(row).getByText('Low')).toBeInTheDocument();
+    expect(within(row).getByText('<19')).toBeInTheDocument();
     expect(within(row).getByText('+12.50%')).toHaveAttribute('title', expect.stringContaining('15D prior level 14.80'));
     expect(within(row).getByText('-25.07%')).toHaveClass('is-falling');
     expect(within(row).queryByRole('button', { name: /Delayed quote/ })).not.toBeInTheDocument();
@@ -127,10 +127,10 @@ describe('Volatility spreadsheet presentation', () => {
   });
 
   test.each([
-    ['VIX', 19.99, '20', 'green', 'Investable'],
-    ['VIX', 20, '20', 'yellow', 'Chop'],
-    ['VVIX', 114.99, '115', 'yellow', 'Chop'],
-    ['VVIX', 115, '115', 'red', 'Uninvestable'],
+    ['VIX', 18.99, '19', 'green', 'Low'],
+    ['VIX', 19, '19', 'yellow', 'Moderate'],
+    ['VVIX', 114.99, '115', 'yellow', 'Moderate'],
+    ['VVIX', 115, '115', 'red', 'High'],
   ])('rounds %s %s for display while preserving its exact reading and regime', (symbol, level, display, bucket, regime) => {
     const reading = Object.freeze({ ...CURRENT_ROW, lastPx: level });
     renderSpreadsheet({ [symbol]: reading });
@@ -232,7 +232,7 @@ describe('Volatility spreadsheet presentation', () => {
     const row = screen.getByRole('row', { name: 'VIX current volatility' });
     expect(row).toHaveAttribute('data-status', 'live');
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent))
-      .toEqual(['16.7', '+10.78%', '+12.50%', '-25.07%', '—', '+7.77%', 'Investable<20']);
+      .toEqual(['16.7', '+10.78%', '+12.50%', '-25.07%', '—', '+7.77%', 'Low<19']);
   });
 
   test.each(['spreadsheet', 'map'])('shows the original observation time in %s when verification happened later', (layout) => {
@@ -293,7 +293,7 @@ describe('Volatility spreadsheet presentation', () => {
       const row = screen.getByRole('row', { name: `${symbol} volatility data unavailable` });
       expect(row).toHaveAttribute('data-status', 'unavailable');
       expect(within(row).queryByText('16.7')).not.toBeInTheDocument();
-      expect(within(row).queryByText('Investable')).not.toBeInTheDocument();
+      expect(within(row).queryByText('Low')).not.toBeInTheDocument();
       expect(within(row).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(Array(7).fill('—'));
     });
   });
@@ -307,7 +307,7 @@ describe('Volatility spreadsheet presentation', () => {
       vixRiskRangeState: { status: 'available', range },
     });
     const row = screen.getByRole('row', { name: 'VIX current volatility' });
-    expect(within(row).getAllByRole('cell').at(-1)).toHaveTextContent(/^Investable<20$/);
+    expect(within(row).getAllByRole('cell').at(-1)).toHaveTextContent(/^Low<19$/);
     expect(screen.queryByLabelText('VIX Risk Range')).not.toBeInTheDocument();
     rerender(<VolatilityMapPanel layout="spreadsheet" volatilityState={{ snapshot: { VIX: CURRENT_ROW } }}
       vixRiskRangeState={{ status: 'available', range: { ...range, source: 'cache_only' } }} />);

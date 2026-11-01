@@ -80,6 +80,8 @@
 .analyst-inbox-urgent-heading { color: #a61b1b; }
 .analyst-inbox-ordinary-heading { margin-top: 6px; color: var(--analyst-muted, #6b7280); }
 .analyst-inbox-finding.is-action-required { border-color: #d64545; }
+/* The card whose Source is open: its border takes the ticker's blue. */
+.analyst-inbox-finding[data-cited] { border-color: var(--portfolio-review-blue, #2563eb); }
 
 /* Security alerts: instruction on the left, one bias and price-window table on
    the right, each taking half the card. The duration and window columns share
@@ -89,7 +91,10 @@
   flex-wrap: wrap;
   align-items: center;
 }
+/* A stance alert's call and order tables take 10% more than half (55 / 45). */
 .analyst-inbox-body.has-horizons .analyst-inbox-copy { flex: 1 1 0; min-width: 260px; }
+.analyst-inbox-body.has-horizons .analyst-inbox-stance { flex: 11 1 0; }
+.analyst-inbox-body.has-horizons .analyst-inbox-stance ~ .analyst-inbox-horizons { flex: 9 1 0; }
 .analyst-inbox-horizons {
   flex: 1 1 0;
   min-width: 300px;
@@ -104,6 +109,9 @@
 }
 .analyst-inbox-horizons-label { width: 28%; }
 .analyst-inbox-horizons-column { width: 18%; }
+/* Tick–Tail have no row label, so they sit centered across the panel: back by half the label column. */
+.analyst-inbox-horizons thead tr,
+.analyst-inbox-horizons tr.analyst-inbox-bias { transform: translateX(-14%); }
 .analyst-inbox-horizons th,
 .analyst-inbox-horizons td { padding: 3px 2px; text-align: center; vertical-align: middle; }
 .analyst-inbox-horizons thead th,
@@ -133,3 +141,5 @@
 .analyst-inbox-stance-order { margin-top: 2px; }
 /* Calls, positions and the order wrap rather than clip in the half-width column. */
 .analyst-inbox-stance-table td { white-space: normal; overflow-wrap: anywhere; }
+/* An action (SELL SOME, COVER SOME) always reads on one line. */
+.analyst-inbox-stance-table:not(.analyst-inbox-stance-order) td:nth-child(2) { white-space: nowrap; overflow-wrap: normal; }

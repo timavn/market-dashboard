@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, Search, Send, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, RefreshCw, Search, Send, Square, Trash2 } from 'lucide-react';
 import AnalystSpinner from './AnalystSpinner';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 import { Message, SourceLibrary } from './AnalystConversationPanel';
@@ -14,6 +14,7 @@ import AnalystReviewSources from './AnalystReviewSources';
 import AnalystLandingStatus from './AnalystLandingStatus';
 import useAnalystReviewSources from '../../hooks/useAnalystReviewSources';
 import AnalystSourceExcerpt from './AnalystSourceExcerpt';
+import AnalystSourceEmail from './AnalystSourceEmail';
 import { formatResearchSourceDate } from '../../utils/researchDateFormat';
 import { formatAnalystReportDate } from '../../utils/analystReportDates';
 import { reuseAnalystEvidence } from '../../services/analyst/analystEvidenceIdentity';
@@ -173,6 +174,11 @@ const recoveryDelay = attempt => Math.min(1000 * 2 ** attempt, 15_000);
 const EVENT_SOURCE_CLOSED = 2;
 // A repeated click must land on the disabled row being deleted, never on the row below it.
 const DELETE_ROW_HOLD_MS = 1000;
+// An Inbox Source docks in the empty space left of the Analyst window when there is room for it.
+const DOCKED_SOURCE_WIDTH = 420;
+const DOCKED_SOURCE_MIN_WIDTH = 320;
+// The product a publication came from: its title up to the colon ("Real-Time Alert: UNH Sell").
+const sourceProduct = source => String(source?.title || source?.product || 'Source').split(':')[0];
 const highlightTexts = value => Array.isArray(value) ? value.filter(text => typeof text === 'string') : [];
 function citationPublications(source, context) {
   const publications = [];
@@ -250,6 +256,8 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   // An anchored citation (Inbox Source) opens beside its button; a second click closes it.
   const [citationAnchor, setCitationAnchor] = useState(null);
   const citationAnchorRef = useRef(null);
+  // An anchored Source with several publications shows one at a time, paged from its header or its squares.
+  const [citationPage, setCitationPage] = useState(0);
   const openCitation = useCallback((source, context) => {
     const anchor = context?.anchor || null;
     if (anchor && citationAnchorRef.current === anchor) {
@@ -259,6 +267,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     }
     citationAnchorRef.current = anchor;
     setCitationAnchor(anchor);
+    setCitationPage(0);
     const generation = ++citationGeneration.current;
     const publications = citationPublications(source, context).map(publication => ({ ...publication,
       ...(publication.evidenceIncluded === false ? { evidenceLoading: true } : {}) }));
@@ -275,31 +284,70 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   useLayoutEffect(() => {
     const surface = citationSurface.current;
     if (!citation || !citationAnchor || !surface) return undefined;
+    const card = citationAnchor.closest('.analyst-inbox-finding');
+    card?.setAttribute('data-cited', '');
+    // A docked popover sits centered beside the Analyst window, no taller than it, and ignores scrolling.
+    const dock = () => {
+      const analyst = surface.parentElement.getBoundingClientRect();
+      const gap = 12;
+      const margin = 8;
+      const width = Math.min(DOCKED_SOURCE_WIDTH, analyst.left - gap - margin);
+      if (width < DOCKED_SOURCE_MIN_WIDTH) return false;
+      surface.classList.add('is-docked');
+      surface.style.width = `${width}px`;
+      surface.style.left = `${analyst.left - gap - width}px`;
+      surface.style.maxHeight = `${analyst.height}px`;
+      surface.style.top = `${analyst.top + (analyst.height - surface.offsetHeight) / 2}px`;
+      return true;
+    };
     const place = () => {
       // A dismissed alert takes its button with it, so its popover closes too.
       if (!citationAnchor.isConnected) { setCitation(null); return; }
+      if (dock()) return;
+      surface.classList.remove('is-docked');
+      surface.style.width = '';
       const container = surface.offsetParent || surface.parentElement;
       const bounds = container.getBoundingClientRect();
       const button = citationAnchor.getBoundingClientRect();
       const gap = 6;
       const margin = 8;
+      surface.style.maxHeight = '';
+      const height = surface.offsetHeight;
       const below = button.bottom - bounds.top + gap;
-      const above = button.top - bounds.top - gap - surface.offsetHeight;
-      const top = below + surface.offsetHeight <= bounds.height - margin || above < margin ? below : above;
+      const roomBelow = bounds.height - margin - below;
+      const roomAbove = button.top - bounds.top - gap - margin;
+      // Below when it fits, else above; when neither fits, the roomier side, shortened to fit there.
+      const under = height <= roomBelow || (height > roomAbove && roomBelow >= roomAbove);
+      const room = under ? roomBelow : roomAbove;
+      if (height > room) surface.style.maxHeight = `${Math.max(120, room)}px`;
+      const top = under ? below : button.top - bounds.top - gap - Math.min(height, room);
       const left = Math.max(margin, Math.min(button.left - bounds.left, bounds.width - surface.offsetWidth - margin));
       surface.style.top = `${Math.max(margin, top)}px`;
       surface.style.left = `${left}px`;
     };
     place();
+    // An original email arrives after the popover opens and makes it taller.
+    const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
+    for (const entry of surface.children) grown?.observe(entry);
+    // Only the in-panel popover follows its button; the docked one holds still.
+    const scrolled = () => { if (!surface.classList.contains('is-docked')) place(); };
     window.addEventListener('resize', place);
-    document.addEventListener('scroll', place, true);
+    document.addEventListener('scroll', scrolled, true);
     return () => {
+      grown?.disconnect();
       window.removeEventListener('resize', place);
-      document.removeEventListener('scroll', place, true);
+      document.removeEventListener('scroll', scrolled, true);
+      card?.removeAttribute('data-cited');
+      surface.classList.remove('is-docked');
       surface.style.top = '';
       surface.style.left = '';
+      surface.style.width = '';
+      surface.style.maxHeight = '';
     };
-  }, [citation, citationAnchor]);
+  }, [citation, citationAnchor, citationPage]);
+  const pagedCitation = Boolean(citationAnchor && citation?.length > 1);
+  const shownCitationPage = pagedCitation ? Math.min(citationPage, citation.length - 1) : 0;
+  const turnCitationPage = step => setCitationPage(page => (page + step + citation.length) % citation.length);
   const { inbox, inboxError, loadInbox, acknowledge } = useAnalystInbox();
   const [refreshingIds, setRefreshingIds] = useState([]);
   // An unacknowledged review start survives a reload as the same Starting slot.
@@ -1072,6 +1120,9 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const optimisticMessage = selectedSend && !acceptedPendingTurn ? selectedSend.message : null;
   const responsePending = running || Boolean(selectedSend && !acceptedPendingTurn);
   const reviewBusy = isReview && (!conversation || (running && !primaryReady) || refreshingIds.includes(selected));
+  // Portfolio and Predictive reviews refresh in place from the bar above Sources, dated by the report it shows.
+  const refreshable = sourcesAnchoredReview(selectedKind) && Boolean(conversation) && !launchingReview;
+  const snapshotAt = reference?.asOf || messages.findLast(message => message.role === 'assistant' && message.reviewPostId)?.created_at;
   // Sources wait for the conversation record, then poll on its ID alone if
   // that read fails: reserved rows never stay Checking with nothing reading.
   const reviewSources = useAnalystReviewSources({ conversationId: isReview ? selected : null,
@@ -1299,11 +1350,12 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     finally { setSending(false); }
   };
   const groups = [];
+  // Each start opens its own chat, newest first. Only a review still running, or a chat with nothing in it yet,
+  // takes the start in place: present its Starting state in that one history slot while retaining the pending ID
+  // for exact receipt reconciliation. Other chats keep their own history rows.
   const existingDailyLaunch = opening => rows.find(row => !row.archived && row.kind === opening.kind
-    && row.trading_date === opening.trading_date && !removed.current.has(row.id) && !deletingIds.includes(row.id));
-  // A daily launch may reuse today's saved conversation. Present its Starting
-  // state in that one history slot while retaining the pending ID for exact
-  // receipt reconciliation. Other dates keep their own history rows.
+    && row.trading_date === opening.trading_date && !removed.current.has(row.id) && !deletingIds.includes(row.id)
+    && (entities[row.id]?.activeTurn || ['running', 'accepted'].includes(row.state) || sidebarMessageCount(entities[row.id] || row) === 0));
   const launchOwners = new Set([...launchesInFlight.current.values()].filter(opening => !opening.accepted
     && !(opening.restored && removed.current.has(opening.id))).map(opening => existingDailyLaunch(opening)?.id).filter(Boolean));
   const pendingDisplayRows = Object.values(pendingReviews).filter(opening => !opening.accepted).map(opening => {
@@ -1329,7 +1381,9 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       || Boolean(drafts[row.id]?.trim());
   });
   const today = pacificDate(new Date());
-  for (const row of visibleRows) { const group = dateGroup(conversationDay(row), today); let target = groups.find(g => g.key === group.key); if (!target) { target = { ...group, items: [] }; groups.push(target); } target.items.push(row); }
+  for (const row of visibleRows) { const day = conversationDay(row); const group = dateGroup(day, today); let target = groups.find(g => g.key === group.key); if (!target) { target = { ...group, day, items: [] }; groups.push(target); } target.items.push(row); }
+  // Days read newest first, whichever row arrived first (a remembered receipt can precede the list).
+  groups.sort((a, b) => b.day.localeCompare(a.day));
   for (const group of groups) group.items = placeDailyChats(group.items);
   const terminalError = conversation?.lastTurn && ['failed', 'interrupted'].includes(conversation.lastTurn.state) && !(reference && conversation.lastTurn.request_id?.startsWith('daily-')) ? conversation.lastTurn : null;
   const lastPrompt = conversation?.messages.find(m => m.turn_id === terminalError?.id && m.role === 'user')?.text;
@@ -1352,7 +1406,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
           <button type="button" className="analyst-chat-back" aria-label="Back to The Analyst" onClick={() => choose(null)}><ArrowLeft size={14} /><span>The Analyst</span></button>
           {selectedTitle && <span className="analyst-chat-title">{selectedTitle}</span>}
         </header>}
-        <div ref={transcript} onScroll={e => { const node = e.currentTarget; followReply.current = !sourcesAnchoredReview(selectedKind) && responsePending && node.scrollHeight - node.scrollTop - node.clientHeight < 80; scrolls.current[selected || 'landing'] = node.scrollTop; clearTimeout(scrollSaveTimer.current); scrollSaveTimer.current = setTimeout(() => save('scrolls', scrolls.current), 150); }} className={`analyst-transcript analyst-transcript-v2${selected || selectedSend || launchingReview ? '' : ' is-landing'}`} role="log" aria-label="Conversation" aria-live="polite">
+        <div ref={transcript} onScroll={e => { const node = e.currentTarget; followReply.current = !sourcesAnchoredReview(selectedKind) && responsePending && node.scrollHeight - node.scrollTop - node.clientHeight < 80; scrolls.current[selected || 'landing'] = node.scrollTop; clearTimeout(scrollSaveTimer.current); scrollSaveTimer.current = setTimeout(() => save('scrolls', scrolls.current), 150); }} className={`analyst-transcript analyst-transcript-v2${selected || selectedSend || launchingReview ? '' : ' is-landing'}${sourcesAnchoredReview(launchingReview?.kind || selectedKind) ? ' is-composer-width' : ''}`} role="log" aria-label="Conversation" aria-live="polite">
           {launchingReview ? <div className="analyst-message-list"><AnalystReviewSources reviewKind={launchingReview.kind} loading phase="Starting…" />
             {launchingReview.kind === 'portfolio-review' && <PortfolioReviewPlaceholder />}</div>
             : !selected && !selectedSend ? <header className="analyst-landing">
@@ -1360,6 +1414,13 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
               <AnalystLandingStatus holdingsCount={holdingsCount} />
             </header>
               : <div className="analyst-message-list">
+                {refreshable && <div className="analyst-review-refresh">
+                  {snapshotAt && <span>As of <time dateTime={snapshotAt}>{formatAnalystReportDate(snapshotAt, { year: false })}</time></span>}
+                  <button type="button" className="analyst-review-refresh-button" aria-label={`Refresh ${selectedTitle}`}
+                    disabled={running || refreshingIds.includes(selected)} onClick={() => refreshReview(conversation)}>
+                    <RefreshCw size={11} aria-hidden="true" /><span>Refresh</span>
+                  </button>
+                </div>}
                 {isReview && <AnalystReviewSources reviewKind={selectedKind} sources={reviewSources.sources} loading={reviewSources.loading}
                   readFailed={reviewSources.readFailed} reconnecting={reviewSources.reconnecting} phase={sourcesPhase} modelPhase={summarizing} />}
                 {selectedKind === 'portfolio-review' && !renderedMessages.some(message => message.role === 'assistant')
@@ -1430,18 +1491,33 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
           </section>
         </div>}
       </main>
-      {citation && <aside ref={citationSurface} className={`analyst-source-detail${citationAnchor ? ' is-anchored' : ''}`} role="dialog" aria-label="Citation source">{!citationAnchor && <header><span>Source evidence</span></header>}{citation.map((source, index) => {
+      {citation && <aside ref={citationSurface} className={`analyst-source-detail${citationAnchor ? ' is-anchored' : ''}`} role="dialog" aria-label="Citation source">{!citationAnchor && <header><span>Source evidence</span></header>}
+      {pagedCitation && <div className="analyst-source-pager">
+        <button type="button" aria-label="Previous source" onClick={() => turnCitationPage(-1)}>‹</button>
+        <span>{shownCitationPage + 1} of {citation.length} · {sourceProduct(citation[shownCitationPage])}</span>
+        <button type="button" aria-label="Next source" onClick={() => turnCitationPage(1)}>›</button>
+      </div>}
+      {(pagedCitation ? [citation[shownCitationPage]] : citation).map((source, index) => {
         const title = source.title || source.product;
         const href = source.sourceUri && source.product !== 'dashboard-health' ? safeResearchUrl(source.sourceUri) : null;
+        // An emailed publication shows the original, clipped around its ticker, with the report link under it.
+        const email = citationAnchor && source.sourceMessageId && source.clipTicker;
         return <article className="analyst-source-publication-entry" key={source.id || index} aria-busy={source.evidenceLoading || undefined}>
         {/* The anchored popover is just the publication, its date and the excerpt; its title opens the report. */}
-        <strong>{citationAnchor && href ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">{title} ↗</a> : title}</strong>
+        <strong>{citationAnchor && href && !email ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">{title} ↗</a> : title}</strong>
         {(source.publicationDate || source.publishedAt) && <p>{formatResearchSourceDate(source.publicationDate || source.publishedAt)}</p>}
         {!citationAnchor && source.sourceUri && source.product !== 'dashboard-health' && <p>{href ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a> : source.sourceUri}</p>}
-        <AnalystSourceExcerpt excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
+        {email ? <>
+          <AnalystSourceEmail messageId={source.sourceMessageId} ticker={source.clipTicker} title={title} excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
+          {href && <p className="analyst-source-email-link"><a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a></p>}
+        </> : <AnalystSourceExcerpt excerpt={source.excerpt} highlightTexts={source.highlightTexts} />}
         {source.evidenceError && <p>Source evidence unavailable.</p>}
       </article>;
-      })}</aside>}
+      })}
+      {pagedCitation && <div className="analyst-source-dots" role="group" aria-label="Sources">{citation.map((source, index) =>
+        <button key={source.id || index} type="button" className={index === shownCitationPage ? 'is-current' : undefined} aria-current={index === shownCitationPage || undefined}
+          aria-label={`Source ${index + 1}: ${source.title || source.product}`} onClick={() => setCitationPage(index)} />)}</div>}
+      </aside>}
     </div>
   </section>;
 }

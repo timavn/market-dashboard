@@ -11,8 +11,8 @@ function historyAround(value, count = 63) {
 
 describe('Hermes rules', () => {
   test('classifies VIX bucket boundaries', () => {
-    expect(classifyVixBucket(19.99).key).toBe('investable');
-    expect(classifyVixBucket(20).key).toBe('chop');
+    expect(classifyVixBucket(18.99).key).toBe('investable');
+    expect(classifyVixBucket(19).key).toBe('chop');
     expect(classifyVixBucket(29).key).toBe('fBucket');
   });
 

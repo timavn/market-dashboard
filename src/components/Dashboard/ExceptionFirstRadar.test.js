@@ -1252,11 +1252,11 @@ describe('Exception-First header', () => {
       'efr-vol-row__metric-level efr-vol-row__metric-level--green',
       'efr-vol-row__metric-level efr-vol-row__metric-level--green',
       'efr-vol-row__metric-level efr-vol-row__metric-level--yellow',
-      'efr-vol-row__metric-level efr-vol-row__metric-level--green',
+      'efr-vol-row__metric-level efr-vol-row__metric-level--yellow',
       'efr-vol-row__metric-level efr-vol-row__metric-level--green',
     ]);
     expect(within(vixRow).queryByText('Regime')).not.toBeInTheDocument();
-    expect(within(vixRow).getByText('Investable')).toBeInTheDocument();
+    expect(within(vixRow).getByText('Low')).toBeInTheDocument();
   });
 
   test('superimposes the verified VIX Risk Range with prediction-market third bands', () => {
@@ -1396,13 +1396,13 @@ describe('Exception-First header', () => {
     const greenRow = screen.getByLabelText('VIX current volatility');
     expect(within(greenRow).getByText('16.6'))
       .toHaveClass('efr-vol-regime-value--green');
-    expect(within(greenRow).getByText('<20')).toBeInTheDocument();
+    expect(within(greenRow).getByText('<19')).toBeInTheDocument();
 
-    rerender(<ExceptionFirstRadar volatilityState={{ snapshot: { VIX: { ...CURRENT_VIX, lastPx: 20 } } }} />);
+    rerender(<ExceptionFirstRadar volatilityState={{ snapshot: { VIX: { ...CURRENT_VIX, lastPx: 19 } } }} />);
     const orangeRow = screen.getByLabelText('VIX current volatility');
-    expect(within(orangeRow).getByText('20'))
+    expect(within(orangeRow).getByText('19'))
       .toHaveClass('efr-vol-regime-value--yellow');
-    expect(within(orangeRow).getByText('20–29')).toBeInTheDocument();
+    expect(within(orangeRow).getByText('19–29')).toBeInTheDocument();
 
     rerender(<ExceptionFirstRadar volatilityState={{ snapshot: { VIX: { ...CURRENT_VIX, lastPx: 40 } } }} />);
     const redRow = screen.getByLabelText('VIX current volatility');
@@ -1430,8 +1430,8 @@ describe('Exception-First header', () => {
     expect(within(dialog).getByText(/Index = 100 × √\(constant 30-day expected variance\)/))
       .toBeInTheDocument();
     const ranges = within(dialog).getByRole('region', { name: 'VIX dashboard process ranges' });
-    expect(within(ranges).getByText('< 20')).toBeInTheDocument();
-    expect(within(ranges).getByText('20 to < 29')).toBeInTheDocument();
+    expect(within(ranges).getByText('< 19')).toBeInTheDocument();
+    expect(within(ranges).getByText('19 to < 29')).toBeInTheDocument();
     expect(within(ranges).getByText('≥ 29')).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: /Official Cboe VIX methodology/i }))
       .toHaveAttribute('href', expect.stringContaining('cboe.com'));

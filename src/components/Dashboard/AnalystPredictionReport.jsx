@@ -7,7 +7,7 @@ import AnalystPredictionResearch, { parsePredictionResearch } from './AnalystPre
 import remarkGfm from 'remark-gfm';
 import { remarkAnalystProcessColors } from './analystProcessColors';
 import { predictionReportSources } from './analystPredictionSources';
-import { foldPredictionAlphaCode, onceAcrossPredictionResearch, pinPredictionDollar, predictionReportTables } from './analystPredictionTables';
+import { foldPredictionAlphaCode, onceAcrossPredictionResearch, pinPredictionDollar, predictionReportTables, splitPredictionZScore } from './analystPredictionTables';
 import { presentAnalystReportDates } from '../../utils/analystReportDates';
 import './AnalystPredictionReport.css';
 
@@ -25,28 +25,46 @@ const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([
 const ALPHA_TOKEN = /^ALPHA\(([^;()]*);([^;()]*);(above|below|at|);(above|below|at|);(%?);([01]);([^;()]*)\)$/;
 // STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone[;direction]]): the Risk Range
 // against its earlier publications. Steps run oldest to today as + (higher), - (lower) or = (unchanged); runs are signed
-// counts ending today. Boards with volume add DV/AV, whether a move against the Trend is supported or warned by it, and
+// counts ending today. Boards with volume add DV/AV, how it reads for the Trend (supports, warns or confirms), and
 // later boards the day's direction (+ up, - down).
-const STRUCTURE_TOKEN = /^STRUCT\(([-+=]*);([-+]?\d+);([-+=]*);([-+]?\d+);([^;()]*);([^;()]*);([-+]?\d*);([01]);(%?)(?:;(DV|AV)?;(supports|warns)?(?:;([-+]?))?)?\)$/;
-// VOL(d1;d15;d30;d90;date;symbol): the latest session's ETF volume against the prior session and its 15-, 30- and
-// 90-calendar-day averages, in signed whole percents. Drawn under Tick, Trade and Trend.
-const VOLUME_TOKEN = /^VOL\(([-+]?\d*);([-+]?\d*);([-+]?\d*);([-+]?\d*);([^;()]*);([^;()]*)\)$/;
-const VOLUME_WINDOWS = ['vs prior day', 'vs 15D avg', 'vs 30D avg', 'vs 90D avg'];
-function VolumeCell({ match, ...span }) {
-  const [, d1, d15, d30, d90, date, symbol] = match;
+const STRUCTURE_TOKEN = /^STRUCT\(([-+=]*);([-+]?\d+);([-+=]*);([-+]?\d+);([^;()]*);([^;()]*);([-+]?\d*);([01]);(%?)(?:;(DV|AV)?;(supports|warns|confirms)?(?:;([-+]?))?)?\)$/;
+// VOL(d1;d15;d30;d90;date;symbol[;side]): the latest session's ETF volume against the prior session and its 15-, 30- and
+// 90-calendar-day averages, in signed whole percents. Drawn under Tick, Trade and Trend, or one window to a cell
+// under Z, Tick, Trade and Trend when the board has a Z column. Side is the day's move with (+) or against (-) the Trend.
+const VOLUME_TOKEN = /^VOL\(([-+]?\d*);([-+]?\d*);([-+]?\d*);([-+]?\d*);([^;()]*);([^;()]*)(?:;([-+]?))?\)$/;
+const VOLUME_WINDOWS = ['1D', '15D', '30D', '90D'];
+// Each window reads green when it is good for the Trend's side and red when it is bad, like HL/HH: against the Trend
+// lighter volume is the pullback to add on and heavier a warning; with it heavier confirms and lighter says nothing.
+// Without a side (no Trend, or a saved board) the windows stay uncolored.
+const windowTone = (value, side) => (side === '-' ? (value < 0 ? ' is-on' : value > 0 ? ' is-against' : '')
+  : side === '+' && value > 0 ? ' is-on' : '');
+const VOLUME_SIDE = { '-': ' · Against the Trend: lighter volume reads green, heavier red',
+  '+': ' · With the Trend: heavier volume reads green' };
+function VolumeCell({ match, split, ...span }) {
+  const [, d1, d15, d30, d90, date, symbol, side] = match;
   const values = [d1, d15, d30, d90];
   const label = values.every(value => value === '') ? 'Volume unavailable'
-    : `${symbol} volume${date ? ` on ${date}` : ''} vs the prior session and its 15-, 30- and 90-day averages`;
+    : `${symbol} volume${date ? ` on ${date}` : ''} vs the prior session and its 15-, 30- and 90-day averages${VOLUME_SIDE[side] || ''}`;
+  const windows = VOLUME_WINDOWS.map((key, index) => {
+    const value = values[index] === '' ? null : Number(values[index]);
+    const tone = value === null ? '' : windowTone(value, side);
+    return <span key={key} className={`analyst-prediction-volume__window${tone}`}>
+      <span className="analyst-prediction-volume__key">{key}</span>
+      <span className="analyst-prediction-volume__value">{value === null ? 'N/A' : `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value)}%`}</span>
+    </span>;
+  });
+  if (split) return <>{windows.map(window => <td key={window.key} className="analyst-prediction-volume-cell is-window" title={label}>{window}</td>)}</>;
   return <td {...span} className="analyst-prediction-volume-cell" title={label}>
-    <span className="analyst-prediction-volume">
-      {VOLUME_WINDOWS.map((key, index) => {
-        const value = values[index] === '' ? null : Number(values[index]);
-        const tone = value > 0 ? ' is-heavier' : value < 0 ? ' is-lighter' : '';
-        return <span key={key} className={`analyst-prediction-volume__window${tone}`}>
-          <span className="analyst-prediction-volume__key">{key}</span>
-          <span className="analyst-prediction-volume__value">{value === null ? 'N/A' : `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value)}%`}</span>
-        </span>;
-      })}
+    <span className="analyst-prediction-volume">{windows}</span>
+  </td>;
+}
+// Z(z): the market's 20-session Z-score, a signal cell before Tick; two or more standard deviations reads heavier.
+const Z_TOKEN = /^Z\(([-+]\d+(?:\.\d+)?)?\)$/;
+function ZCell({ match }) {
+  const z = match[1];
+  return <td className="analyst-prediction-z-cell" title={`Z-score ${z || 'N/A'} vs. the prior 20 daily closes`}>
+    <span className={`analyst-prediction-stack analyst-prediction-z${z && Math.abs(Number(z)) >= 2 ? ' analyst-prediction-z--stretched' : ''}${z ? '' : ' analyst-prediction-stack--muted'}`}>
+      {z ? z.replace('-', '−') : 'N/A'}
     </span>
   </td>;
 }
@@ -85,12 +103,13 @@ function AthLine({ level, distance, date }) {
   </span>;
 }
 // Hedgeye reads volume against the Trend: a move against it on DV is a buy (Bullish) or short (Bearish) setup,
-// on AV a warning. A move with the Trend says nothing either way and keeps the plain outline.
-const VOLUME_TONE = { supports: ' is-on', warns: ' is-against' };
+// on AV a warning. A move with the Trend on AV confirms it; on DV it says nothing either way and keeps the plain outline.
+const VOLUME_TONE = { supports: ' is-on', warns: ' is-against', confirms: ' is-on' };
 const VOLUME_ARROW = { '+': '↑', '-': '↓' };
 const VOLUME_SENTENCE = { DV: 'volume below its 30-day average', AV: 'volume above its 30-day average' };
 const VOLUME_DAY = { '+': 'Up day on ', '-': 'Down day on ' };
-const VOLUME_READING = { supports: ' (against the Trend: setup)', warns: ' (against the Trend: warning)' };
+const VOLUME_READING = { supports: ' (against the Trend: setup)', warns: ' (against the Trend: warning)',
+  confirms: ' (with the Trend: confirmation)' };
 function StructureCell({ match, ...span }) {
   const [, lowSteps, lowRun, highSteps, highRun, ath, athDate, athPct, topAbove, unit, volume, volumeTone, direction] = match;
   const legs = [['high', highSteps, highRun], ['low', lowSteps, lowRun]];
@@ -134,6 +153,8 @@ function cellFor({ node, children }) {
   if (structure) return <StructureCell match={structure} />;
   const volume = text.match(VOLUME_TOKEN);
   if (volume) return <VolumeCell match={volume} />;
+  const zScore = text.match(Z_TOKEN);
+  if (zScore) return <ZCell match={zScore} />;
   const bias = text.match(BIAS_TOKEN);
   if (bias) {
     const [, direction, date, product] = bias;
@@ -182,7 +203,7 @@ function cellFor({ node, children }) {
     const lines = [['Ti', rest[0], rest[1]], ['Ta', rest[2], rest[3]], ['Te', rest[4], rest[5]]];
     const label = [pulled, ...lines.map(([key, date, product]) => `${key} ${date ? `${date} ${product}`.trim() : 'N/A'}`)].join(' · ');
     return <td className="analyst-prediction-as-of-cell" title={label}>
-      <span className="analyst-prediction-stack analyst-process--key">{pulled}</span>
+      <span className="analyst-prediction-stack analyst-process--key analyst-prediction-as-of-pulled">{pulled}</span>
       {lines.map(([key, date, product]) => <span key={key} className="analyst-prediction-stack analyst-prediction-as-of-line">
         <span className="analyst-prediction-stack__key">{key}</span>{' '}
         <span className="analyst-prediction-as-of-line__product analyst-prediction-stack--muted">{date ? product : ''}</span>{date && product ? ' ' : ''}
@@ -199,15 +220,18 @@ function cellFor({ node, children }) {
     ? dates.map((date, index) => <React.Fragment key={`${date}-${index}`}>{index > 0 && ' · '}<span className="analyst-prediction-cell-date analyst-process--key">{date}</span></React.Fragment>)
     : children}</td>;
 }
-// The row renderer spans cells over the volume row by passing rowSpan/colSpan through.
-const MarkdownCell = ({ rowSpan, colSpan, ...props }) => {
+// The row renderer spans cells over the volume row, or splits the volume into one cell per window, by passing
+// rowSpan/colSpan/split through.
+const MarkdownCell = ({ rowSpan, colSpan, split, ...props }) => {
   const cell = cellFor(props);
-  return rowSpan || colSpan ? React.cloneElement(cell, { rowSpan, colSpan }) : cell;
+  return rowSpan || colSpan || split ? React.cloneElement(cell, { rowSpan, colSpan, split }) : cell;
 };
 const isVolumeHeading = cell => cell.tagName === 'th' && /^Volume$/i.test(nodeText(cell).trim());
 const isVolumeCell = cell => cell.tagName === 'td' && VOLUME_TOKEN.test(nodeText(cell).trim());
+const isZCell = cell => cell.tagName === 'td' && Z_TOKEN.test(nodeText(cell).trim());
 // Boards with volume carry it as a column after Trend; Tick, Trade and Trend take the top half of the row
 // and the volume windows span the three of them underneath, while the other cells run the full height.
+// With a Z column before Tick, Z joins the top half and each volume window sits in its own cell under one of the four.
 const MarkdownRow = ({ node, children }) => {
   const cells = (node?.children || []).filter(child => child.tagName === 'td' || child.tagName === 'th');
   const elements = React.Children.toArray(children).filter(React.isValidElement);
@@ -215,10 +239,11 @@ const MarkdownRow = ({ node, children }) => {
   if (volume < 3 || elements.length !== cells.length) return <tr>{children}</tr>;
   const rest = elements.filter((_cell, index) => index !== volume);
   if (cells[volume].tagName === 'th') return <tr>{rest}</tr>;
-  const signal = index => index >= volume - 3 && index < volume;
+  const zed = cells.findIndex(isZCell) === volume - 4;
+  const signal = index => index >= volume - (zed ? 4 : 3) && index < volume;
   return <>
     <tr>{rest.map((cell, index) => (signal(index) ? cell : React.cloneElement(cell, { rowSpan: 2 })))}</tr>
-    <tr className="analyst-prediction-volume-row">{React.cloneElement(elements[volume], { colSpan: 3 })}</tr>
+    <tr className="analyst-prediction-volume-row">{React.cloneElement(elements[volume], zed ? { split: true } : { colSpan: 3 })}</tr>
   </>;
 };
 const MarkdownTable = ({ children, node }) => {
@@ -233,6 +258,7 @@ const MarkdownTable = ({ children, node }) => {
   const rangeBoard = headings.some(label => /^Price and Risk Range$/i.test(label.trim()));
   const alphaBoard = rangeBoard && headings.some(label => /^Alpha Code$/i.test(label.trim()));
   const structureBoard = rangeBoard && headings.some(label => /^Structure\b/i.test(label.trim()));
+  const zBoard = rangeBoard && /^Z$/.test(headings[1]?.trim() || '');
   const setupBoard = rangeBoard || (headings.some(label => /^Setup$/i.test(label.trim()))
     && headings.some(label => /^In range$/i.test(label.trim())));
   // CPI nowcast: Low in red, Base as is, High in green.
@@ -252,7 +278,7 @@ const MarkdownTable = ({ children, node }) => {
     if (/^Gross reward\/risk \(before fees\)$/i.test(label.trim())) return 'analyst-prediction-contract-payoff-col';
     return undefined;
   };
-  const frameClass = `analyst-table-frame${dated ? ' has-dates' : ''}${tickers ? ' has-tickers' : ''}${securities ? ' has-securities' : ''}${labels ? ' has-labels' : ''}${tickComparison ? ' is-tick-comparison' : ''}${contractComparison ? ' is-contract-comparison' : ''}${setupBoard ? ' is-setup-board' : ''}${rangeBoard ? ' is-range-board' : ''}${alphaBoard ? ' has-alpha' : ''}${structureBoard ? ' has-structure' : ''}${rangeBoard && headings.some(label => /^Setup$/i.test(label.trim())) ? ' has-setup' : ''}${nowcast ? ' is-nowcast' : ''}${pinned ? ' is-pinned-dollar' : ''}`;
+  const frameClass = `analyst-table-frame${dated ? ' has-dates' : ''}${tickers ? ' has-tickers' : ''}${securities ? ' has-securities' : ''}${labels ? ' has-labels' : ''}${tickComparison ? ' is-tick-comparison' : ''}${contractComparison ? ' is-contract-comparison' : ''}${setupBoard ? ' is-setup-board' : ''}${rangeBoard ? ' is-range-board' : ''}${alphaBoard ? ' has-alpha' : ''}${structureBoard ? ' has-structure' : ''}${zBoard ? ' has-z' : ''}${rangeBoard && headings.some(label => /^Setup$/i.test(label.trim())) ? ' has-setup' : ''}${nowcast ? ' is-nowcast' : ''}${pinned ? ' is-pinned-dollar' : ''}`;
   // The volume column draws inside the signal columns, so it has no column of its own.
   const columns = rangeBoard ? headings.filter(label => !/^Volume$/i.test(label.trim())) : headings;
   const table = <table>{columns.length > 0 && <colgroup>{columns.map((label, index) => <col key={`${label}-${index}`} className={
@@ -306,12 +332,12 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
   const report = useMemo(() => {
     const sourced = predictionReportSources(markdown, citations);
     // Saved reports titled the CPI nowcast's first column "Nowcast low".
-    return { ...sourced, markdown: onceAcrossPredictionResearch(pinPredictionDollar(foldPredictionAlphaCode(predictionReportTables(sourced.markdown))))
+    return { ...sourced, markdown: onceAcrossPredictionResearch(pinPredictionDollar(splitPredictionZScore(foldPredictionAlphaCode(predictionReportTables(sourced.markdown)))))
       .replace(/^(\| Market \| Kalshi \| )Nowcast low( \| Base \| High \|)/gm, '$1Low$2')
       // Setup boards saved before Status was named for their publication times.
-      .replace(/^(\| Market \| Tick \|.*\| )As of \(PT\)( \|)$/gm, '$1Status$2')
+      .replace(/^(\| Market \| (?:Z \| )?Tick \|.*\| )As of \(PT\)( \|)$/gm, '$1Status$2')
       // Boards saved while Structure carried its session count in the title.
-      .replace(/^(\| Market \| Tick \|.*\| )Structure \(\d+d\)( \|)/gm, '$1Structure$2') };
+      .replace(/^(\| Market \| (?:Z \| )?Tick \|.*\| )Structure \(\d+d\)( \|)/gm, '$1Structure$2') };
   }, [markdown, citations]);
   const parts = useMemo(() => {
     const match = report.markdown.match(/<details data-analyst-hedgai>\s*<summary>([^<\n]+)<\/summary>\s*([\s\S]*?)\s*<\/details>/);

@@ -312,7 +312,7 @@ const DashboardGuide = () => (
       dashboard={(
         <MethodStatement label="Dashboard heuristic">
           <p>
-            The implemented VIX buckets are &lt;20, 20–&lt;29, and ≥29; the code therefore simplifies the public
+            The implemented VIX buckets are &lt;19, 19–&lt;29, and ≥29; the code therefore simplifies the public
             framing&apos;s lower bound. RVX/VXN/GVZ use &lt;24, 24–&lt;36, ≥36; OVX uses &lt;40, 40–&lt;55, ≥55; MOVE uses
             &lt;100, 100–&lt;120, ≥120; and VVIX uses &lt;95, 95–&lt;115, ≥115. BITVX has no assigned regime range. These
             colors are context, not provider-defined signals or an execution instruction.

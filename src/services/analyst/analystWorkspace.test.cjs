@@ -1061,7 +1061,7 @@ test('Balance Review is retired: a launch is rejected before any review run star
  assert.equal((await api('/conversations')).conversations.length,0);
 });
 
-test('explicit refresh appends a full unchanged review while replay and background research keep its post', async t => {
+test('explicit refresh replaces the review in its own post while replay and background research keep it', async t => {
  const {REQUIRED_PRODUCTS}=require('./analystPolicy.cjs');
  const {attachDailyWorkflow}=require('./analystDaily.cjs');
  const date='2026-09-04';
@@ -1091,15 +1091,17 @@ test('explicit refresh appends a full unchanged review while replay and backgrou
   assert.equal(next.status,200);
   assert.equal(next.conversation.id,row.id);
  }
- // Empty pending reports add nothing; a report and its generated notes add one.
+ // The refreshed report takes the earlier one's post, so each chat stays one message.
  assert.ok((await api('/conversations')).conversations.every(row=>row.message_count===1));
  await daily.tick();
- assert.ok((await api('/conversations')).conversations.every(row=>row.message_count===2));
+ assert.ok((await api('/conversations')).conversations.every(row=>row.message_count===1));
  for(const row of rows){
   const detail=(await api(`/conversations/${row.id}`)).conversation;
-  assert.equal(detail.messages.filter(message=>message.text===`Complete ${row.kind} report`).length,2);
+  const reports=detail.messages.filter(message=>message.text===`Complete ${row.kind} report`);
+  assert.equal(reports.length,2);
+  assert.equal(new Set(reports.map(message=>message.reviewPostId)).size,1);
   assert.ok(detail.messages.every(message=>!message.text.includes('No material changes')));
-  assert.equal((await workspace.call('setting',{key:`daily-run:${row.id}`})).value.newPost,true);
+  assert.equal((await workspace.call('setting',{key:`daily-run:${row.id}`})).value.newPost,false);
  }
  const runCount=runs.size;
  for(const row of rows)await api(`/daily/${row.kind}`,{refresh:true,conversationId:row.id,requestId:`refresh-${row.id}`});
@@ -1111,16 +1113,21 @@ test('explicit refresh appends a full unchanged review while replay and backgrou
   await daily.prepare(row.kind,true);await pause();
  }
  await daily.tick();
+ // A new start is a chat of its own; the day's earlier chat keeps its report.
+ const started=(await api('/conversations')).conversations.filter(row=>!rows.some(item=>item.id===row.id));
+ assert.deepEqual(started.map(row=>row.kind),['prediction-markets-review']);
  for(const row of rows.filter(item=>item.kind!=='portfolio-review')){
   const detail=(await api(`/conversations/${row.id}`)).conversation;
-  assert.equal(detail.messages.filter(message=>message.text===`Complete ${row.kind} report`).length,3);
-  assert.ok(detail.messages.every(message=>!message.text.includes('No material changes')));
+  assert.equal(detail.messages.filter(message=>message.text===`Complete ${row.kind} report`).length,2);
+  const fresh=(await api(`/conversations/${started[0].id}`)).conversation;
+  assert.equal(fresh.messages.filter(message=>message.text===`Complete ${row.kind} report`).length,1);
+  assert.ok([...detail.messages,...fresh.messages].every(message=>!message.text.includes('No material changes')));
  }
  const beforePublication=runs.size;
  evidence.indexed[0].content_hash='new-publication';
  await daily.tick();await daily.tick();
  assert.equal(runs.size,beforePublication);
- assert.ok((await api('/conversations')).conversations.every(row=>row.message_count===2));
+ assert.deepEqual((await api('/conversations')).conversations.map(row=>row.message_count),[1,1,1]);
 });
 
 for(const kind of ['portfolio-review','prediction-markets-review']){
@@ -1265,9 +1272,10 @@ for (const date of ['2026-09-06', '2026-09-07', '2026-09-08']) {
   assert.ok(saved.messages.some(m=>m.text===report));
   assert.doesNotMatch(saved.messages.map(m=>m.text).join('\n'),/Daily reviews resume|Market closed on/);
   assert.deepEqual(narratives, [], 'the captured prediction report requires no second model pass');
+  // Pressing the button again runs a new review in a chat of its own.
   const again=await api('/daily/prediction-markets-review',{});
-  assert.equal(again.conversation.id,old.id);
-  assert.equal(runs,1);
+  assert.notEqual(again.conversation.id,old.id);
+  assert.equal(runs,2);
  });
 }
 
@@ -1759,4 +1767,26 @@ test('a client that leaves during the tail handshake leaves no poller or write l
  t.mock.timers.tick(1_500);
  await pause();
  assert.deepEqual(operations,['event-cursor','frame']);
+});
+
+test('a fresh daily review takes the day and leaves the earlier one filed by its creation time', async t => {
+ const {workspace}=await fixture(t,async url=>{
+  if(url.endsWith('/readiness'))return {};
+  if(url.endsWith('/changes'))return {events:[]};
+  assert.fail(`Unexpected request ${url}`);
+ });
+ const day={kind:'prediction-markets-review',date:'2026-09-19',title:'Predictive Markets Review'};
+ const earlier=(await workspace.call('daily',day)).conversation;
+ await workspace.call('append',{conversationId:earlier.id,sourceId:'earlier-report',text:'Earlier report'});
+ const fresh=(await workspace.call('daily',{...day,fresh:true,reopen:true})).conversation;
+ assert.notEqual(fresh.id,earlier.id);
+ assert.equal(fresh.trading_date,'2026-09-19');
+ assert.deepEqual(fresh.messages,[]);
+ const kept=(await workspace.call('get',{conversationId:earlier.id})).conversation;
+ assert.equal(kept.trading_date,null);
+ assert.deepEqual(kept.messages.map(message=>message.text),['Earlier report']);
+ // The day now resolves to the newest chat; both stay in history.
+ assert.equal((await workspace.call('daily',day)).conversation.id,fresh.id);
+ const rows=(await workspace.call('list',{archived:false,query:''})).conversations.filter(row=>row.kind===day.kind);
+ assert.deepEqual(new Set(rows.map(row=>row.id)),new Set([earlier.id,fresh.id]));
 });

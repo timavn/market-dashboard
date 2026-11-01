@@ -267,7 +267,7 @@ def _structure_cell(row: dict[str, Any]) -> str:
 
     STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone;direction]) — steps oldest
     first as + (higher), - (lower) or = (unchanged); runs signed (+8 = eight higher in a row ending today). Boards with
-    volume add DV/AV, whether the move against the Trend is supported or warned by it, and the day's direction (+/-).
+    volume add DV/AV, how it reads for the Trend (supports, warns or confirms), and the day's direction (+/-).
     """
     structure = row.get("structure")
     if not isinstance(structure, dict):
@@ -299,13 +299,16 @@ def _volume_cell(row: dict[str, Any]) -> str:
     """Token the report UI draws under Tick, Trade and Trend: the latest session's ETF volume against the prior
     session and its 15-, 30- and 90-calendar-day averages, as signed whole percents.
 
-    VOL(d1;d15;d30;d90;date;symbol) — empty readings when the market's volume is unavailable, so the row keeps its shape.
+    VOL(d1;d15;d30;d90;date;symbol;side) — side is the day's move with (+) or against (-) the Trend, empty without one.
+    Empty readings when the market's volume is unavailable, so the row keeps its shape.
     """
     volume = row.get("volume")
     if not isinstance(volume, dict):
-        return "VOL(;;;;;)"
+        return "VOL(;;;;;;)"
     pct = lambda key: f"{round(volume[key]):+d}" if isinstance(volume.get(key), (int, float)) else ""
-    return f"VOL({pct('d1')};{pct('d15')};{pct('d30')};{pct('d90')};{volume.get('date') or ''};{volume.get('symbol') or ''})"
+    side = {"with": "+", "against": "-"}.get((volume.get("signal") or {}).get("side"), "")
+    return (f"VOL({pct('d1')};{pct('d15')};{pct('d30')};{pct('d90')};{volume.get('date') or ''};"
+            f"{volume.get('symbol') or ''};{side})")
 
 
 TONE = {"Bullish": "positive", "Bearish": "negative", "Long": "positive", "Short": "negative",
@@ -376,6 +379,8 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
         return None
     products = research.get("products") or []
     published = {product.get("label"): product.get("publishedAt") for product in products}
+    # Each product's email, which its Source shows clipped to the quoted line.
+    messages = {product.get("label"): product.get("messageId") for product in products}
     order = {product.get("label"): index for index, product in enumerate(products)}
     clock = lambda value: (lambda when: when.rsplit(" ", 1)[-1] if ":" in when else None)(_pacific(value)) if value else None
     # The Pacific date the product was published, e.g. Oct 22.
@@ -390,7 +395,8 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
             excerpt = finding.get("excerpt")
             if excerpt:
                 context = finding.get("context") or excerpt
-                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context, "source": excerpt, "date": date})
+                entries.setdefault((label, excerpt), {"product": label, "time": time, "context": context, "source": excerpt, "date": date,
+                                                      "messageId": messages.get(label)})
                 continue
             facts = _fact_text(finding, row)
             if not facts:
@@ -406,7 +412,8 @@ def _research_block(board: dict[str, Any], rows: list[dict[str, Any]]) -> dict[s
                 context = f"{verb} {finding['name']}" + (" (inverse to yield)" if finding.get("inverse") else "")
             else:
                 context = " · ".join(fact["text"] for fact in facts)
-            entry = {"product": label, "time": time, "context": context, "source": finding.get("sourceText"), "date": date}
+            entry = {"product": label, "time": time, "context": context, "source": finding.get("sourceText"), "date": date,
+                     "messageId": messages.get(label)}
             # Reported data ("Label: value" readings) lists as one line per fact rather than a sentence.
             if finding.get("kind") != "position" and all(": " in fact["text"] for fact in facts):
                 entry["facts"] = [fact["text"] for fact in facts]
