@@ -34,6 +34,7 @@ function createPublishedTradeArchiveWorkerService({
   let disposed = false;
   let readings = [];
   let hasResult = false;
+  let refreshedAt = null;
   const requests = new Map();
   const inFlight = new Map();
 
@@ -91,6 +92,7 @@ function createPublishedTradeArchiveWorkerService({
         }
         readings = message.readings;
         hasResult = true;
+        refreshedAt = Number.isFinite(message.verifiedAt) ? new Date(message.verifiedAt).toISOString() : null;
         settle(request, readings);
       };
       target.onExit = () => fail(target, 'WORKER_EXIT');
@@ -125,7 +127,10 @@ function createPublishedTradeArchiveWorkerService({
     stop(previous);
     for (const request of [...requests.values()]) settle(request, readings);
   }
-  return { load, dispose };
+  // When the archive last read every snapshot type successfully, so a reader can
+  // tell current readings from ones retained through failed reads or a backoff.
+  const status = () => ({ refreshedAt, retrying: Number(now()) < retryAt });
+  return { load, status, dispose };
 }
 
 module.exports = { createPublishedTradeArchiveWorkerService, validReadings };

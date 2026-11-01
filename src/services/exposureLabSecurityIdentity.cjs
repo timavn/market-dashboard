@@ -495,6 +495,7 @@ function createExposureLabSecurityIdentityResolver({
         status: identity ? 'available' : 'not_found',
         identity,
         yahooSymbol,
+        fetchedAt: new Date(currentTime).toISOString(),
       };
       yahooCache.set(cacheKey, { timestamp: currentTime, result });
       return { ...result, cacheStatus: 'miss' };

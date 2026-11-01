@@ -86,3 +86,20 @@ test('serves persisted research immediately while the archive refresh is still p
   resolve([]);
   assert.deepEqual(await restarted.load({ waitForRefresh: true }), expected);
 });
+
+test('a refresh counts as verified only when every snapshot query succeeded', async () => {
+  let failing = 'the-call';
+  let clock = 1_000;
+  const archive = createPublishedTradeArchive({ referencePath: null, products, ttlMs: 0, now: () => clock,
+    querySnapshotsByType: async (type) => { if (type === failing) throw new Error('ExpiredTokenException'); return [publication()]; } });
+  await archive.load({ waitForRefresh: true });
+  assert.equal(archive.status().verifiedAt, null);
+  failing = null;
+  clock = 2_000;
+  await archive.load({ waitForRefresh: true });
+  assert.equal(archive.status().verifiedAt, 2_000);
+  failing = 'early-look';
+  clock = 3_000;
+  await archive.load({ waitForRefresh: true });
+  assert.equal(archive.status().verifiedAt, 2_000, 'a later partial failure keeps the last verified read');
+});

@@ -29,7 +29,7 @@ parentPort.on('message', async message => {
   if (message?.type !== 'load' || !Number.isSafeInteger(message.id) || message.id < 1) return;
   try {
     const readings = await archive.load({ waitForRefresh: message.waitForRefresh === true });
-    if (!closed) parentPort.postMessage({ type: 'readings', id: message.id,
+    if (!closed) parentPort.postMessage({ type: 'readings', id: message.id, verifiedAt: archive.status().verifiedAt,
       readings: readings.map(reading => Object.fromEntries(fields.filter(field => reading[field] !== undefined).map(field => [field, reading[field]]))),
     });
   } catch {

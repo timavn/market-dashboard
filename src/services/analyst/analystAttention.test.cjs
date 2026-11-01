@@ -21,6 +21,7 @@ function fixture(overrides = {}) {
     collectOperations: async () => ({ findings: [], complete: true }),
     evaluateResearch: () => ({ findings: [], complete: true }),
     loadStanceHistory: async () => ({ from: '2026-06-25', through: '2026-09-22', events: [] }),
+    loadSecurities: async () => ({}),
     ...overrides,
   });
   return { subject, publications, settings, advance: () => { current = new Date(current.getTime() + 31_000); } };
@@ -173,4 +174,83 @@ test('the stance book folds the journal, backfills its history once, and saves o
   f.advance();
   await f.subject.start();
   assert.equal(loads, 1); assert.equal(writes, 1);
+});
+
+test('held securities are named from the security record and the scored stance book keeps the source-enriched SOME', async () => {
+  const sell = { entityId: 'MPC', entityType: 'ticker', productKey: 'real-time-alert', eventType: 'position_change', fieldPath: 'data.alert',
+    excerpt: JSON.stringify({ ticker: 'MPC', action: 'SELL', headline: 'SELL SIGNAL MPC' }), marketDate: '2026-09-22', publishedAt: '2026-09-22T14:00:00+00:00',
+    qualityStatus: 'validated', sourceUrl: 'https://app.hedgeye.com/feed_items/9', sourceMessageId: 'msg-mpc' };
+  const enriched = { ...sell, sourceReport: { sourceMessageId: 'msg-mpc', title: 'Real-Time Alert: Sell-SOME Signal: Marathon Petroleum (MPC) -KM', bodyText: '' } };
+  const positions = [{ symbol: 'MPC', quantity: 10 }, { symbol: 'BRK B', quantity: 2 }, { symbol: 'KXFED-26', quantity: 3, category: 'event_contract' },
+    { symbol: 'IGV', quantity: 0 }, { symbol: 'AAPL 261218C00200000', quantity: 1 }];
+  let requested;
+  let seen;
+  const f = fixture({
+    request: async () => ({ complete: true, holdings: { positions }, events: [enriched] }),
+    loadSecurities: async symbols => { requested = symbols; return { MPC: { identity: { status: 'available' } } }; },
+    evaluateResearch: context => { seen = context; return { findings: [], complete: true }; },
+  });
+  await f.subject.start();
+  assert.deepEqual(requested, ['MPC', 'BRK.B']);
+  assert.deepEqual(Object.keys(seen.securities), ['MPC']);
+  const scored = f.subject.scoredStanceBook();
+  assert.equal(scored.scoredAt, '2026-09-22T16:00:00.000Z');
+  assert.equal(scored.book.tickers.MPC['real-time-alert'].action, 'SELL-SOME');
+  assert.equal(seen.stanceBook, scored.book, 'the evaluation scores the same book the record reads');
+});
+
+test('a failed security record read leaves the scan running without names', async () => {
+  let seen;
+  const f = fixture({
+    request: async () => ({ complete: true, holdings: { positions: [{ symbol: 'DRAM', quantity: 5 }] } }),
+    loadSecurities: async () => { throw new Error('record offline'); },
+    evaluateResearch: context => { seen = context; return { findings: [], complete: true }; },
+  });
+  const status = await f.subject.start();
+  assert.equal(status.state, 'completed');
+  assert.deepEqual(seen.securities, {});
+});
+
+test('the default record read asks for identity only, in batches the route accepts, with a short timeout', async () => {
+  const reads = [];
+  const positions = Array.from({ length: 62 }, (_, index) => ({ symbol: `T${index}`, quantity: 1 }));
+  let seen;
+  const f = fixture({
+    loadSecurities: undefined,
+    fetchJson: async (path, options) => {
+      reads.push({ path, options });
+      if (path.startsWith('/api/security-universe')) {
+        const symbols = decodeURIComponent(path.split('symbols=')[1]).split(',');
+        if (symbols.includes('T60')) throw new Error('timeout');
+        return { rows: Object.fromEntries(symbols.map(symbol => [symbol, { symbol }])) };
+      }
+      return {};
+    },
+    request: async () => ({ complete: true, holdings: { positions } }),
+    evaluateResearch: context => { seen = context; return { findings: [], complete: true }; },
+  });
+  await f.subject.start();
+  const recordReads = reads.filter(read => read.path.startsWith('/api/security-universe'));
+  assert.equal(recordReads.length, 2);
+  assert.ok(recordReads.every(read => read.path.includes('fields=identity') && read.options.timeoutMs === 8000));
+  assert.equal(decodeURIComponent(recordReads[0].path.split('symbols=')[1]).split(',').length, 50);
+  assert.equal(Object.keys(seen.securities).length, 50, 'a failed batch leaves only its own tickers unnamed');
+});
+
+test('holdings freshness is judged when the context arrives, and an unreadable book is not published as current', async () => {
+  let seenAt;
+  const f = fixture({
+    request: async () => ({ complete: true, holdings: { positions: [{ symbol: 'XLE', quantity: 5 }] } }),
+    loadSecurities: async () => { f.advance(); return {}; },
+    evaluateResearch: (context, at) => { seenAt = at; return { findings: [], complete: true }; },
+  });
+  const started = new Date('2026-09-22T16:00:00Z');
+  await f.subject.start();
+  assert.equal(seenAt.toISOString(), started.toISOString(), 'the name read does not age the holdings book');
+
+  const failing = fixture({ request: async () => ({ complete: true, holdings: { positions: [] } }) });
+  const read = failing.settings.get.bind(failing.settings);
+  failing.settings.get = key => { if (key === 'stance-book-v1') throw new Error('workspace offline'); return read(key); };
+  await failing.subject.start();
+  assert.deepEqual([failing.subject.scoredStanceBook().book, failing.subject.scoredStanceBook().reason], [null, 'stance-book-unreadable']);
 });

@@ -153,3 +153,17 @@ test('CPU-bound archive work runs in a native worker while the API event loop re
   assert.equal(completed, false, 'The API loop handles timers while the archive is still computing.');
   assert.deepEqual(await pending, [reading()]);
 });
+
+test('status reports when the archive last read every source, not when the worker last replied', async (t) => {
+  const { service, workers } = harness(t);
+  assert.deepEqual(service.status(), { refreshedAt: null, retrying: false });
+  const first = service.load();
+  workers[0].ready();
+  workers[0].emit('message', { type: 'readings', id: workers[0].messages.at(-1).id, readings: [reading()] });
+  await first;
+  assert.equal(service.status().refreshedAt, null, 'a reply without a verified read is not current');
+  const second = service.load({ waitForRefresh: true });
+  workers[0].emit('message', { type: 'readings', id: workers[0].messages.at(-1).id, readings: [reading()], verifiedAt: Date.parse('2026-10-31T14:58:00Z') });
+  await second;
+  assert.equal(service.status().refreshedAt, '2026-10-31T14:58:00.000Z');
+});

@@ -295,6 +295,33 @@ test('a Signal Strength Shorts addition opposes a held long; its removal exits a
   assert.deepEqual(findings.find(item => item.symbol === 'JPM').presentation.stance.calls, [{ product: 'Signal Strength Shorts', action: 'SHORT', date: '2026-09-22', bias: 'BEARISH' }]);
   assert.deepEqual(findings.find(item => item.symbol === 'DECK').presentation.stance.calls, [{ product: 'Signal Strength Shorts', action: 'REMOVE', date: '2026-09-22', bias: 'NEUTRAL' }]);
 });
+// The central security record (/api/security-universe identity) as the scan passes it in.
+const identityRecord = displayName => ({ identity: { status: 'available', displayName: { status: 'available', value: displayName, source: 'Yahoo Finance instrument metadata', asOf: '2026-09-22T12:00:00Z', reason: null } } });
+test('stance cards name every security from the security record, including ETF Pro, alert and removed tickers', () => {
+  const ctx = context();
+  ctx.holdings.positions = ['DRAM', 'LULU', 'COST', 'GS', 'ASTS'].map(symbol => ({ symbol, quantity: 10 }));
+  const etf = { productKey: 'etf-pro', productLabel: 'ETF Pro' };
+  ctx.events = [changeEvent('DRAM', 'REMOVE', 'LONG', etf),
+    changeEvent('LULU', undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', eventType: 'signal_strength_removed', excerpt: 'LULU' }),
+    changeEvent('COST', 'ADD', 'SHORT', etf), changeEvent('GS', 'ADD', 'SHORT', etf),
+    changeEvent('ASTS', 'SELL', undefined, { productKey: 'real-time-alert', productLabel: 'Real-Time Alert' })];
+  ctx.securities = { DRAM: identityRecord('Roundhill Memory ETF'), LULU: identityRecord('lululemon athletica inc.'),
+    COST: identityRecord('Costco Wholesale Corporation'), GS: identityRecord('The Goldman Sachs Group, Inc.'), ASTS: identityRecord('AST SpaceMobile, Inc.') };
+  const names = Object.fromEntries(evaluateResearchAttention(ctx, NOW).findings.filter(item => item.presentation.stance)
+    .map(item => [item.symbol, item.presentation.stance.name]));
+  assert.deepEqual(names, { DRAM: 'Roundhill Memory ETF', LULU: 'lululemon athletica inc.', COST: 'Costco Wholesale Corporation',
+    GS: 'The Goldman Sachs Group, Inc.', ASTS: 'AST SpaceMobile, Inc.' });
+});
+test('a roster name stands in only while the security record has no identity', () => {
+  const ctx = context();
+  ctx.holdings.positions = [{ symbol: 'JPM', quantity: 10 }, { symbol: 'EFX', quantity: 10 }];
+  const roster = symbol => changeEvent(symbol, undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', entityType: 'ticker',
+    eventType: 'signal_strength_short_membership', fieldPath: 'data.shorts.stocks[0]', excerpt: JSON.stringify({ ticker: symbol, side: 'short', name: `${symbol} roster name`, entryDate: '2026-09-22' }) });
+  ctx.events = [roster('JPM'), roster('EFX')];
+  ctx.securities = { JPM: identityRecord('JPMorgan Chase & Co.'), EFX: { identity: { status: 'unavailable', displayName: { status: 'unavailable', value: null, reason: 'identity-directory-unavailable' } } } };
+  const names = Object.fromEntries(evaluateResearchAttention(ctx, NOW).findings.map(item => [item.symbol, item.presentation.stance?.name]));
+  assert.deepEqual(names, { JPM: 'JPMorgan Chase & Co.', EFX: 'EFX roster name' });
+});
 test('a later re-add from the same product supersedes its removal', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: 10 }];
   ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG'), changeEvent('SNOW', 'ADD', 'LONG', { publishedAt: '2026-09-22T14:00:00Z' })];

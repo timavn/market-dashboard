@@ -255,6 +255,8 @@ function foldStanceEvents(stored, events = [], now = new Date()) {
   return { book, changed };
 }
 
+// A listing that dropped off its latest roster without a removal is unknown, not a stance.
+const droppedListing = (book, slot, entry) => Boolean(entry.roster && book?.rosters?.[slot] && (entry.seen || entry.date) < book.rosters[slot]);
 // Compare every held position to its ticker's standing stances. An opposing
 // stance stands unless some product supports the held side from a later date.
 function scanHoldings(book, positions = []) {
@@ -271,8 +273,7 @@ function scanHoldings(book, positions = []) {
     const supporting = [];
     const opposing = [];
     for (const [slot, entry] of Object.entries(book?.tickers?.[symbol] || {})) {
-      // A listing that dropped off its latest roster without a removal is unknown, not a stance.
-      if (entry.roster && book.rosters?.[slot] && (entry.seen || entry.date) < book.rosters[slot]) continue;
+      if (droppedListing(book, slot, entry)) continue;
       const effect = EFFECTS[entry.stance];
       const item = { ...entry, slot, productLabel: SLOT_LABELS[slot], partial: Boolean(effect?.partial) };
       if (effect?.supports === side) supporting.push(item);
@@ -319,4 +320,34 @@ async function loadStanceLedger(dynamodb, { days = EXIT_RETENTION_DAYS, now = ne
   return { from: dates.at(-1), through: dates[0], events };
 }
 
-module.exports = { STANCE_BOOK_VERSION, STANCE_PRODUCTS, SLOT_LABELS, emptyStanceBook, stancesFromEvent, foldStanceEvents, scanHoldings, loadStanceLedger };
+const CALL_PRODUCTS = { 'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts', 'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
+// Each product call as an Action and Bias reading. Bias is the side the product
+// still holds after its call: SOME keeps it; a full sell, cover or removal
+// leaves no view. Nothing here infers a Trade or Trend.
+function stanceCall(item) {
+  const removal = item.stance.startsWith('EXIT_') && item.slot !== 'real-time-alert';
+  const action = { LONG: item.action === 'BUY-SOME' ? 'ADD' : 'LONG', SHORT: 'SHORT', REDUCE_LONG: 'SELL SOME', REDUCE_SHORT: 'COVER SOME',
+    EXIT_LONG: removal ? 'REMOVE' : 'SELL', EXIT_SHORT: removal ? 'REMOVE' : 'COVER' }[item.stance];
+  const bias = { LONG: 'BULLISH', SHORT: 'BEARISH', REDUCE_LONG: 'BULLISH', REDUCE_SHORT: 'BEARISH', EXIT_LONG: 'NEUTRAL', EXIT_SHORT: 'NEUTRAL' }[item.stance];
+  // A standing listing is dated by its entry; a change by its publication.
+  return { product: CALL_PRODUCTS[item.slot], action, date: item.label === 'Listed' ? item.since : item.date, bias };
+}
+// Every product's call on one security: the standing ones, then the book's
+// earlier calls, one row per product, action and day, newest first. Unlike
+// scanHoldings this reads no held side; an Inbox card shows the calls that bear
+// on the side held.
+function securityCalls(book, symbol) {
+  const standing = Object.entries(book?.tickers?.[symbol] || {}).filter(([slot, entry]) => !droppedListing(book, slot, entry))
+    .map(([slot, entry]) => ({ ...entry, slot, standing: true }));
+  const calls = new Map();
+  for (const item of [...standing, ...(book?.history?.[symbol] || []).map(entry => ({ ...entry, standing: false }))]) {
+    if (!EFFECTS[item.stance] || !CALL_PRODUCTS[item.slot]) continue;
+    const call = stanceCall(item);
+    const key = [call.product, call.action, call.date].join('|');
+    if (!calls.has(key)) calls.set(key, { ...call, slot: item.slot, sourceProduct: item.product || null, sourceUri: item.sourceUri || null,
+      standing: item.standing, partial: Boolean(EFFECTS[item.stance].partial) });
+  }
+  return [...calls.values()].sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product));
+}
+
+module.exports = { STANCE_BOOK_VERSION, STANCE_PRODUCTS, SLOT_LABELS, symbolOf, emptyStanceBook, stancesFromEvent, foldStanceEvents, scanHoldings, stanceCall, securityCalls, loadStanceLedger };

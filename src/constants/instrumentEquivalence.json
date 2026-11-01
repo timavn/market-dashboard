@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "notes": "Source tickers that measure the same instrument the dashboard prices for a symbol. A research reading keyed to any other ticker (SPX for SPY, RUT for IWM, gold spot for GLD) is a proxy and is labelled with its source instrument. Aliases in infra/lambdas/gmail_ingestor/research_entities.json route readings to a symbol; they do not make them the same instrument. rewrittenAtIngest lists publication keys the email parser files under an ETF ticker although the published range is for the underlying (infra/lambdas/gmail_ingestor/parse_hedgeye_email_html.py TICKER_MAP: GOLD \u2192 GLD, WTI \u2192 USO); such a range is a proxy for the ETF.",
+  "sameInstrument": {
+    "BTC": [
+      "BITCOIN",
+      "BTCUSD",
+      "BTC-USD"
+    ],
+    "ETH": [
+      "ETHEREUM",
+      "ETHUSD",
+      "ETH-USD"
+    ]
+  },
+  "rewrittenAtIngest": {
+    "risk-ranges": {
+      "GLD": "GOLD",
+      "USO": "WTI"
+    }
+  }
+}

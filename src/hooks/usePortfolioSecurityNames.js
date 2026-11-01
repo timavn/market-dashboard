@@ -30,8 +30,13 @@ export default function usePortfolioSecurityNames(rows = []) {
           && row.nameVerified === true && !invalidIdentity(row) && row.identityStatus !== 'rejected'
           && typeof row.name === 'string' && row.name.trim() && row.name.trim().toUpperCase() !== row.ticker
           && typeof row.nameSource === 'string' && row.nameSource.trim());
+        // The security record's readable name for the same listing ("Costco Wholesale
+        // Corporation" for SEC's "COSTCO WHOLESALE CORP /NEW"), cited to its own source.
+        const shown = row => (typeof row.displayName === 'string' && row.displayName.trim()
+          && typeof row.displayNameSource === 'string' && row.displayNameSource.trim()
+          ? { name: row.displayName.trim(), source: row.displayNameSource } : { name: row.name.trim(), source: row.nameSource });
         if (entries.length) setNames(previous => ({ ...previous,
-          ...Object.fromEntries(entries.map(row => [row.ticker, { name: row.name.trim(), source: row.nameSource }])) }));
+          ...Object.fromEntries(entries.map(row => [row.ticker, shown(row)])) }));
       }).catch(() => { /* Missing identity stays an em dash; other batches continue. */ });
     }
     return () => { active = false; controller.abort(); };

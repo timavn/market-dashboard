@@ -18,6 +18,20 @@ test('only verified descriptive names with sources supplement the captured repor
   expect(Object.keys(result.current)).toEqual(['DBMF']);
 });
 
+test('shows the security record display name with its own source', async () => {
+  MarketDataService.getSecurityIdentities.mockResolvedValue({ status: 'available', historicalOnly: true, executable: false, rows: [
+    { ticker: 'COST', name: 'COSTCO WHOLESALE CORP /NEW', displayName: 'Costco Wholesale Corporation', displayNameSource: 'Yahoo Finance instrument metadata', nameVerified: true, nameSource: 'SEC company ticker directory' },
+    { ticker: 'GS', name: 'GOLDMAN SACHS GROUP INC', displayName: '  ', displayNameSource: 'SEC company ticker directory', nameVerified: true, nameSource: 'SEC company ticker directory' },
+    { ticker: 'ASTS', name: 'AST SpaceMobile, Inc.', displayName: 'Uncited name', nameVerified: true, nameSource: 'SEC company ticker directory' },
+  ] });
+  const { result } = renderHook(() => usePortfolioSecurityNames([{ holding: 'COST' }, { holding: 'GS' }, { holding: 'ASTS' }]));
+  await waitFor(() => expect(result.current.COST?.name).toBe('Costco Wholesale Corporation'));
+  expect(result.current.COST.source).toBe('Yahoo Finance instrument metadata');
+  expect(result.current.GS).toEqual({ name: 'GOLDMAN SACHS GROUP INC', source: 'SEC company ticker directory' });
+  // A display name without its own source is not shown.
+  expect(result.current.ASTS).toEqual({ name: 'AST SpaceMobile, Inc.', source: 'SEC company ticker directory' });
+});
+
 test('captured identities do not require a current directory request', () => {
   renderHook(() => usePortfolioSecurityNames([{ holding: 'DBMF', securityName: 'Captured fund name' }]));
   expect(MarketDataService.getSecurityIdentities).not.toHaveBeenCalled();

@@ -30,6 +30,9 @@ function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEF
   products = RESEARCH_PRODUCTS, now = Date.now, ttlMs = 5 * 60 * 1000 } = {}) {
   let publications = {};
   let refreshedAt = null;
+  // The last refresh in which every snapshot query succeeded; a partly failed
+  // refresh keeps serving verified publications but is not a current read.
+  let verifiedAt = null;
   let pending = null;
   const definitions = new Map(products.flatMap((product) => product.snapshotTypes.map((type) => [type, product])));
   const publicationKey = (source) => `${source.snapshotType}:${source.date}:${source.article?.feedUrl || source.sourceUrl}`;
@@ -91,9 +94,11 @@ function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEF
       }
     }
     refreshedAt = Number(now());
+    if (results.every((result) => result.status === 'fulfilled')) verifiedAt = refreshedAt;
     persist();
   };
   return {
+    status: () => ({ verifiedAt }),
     async load({ date = '9999-12-31', waitForRefresh = false } = {}) {
       if (refreshedAt === null || Number(now()) - refreshedAt >= ttlMs) {
         if (!pending) pending = refresh().finally(() => { pending = null; });

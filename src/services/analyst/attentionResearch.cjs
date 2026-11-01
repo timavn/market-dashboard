@@ -1,7 +1,7 @@
 const { createHash } = require('node:crypto');
 const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js');
 const { sourceActionEvidence, describeAnalystFinding } = require('../../utils/analystFindingPresentation.cjs');
-const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings } = require('./stanceBook.cjs');
+const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings, stanceCall } = require('./stanceBook.cjs');
 const { MESSAGE_ID, TERM } = require('../../utils/sourceEmailClip.cjs');
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -13,6 +13,11 @@ const emailClip = (messageId, ticker) => (MESSAGE_ID.test(String(messageId || ''
   ? { sourceMessageId: messageId, clipTicker: ticker } : {});
 const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 const time = value => Date.parse(value);
+// The display name from the central security record (/api/security-universe identity).
+const securityName = (context, symbol) => {
+  const field = context.securities?.[symbol]?.identity?.displayName;
+  return field?.status === 'available' && typeof field.value === 'string' && field.value.trim() ? field.value.trim() : null;
+};
 const invalid = value => !value || value.connected === false || ['stale', 'isStale', 'cacheOnly', 'cachedOnly', 'cached', 'fromCache', 'from_cache', 'mock', 'isMock', 'seed', 'seeded', 'fixture', 'synthetic', 'inferred', 'fallback', 'refreshFailed'].some(flag => value[flag] === true)
   || ['status', 'freshness', 'source', 'provider'].some(key => /^(?:unavailable|unverified|offline|disconnected|error|failed|stale|cache[-_ ]?only|cached|mock|seed(?:ed)?|fixture|synthetic|inferred|fallback)$/i.test(String(value[key] || '')))
   || ['metadata', 'provenance'].some(key => value[key] && typeof value[key] === 'object' && invalid(value[key]));
@@ -470,19 +475,7 @@ function accountFindings(context, now) {
   return { findings: output, complete: fresh && account.historyVerified === true };
 }
 const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'signal-strength-shorts': 'Signal Strength Shorts', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
-const STANCE_SLOT_NAMES = { 'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts', 'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 const monthDay = date => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-// Each product call as the card's Action and Bias columns read it. Bias is the
-// side the product still holds after its call: SOME keeps it; a full sell,
-// cover or removal leaves no view. Nothing here infers a Trade or Trend.
-function stanceCall(item) {
-  const removal = item.stance.startsWith('EXIT_') && item.slot !== 'real-time-alert';
-  const action = { LONG: item.action === 'BUY-SOME' ? 'ADD' : 'LONG', SHORT: 'SHORT', REDUCE_LONG: 'SELL SOME', REDUCE_SHORT: 'COVER SOME',
-    EXIT_LONG: removal ? 'REMOVE' : 'SELL', EXIT_SHORT: removal ? 'REMOVE' : 'COVER' }[item.stance];
-  const bias = { LONG: 'BULLISH', SHORT: 'BEARISH', REDUCE_LONG: 'BULLISH', REDUCE_SHORT: 'BEARISH', EXIT_LONG: 'NEUTRAL', EXIT_SHORT: 'NEUTRAL' }[item.stance];
-  // A standing listing is dated by its entry; a change by its publication.
-  return { product: STANCE_SLOT_NAMES[item.slot], action, date: item.label === 'Listed' ? item.since : item.date, bias };
-}
 const amount = value => String(Math.round(value * 100) / 100);
 // Where the position is, where the calls take it, and the order between them.
 // A trim goes no lower than the security's own MIN and keeps its side.
@@ -536,7 +529,9 @@ function stanceFindings(context, now, verified) {
     const result = finding({ key, material: [scanned.side, opposing.map(item => [item.slot, item.stance, item.date])],
       symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: plan.verdict,
       publishedAt: opposing.map(item => item.at).sort().at(-1), rows, sourceLinks, state: { ...state, stanceBaseline: baseline } });
-    const name = [...opposing, ...supporting].find(item => item.name)?.name;
+    // The security record names every ticker (ETF Pro, alerts, removed listings); a
+    // Signal Strength roster name stands in only while the record cannot.
+    const name = securityName(context, symbol) || [...opposing, ...supporting].find(item => item.name)?.name;
     result.presentation.stance = { ...(name ? { name } : {}), calls, ...plan };
     output.push(result);
   }
