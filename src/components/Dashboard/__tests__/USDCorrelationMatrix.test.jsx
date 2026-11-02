@@ -320,7 +320,7 @@ describe('USDCorrelationMatrix', () => {
     expect(within(row).getByText('G5RV')).toBeInTheDocument();
     expect(within(row).queryByText('AS OF JUL 13')).not.toBeInTheDocument();
     expect(within(row).getByText('5.75')).toHaveClass('efr-vol-regime-value', 'efr-vol-regime-value--green');
-    expect(within(row).getByText('Investable')).toBeInTheDocument();
+    expect(within(row).getByText('Low')).toBeInTheDocument();
     expect(within(row).getByText('<8')).toBeInTheDocument();
     expect(within(row).queryByText('—')).not.toBeInTheDocument();
   });

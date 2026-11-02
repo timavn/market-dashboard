@@ -54,7 +54,7 @@ describe('DashboardGuide', () => {
     expect(guide).toHaveTextContent(/DXY is the U\.S\. Dollar Index level/i);
     expect(guide).toHaveTextContent(/UUP is an exchange-traded dollar proxy/i);
     expect(guide).toHaveTextContent(/sample SD\[ln\(Pₜ ÷ Pₜ₋₁\)\] × √252 × 100/i);
-    expect(guide).toHaveTextContent(/Investable: <8 · Chop: 8–<14 · Uninvestable: ≥14/i);
+    expect(guide).toHaveTextContent(/Low: <8 · Moderate: 8–<14 · High: ≥14/i);
     expect(guide).toHaveTextContent(/52 and 156 consecutive reporting observations/i);
     expect(guide).toHaveTextContent(/current observation is included/i);
     expect(guide).toHaveTextContent(/renormalizes across finite components/i);

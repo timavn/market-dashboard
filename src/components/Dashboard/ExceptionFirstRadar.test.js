@@ -1256,7 +1256,7 @@ describe('Exception-First header', () => {
       'efr-vol-row__metric-level efr-vol-row__metric-level--green',
     ]);
     expect(within(vixRow).queryByText('Regime')).not.toBeInTheDocument();
-    expect(within(vixRow).getByText('Investable')).toBeInTheDocument();
+    expect(within(vixRow).getByText('Low')).toBeInTheDocument();
   });
 
   test('superimposes the verified VIX Risk Range with prediction-market third bands', () => {
