@@ -684,6 +684,43 @@ def _typed_reference_citation(reference: dict[str, Any]) -> Optional[dict[str, A
     }
 
 
+_STATEMENT_GRAMMAR: list = []
+
+
+def _statement_grammar():
+    """The dashboard's own TRADE/TREND claim patterns (src/constants/researchStatementGrammar.json).
+
+    Only a successful read is kept, so a transient read failure is retried."""
+    if not _STATEMENT_GRAMMAR:
+        try:
+            grammar = json.loads((Path(__file__).resolve().parents[2] / "src/constants/researchStatementGrammar.json").read_text())
+            _STATEMENT_GRAMMAR.append((re.compile(grammar["forbidden"], re.I),
+                                       [(re.compile(claim["pattern"], re.I), claim.get("trade")) for claim in grammar["claims"]]))
+        except (OSError, ValueError, KeyError, TypeError, re.error):
+            return None
+    return _STATEMENT_GRAMMAR[0]
+
+
+def stated_trade_values(statement: Any) -> set:
+    """Trade directions a stored statement span claims; empty when it is conditional, negated or unreadable.
+
+    Claims are chosen as the dashboard chooses them: earliest first, then the
+    longest, then pattern order, never two that overlap."""
+    grammar = _statement_grammar()
+    if grammar is None or not isinstance(statement, str) or not statement.strip():
+        return set()
+    forbidden, claims = grammar
+    if forbidden.search(statement):
+        return set()
+    found = [(match.start(), -(match.end() - match.start()), order, match.end(), _bias(match[group]) if group else None)
+             for order, (pattern, group) in enumerate(claims) for match in pattern.finditer(statement)]
+    taken = []
+    for start, negative_length, order, end, value in sorted(found):
+        if not any(start < other_end and other_start < end for other_start, other_end, _ in taken):
+            taken.append((start, end, value))
+    return {value for _, _, value in taken} - {None}
+
+
 @lru_cache(maxsize=1)
 def _trade_instrument_aliases():
     """Reuse exact instrument identities; exposure/proxy mappings do not apply."""
@@ -718,8 +755,7 @@ def published_trade_display(security, symbol, as_of):
             continue
         if proof["method"] == "explicit-field" and not re.search(r"(?:^|\.)(?:trade|tradeSignal|tradeBias)$", proof["sourceField"], re.I):
             continue
-        if proof["method"] == "explicit-statement" and (re.search(r'\b(?:if|unless|could|would|should|may|might|will|expect|forecast|previously|historically|prior|not|never)\b|[?"“”]', proof["sourceText"], re.I)
-                or not re.search(r"\b(?:BULLISH|BEARISH|NEUTRAL) (?:on )?TRADE\b|\bTRADE(?: signal)?(?:(?: is| remains|:)\s*|\s+)(?:BULLISH|BEARISH|NEUTRAL)\b", proof["sourceText"], re.I)):
+        if proof["method"] == "explicit-statement" and not stated_trade_values(proof["sourceText"]):
             continue
         if any(descriptor.get(flag) is True for flag in ("stale", "fromCache", "cacheOnly", "offline", "disconnected", "mock", "seed", "seeded", "synthetic", "inferred")) or descriptor.get("verified") is False:
             continue

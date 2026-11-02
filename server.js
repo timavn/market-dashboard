@@ -1367,6 +1367,8 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
     predictionCpiConsensus = { at: Date.now(), value };
     return value;
   },
+  // The archive is constructed later in this file; the board reads it per request.
+  loadPublishedStatements: ({ date }) => publishedTradeArchive.loadStatements({ date }),
   marketDateFor: (now) => defaultResearchMarketDate(now),
 });
 // The market day's Alpha Code lines with live prices, for the Analyst's line watch. The
@@ -2405,6 +2407,7 @@ const securityUniverse = createSecurityUniverseService({
       return new Map(symbols.map(symbol => [symbol, rows[symbol]?.referencePrice?.status === 'available' ? rows[symbol].referencePrice.value : null]));
     },
     tradeArchiveStatus: () => publishedTradeArchive.status(),
+    loadPublishedStatements: () => publishedTradeArchive.loadStatements({ date: defaultResearchMarketDate(new Date()) }),
   }),
   stance: createStancePiece({ getScoredStanceBook: () => analystRoutes.dailyWorkflow?.scoredStanceBook?.() }),
   marketHistory: createMarketHistoryPiece({

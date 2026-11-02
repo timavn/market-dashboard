@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "notes": "The claim and guard patterns for TRADE/TREND statements in Hedgeye prose. src/utils/researchStatements.cjs binds them to the instrument a clause opens with; the analyst sidecar re-checks stored evidence with the same patterns (case-insensitive). Keep every pattern valid in both JavaScript and Python: no named groups, no variable-width lookbehind.",
+  "forbidden": "\\b(?:if|unless|provided|could|would|should|may|might|will|can(?:not)?|\\w+n['’]t|expect(?:s|ed|ing)?|forecast(?:s|ed|ing)?|assum(?:e|es|ed|ing)|scenario|previously|formerly|historically|prior|not|never|no\\s+longer|used\\s+to|had\\s+(?:\\w+\\s+)?been|wait(?:s|ed|ing)?\\s+for|until|needs?\\s+to|has\\s+to|have\\s+to|hop(?:e|es|ed|ing)|whether|perhaps|possibl[ey]|possibility|potential(?:ly)?|pending|probably|likely|near(?:ing|ly)?|approach(?:es|ed|ing)?|close\\s+to|closing\\s+in|away\\s+from|about\\s+to|poised|positioned|set\\s+to|threaten(?:s|ed|ing)?|knocking\\s+on|verge|towards?|risk\\s+of|when(?:ever)?|once(?!\\s+again)|according\\s+to|consensus)\\b|[?\"“”]",
+  "claims": [
+    { "form": "both", "pattern": "\\b(bullish|bearish|neutral)(?:\\s+(?:on|in)\\s+(?:both\\s+)?(?:(?:our|the|its|out|their)\\s+)?|\\s+(?:on\\s+(?:the\\s+)?)?)(?:@?hedgeye\\s+)?trade(?:\\s*(?:and|&|/)\\s*|-and-)(?:@?hedgeye\\s+)?trend\\b", "trade": 1, "trend": 1 },
+    { "form": "both-trend-first", "pattern": "\\b(bullish|bearish|neutral)(?:\\s+(?:on|in)\\s+(?:both\\s+)?(?:(?:our|the|its|their)\\s+)?|\\s+(?:on\\s+(?:the\\s+)?)?)(?:@?hedgeye\\s+)?trend(?:\\s*(?:and|&|/)\\s*|-and-)(?:@?hedgeye\\s+)?trade\\b", "trade": 1, "trend": 1 },
+    { "form": "trade-then-trend", "pattern": "\\b(bullish|bearish|neutral)\\s+(?:on\\s+(?:the\\s+)?)?(?:@?hedgeye\\s+)?trade(?:\\s+(?:signals?|durations?|horizons?))?\\s*(?:,|;|/|\\(|\\band\\b|\\bbut\\b|\\bwith\\b|\\bwhile\\b|\\byet\\b|[–—])\\s*(?:(?:but|and|while|yet)\\s+)?(?:(?:still|remains?|is|stays?|now|in)\\s+)*(bullish|bearish|neutral)\\s+(?:on\\s+(?:the\\s+)?)?(?:@?hedgeye\\s+)?trend\\b", "trade": 1, "trend": 2 },
+    { "form": "trend-then-trade", "pattern": "\\b(bullish|bearish|neutral)\\s+(?:on\\s+(?:the\\s+)?)?(?:@?hedgeye\\s+)?trend(?:\\s+(?:signals?|durations?|horizons?))?\\s*(?:,|;|/|\\(|\\band\\b|\\bbut\\b|\\bwith\\b|\\bwhile\\b|\\byet\\b|[–—])\\s*(?:(?:but|and|while|yet)\\s+)?(?:(?:still|remains?|is|stays?|now|in)\\s+)*(bullish|bearish|neutral)\\s+(?:on\\s+(?:the\\s+)?)?(?:@?hedgeye\\s+)?trade\\b", "trend": 1, "trade": 2 },
+    { "form": "durations-are", "pattern": "\\b(?:@?hedgeye\\s+)?trade\\s*(?:and|&|/)\\s*(?:@?hedgeye\\s+)?trend(?:\\s+signals?)?\\s*(?:are|remain|is|=|:)\\s*(bullish|bearish|neutral)\\b", "trade": 1, "trend": 1 },
+    { "form": "trade-is", "pattern": "\\b(?:@?hedgeye\\s+)?trade(?:\\s+signal)?(?:\\s*[:=]\\s*|\\s+(?:is|remains)\\s+|\\s+)(bullish|bearish|neutral)\\b", "trade": 1 },
+    { "form": "trend-is", "pattern": "\\b(?:@?hedgeye\\s+)?trend(?:\\s+signal)?(?:\\s*[:=]\\s*|\\s+(?:is|remains)\\s+|\\s+)(bullish|bearish|neutral)\\b", "trend": 1 },
+    { "form": "trade", "pattern": "\\b(bullish|bearish|neutral)\\s+(?:on\\s+(?:the\\s+)?)?(?:@?hedgeye\\s+)?trade\\b", "trade": 1 },
+    { "form": "trend", "pattern": "\\b(bullish|bearish|neutral)\\s+(?:on\\s+(?:the\\s+)?)?(?:@?hedgeye\\s+)?trend\\b", "trend": 1 }
+  ]
+}

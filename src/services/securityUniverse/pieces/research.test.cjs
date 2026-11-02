@@ -13,7 +13,12 @@ const entry = (riskRange, references, extra = {}) => ({ decision: {
   trade: missing('no-verified-published-trade-signal'), trend: descriptor('BULLISH'), riskRange,
   signalStrength: missing('no-explicit-signal-strength-event'), signalStrengthShorts: missing('no-explicit-signal-strength-shorts-event'), ...extra,
 }, directReferences: references });
-const intelligence = bySymbol => async () => ({ schemaVersion: 2, bySymbol });
+const intelligence = bySymbol => async () => ({ schemaVersion: 2, marketDate: '2026-10-31', bySymbol });
+// Trade as a publication states it: explicit evidence, its feed item and its own instrument.
+const publishedTrade = (ticker, value, extra = {}) => ({ status: 'available', value, sourceId: 'early-look', sourceLabel: 'Early Look',
+  sourceDate: '2026-10-30', publishedAt: '2026-10-30T11:27:00.000Z', sourceUrl: 'https://app.hedgeye.com/feed_items/189000',
+  sourceTicker: ticker, ticker, qualityStatus: 'indexed', reason: null,
+  signalProvenance: { field: 'trade', sourceField: 'article.bodyText', method: 'explicit-statement', sourceText: `${ticker} is ${value} TRADE` }, ...extra });
 const freshArchive = () => ({ refreshedAt: '2026-10-31T14:58:00Z' });
 
 test('a range routed through a research alias is a labelled proxy; the same instrument is direct', async () => {
@@ -72,7 +77,7 @@ test('unpublished readings keep their reason, Tail says it has no source, and a 
 });
 
 test('a trade archive that has not refreshed recently marks Trade partial instead of current', async () => {
-  const bySymbol = { NVDA: entry(range(170, 190), [reference('NVDA', 170, 190)], { trade: descriptor('BULLISH', { sourceId: 'real-time-alert', sourceLabel: 'Real-Time Alerts' }) }) };
+  const bySymbol = { NVDA: entry(range(170, 190), [reference('NVDA', 170, 190)], { trade: publishedTrade('NVDA', 'BULLISH') }) };
   for (const archive of [() => null, () => ({ refreshedAt: null }), () => ({ refreshedAt: '2026-10-31T14:00:00Z' })]) {
     const research = await createResearchPiece({ now: () => NOW, tradeArchiveStatus: archive, loadSecurityIntelligence: intelligence(bySymbol) }).loadMany(['NVDA']);
     assert.deepEqual([research.get('NVDA').trade.status, research.get('NVDA').trade.reason], ['partial', 'published-trade-archive-unavailable']);
@@ -91,4 +96,40 @@ test('flagged or malformed research is rejected', async () => {
   for (const response of [null, { schemaVersion: 1, bySymbol: {} }, { schemaVersion: 2, bySymbol: {}, stale: true }]) {
     await assert.rejects(createResearchPiece({ loadSecurityIntelligence: async () => response }).loadMany(['SPY']));
   }
+});
+
+test('Trade is the current or latest dated publication, and stated Trend and Alpha Codes come from the archive for the exact instrument', async () => {
+  const retained = publishedTrade('USD', 'BULLISH', { status: 'historical', sourceDate: '2026-10-16', publishedAt: '2026-10-16T11:27:00.000Z',
+    signalProvenance: { field: 'trade', sourceField: 'article.bodyText', method: 'explicit-statement',
+      sourceText: 'US Dollar Index was up +0.1% on the week and remains Bullish on both our TRADE and TREND' } });
+  const archived = (fields) => ({ sourceProduct: 'early-look', sourceLabel: 'Early Look', date: '2026-11-02', publishedAt: '2026-11-02T12:27:00.000Z',
+    sourceUrl: 'https://app.hedgeye.com/feed_items/189309', ...fields });
+  const statements = {
+    references: [],
+    trends: [archived({ sourceTicker: 'UST2Y', value: 'BULLISH', sourceText: 'UST 2yr Yield … to Signal Bearish TRADE, but Bullish TREND' }),
+      archived({ sourceTicker: 'GOLD', value: 'BEARISH', referenceOnly: true, sourceText: 'Gold remains Bearish TRADE and TREND' })],
+    alphaCodes: [archived({ sourceTicker: 'CL', levels: { raw: '9791', trade: 97, trend: 91, unit: '$', basis: 'printed-levels' },
+      sourceText: 'Oil’s (WTI) Alpha Code = 9791 (TRADE = $97, TREND = $91)' })],
+  };
+  const bySymbol = {
+    USD: { ...entry(missing('symbol-not-in-verified-primary-publication'), []), lastVerifiedDecision: { trade: retained } },
+    UST2Y: entry(missing('symbol-not-in-verified-primary-publication'), []),
+    WTIC: entry(missing('symbol-not-in-verified-primary-publication'), []),
+    GOLD: entry(missing('symbol-not-in-verified-primary-publication'), []),
+  };
+  const piece = createResearchPiece({ now: () => NOW, tradeArchiveStatus: freshArchive, loadSecurityIntelligence: intelligence(bySymbol),
+    loadPublishedStatements: async () => statements });
+  const research = await piece.loadMany(['USD', 'UST2Y', 'WTIC', 'GOLD']);
+  assert.deepEqual([research.get('USD').trade.value, research.get('USD').trade.asOf, research.get('USD').trade.retained, research.get('USD').trade.source],
+    ['BULLISH', '2026-10-16', true, 'Early Look']);
+  // A Trade without explicit published evidence is not shown, as on the board.
+  const unproven = await createResearchPiece({ now: () => NOW, tradeArchiveStatus: freshArchive, loadPublishedStatements: async () => statements,
+    loadSecurityIntelligence: intelligence({ USD: entry(missing('x'), [], { trade: { ...retained, status: 'available', signalProvenance: null } }) }) }).loadMany(['USD']);
+  assert.equal(unproven.get('USD').trade.status, 'unavailable');
+  assert.deepEqual([research.get('UST2Y').statedTrend.value, research.get('UST2Y').statedTrend.source], ['BULLISH', 'Early Look']);
+  assert.deepEqual(research.get('WTIC').alphaCode.value, { raw: '9791', trade: 97, trend: 91, unit: '$', basis: 'printed-levels' }, 'WTIC is the catalog alias of CL');
+  assert.equal(research.get('GOLD').statedTrend.reason, 'no-stated-trend', 'gold spot is not GOLD the security');
+  const stale = await createResearchPiece({ now: () => NOW, tradeArchiveStatus: () => ({ refreshedAt: '2026-10-31T14:00:00Z' }),
+    loadSecurityIntelligence: intelligence(bySymbol), loadPublishedStatements: async () => statements }).loadMany(['UST2Y']);
+  assert.equal(stale.get('UST2Y').statedTrend.reason, 'published-research-archive-unavailable');
 });

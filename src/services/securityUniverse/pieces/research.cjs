@@ -1,6 +1,8 @@
 'use strict';
 
 const EQUIVALENCE = require('../../../constants/instrumentEquivalence.json');
+const { sameSignalInstrument } = require('../../../utils/publishedResearchSignals.cjs');
+const { canonicalTradeResearch } = require('../../../utils/canonicalTradeResearch.cjs');
 const { available, flagged, unavailable, withStatus } = require('../fields.cjs');
 
 const SOURCE = 'Security intelligence';
@@ -10,7 +12,43 @@ const ARCHIVE_MAX_AGE_MS = 15 * 60_000;
 function emptyResearch(reason) {
   return withStatus({ trade: unavailable(reason, { source: SOURCE }), trend: unavailable(reason, { source: SOURCE }),
     tail: unavailable('no-published-tail-source'), riskRange: unavailable(reason, { source: SOURCE }),
-    signalStrength: unavailable(reason, { source: SOURCE }), signalStrengthShorts: unavailable(reason, { source: SOURCE }) });
+    signalStrength: unavailable(reason, { source: SOURCE }), signalStrengthShorts: unavailable(reason, { source: SOURCE }),
+    statedTrend: unavailable(reason, { source: SOURCE }), alphaCode: unavailable(reason, { source: SOURCE }) });
+}
+
+// Trade as the Predictive Markets board and every other surface pick it
+// (canonicalTradeResearch): the latest dated publication with explicit Trade
+// evidence, kept until a later report states otherwise, with its source text.
+function tradeField(response, symbol, decision) {
+  if (decision?.status === 'conflict') return unavailable('conflicting-published-trade-signals', { source: SOURCE });
+  const trade = canonicalTradeResearch(response, symbol, { date: response.marketDate });
+  if (trade.status !== 'available') {
+    return unavailable(decision?.reason || 'no-verified-published-trade-signal', { source: SOURCE });
+  }
+  return available(trade.direction, { source: trade.sourceLabel || trade.source, sourceId: trade.source, asOf: trade.sourceDate,
+    publishedAt: trade.sourcePublishedAt, sourceTicker: trade.ticker, sourceUrl: trade.sourceUrl,
+    sourceText: trade.signalProvenance?.sourceText || null, ...(trade.retainedPublication ? { retained: true } : {}) });
+}
+
+// The latest Trend or Alpha Code a publication states for this exact instrument
+// (never a spot reference or an ETF's index). Two different statements on the
+// latest date are a conflict.
+function statedField(readings, symbol, field, missing) {
+  const rows = (readings || []).filter(row => row && !flagged(row) && row.referenceOnly !== true
+    && sameSignalInstrument(row.sourceTicker || row.ticker, symbol) && /^\d{4}-\d{2}-\d{2}$/.test(row.date || ''));
+  if (!rows.length) return unavailable(missing, { source: 'Published research archive' });
+  const latestDate = rows.map(row => row.date).sort().at(-1);
+  // A midnight placeholder is a date, not a send time.
+  const sent = row => (/T00:00:00(?:\.000)?(?:Z|\+00:00)$/.test(String(row.publishedAt || '')) ? NaN : Date.parse(row.publishedAt || ''));
+  const dated = rows.filter(row => row.date === latestDate);
+  const latestSent = dated.every(row => Number.isFinite(sent(row))) ? Math.max(...dated.map(sent)) : null;
+  const latest = latestSent === null ? dated : dated.filter(row => sent(row) === latestSent);
+  // The same levels printed in two styles (a code, a legend) are one reading.
+  const value = row => (field === 'alphaCode' ? JSON.stringify([row.levels?.trade ?? null, row.levels?.trend ?? null, row.levels?.unit ?? null]) : row.value);
+  if (new Set(latest.map(value)).size > 1) return unavailable(`conflicting-published-${field === 'alphaCode' ? 'alpha-codes' : 'trend-statements'}`, { source: 'Published research archive', asOf: latestDate });
+  const row = latest[0];
+  return available(field === 'alphaCode' ? row.levels : row.value, { source: row.sourceLabel || row.sourceProduct, sourceId: row.sourceProduct || null,
+    asOf: row.date, publishedAt: row.publishedAt || null, sourceTicker: row.sourceTicker, sourceUrl: row.sourceUrl || null, sourceText: row.sourceText });
 }
 
 function descriptorField(descriptor, extra = {}) {
@@ -45,12 +83,14 @@ function rangeInstrument(entry, descriptor, symbol, price = null) {
 
 // Trade, Trend, risk range and Signal Strength from the shared security research
 // projection (AGENTS.md): the same decision descriptors every research surface reads.
-function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = async () => new Map(), tradeArchiveStatus = () => null, now = Date.now } = {}) {
+function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = async () => new Map(), tradeArchiveStatus = () => null,
+  loadPublishedStatements = async () => null, now = Date.now } = {}) {
   if (typeof loadSecurityIntelligence !== 'function') throw new Error('loadSecurityIntelligence is required');
 
   async function loadMany(symbols) {
-    const [response, prices] = await Promise.all([loadSecurityIntelligence({ symbols }),
-      Promise.resolve().then(() => loadReferencePrices(symbols)).catch(() => new Map())]);
+    const [response, prices, statements] = await Promise.all([loadSecurityIntelligence({ symbols }),
+      Promise.resolve().then(() => loadReferencePrices(symbols)).catch(() => new Map()),
+      Promise.resolve().then(() => loadPublishedStatements()).catch(() => null)]);
     if (!response || flagged(response) || response.schemaVersion !== 2 || !response.bySymbol || typeof response.bySymbol !== 'object') {
       throw new Error('security-intelligence-unavailable');
     }
@@ -63,10 +103,13 @@ function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = a
       const range = rangeInstrument(entry, decision.riskRange, symbol, prices?.get?.(symbol) ?? null);
       const sameRangeSource = decision.trend?.sourceId && decision.trend.sourceId === decision.riskRange?.sourceId
         && decision.trend.sourceDate === decision.riskRange?.sourceDate;
-      let trade = descriptorField(decision.trade);
+      let trade = tradeField(response, symbol, decision.trade);
       if (!archiveCurrent) {
         trade = { ...trade, status: trade.status === 'available' ? 'partial' : 'unavailable', reason: 'published-trade-archive-unavailable' };
       }
+      const stated = (field, missing) => (statements && archiveCurrent
+        ? statedField(statements[field === 'trend' ? 'trends' : 'alphaCodes'], symbol, field, missing)
+        : unavailable('published-research-archive-unavailable', { source: 'Published research archive' }));
       const riskRange = descriptorField(decision.riskRange, range);
       return [symbol, withStatus({
         trade,
@@ -77,6 +120,9 @@ function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = a
           : riskRange,
         signalStrength: descriptorField(decision.signalStrength),
         signalStrengthShorts: descriptorField(decision.signalStrengthShorts),
+        // What the prose states, beside the Risk Range Trend that sizes positions.
+        statedTrend: stated('trend', 'no-stated-trend'),
+        alphaCode: stated('alphaCode', 'no-published-alpha-code'),
       })];
     }));
   }

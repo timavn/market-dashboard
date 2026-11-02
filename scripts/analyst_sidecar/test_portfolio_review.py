@@ -442,5 +442,21 @@ class PortfolioReviewContractTests(unittest.TestCase):
             self.assertEqual(comparison["baselineRunId"], first["runId"])
 
 
+class StatedTradeGrammarTests(unittest.TestCase):
+    """Stored Trade evidence is re-read with the dashboard's own claim patterns."""
+
+    def test_reads_the_same_claims_the_dashboard_extracts(self):
+        from portfolio_review import stated_trade_values
+        self.assertEqual(stated_trade_values("UST 2yr Yield down -11 basis points last week to Signal Bearish TRADE, but Bullish TREND"), {"BEARISH"})
+        self.assertEqual(stated_trade_values("US Dollar Index was up +0.1% on the week and remains Bullish on both our TRADE and TREND"), {"BULLISH"})
+        self.assertEqual(stated_trade_values("Copper was described as bullish trend but bearish trade"), {"BEARISH"})
+        self.assertEqual(stated_trade_values("NVDA Trade: BULLISH"), {"BULLISH"})
+
+    def test_conditional_negated_and_trend_only_text_is_not_trade_evidence(self):
+        from portfolio_review import stated_trade_values
+        for text in ("SPX is not BULLISH TRADE", "If SPY is Bearish TRADE and TREND", "SPX may be BULLISH TRADE", "SPX is BULLISH TREND", "", None):
+            self.assertEqual(stated_trade_values(text), set(), text)
+
+
 if __name__ == "__main__":
     unittest.main()

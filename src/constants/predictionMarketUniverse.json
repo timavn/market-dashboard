@@ -50,7 +50,7 @@
         },
         "trade": {
           "source": "published-trade",
-          "ticker": "GLD"
+          "reference": "GOLD"
         },
         "tick": {
           "product": "hedgai-signals",
@@ -113,7 +113,7 @@
         },
         "trade": {
           "source": "published-trade",
-          "ticker": "SILVER"
+          "reference": "SILVER"
         },
         "tick": {
           "product": "hedgai-signals",
@@ -176,7 +176,7 @@
         },
         "trade": {
           "source": "published-trade",
-          "ticker": "COPPER"
+          "reference": "COPPER"
         },
         "tick": {
           "product": "hedgai-signals",

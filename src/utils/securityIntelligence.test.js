@@ -796,6 +796,23 @@ describe('security intelligence projection', () => {
     expect(response.bySymbol.AAPL.decision.trade.status).toBe('unavailable');
   });
 
+  test('a later same-day publication decides Trade once every send time is known', () => {
+    const prose = (snapshotType, bodyText) => ({ date: MARKET_DATE, snapshotType, publishedAt: `${MARKET_DATE}T00:00:00+00:00`,
+      article: { bodyText, feedUrl: 'https://app.hedgeye.com/feed_items/189311' } });
+    const [year, month, day] = MARKET_DATE.split('-');
+    const sent = (clock) => `${month}/${day}/${year} ${clock} AM EDT`;
+    const build = (snapshots) => buildSecurityIntelligence({ symbols: ['UST10Y'], marketDate: MARKET_DATE, historyDays: 0, now: NOW, snapshots,
+      productManifests: [indexedManifest('early-look'), indexedManifest('top-3-things')], riskRangeEnvelope: verifiedRiskEnvelope({}) });
+    const timed = build([
+      prose('early-look', `${sent('07:27')}\nUST 10yr Yield is Bullish TRADE`),
+      prose('top-3-things', `${sent('08:30')}\nUST 10yr Yield is Bearish TRADE, Neutral TREND`),
+    ]);
+    expect(timed.bySymbol.UST10Y.decision.trade).toMatchObject({ status: 'available', value: 'BEARISH', sourceId: 'top-3-things' });
+    // Without send times the two publications cannot be ordered, so Trade stays a conflict.
+    const untimed = build([prose('early-look', 'UST 10yr Yield is Bullish TRADE'), prose('top-3-things', 'UST 10yr Yield is Bearish TRADE')]);
+    expect(untimed.bySymbol.UST10Y.decision.trade).toMatchObject({ status: 'conflict', value: null });
+  });
+
   test('fails closed when two indexed tracker publications conflict', () => {
     const response = buildSecurityIntelligence({
       symbols: ['AAPL'],
