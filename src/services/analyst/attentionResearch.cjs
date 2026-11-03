@@ -1,7 +1,7 @@
 const { createHash } = require('node:crypto');
 const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js');
 const { sourceActionEvidence, describeAnalystFinding } = require('../../utils/analystFindingPresentation.cjs');
-const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings } = require('./stanceBook.cjs');
+const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings, stanceCall } = require('./stanceBook.cjs');
 const { MESSAGE_ID, TERM } = require('../../utils/sourceEmailClip.cjs');
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -13,6 +13,11 @@ const emailClip = (messageId, ticker) => (MESSAGE_ID.test(String(messageId || ''
   ? { sourceMessageId: messageId, clipTicker: ticker } : {});
 const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 const time = value => Date.parse(value);
+// The display name from the central security record (/api/security-universe identity).
+const securityName = (context, symbol) => {
+  const field = context.securities?.[symbol]?.identity?.displayName;
+  return field?.status === 'available' && typeof field.value === 'string' && field.value.trim() ? field.value.trim() : null;
+};
 const invalid = value => !value || value.connected === false || ['stale', 'isStale', 'cacheOnly', 'cachedOnly', 'cached', 'fromCache', 'from_cache', 'mock', 'isMock', 'seed', 'seeded', 'fixture', 'synthetic', 'inferred', 'fallback', 'refreshFailed'].some(flag => value[flag] === true)
   || ['status', 'freshness', 'source', 'provider'].some(key => /^(?:unavailable|unverified|offline|disconnected|error|failed|stale|cache[-_ ]?only|cached|mock|seed(?:ed)?|fixture|synthetic|inferred|fallback)$/i.test(String(value[key] || '')))
   || ['metadata', 'provenance'].some(key => value[key] && typeof value[key] === 'object' && invalid(value[key]));
@@ -128,12 +133,71 @@ function durationRows(context, symbol, now) {
       value = descriptor?.status === 'available' && !invalid(descriptor) ? descriptor.value : null;
       at = readingTime(descriptor?.publishedAt, descriptor?.sourceDate);
     }
+    // A line broken after the latest reading reads the side the price crossed to.
+    const broken = ['trade', 'trend'].includes(field) && alphaCodeBreak(context.alphaCodeWatch, symbol, field);
+    if (broken && time(broken.at) > Math.max(at, listed?.at ?? -Infinity)) return alphaCodeRow(label, broken.line);
     if (listed && ['trade', 'trend'].includes(field) && !(SIGNALS.includes(value) && at >= listed.at)) {
       const text = listed.value ? listed.value[0] + listed.value.slice(1).toLowerCase() : 'N/A';
       return { ...row(label, text), basis: listed.basis, note: listed.note };
     }
     return row(label, SIGNALS.includes(value) ? value[0] + value.slice(1).toLowerCase() : 'N/A');
   });
+}
+// Alpha Code lines are watched by the symbol quoted for them (CL=F for WTI, USO for itself).
+const alphaLines = (watch, symbol) => Object.values(watch?.lines || {}).filter(line => line.symbol === symbol);
+function alphaCodeBreak(watch, symbol, field) {
+  const line = alphaLines(watch, symbol).find(candidate => candidate.duration === field);
+  const last = line?.breaks?.at(-1);
+  return last && line.side === last.to ? { line, at: last.at } : null;
+}
+const level = value => value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+// Break times read as the dashboard's other clock times: Pacific, 24-hour.
+const clock = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value));
+const alphaSide = side => (side === 'above' ? 'Bullish' : side === 'below' ? 'Bearish' : null);
+function alphaCodeRow(label, line) {
+  const side = alphaSide(line.side);
+  return { ...row(label, side || 'N/A'), basis: 'inferred',
+    note: `Price ${side ? `${line.side} ` : 'at '}the ${line.productLabel || 'Alpha Code'} ${label} line ${level(line.level)}; inferred, not stated by the source` };
+}
+// A broken Alpha Code line is the Trade or Trend change Hedgeye confirms the next
+// morning. One card per instrument states each break; it is red only when the
+// line's own security is held on the side the break now opposes.
+function alphaCodeFindings(context, now, verified) {
+  const watch = context.alphaCodeWatch;
+  const output = [];
+  for (const symbol of [...new Set(Object.values(watch?.lines || {}).map(line => line.symbol))]) {
+    const lines = alphaLines(watch, symbol).sort((left, right) => left.duration.localeCompare(right.duration));
+    const broken = lines.filter(line => line.breaks?.length);
+    if (!broken.length) continue;
+    const state = holdingState(context.holdings, symbol, verified, now);
+    const held = state.quantity > 0 ? 'Long' : state.quantity < 0 ? 'Short' : null;
+    const rows = [...(held ? positionRows(state) : [])];
+    let opposed = null;
+    for (const line of broken) {
+      const last = line.breaks.at(-1);
+      const name = line.duration === 'trade' ? 'Trade' : 'Trend';
+      const side = alphaSide(last.to);
+      // Every cross of the session in order, so a reclaim never hides the break before it.
+      const crosses = line.breaks.map(cross => `${cross.to === 'below' ? 'Broke' : 'Reclaimed'} ${level(line.level)} at ${level(cross.price)} (${clock(cross.at)})`);
+      rows.push(row(`${name} line`, `${crosses.join(' → ')} → ${name} ${side.toLowerCase()}`));
+      if (held && line.side === last.to && (held === 'Long') === (last.to === 'below')) opposed ||= line.duration;
+    }
+    if (opposed) rows.push(row('Context', opposed === 'trade' ? `Trade broke vs ${held} → exit.` : 'Trend broke → reduce to MIN.'));
+    rows.push(...DURATIONS.map(([field, label]) => {
+      const line = lines.find(candidate => candidate.duration === field);
+      return line ? alphaCodeRow(label, line) : row(label, 'N/A');
+    }));
+    const latest = broken.map(line => line.breaks.at(-1).at).sort().at(-1);
+    const sourceLinks = broken.map(line => ({ label: `${line.productLabel || 'Research'} Alpha Code`, citation: {
+      id: `cite_${hash(['alpha-code', line.symbol, line.duration, line.level, line.marketDate]).slice(0, 28)}`,
+      title: `${line.productLabel || 'Research'}: ${line.label} Alpha Code`, product: line.product, publicationDate: line.marketDate,
+      ...(line.excerpt ? { excerpt: line.excerpt } : {}), ...emailClip(line.messageId, line.label) } }));
+    output.push(finding({ key: [symbol, 'alpha-code-break'], material: [symbol, broken.map(line => [line.duration, line.level, line.breaks.at(-1)])],
+      symbol: broken[0].label, kind: opposed ? 'portfolio' : 'market', priority: opposed ? 0 : 1, severity: opposed ? ACTION_REQUIRED : null,
+      action: `${broken.map(line => line.duration).join(' and ')} line ${broken.length > 1 ? 'breaks' : 'break'}`, publishedAt: latest, rows, sourceLinks,
+      state: held ? state : {} }));
+  }
+  return output;
 }
 function portfolioFindings(context, now, verified) {
   if (!verified) return [];
@@ -470,19 +534,7 @@ function accountFindings(context, now) {
   return { findings: output, complete: fresh && account.historyVerified === true };
 }
 const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'signal-strength-shorts': 'Signal Strength Shorts', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
-const STANCE_SLOT_NAMES = { 'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts', 'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 const monthDay = date => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-// Each product call as the card's Action and Bias columns read it. Bias is the
-// side the product still holds after its call: SOME keeps it; a full sell,
-// cover or removal leaves no view. Nothing here infers a Trade or Trend.
-function stanceCall(item) {
-  const removal = item.stance.startsWith('EXIT_') && item.slot !== 'real-time-alert';
-  const action = { LONG: item.action === 'BUY-SOME' ? 'ADD' : 'LONG', SHORT: 'SHORT', REDUCE_LONG: 'SELL SOME', REDUCE_SHORT: 'COVER SOME',
-    EXIT_LONG: removal ? 'REMOVE' : 'SELL', EXIT_SHORT: removal ? 'REMOVE' : 'COVER' }[item.stance];
-  const bias = { LONG: 'BULLISH', SHORT: 'BEARISH', REDUCE_LONG: 'BULLISH', REDUCE_SHORT: 'BEARISH', EXIT_LONG: 'NEUTRAL', EXIT_SHORT: 'NEUTRAL' }[item.stance];
-  // A standing listing is dated by its entry; a change by its publication.
-  return { product: STANCE_SLOT_NAMES[item.slot], action, date: item.label === 'Listed' ? item.since : item.date, bias };
-}
 const amount = value => String(Math.round(value * 100) / 100);
 // Where the position is, where the calls take it, and the order between them.
 // A trim goes no lower than the security's own MIN and keeps its side.
@@ -536,7 +588,9 @@ function stanceFindings(context, now, verified) {
     const result = finding({ key, material: [scanned.side, opposing.map(item => [item.slot, item.stance, item.date])],
       symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: plan.verdict,
       publishedAt: opposing.map(item => item.at).sort().at(-1), rows, sourceLinks, state: { ...state, stanceBaseline: baseline } });
-    const name = [...opposing, ...supporting].find(item => item.name)?.name;
+    // The security record names every ticker (ETF Pro, alerts, removed listings); a
+    // Signal Strength roster name stands in only while the record cannot.
+    const name = securityName(context, symbol) || [...opposing, ...supporting].find(item => item.name)?.name;
     result.presentation.stance = { ...(name ? { name } : {}), calls, ...plan };
     output.push(result);
   }
@@ -557,11 +611,12 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   const actions = [...stances, ...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...pendingCheckFindings(context, now, verified)];
   const opportunities = opportunityFindings(context, now, verified, [...portfolio, ...stances], sentenceMemo);
   const accounts = accountFindings(context, now);
+  const alphaCodes = alphaCodeFindings(context, now, verified);
   const completeKinds = [];
   if (verified && context.holdings.researchComplete !== false && context.research?.scanComplete === true) completeKinds.push('portfolio');
   if (context.research?.scanComplete === true && Array.isArray(context.documents?.products)) completeKinds.push('opportunity', 'market');
   if (accounts.complete) completeKinds.push('account');
-  const unique = new Map([...portfolio, ...actions, ...opportunities, ...accounts.findings].map(item => [item.id, item]));
+  const unique = new Map([...portfolio, ...actions, ...opportunities, ...alphaCodes, ...accounts.findings].map(item => [item.id, item]));
   return { findings: [...unique.values()], diagnostics, complete: completeKinds.includes('portfolio') && completeKinds.includes('opportunity') && completeKinds.includes('market'), completeKinds };
 }
 module.exports = { evaluateResearchAttention, freshBook };

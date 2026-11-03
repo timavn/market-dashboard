@@ -295,6 +295,33 @@ test('a Signal Strength Shorts addition opposes a held long; its removal exits a
   assert.deepEqual(findings.find(item => item.symbol === 'JPM').presentation.stance.calls, [{ product: 'Signal Strength Shorts', action: 'SHORT', date: '2026-09-22', bias: 'BEARISH' }]);
   assert.deepEqual(findings.find(item => item.symbol === 'DECK').presentation.stance.calls, [{ product: 'Signal Strength Shorts', action: 'REMOVE', date: '2026-09-22', bias: 'NEUTRAL' }]);
 });
+// The central security record (/api/security-universe identity) as the scan passes it in.
+const identityRecord = displayName => ({ identity: { status: 'available', displayName: { status: 'available', value: displayName, source: 'Yahoo Finance instrument metadata', asOf: '2026-09-22T12:00:00Z', reason: null } } });
+test('stance cards name every security from the security record, including ETF Pro, alert and removed tickers', () => {
+  const ctx = context();
+  ctx.holdings.positions = ['DRAM', 'LULU', 'COST', 'GS', 'ASTS'].map(symbol => ({ symbol, quantity: 10 }));
+  const etf = { productKey: 'etf-pro', productLabel: 'ETF Pro' };
+  ctx.events = [changeEvent('DRAM', 'REMOVE', 'LONG', etf),
+    changeEvent('LULU', undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', eventType: 'signal_strength_removed', excerpt: 'LULU' }),
+    changeEvent('COST', 'ADD', 'SHORT', etf), changeEvent('GS', 'ADD', 'SHORT', etf),
+    changeEvent('ASTS', 'SELL', undefined, { productKey: 'real-time-alert', productLabel: 'Real-Time Alert' })];
+  ctx.securities = { DRAM: identityRecord('Roundhill Memory ETF'), LULU: identityRecord('lululemon athletica inc.'),
+    COST: identityRecord('Costco Wholesale Corporation'), GS: identityRecord('The Goldman Sachs Group, Inc.'), ASTS: identityRecord('AST SpaceMobile, Inc.') };
+  const names = Object.fromEntries(evaluateResearchAttention(ctx, NOW).findings.filter(item => item.presentation.stance)
+    .map(item => [item.symbol, item.presentation.stance.name]));
+  assert.deepEqual(names, { DRAM: 'Roundhill Memory ETF', LULU: 'lululemon athletica inc.', COST: 'Costco Wholesale Corporation',
+    GS: 'The Goldman Sachs Group, Inc.', ASTS: 'AST SpaceMobile, Inc.' });
+});
+test('a roster name stands in only while the security record has no identity', () => {
+  const ctx = context();
+  ctx.holdings.positions = [{ symbol: 'JPM', quantity: 10 }, { symbol: 'EFX', quantity: 10 }];
+  const roster = symbol => changeEvent(symbol, undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', entityType: 'ticker',
+    eventType: 'signal_strength_short_membership', fieldPath: 'data.shorts.stocks[0]', excerpt: JSON.stringify({ ticker: symbol, side: 'short', name: `${symbol} roster name`, entryDate: '2026-09-22' }) });
+  ctx.events = [roster('JPM'), roster('EFX')];
+  ctx.securities = { JPM: identityRecord('JPMorgan Chase & Co.'), EFX: { identity: { status: 'unavailable', displayName: { status: 'unavailable', value: null, reason: 'identity-directory-unavailable' } } } };
+  const names = Object.fromEntries(evaluateResearchAttention(ctx, NOW).findings.map(item => [item.symbol, item.presentation.stance?.name]));
+  assert.deepEqual(names, { JPM: 'JPMorgan Chase & Co.', EFX: 'EFX roster name' });
+});
 test('a later re-add from the same product supersedes its removal', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'SNOW', quantity: 10 }];
   ctx.events = [changeEvent('SNOW', 'REMOVE', 'LONG'), changeEvent('SNOW', 'ADD', 'LONG', { publishedAt: '2026-09-22T14:00:00Z' })];
@@ -465,4 +492,56 @@ test('a newer explicit reading overrides the listing; an older one loses to it',
     sources: { trade: { publishedAt: '2026-09-22T15:00:00Z', citation: cite('trade') }, trend: { publishedAt: '2026-09-22T11:00:00Z', citation: cite('trend') } } });
   const finding = evaluateResearchAttention(ctx, NOW).findings.find(item => item.symbol === 'XLU' && item.presentation.stance);
   assert.deepEqual([durations(finding).Trade, durations(finding).Trend], ['Bearish', 'Bullish (inferred)']);
+});
+
+const alphaLine = (symbol, label, duration, level, side, breaks = []) => ({ id: `${symbol}|${duration}`, symbol, label, market: 'wti', duration, level,
+  product: 'early-look', productLabel: 'Early Look', marketDate: '2026-09-22', messageId: '1a18c949d0c80bdd', excerpt: `${label} Alpha Code`, side, breaks });
+const alphaWatch = (...lines) => ({ version: 1, marketDate: '2026-09-22', lines: Object.fromEntries(lines.map(line => [line.id, line])) });
+test('a broken Alpha Code line is a notification naming the line, the price and the duration it turns', () => {
+  const ctx = context();
+  ctx.alphaCodeWatch = alphaWatch(alphaLine('CL=F', 'WTI', 'trade', 97, 'below', [{ from: 'above', to: 'below', price: 96.85, at: '2026-09-22T14:40:00Z' }]),
+    alphaLine('CL=F', 'WTI', 'trend', 91, 'above'));
+  const card = evaluateResearchAttention(ctx, NOW).findings.find(item => item.action.includes('line'));
+  assert.equal(card.kind, 'market');
+  assert.equal(card.severity, undefined);
+  assert.equal(card.presentation.subject, 'WTI');
+  assert.deepEqual(card.presentation.rows.map(item => [item.label, item.text]), [
+    ['Trade line', 'Broke 97 at 96.85 (07:40) → Trade bearish'], ['Tick', 'N/A'], ['Trade', 'Bearish'], ['Trend', 'Bullish'], ['Tail', 'N/A']]);
+  assert.equal(card.presentation.rows[2].basis, 'inferred');
+  assert.match(card.presentation.rows[2].note, /below the Early Look Trade line 97; inferred/);
+  assert.deepEqual(card.presentation.sourceLinks.map(link => [link.label, link.citation.title, link.citation.sourceMessageId, link.citation.clipTicker]),
+    [['Early Look Alpha Code', 'Early Look: WTI Alpha Code', '1a18c949d0c80bdd', 'WTI']]);
+  // A reclaim lists the break before it, each at its own time.
+  ctx.alphaCodeWatch.lines['CL=F|trade'].breaks.push({ from: 'below', to: 'above', price: 97.17, at: '2026-09-22T14:56:32Z' });
+  ctx.alphaCodeWatch.lines['CL=F|trade'].side = 'above';
+  assert.equal(evaluateResearchAttention(ctx, NOW).findings.find(item => item.action.includes('line')).presentation.rows[0].text,
+    'Broke 97 at 96.85 (07:40) → Reclaimed 97 at 97.17 (07:56) → Trade bullish');
+  // An unbroken watch raises nothing.
+  ctx.alphaCodeWatch = alphaWatch(alphaLine('CL=F', 'WTI', 'trade', 97, 'above'));
+  assert.equal(evaluateResearchAttention(ctx, NOW).findings.some(item => item.action.includes('line')), false);
+});
+
+test('a held security’s own line breaking against the position is red, and its other cards read the break', () => {
+  const ctx = context();
+  addHolding(ctx, 'USO', 'LONG');
+  ctx.holdings.ruleHoldings[0].trade = 'BULLISH';
+  ctx.alphaCodeWatch = alphaWatch(alphaLine('USO', 'USO', 'trade', 88, 'below', [{ from: 'above', to: 'below', price: 87.5, at: '2026-09-22T14:40:00Z' }]));
+  const card = evaluateResearchAttention(ctx, NOW).findings.find(item => item.action.includes('line'));
+  assert.equal(card.kind, 'portfolio');
+  assert.equal(card.severity, 'action-required');
+  assert.deepEqual(card.presentation.rows.map(item => [item.label, item.text]).slice(0, 4), [
+    ['Current position', 'Long'], ['Position size', '4.00%'], ['Trade line', 'Broke 88 at 87.5 (07:40) → Trade bearish'], ['Context', 'Trade broke vs Long → exit.']]);
+});
+
+test('a line broken after a security’s latest published reading sets that duration on its other cards', () => {
+  const ctx = context();
+  addHolding(ctx, 'USO', 'LONG');
+  // Published Bearish Trade at 12:00 opposes the Long; USO then reclaims its Trade line at 14:40.
+  ctx.alphaCodeWatch = alphaWatch(alphaLine('USO', 'USO', 'trade', 88, 'above', [{ from: 'below', to: 'above', price: 88.4, at: '2026-09-22T14:40:00Z' }]));
+  const rule = evaluateResearchAttention(ctx, NOW).findings.find(item => item.state === 'open' && item.action === 'exit');
+  const trade = rule.presentation.rows.find(item => item.label === 'Trade');
+  assert.deepEqual([trade.text, trade.basis], ['Bullish', 'inferred']);
+  // A break older than the published reading leaves the reading.
+  ctx.alphaCodeWatch.lines['USO|trade'].breaks[0].at = '2026-09-22T11:00:00Z';
+  assert.equal(evaluateResearchAttention(ctx, NOW).findings.find(item => item.action === 'exit').presentation.rows.find(item => item.label === 'Trade').text, 'Bearish');
 });

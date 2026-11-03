@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { Worker } = require('node:worker_threads');
-const { createPublishedTradeArchiveWorkerService, validReadings } = require('./publishedTradeArchiveWorkerService.cjs');
+const { createPublishedTradeArchiveWorkerService, validReadings, validStatements } = require('./publishedTradeArchiveWorkerService.cjs');
 const reading = (fields = {}) => ({ ticker: 'CRB', sourceTicker: 'CRB', value: 'BULLISH', field: 'trade',
   sourceProduct: 'early-look', sourceLabel: 'Early Look', date: '2026-08-18', publishedAt: null,
   sourceUrl: 'https://app.hedgeye.com/feed_items/186089', qualityStatus: 'validated',
@@ -152,4 +152,38 @@ test('CPU-bound archive work runs in a native worker while the API event loop re
   await new Promise(resolve => setTimeout(resolve, 25));
   assert.equal(completed, false, 'The API loop handles timers while the archive is still computing.');
   assert.deepEqual(await pending, [reading()]);
+});
+
+test('status reports when the archive last read every source, not when the worker last replied', async (t) => {
+  const { service, workers } = harness(t);
+  assert.deepEqual(service.status(), { refreshedAt: null, retrying: false });
+  const first = service.load();
+  workers[0].ready();
+  workers[0].emit('message', { type: 'readings', id: workers[0].messages.at(-1).id, readings: [reading()] });
+  await first;
+  assert.equal(service.status().refreshedAt, null, 'a reply without a verified read is not current');
+  const second = service.load({ waitForRefresh: true });
+  workers[0].emit('message', { type: 'readings', id: workers[0].messages.at(-1).id, readings: [reading()], verifiedAt: Date.parse('2026-10-31T14:58:00Z') });
+  await second;
+  assert.equal(service.status().refreshedAt, '2026-10-31T14:58:00.000Z');
+});
+
+test('serves the reference Trade, stated Trend and Alpha Codes of the same reply, re-checked from their clauses', async (t) => {
+  const { service, workers } = harness(t);
+  const source = { sourceProduct: 'early-look', date: '2026-11-02', sourceUrl: 'https://app.hedgeye.com/feed_items/189309', qualityStatus: 'validated' };
+  const trend = { ...source, ticker: 'UST2Y', sourceTicker: 'UST2Y', field: 'trend', value: 'BULLISH',
+    sourceText: 'UST 2yr Yield down -11 basis points last week to Signal Bearish TRADE, but Bullish TREND',
+    signalProvenance: { field: 'trend', sourceField: 'article.bodyText', method: 'explicit-statement',
+      sourceText: 'UST 2yr Yield down -11 basis points last week to Signal Bearish TRADE, but Bullish TREND' } };
+  const alpha = { ...source, ticker: 'CL', sourceTicker: 'CL', field: 'alphaCode', sourceText: 'Oil’s (WTI) Alpha Code = 9791 (TRADE = $97, TREND = $91)',
+    levels: { raw: '9791', trade: 97, trend: 91, unit: '$', basis: 'printed-levels' } };
+  const statements = { references: [], trends: [trend], alphaCodes: [alpha] };
+  assert.equal(validStatements(statements), true);
+  assert.equal(validStatements({ ...statements, trends: [{ ...trend, value: 'BEARISH' }] }), false, 'the clause says Bullish TREND');
+  assert.equal(validStatements({ ...statements, alphaCodes: [{ ...alpha, mock: true }] }), false);
+  const pending = service.loadStatements({ date: '2026-11-02' });
+  workers[0].ready();
+  workers[0].emit('message', { type: 'readings', id: workers[0].messages.at(-1).id, readings: [], statements });
+  assert.deepEqual(await pending, statements);
+  assert.deepEqual(await service.loadStatements({ date: '2026-11-01' }), { references: [], trends: [], alphaCodes: [] });
 });

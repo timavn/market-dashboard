@@ -1,12 +1,11 @@
 const instrumentCatalog = require('../constants/dashboardResearchCatalog.json');
-const narrativeCatalog = require('../constants/dashboardNarrativeResearchCatalog.json');
+const { researchStatements, claimedValues, FORBIDDEN } = require('./researchStatements.cjs');
+const { publicationTime } = require('./researchPublicationTime.cjs');
 
 const record = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const bias = (value) => /^(BULLISH|BEARISH|NEUTRAL)$/i.test(String(value || '').trim())
   ? String(value).trim().toUpperCase() : null;
 const symbol = (value) => String(value || '').trim().toUpperCase();
-const escape = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const forbidden = /\b(?:if|unless|could|would|should|may|might|will|expect(?:s|ed)?|forecast|assuming|scenario|previously|formerly|historically|prior|not|never|no longer|used to)\b|[?"“”]/i;
 const reject = (value) => record(value) && (
   ['mock', 'isMock', 'seed', 'seeded', 'isSeeded', 'synthetic', 'inferred',
     'cacheOnly', 'cache_only', 'fromCache', 'stale', 'isStale', 'offline', 'disconnected', 'fallback'].some((key) => value[key] === true)
@@ -31,8 +30,8 @@ function isExplicitTradeProvenance(value) {
     && typeof value.sourceField === 'string' && value.sourceField.trim()
     && typeof value.sourceText === 'string' && value.sourceText.trim()
     && (value.method !== 'explicit-field' || /(?:^|\.)(?:trade|tradeSignal|tradeBias)$/i.test(value.sourceField))
-    && (value.method !== 'explicit-statement' || (!forbidden.test(value.sourceText)
-      && /\b(?:BULLISH|BEARISH|NEUTRAL) (?:on )?TRADE\b|\bTRADE(?: signal)?(?:(?: is| remains|:)\s*|\s+)(?:BULLISH|BEARISH|NEUTRAL)\b/i.test(value.sourceText))));
+    && (value.method !== 'explicit-statement' || (!FORBIDDEN.test(value.sourceText)
+      && claimedValues(value.sourceText, 'trade').length > 0)));
 }
 
 function metadata(snapshot) {
@@ -41,7 +40,7 @@ function metadata(snapshot) {
     sourceLabel: snapshot.productLabel || snapshot.sourceLabel || null,
     sourceUrl: snapshot.article?.feedUrl || snapshot.sourceUrl || null,
     date: snapshot.date || snapshot.marketDate || null,
-    publishedAt: snapshot.publishedAt || null,
+    publishedAt: publicationTime(snapshot),
     sourceEventId: snapshot.sourceEventId || snapshot.gmailMessageId || snapshot.sourceMessageId || null,
   };
 }
@@ -94,66 +93,54 @@ function explicitRow(row, ticker, fieldPath, meta) {
   return result;
 }
 
-function subjectDefinitions() {
-  const entries = instrumentCatalog.flatMap((entry) => [
-    ...(entry.aliases || []).map((name) => ({ ticker: entry.symbol, pattern: escape(name) })),
-    ...(entry.names || []).map((name) => ({ ticker: entry.symbol, pattern: escape(name) })),
-  ]);
-  narrativeCatalog.forEach((entry) => entries.push({
-    ticker: entry.sourceTicker, pattern: entry.subjectPattern,
-    prefix: entry.performancePrefixPattern,
-    statement: entry.currentStatementPattern,
-    sourceInstrument: entry.sourceInstrument,
-    ...(entry.basisLabel ? { basisLabel: entry.basisLabel, basisRelationship: entry.basisRelationship } : {}),
-  }));
-  return entries.sort((a, b) => b.pattern.length - a.pattern.length);
+// A statement about a spot commodity or other published reference keeps that
+// identity apart from any security sharing its code (Gold spot is not GOLD the
+// stock, Corn the commodity is not the CORN ETF).
+function identityFields(item) {
+  if (item.kind === 'reference') {
+    return { sourceInstrument: item.sourceInstrument, basisLabel: item.basisLabel, basisRelationship: item.basisRelationship,
+      instrumentKey: `reference:${item.ticker}`, referenceOnly: true };
+  }
+  return item.sourceInstrument ? { sourceInstrument: item.sourceInstrument } : {};
 }
-const stateVerb = '(?:(?:is|remains|stays|turned|turns|flipped|flips)(?: now| back)?(?: to)?(?: signaling)? |(?:is )?back to signaling |[:=]\\s*)';
 
-function compileSubject(entry) {
-  const prefix = `^${entry.pattern}(?:\\s*[:=]\\s*|\\s+)${entry.prefix || ''}`;
-  return { ...entry,
-    directionalFirst: new RegExp(`${prefix}(?:${entry.statement || stateVerb})?(BULLISH|BEARISH|NEUTRAL) (?:on )?TRADE\\b`, 'i'),
-    fieldFirst: new RegExp(`${prefix}(?:${stateVerb})?TRADE(?: signal)?(?:(?: is| remains|:)\\s*|\\s+)(BULLISH|BEARISH|NEUTRAL)\\b`, 'i'),
-  };
-}
-const subjects = subjectDefinitions().map(compileSubject);
-const ambiguousCommoditySubjects = new Set([
-  ...narrativeCatalog.filter((entry) => entry.basisLabel).map((entry) => symbol(entry.sourceTicker)),
-  ...instrumentCatalog.flatMap((entry) => (entry.publishedReferences || []).flatMap((reference) =>
-    (reference.names || []).map((name) => symbol(name.split(/\s+/)[0]))
-      .filter((name) => (reference.aliases || []).includes(name)))),
-]);
-const nonSecurities = new Set(['TRADE', 'TREND', 'BUY', 'SELL', 'THIS', 'THAT', 'THESE', 'THOSE', 'THE',
-  'OUR', 'WE', 'I', 'IT', 'ITS', 'AND', 'FOR', 'NEW', 'US', 'USA', 'ETF', 'FED', 'TODAY', 'NOW',
-  'EQUITIES', 'SOFTWARE', 'COMMODITIES', 'MARKET', 'MARKETS', 'LONG', 'SHORT', 'BULLISH', 'BEARISH', 'NEUTRAL']);
-
-/** Conservative, subject-bound published statements, never a proximity match. */
+/** Every subject-bound TRADE statement in a text, by the shared research grammar. */
+// Each reading keeps the whole sentence it was read from, so it can be read
+// again with the conditions and neighbouring clauses its span leaves out.
 function tradeStatements(text, meta = {}, fieldPath = 'article.bodyText') {
-  const result = [];
-  if (!/\bTRADE\b/i.test(String(text || '')) || !/\b(?:BULLISH|BEARISH|NEUTRAL)\b/i.test(String(text || ''))) return result;
-  String(text || '').split(/\r?\n|(?<=[.!?])\s+/).forEach((raw) => {
-    const line = raw.trim().replace(/^[•*-]\s+/, '').replace(/\s+/g, ' ');
-    if (!line || line.length > 900 || !/\bTRADE\b/i.test(line)
-      || !/\b(?:BULLISH|BEARISH|NEUTRAL)\b/i.test(line) || forbidden.test(line)) return;
-    const claims = [...line.matchAll(/\b(BULLISH|BEARISH|NEUTRAL) (?:on )?TRADE\b|\bTRADE(?: signal)?(?:(?: is| remains|:)\s*|\s+)(BULLISH|BEARISH|NEUTRAL)\b/gi)]
-      .map((match) => (match[1] || match[2]).toUpperCase());
-    if (new Set(claims).size > 1 || /\bTRADE\b.*\b(?:versus|last month|last year|last week)\b/i.test(line)) return;
-    const token = /^\$?([A-Z][A-Z0-9./=^_-]{0,15})(?=\s|:)/.exec(line)?.[1];
-    const candidates = [...subjects, ...(token && !nonSecurities.has(token) && !ambiguousCommoditySubjects.has(token)
-      ? [compileSubject({ ticker: token, pattern: `\\$?${escape(token)}` })] : [])];
-    candidates.forEach((entry) => {
-      const match = entry.directionalFirst.exec(line) || entry.fieldFirst.exec(line);
-      if (!match) return;
-      result.push(reading(meta, entry.ticker, match[1].toUpperCase(), fieldPath, line, 'explicit-statement', {
-        ...(entry.sourceInstrument ? { sourceInstrument: entry.sourceInstrument } : {}),
-        ...(entry.basisLabel ? { basisLabel: entry.basisLabel, basisRelationship: entry.basisRelationship,
-          instrumentKey: `reference:${entry.ticker}`, referenceOnly: true } : {}),
-      }));
-    });
-  });
-  return [...new Map(result.map((item) => [`${item.ticker}:${item.value}:${item.sourceText}`, item])).values()];
+  return researchStatements(text).filter((item) => item.field === 'trade').map((item) => reading(
+    meta, item.ticker, item.value, fieldPath, item.sourceText, 'explicit-statement', { ...identityFields(item), statement: item.statement }));
 }
+
+/** Stated TREND directions and Alpha Code levels, with the clause that states each. */
+function statementReadings(text, meta = {}, fieldPath = 'article.bodyText') {
+  return researchStatements(text).filter((item) => item.field !== 'trade').map((item) => ({
+    ...meta, ticker: symbol(item.ticker), sourceTicker: symbol(item.ticker), field: item.field, fieldPath,
+    sourceText: item.sourceText, statement: item.statement,
+    ...(item.field === 'trend' ? { value: item.value,
+      signalProvenance: { field: 'trend', sourceField: fieldPath, method: 'explicit-statement', sourceText: item.sourceText } }
+      : { levels: item.levels }),
+    ...identityFields(item),
+  }));
+}
+
+// The prose a publication carries. Top 3 Things repeats its items in the
+// body; a statement read from both is kept once. A monthly review ("ETF Pro
+// Plus: August Update") retells last month in the past tense and quotes old
+// ranges, so its prose states no current signal.
+const MONTHLY_REVIEW = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+Update\b/i;
+function proseFields(snapshot) {
+  const article = record(snapshot.article) ? snapshot.article : {};
+  if (MONTHLY_REVIEW.test(article.headline || '')) return [];
+  const fields = ['bodyText', 'summary', 'headline', 'teaser'].map((field) => [`article.${field}`, article[field]]);
+  (Array.isArray(article.keyTakeaways) ? article.keyTakeaways : [])
+    .forEach((text, index) => fields.push([`article.keyTakeaways[${index}]`, text]));
+  (Array.isArray(snapshot.data?.items) ? snapshot.data.items : [])
+    .forEach((item, index) => fields.push([`data.items[${index}].body`, item?.body]));
+  return fields.filter(([, text]) => typeof text === 'string' && text.trim());
+}
+const statementKey = (item) => `${item.field}:${item.sourceTicker}:${item.instrumentKey || ''}:${item.value || JSON.stringify(item.levels)}:${item.sourceText}`;
+const once = (items) => [...new Map(items.map((item) => [statementKey(item), item])).values()];
 
 function extractPublishedTradeSignals(snapshot, { sourceVerified = false } = {}) {
   if (!record(snapshot) || reject(snapshot)) return [];
@@ -170,13 +157,66 @@ function extractPublishedTradeSignals(snapshot, { sourceVerified = false } = {})
     });
   };
   walk(snapshot.data, 'data');
-  ['bodyText', 'summary', 'headline'].forEach((field) => {
-    result.push(...tradeStatements(snapshot.article?.[field], meta, `article.${field}`));
-  });
-  const valid = result.filter((item) => !item.basisLabel && !(snapshot.sourceQuality?.issues || []).some((issue) =>
+  const structured = [...new Map(result.map((item) => [`${item.ticker}:${item.value}:${item.fieldPath}:${item.sourceText}`, item])).values()];
+  const stated = once(proseFields(snapshot).flatMap(([field, text]) => tradeStatements(text, meta, field)));
+  return withoutQualityIssues(snapshot, [...structured, ...stated].filter((item) => !item.basisLabel), TRADE_FIELDS);
+}
+
+const TRADE_FIELDS = ['trade', 'tradeSignal', 'tradeBias', 'narrative'];
+function withoutQualityIssues(snapshot, items, fields) {
+  return items.filter((item) => !(snapshot.sourceQuality?.issues || []).some((issue) =>
     sameSignalInstrument(issue.ticker, item.sourceTicker)
-    && [issue.field, ...(issue.affectedFields || [])].some((field) => ['trade', 'tradeSignal', 'tradeBias', 'narrative'].includes(field))));
-  return [...new Map(valid.map((item) => [`${item.ticker}:${item.value}:${item.fieldPath}:${item.sourceText}`, item])).values()];
+    && [issue.field, ...(issue.affectedFields || [])].some((field) => fields.includes(field))));
+}
+
+/**
+ * The day's published statements in one verified publication: security Trade
+ * (as extractPublishedTradeSignals), Trade for published references such as
+ * Gold spot, stated TREND directions, and Alpha Code levels.
+ */
+function extractPublishedStatements(snapshot, { sourceVerified = false } = {}) {
+  const empty = { trade: [], references: [], trends: [], alphaCodes: [] };
+  if (!record(snapshot) || reject(snapshot)) return empty;
+  if (!sourceVerified && !isVerifiedPublicationSnapshot(snapshot)) return empty;
+  const meta = metadata(snapshot);
+  const prose = proseFields(snapshot);
+  const references = once(prose.flatMap(([field, text]) => tradeStatements(text, meta, field)))
+    .filter((item) => item.referenceOnly === true);
+  const others = once(prose.flatMap(([field, text]) => statementReadings(text, meta, field)));
+  return {
+    trade: extractPublishedTradeSignals(snapshot, { sourceVerified: true }),
+    references: withoutQualityIssues(snapshot, references, TRADE_FIELDS),
+    trends: withoutQualityIssues(snapshot, others.filter((item) => item.field === 'trend'), ['trend', 'narrative']),
+    alphaCodes: withoutQualityIssues(snapshot, others.filter((item) => item.field === 'alphaCode'), ['lrr', 'hrr', 'narrative']),
+  };
+}
+
+const sameLevels = (left, right) => ['raw', 'trade', 'trend', 'unit'].every((key) => (left?.[key] ?? null) === (right?.[key] ?? null));
+/** The stored reading is what its sentence (or, for older readings, its span) still states. */
+function restates(item) {
+  const fromStatement = typeof item.statement === 'string' && item.statement.trim();
+  return researchStatements(fromStatement ? item.statement : item.sourceText).some((statement) => statement.field === item.field
+    && symbol(statement.ticker) === symbol(item.sourceTicker)
+    && (statement.kind === 'reference') === (item.referenceOnly === true)
+    && (!fromStatement || statement.sourceText === item.sourceText)
+    && (item.field === 'alphaCode' ? sameLevels(statement.levels, item.levels) : statement.value === item.value));
+}
+// Archive replies re-check the same readings on every load; remember the verdicts.
+const statedVerdicts = new Map();
+/** A stored Trend, reference Trade or Alpha Code reading its own source text still states. */
+function isStatedReading(item) {
+  if (!record(item) || reject(item) || typeof item.sourceText !== 'string' || !item.sourceText.trim()) return false;
+  if (item.field === 'trend' && (item.signalProvenance?.field !== 'trend' || item.signalProvenance?.method !== 'explicit-statement'
+    || item.signalProvenance.sourceText !== item.sourceText || FORBIDDEN.test(item.sourceText))) return false;
+  if (item.field === 'trade' && (!isExplicitTradeProvenance(item.signalProvenance) || item.referenceOnly !== true)) return false;
+  // A reference reading is keyed by its own instrument.
+  if ((item.referenceOnly === true) !== (item.instrumentKey === `reference:${symbol(item.sourceTicker)}`)) return false;
+  const key = JSON.stringify([item.field, item.sourceTicker, item.referenceOnly === true, item.value ?? null, item.levels ?? null, item.sourceText, item.statement ?? null]);
+  if (!statedVerdicts.has(key)) {
+    if (statedVerdicts.size >= 20_000) statedVerdicts.delete(statedVerdicts.keys().next().value);
+    statedVerdicts.set(key, restates(item));
+  }
+  return statedVerdicts.get(key);
 }
 
 function publishedTradeFromEvent(event) {
@@ -206,14 +246,21 @@ function isExactPublishedTradeReading(item) {
   if (item.signalProvenance.method === 'explicit-field') return true;
   // Recheck old cached statement readings too: a commodity word that also
   // happens to be an ETF ticker does not identify that ETF's published signal.
+  if (typeof item.statement === 'string' && item.statement.trim()) {
+    return tradeStatements(item.statement).some((statement) => !statement.basisLabel && statement.value === item.value
+      && statement.sourceText === item.signalProvenance.sourceText && sameSignalInstrument(statement.sourceTicker, item.sourceTicker || item.ticker));
+  }
   return tradeStatements(item.signalProvenance.sourceText).some((statement) => !statement.basisLabel
     && sameSignalInstrument(statement.sourceTicker, item.sourceTicker || item.ticker));
 }
 
-function selectLatestPublishedTrade(readings, { ticker, asOf = '9999-12-31' } = {}) {
+/** The latest dated Trade for an exact instrument, or with `reference` for a
+ * published reference such as Gold spot (never a security sharing its code). */
+function selectLatestPublishedTrade(readings, { ticker, asOf = '9999-12-31', reference = false } = {}) {
   const rows = (readings || []).filter((item) => isExplicitTradeProvenance(item?.signalProvenance)
-    && bias(item.value) && sameSignalInstrument(item.sourceTicker || item.ticker, ticker)
-    && isExactPublishedTradeReading(item)
+    && bias(item.value) && (reference
+      ? item.instrumentKey === `reference:${symbol(ticker)}` && isStatedReading(item)
+      : sameSignalInstrument(item.sourceTicker || item.ticker, ticker) && isExactPublishedTradeReading(item))
     && /^\d{4}-\d{2}-\d{2}$/.test(item.date || item.sourceDate || '')
     && (item.date || item.sourceDate) <= String(asOf).slice(0, 10));
   if (!rows.length) return null;
@@ -228,5 +275,6 @@ function selectLatestPublishedTrade(readings, { ticker, asOf = '9999-12-31' } = 
   return { ...selected[0], status: 'available' };
 }
 
-module.exports = { extractPublishedTradeSignals, publishedTradeFromEvent, selectLatestPublishedTrade,
-  tradeStatements, isExplicitTradeProvenance, sameSignalInstrument, isVerifiedPublicationSnapshot, isExactPublishedTradeReading };
+module.exports = { extractPublishedTradeSignals, extractPublishedStatements, isStatedReading, publishedTradeFromEvent,
+  selectLatestPublishedTrade, tradeStatements, isExplicitTradeProvenance, sameSignalInstrument, isVerifiedPublicationSnapshot,
+  isExactPublishedTradeReading };

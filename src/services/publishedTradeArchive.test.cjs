@@ -86,3 +86,43 @@ test('serves persisted research immediately while the archive refresh is still p
   resolve([]);
   assert.deepEqual(await restarted.load({ waitForRefresh: true }), expected);
 });
+
+test('a refresh counts as verified only when every snapshot query succeeded', async () => {
+  let failing = 'the-call';
+  let clock = 1_000;
+  const archive = createPublishedTradeArchive({ referencePath: null, products, ttlMs: 0, now: () => clock,
+    querySnapshotsByType: async (type) => { if (type === failing) throw new Error('ExpiredTokenException'); return [publication()]; } });
+  await archive.load({ waitForRefresh: true });
+  assert.equal(archive.status().verifiedAt, null);
+  failing = null;
+  clock = 2_000;
+  await archive.load({ waitForRefresh: true });
+  assert.equal(archive.status().verifiedAt, 2_000);
+  failing = 'early-look';
+  clock = 3_000;
+  await archive.load({ waitForRefresh: true });
+  assert.equal(archive.status().verifiedAt, 2_000, 'a later partial failure keeps the last verified read');
+});
+
+test('keeps a publication that states only references, Trend or Alpha Codes, and drops a tampered statement on reload', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trade-publications-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const referencePath = path.join(directory, 'archive.json');
+  const body = 'Gold remains Bearish TRADE and TREND\nOil’s (WTI) Alpha Code = 9791 (TRADE = $97, TREND = $91)';
+  const archive = createPublishedTradeArchive({ referencePath, products: [products[0]], querySnapshotsByType: async () => [publication('2026-11-02', body)] });
+  assert.deepEqual(await archive.load({ waitForRefresh: true }), [], 'spot gold is not security Trade');
+  const statements = archive.statements();
+  assert.deepEqual(statements.references.map((row) => [row.sourceTicker, row.value, row.instrumentKey]), [['GOLD', 'BEARISH', 'reference:GOLD']]);
+  assert.deepEqual(statements.trends.map((row) => [row.sourceTicker, row.value]), [['GOLD', 'BEARISH']]);
+  assert.deepEqual(statements.alphaCodes.map((row) => [row.sourceTicker, row.levels.trade, row.levels.trend]), [['CL', 97, 91]]);
+  assert.deepEqual(archive.statements({ date: '2026-11-01' }).references, []);
+  const stored = JSON.parse(fs.readFileSync(referencePath, 'utf8'));
+  Object.values(stored.publications)[0].alphaCodes[0].levels.trade = 98;
+  fs.writeFileSync(referencePath, JSON.stringify(stored));
+  const restarted = createPublishedTradeArchive({ referencePath, products: [products[0]], querySnapshotsByType: async () => { throw new Error('offline'); } });
+  await restarted.load({ date: '2026-11-02' });
+  // Only the altered statement is dropped; the publication's other statements stand.
+  const kept = restarted.statements();
+  assert.deepEqual(kept.alphaCodes, []);
+  assert.deepEqual([kept.references.length, kept.trends.length], [1, 1]);
+});

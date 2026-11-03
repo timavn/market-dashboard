@@ -2577,6 +2577,9 @@ test('a slow delete keeps a disabled Deleting row in place and a stale refresh c
   expect(row).toBeDisabled();
   expect(row).toHaveTextContent('Deleting…');
   expect(row.closest('.analyst-conversation-row')).toHaveClass('is-deleting');
+  // One indicator: the rolling digits, with no seconds counting beside them.
+  expect(row.querySelectorAll('.analyst-spinner')).toHaveLength(1);
+  expect(row.querySelector('.analyst-spinner-elapsed')).toBeNull();
   expect(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' })).toBeDisabled();
   fireEvent.click(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' }));
   expect(screen.queryByText('Only answer A')).not.toBeInTheDocument();

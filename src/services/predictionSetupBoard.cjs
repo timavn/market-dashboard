@@ -1,6 +1,8 @@
 const UNIVERSE = require('../constants/predictionMarketUniverse.json');
 const { canonicalTradeResearch } = require('../utils/canonicalTradeResearch.cjs');
+const { selectLatestPublishedTrade } = require('../utils/publishedResearchSignals.cjs');
 const { PRODUCTS: MORNING_PRODUCTS, PROXY_TICKERS, buildMorningResearch } = require('./predictionMorningResearch.cjs');
+const { emailPublishedAt } = require('../utils/researchPublicationTime.cjs');
 
 // One row per tracked Kalshi market: Hedgeye Tick/Trade/Trend, the verified
 // underlying price, its Risk Range position, and the rule-based setup. Line
@@ -19,44 +21,6 @@ const direction = (value) => {
   const text = String(value || '').toUpperCase();
   return ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(text) ? text : null;
 };
-
-// Hedgeye emails print their send time ("10/15/2026 07:37 AM EDT"); imported
-// publishedAt values are midnight placeholders. Mirrors daily_research_rollup.publication_time.
-const PUB_LINE = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?:\s*([AP]M))?\s+(EDT|EST|ET|PDT|PST|PT|UTC|GMT)\b/i;
-const ZONES = { ET: 'America/New_York', EDT: 'America/New_York', EST: 'America/New_York',
-  PT: 'America/Los_Angeles', PDT: 'America/Los_Angeles', PST: 'America/Los_Angeles' };
-
-function zonedInstant(parts, zone) {
-  const wall = Date.UTC(...parts);
-  if (!zone) return new Date(wall);
-  // The zone's offset at that wall time, applied twice to settle across a DST edge.
-  const offset = (at) => {
-    const local = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23',
-      year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
-      .formatToParts(new Date(at)).map(({ type, value }) => [type, Number(value)]));
-    return Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second) - at;
-  };
-  const first = wall - offset(wall);
-  return new Date(wall - offset(first));
-}
-
-/** The research email's own send time, or null when only a date is known. */
-function emailPublishedAt(snapshot) {
-  const line = String(snapshot?.article?.bodyText || '').match(PUB_LINE);
-  if (line) {
-    const [, month, day, year, clock, minute, meridiem, zone] = line;
-    let hour = Number(clock);
-    if (meridiem) hour = (hour % 12) + (meridiem.toUpperCase() === 'PM' ? 12 : 0);
-    const instant = zonedInstant([Number(year), Number(month) - 1, Number(day), hour, Number(minute)],
-      ZONES[zone.toUpperCase()]);
-    return Number.isNaN(instant.getTime()) ? null : instant.toISOString();
-  }
-  for (const value of [snapshot?.article?.publishedAt, snapshot?.publishedAt]) {
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed) && new Date(parsed).toISOString().slice(11, 19) !== '00:00:00') return value;
-  }
-  return null;
-}
 
 function riskRangeReading(market, { riskRanges, cryptoQuant }) {
   const spec = market.hedgeye.riskRange;
@@ -91,8 +55,18 @@ function tickReading(market, hedgai) {
   };
 }
 
-function tradeReading(market, securityIntelligence, marketDate) {
-  const ticker = market.hedgeye.trade?.ticker;
+function tradeReading(market, securityIntelligence, marketDate, publishedStatements) {
+  const spec = market.hedgeye.trade;
+  // Spot metals settle on their published spot reference, which no security shares.
+  if (spec?.reference) {
+    const reading = publishedStatements && selectLatestPublishedTrade(publishedStatements.references,
+      { ticker: spec.reference, asOf: marketDate, reference: true });
+    if (reading?.status !== 'available') return null;
+    return { direction: reading.value, ticker: reading.sourceTicker, date: reading.date,
+      source: reading.sourceLabel || reading.sourceProduct, sourceUrl: reading.sourceUrl,
+      instrument: reading.sourceInstrument || null, reference: true };
+  }
+  const ticker = spec?.ticker;
   if (!ticker || !securityIntelligence) return null;
   const trade = canonicalTradeResearch(securityIntelligence, ticker, { date: marketDate });
   if (trade.status !== 'available') return null;
@@ -421,7 +395,7 @@ const allTimeHighSymbol = (market) => market.hedgeye.riskRange?.priceSymbol || m
 
 function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations,
   usdPeriods, eventsBySeries, morningSnapshots, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory,
-  priceHistory, cpiConsensus, marketDate, asOf = new Date().toISOString() } = {}) {
+  priceHistory, cpiConsensus, publishedStatements, marketDate, asOf = new Date().toISOString() } = {}) {
   // Saved boards from before volume keep their original shape.
   // Bond ETFs (SHY, IEF, TLT) move opposite to the yield their Trend describes.
   const volumeFor = ({ symbol, inverse } = {}, trend) => {
@@ -453,7 +427,7 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       && (rangePrice.value < (range.low + range.high) / 4 || rangePrice.value > (range.low + range.high));
     const position = mismatch ? null : rangePosition(rangePrice, range);
     const tick = tickReading(market, hedgai);
-    const trade = tradeReading(market, securityIntelligence, marketDate);
+    const trade = tradeReading(market, securityIntelligence, marketDate, publishedStatements);
     const trend = range?.trend || null;
     return {
       id: market.id, label: market.label, group: market.group, cadence: market.cadence, events,
@@ -519,7 +493,7 @@ const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.h
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
   loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts,
   loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
-  marketDateFor }) {
+  loadPublishedStatements, marketDateFor }) {
   return async function loadSetupBoard({ now = new Date(), researchDate = null } = {}) {
     const marketDate = researchDate || marketDateFor(now);
     const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
@@ -529,7 +503,8 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
     // An earlier day reads its own Crypto Quant; the current one would put today's call on that date.
     const products = MORNING_PRODUCTS.map((product) => product.key).filter((key) => researchDate || key !== 'crypto-quant');
     const [riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations, usdPeriods,
-      events, morning, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory, priceHistory, cpiConsensus] = await Promise.all([
+      events, morning, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory, priceHistory, cpiConsensus,
+      publishedStatements] = await Promise.all([
       loadedRanges,
       settle(loadCryptoQuant()),
       settle(full(() => loadHedgai({ now }))),
@@ -550,6 +525,8 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       optional(loadVolumeHistory, volumeSymbols()),
       optional(loadPriceHistory, zScoreSymbols()),
       optional(loadCpiConsensus),
+      // The day's archived statements: spot-reference Trade for the metals.
+      optional(loadPublishedStatements, { date: marketDate }),
     ]);
     if (researchDate && morning.value) morning.value = { 'crypto-quant': {}, ...morning.value };
     const board = buildSetupBoard({
@@ -566,12 +543,14 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       // A failed load still yields a board whose Z-scores and CPI consensus read unavailable.
       ...(priceHistory ? { priceHistory: priceHistory.value || {} } : {}),
       ...(cpiConsensus ? { cpiConsensus: cpiConsensus.value || { releases: [] } } : {}),
+      ...(publishedStatements?.value ? { publishedStatements: publishedStatements.value } : {}),
     });
     board.sourceStatus = Object.fromEntries(Object.entries({ riskRanges, cryptoQuant, hedgai, securityIntelligence,
       nowcast, quotes, volatility, usdCorrelations, kalshi: events, ...(loadMorningProducts ? { morningResearch: morning } : {}),
       ...(riskRangeHistory ? { riskRangeHistory } : {}), ...(cryptoQuantHistory ? { cryptoQuantHistory } : {}),
       ...(allTimeHighs ? { allTimeHighs } : {}), ...(volumeHistory ? { volumeHistory } : {}),
-      ...(priceHistory ? { priceHistory } : {}), ...(cpiConsensus ? { cpiConsensus } : {}) })
+      ...(priceHistory ? { priceHistory } : {}), ...(cpiConsensus ? { cpiConsensus } : {}),
+      ...(publishedStatements ? { publishedStatements } : {}) })
       .map(([key, result]) => [key, result.error ? 'failed' : 'ready']));
     return board;
   };

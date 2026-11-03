@@ -254,7 +254,6 @@ const {
   normalizeAdjustedPriceBars,
 } = require('./src/utils/securityRiskMetrics.cjs');
 const { fetchYahooAdjustedHistoryData } = require('./src/services/providers/yahooAdjustedHistory.cjs');
-const { horizonStats } = require('./src/utils/securityHorizonStats.cjs');
 const { createCompletedSessionVolatilityHandler } = require('./src/services/completedSessionVolatility.cjs');
 const { closeWorkbookReaders } = require('./src/services/workbookReaderWorkerService.cjs');
 const {
@@ -286,6 +285,13 @@ const {
   resolveExposureLabYahooSymbol,
 } = require('./src/services/exposureLabSecurityIdentity.cjs');
 const { createSecurityIdentitiesHandler } = require('./src/routes/securityIdentities.cjs');
+const { createSecurityUniverseHandler } = require('./src/routes/securityUniverse.cjs');
+const { createSecurityUniverseService } = require('./src/services/securityUniverse/securityUniverseService.cjs');
+const { createIdentityPiece } = require('./src/services/securityUniverse/pieces/identity.cjs');
+const { createResearchPiece } = require('./src/services/securityUniverse/pieces/research.cjs');
+const { createStancePiece } = require('./src/services/securityUniverse/pieces/stance.cjs');
+const { createMarketHistoryPiece } = require('./src/services/securityUniverse/pieces/marketHistory.cjs');
+const { securitySizingReference } = require('./src/utils/securitySizingReference.js');
 const {
   ANALYTICS_SOURCE_IDS,
   buildAnalyticsDailyBrief,
@@ -464,17 +470,11 @@ app.get('/api/analyst/horizon-stats', async (req, res) => {
   const symbols = Array.from(new Set(String(req.query.symbols || '').split(',')
     .map((symbol) => symbol.trim().toUpperCase()).filter(validSecurityRiskMetricsSymbol))).slice(0, 25);
   res.set('Cache-Control', 'no-store');
-  const entries = await mapWithConcurrency(symbols, 6, async (symbol) => {
-    try {
-      const history = await fetchYahooAdjustedHistory(symbol, {
-        cacheScope: 'sizing-2y', period1: String(Math.floor(Date.now() / 1000) - 2 * 366 * 86400),
-      });
-      return [symbol, horizonStats(history.bars)];
-    } catch (error) {
-      return [symbol, null];
-    }
-  });
-  res.json({ rows: Object.fromEntries(entries.filter(([, stats]) => stats)), historicalOnly: true, executable: false });
+  // A view of the security record's activity piece; a symbol without verified history is omitted.
+  const record = await securityUniverse.load(symbols, { fields: ['activity'] });
+  const rows = Object.fromEntries(symbols.map((symbol) => [symbol, record.rows[symbol]?.activity?.horizons])
+    .filter(([, field]) => field?.status === 'available').map(([symbol, field]) => [symbol, field.value]));
+  res.json({ rows, historicalOnly: true, executable: false });
 });
 // The stored original of a research email for the Source popover, made inert and with
 // the cited ticker marked. Read-only: one ledger query and the cached S3 artifact.
@@ -1367,8 +1367,39 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
     predictionCpiConsensus = { at: Date.now(), value };
     return value;
   },
+  // The archive is constructed later in this file; the board reads it per request.
+  loadPublishedStatements: ({ date }) => publishedTradeArchive.loadStatements({ date }),
   marketDateFor: (now) => defaultResearchMarketDate(now),
 });
+// The market day's Alpha Code lines with live prices, for the Analyst's line watch. The
+// levels are re-read every few minutes as the morning's products arrive; prices on every call.
+const ALPHA_CODE_LEVELS_MS = 5 * 60_000;
+let alphaCodeLevels = null;
+app.get('/api/analyst/alpha-code-lines', async (req, res) => {
+  try {
+    const { alphaCodeLines } = require('./src/services/analyst/alphaCodeWatch.cjs');
+    const now = new Date();
+    const marketDate = defaultResearchMarketDate(now);
+    if (!alphaCodeLevels || alphaCodeLevels.marketDate !== marketDate || now.getTime() - alphaCodeLevels.at > ALPHA_CODE_LEVELS_MS) {
+      const board = await loadPredictionSetupBoard({ now, researchDate: marketDate });
+      alphaCodeLevels = { at: now.getTime(), marketDate, lines: alphaCodeLines(board) };
+    }
+    const { lines } = alphaCodeLevels;
+    const prices = Object.fromEntries((await Promise.all([...new Set(lines.map((line) => line.symbol))].map(async (symbol) => {
+      const quote = await getQuote(symbol).catch(() => null);
+      const price = Number(quote?.price);
+      // A delayed quote keeps the time it was observed, so a break is dated when the price was seen.
+      return quote && Number.isFinite(price) && price > 0 && isQuoteUsableNow(quote, symbol)
+        ? [symbol, { price, asOf: quote.observedAt || now.toISOString(), source: quote.observation?.source || null,
+          delayed: quote.observation?.dataType === 'delayed' }] : null;
+    }))).filter(Boolean));
+    res.json({ marketDate, lines, prices });
+  } catch (error) {
+    console.error('[alpha-code-lines]', error.message);
+    res.status(503).json({ error: 'Alpha Code lines unavailable' });
+  }
+});
+
 // ?date=YYYY-MM-DD reads an earlier market day's morning research for the report's date picker.
 const predictionResearchBoards = new Map();
 app.get('/api/prediction-markets/setup-board', async (req, res) => {
@@ -2337,20 +2368,57 @@ function getTickerMapping(symbol) {
   return { source: 'yahoo', ticker: upperSymbol };
 }
 
+// The Yahoo instrument behind a dashboard symbol: its listed share class
+// (BRK.B → BRK-B) or the instrument the dashboard prices for an alias
+// (BTC → BTC-USD, GOLD → GC=F). Daily history, identity and the security
+// record all resolve through here, so they describe one instrument.
+function resolveHistoryInstrument(symbol) {
+  const normalized = String(symbol || '').trim().toUpperCase();
+  const mapping = getTickerMapping(normalized);
+  if (!normalized || mapping.source !== 'yahoo') return null;
+  const listingSymbol = /^[A-Z]{1,5}\.[AB]$/.test(normalized) ? normalized.replace('.', '-') : normalized;
+  const yahooSymbol = resolveExposureLabYahooSymbol(normalized, value => (/^[A-Z]{1,5}\.[AB]$/.test(value) ? listingSymbol : mapping.ticker));
+  return yahooSymbol ? { yahooSymbol, listingSymbol } : null;
+}
+
 const exposureLabSecurityIdentityResolver = createExposureLabSecurityIdentityResolver({
   httpClient: axios,
   secUserAgent: process.env.EXPOSURE_LAB_SEC_USER_AGENT
     || 'market-dashboard/1.0 (local research operator)',
-  resolveYahooSymbol: (ticker) => resolveExposureLabYahooSymbol(ticker, (normalizedTicker) => {
-    const mapping = getTickerMapping(normalizedTicker);
-    if (mapping.source !== 'yahoo') return null;
-    return /^[A-Z]{1,5}\.[A-Z]$/.test(normalizedTicker)
-      ? normalizedTicker.replace('.', '-')
-      : mapping.ticker;
+  resolveYahooSymbol: (ticker) => resolveHistoryInstrument(ticker)?.yahooSymbol || null,
+});
+
+// The central per-ticker security record. Every loader is a lazy closure: the
+// research, archive and analyst services it reads are created later in this file.
+const securityUniverse = createSecurityUniverseService({
+  resolveInstrument: resolveHistoryInstrument,
+  identity: createIdentityPiece({ resolver: exposureLabSecurityIdentityResolver, resolveInstrument: resolveHistoryInstrument }),
+  research: createResearchPiece({
+    loadSecurityIntelligence: ({ symbols }) => loadCanonicalSecurityIntelligence({ symbols }),
+    // The security's own completed close, to check a range is on its scale. Bounded:
+    // a slow history provider leaves the check 'not-checked' and keeps warming the
+    // shared bar cache instead of holding research back.
+    loadReferencePrices: async symbols => {
+      let timer;
+      const timeout = new Promise(resolve => { timer = setTimeout(() => resolve(null), 4000); timer.unref?.(); });
+      const result = await Promise.race([buildSecurityRiskMetricsResponse({ symbols, sizingOnly: true }).catch(() => null), timeout]);
+      clearTimeout(timer);
+      const rows = result?.payload?.rows || {};
+      return new Map(symbols.map(symbol => [symbol, rows[symbol]?.referencePrice?.status === 'available' ? rows[symbol].referencePrice.value : null]));
+    },
+    tradeArchiveStatus: () => publishedTradeArchive.status(),
+    loadPublishedStatements: () => publishedTradeArchive.loadStatements({ date: defaultResearchMarketDate(new Date()) }),
+  }),
+  stance: createStancePiece({ getScoredStanceBook: () => analystRoutes.dailyWorkflow?.scoredStanceBook?.() }),
+  marketHistory: createMarketHistoryPiece({
+    loadRiskMetrics: async symbols => (await buildSecurityRiskMetricsResponse({ symbols, sizingOnly: true })).payload,
+    loadSizingHistory: symbol => fetchYahooSizingHistory(symbol),
+    sizingReference: securitySizingReference,
   }),
 });
 
-app.get('/api/security-identities', createSecurityIdentitiesHandler({ resolver: exposureLabSecurityIdentityResolver }));
+app.get('/api/security-universe', createSecurityUniverseHandler({ service: securityUniverse }));
+app.get('/api/security-identities', createSecurityIdentitiesHandler({ loadIdentities: symbols => securityUniverse.identities(symbols) }));
 
 function enforceSecurityRiskMetricsCacheCapacity() {
   while (securityRiskMetricsHistoryCache.size > SECURITY_RISK_METRICS_CACHE_MAX_ENTRIES) {
@@ -2365,14 +2433,14 @@ async function fetchYahooAdjustedHistory(symbol, {
   period1 = '-2208988800',
   period2 = String(Math.floor(Date.now() / 1000)),
 } = {}) {
-  const mapping = getTickerMapping(symbol);
-  if (mapping.source !== 'yahoo') {
+  const instrument = resolveHistoryInstrument(symbol);
+  if (!instrument) {
     const error = new Error(`Yahoo maximum history is unsupported for ${symbol}`);
     error.code = SECURITY_RISK_METRICS_REASONS.UNSUPPORTED_SOURCE;
     throw error;
   }
 
-  const yahooSymbol = resolveExposureLabYahooSymbol(symbol, normalized => /^[A-Z]{1,5}\.[AB]$/.test(normalized) ? normalized.replace('.', '-') : mapping.ticker);
+  const { yahooSymbol } = instrument;
   const cacheKey = `${yahooSymbol.toUpperCase()}::${cacheScope}`;
   const now = Date.now();
   const cached = securityRiskMetricsHistoryCache.get(cacheKey);
@@ -2411,6 +2479,16 @@ async function fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh = false }
     forceRefresh,
     cacheScope: 'maximum',
     period1: '-2208988800',
+  });
+}
+
+// Two years of completed sessions: Position Sizing, the sidecar's sizing reader,
+// Inbox horizon stats and the security record share this one cache entry.
+async function fetchYahooSizingHistory(symbol, { forceRefresh = false } = {}) {
+  return fetchYahooAdjustedHistory(symbol, {
+    forceRefresh,
+    cacheScope: 'sizing-2y',
+    period1: String(Math.floor(Date.now() / 1000) - 2 * 366 * 86400),
   });
 }
 
@@ -4088,9 +4166,6 @@ app.get('/api/security-risk-metrics', async (req, res) => {
   );
   const assetTypeBySymbol = parseSecurityRiskAssetTypes(req.query.assetTypes);
   const sizingOnly = ['1', 'true'].includes(String(req.query.sizingOnly || '').toLowerCase());
-  const fetchHistory = sizingOnly
-    ? (symbol) => fetchYahooAdjustedHistory(symbol, { forceRefresh, cacheScope: 'sizing-2y', period1: String(Math.floor(Date.now() / 1000) - 2 * 366 * 86400) })
-    : (symbol) => fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh });
 
   res.set('Cache-Control', 'no-store');
   res.set('X-Data-Use', 'historical-research-only');
@@ -4114,6 +4189,23 @@ app.get('/api/security-risk-metrics', async (req, res) => {
     });
   }
 
+  const { payload, cacheStatus, cacheAgeSeconds } = await buildSecurityRiskMetricsResponse({
+    symbols, forceRefresh, includeVolSeries, assetTypeBySymbol, sizingOnly,
+  });
+  res.set('X-Data-Cache', cacheStatus);
+  res.set('X-Data-Age', String(cacheAgeSeconds));
+  return res.json(payload);
+});
+
+// Per-symbol ATR, beta, reference close and (outside sizingOnly) the wider
+// history metrics, with SPY as the beta benchmark. The route and the security
+// record both read it, so their figures are the same computation.
+async function buildSecurityRiskMetricsResponse({
+  symbols, forceRefresh = false, includeVolSeries = false, assetTypeBySymbol = {}, sizingOnly = false,
+}) {
+  const fetchHistory = sizingOnly
+    ? (symbol) => fetchYahooSizingHistory(symbol, { forceRefresh })
+    : (symbol) => fetchYahooMaximumAdjustedHistory(symbol, { forceRefresh });
   const cacheStatuses = [];
   let benchmarkHistory = null;
   try {
@@ -4243,30 +4335,32 @@ app.get('/api/security-risk-metrics', async (req, res) => {
   const completedSessionCurrent = completedSessionRows.length > 0
     && completedSessionRows.every((row) => row.asOf === expectedCompletedSession);
 
-  res.set('X-Data-Cache', cacheStatus);
-  res.set('X-Data-Age', String(cacheAgeSeconds));
-  return res.json({
-    status,
-    source: SECURITY_RISK_METRICS_SOURCE,
-    benchmark: 'SPY',
-    asOf,
-    generatedAt: new Date().toISOString(),
-    requestedSymbols: symbols,
-    rows,
-    cache: {
-      status: cacheStatus,
-      ageSeconds: cacheAgeSeconds,
-      ttlSeconds: Math.floor(SECURITY_RISK_METRICS_CACHE_TTL / 1000),
+  return {
+    cacheStatus,
+    cacheAgeSeconds,
+    payload: {
+      status,
+      source: SECURITY_RISK_METRICS_SOURCE,
+      benchmark: 'SPY',
+      asOf,
+      generatedAt: new Date().toISOString(),
+      requestedSymbols: symbols,
+      rows,
+      cache: {
+        status: cacheStatus,
+        ageSeconds: cacheAgeSeconds,
+        ttlSeconds: Math.floor(SECURITY_RISK_METRICS_CACHE_TTL / 1000),
+      },
+      completedSession: {
+        status: completedSessionCurrent ? 'current' : 'unavailable',
+        expectedAsOf: expectedCompletedSession,
+        observedAsOf: asOf,
+      },
+      historicalOnly: true,
+      executable: false,
     },
-    completedSession: {
-      status: completedSessionCurrent ? 'current' : 'unavailable',
-      expectedAsOf: expectedCompletedSession,
-      observedAsOf: asOf,
-    },
-    historicalOnly: true,
-    executable: false,
-  });
-});
+  };
+}
 
 function isExposureLabModelHolding(holding = {}) {
   if (holding?.isPredictionMarket === true) return false;

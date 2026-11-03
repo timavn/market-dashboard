@@ -1420,14 +1420,21 @@ function decisionInputs({
     }
   });
 
-  const uniqueTrackerValues = [...new Set(latestTrackerCandidates.map((candidate) => candidate.value))];
+  // Across products, a later publication that day supersedes an earlier one
+  // when every send time is known; otherwise any disagreement is a conflict.
+  const sentAt = (candidate) => (/T00:00:00(?:\.000)?(?:Z|\+00:00)$/.test(String(candidate.publishedAt || ''))
+    ? NaN : Date.parse(candidate.publishedAt || ''));
+  const timed = latestTrackerCandidates.length > 0 && latestTrackerCandidates.every((candidate) => Number.isFinite(sentAt(candidate)));
+  const latestSent = timed ? Math.max(...latestTrackerCandidates.map(sentAt)) : null;
+  const deciding = timed ? latestTrackerCandidates.filter((candidate) => sentAt(candidate) === latestSent) : latestTrackerCandidates;
+  const uniqueTrackerValues = [...new Set(deciding.map((candidate) => candidate.value))];
   if (trackerPublicationConflict || uniqueTrackerValues.length > 1) {
     decision.trade = {
       ...unavailableDecision('conflicting-published-trade-signals'),
       status: 'conflict',
     };
-  } else if (latestTrackerCandidates.length > 0) {
-    const selected = latestTrackerCandidates.sort((a, b) => (
+  } else if (deciding.length > 0) {
+    const selected = deciding.sort((a, b) => (
       String(b.publishedAt || '').localeCompare(String(a.publishedAt || ''))
     ))[0];
     decision.trade = { status: 'available', ...selected, reason: null };

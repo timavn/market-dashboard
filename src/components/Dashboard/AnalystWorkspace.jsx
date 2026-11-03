@@ -138,7 +138,8 @@ const SidebarStatus = ({ row, conversation, starting, deleting }) => {
     : balanceReady ? sidebarCountLabel({ ...conversation, message_count: undefined })
       : phase || (loading ? 'Responding…' : sidebarCountLabel(row));
   return <small>{loading
-    ? <AnalystSpinner size={10} className="analyst-conversation-running-icon" text={label} elapsed since={row.activeTurn?.created_at} />
+    // A delete is quick: the rolling digits alone, no seconds counting beside them.
+    ? <AnalystSpinner size={10} className="analyst-conversation-running-icon" text={label} elapsed={!deleting} since={row.activeTurn?.created_at} />
     : <span className="analyst-conversation-status-text">{label}</span>}</small>;
 };
 // Retain navigation through API restarts, without retaining report, source, or

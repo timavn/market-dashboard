@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from daily_research_rollup import accepted_snapshots, _article_sections, _citation, _paragraphs, _symbol, PRODUCTS, SIDE_LINE, WRAPPER, _heading
 from hedgai_review import portfolio_tick_readings
-from portfolio_review import _typed_reference_citation, _trade_instrument_aliases
+from portfolio_review import _typed_reference_citation, _trade_instrument_aliases, stated_trade_values
 
 
 NY = ZoneInfo("America/New_York")
@@ -114,15 +114,8 @@ def _trade_direction(reference):
     if proof["method"] == "explicit-field":
         if not re.search(r"(?:^|\.)(?:trade|tradeSignal|tradeBias)$", proof["sourceField"], re.I):
             return None
-    else:
-        if re.search(r"\b(?:if|unless|could|would|should|may|might|will|expect|forecast|previously|historically|prior|not|never)\b|[?\"“”]", statement, re.I):
-            return None
-        match = re.search(r"\b(BULLISH|BEARISH|NEUTRAL)\s+(?:on\s+)?TRADE\b|\bTRADE(?: signal)?\s*(?:is|remains|:)?\s*(BULLISH|BEARISH|NEUTRAL)\b", statement, re.I)
-        if not match:
-            return None
-        explicit = _bias(match[1] or match[2])
-        if explicit != _bias(reference.get("value") or reference.get("direction")):
-            return None
+    elif stated_trade_values(statement) != {_bias(reference.get("value") or reference.get("direction"))}:
+        return None
     return _bias(reference.get("value") or reference.get("direction"))
 
 

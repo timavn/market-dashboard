@@ -17,7 +17,8 @@ const archive = createPublishedTradeArchive({
 });
 const fields = ['ticker', 'sourceTicker', 'value', 'field', 'fieldPath', 'sourceText', 'sourceProduct',
   'sourceLabel', 'sourceUrl', 'date', 'publishedAt', 'sourceEventId', 'signalProvenance', 'qualityStatus',
-  'sourceInstrument', 'basisLabel', 'basisRelationship'];
+  'sourceInstrument', 'basisLabel', 'basisRelationship', 'instrumentKey', 'referenceOnly', 'levels', 'statement'];
+const pick = reading => Object.fromEntries(fields.filter(field => reading[field] !== undefined).map(field => [field, reading[field]]));
 let closed = false;
 parentPort.on('message', async message => {
   if (message?.type === 'dispose') {
@@ -29,8 +30,10 @@ parentPort.on('message', async message => {
   if (message?.type !== 'load' || !Number.isSafeInteger(message.id) || message.id < 1) return;
   try {
     const readings = await archive.load({ waitForRefresh: message.waitForRefresh === true });
-    if (!closed) parentPort.postMessage({ type: 'readings', id: message.id,
-      readings: readings.map(reading => Object.fromEntries(fields.filter(field => reading[field] !== undefined).map(field => [field, reading[field]]))),
+    const statements = archive.statements();
+    if (!closed) parentPort.postMessage({ type: 'readings', id: message.id, verifiedAt: archive.status().verifiedAt,
+      readings: readings.map(pick),
+      statements: Object.fromEntries(Object.entries(statements).map(([kind, list]) => [kind, list.map(pick)])),
     });
   } catch {
     if (!closed) parentPort.postMessage({ type: 'failure', id: message.id, code: 'ARCHIVE_READ_FAILED' });

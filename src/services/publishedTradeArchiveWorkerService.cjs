@@ -2,22 +2,29 @@
 
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
-const { isExplicitTradeProvenance } = require('../utils/publishedResearchSignals.cjs');
+const { isExplicitTradeProvenance, isStatedReading } = require('../utils/publishedResearchSignals.cjs');
+const { STATEMENT_KINDS } = require('./publishedTradeArchive.cjs');
 const WORKER_PATH = path.join(__dirname, 'publishedTradeArchiveWorker.cjs');
 
+function publishedSource(reading) {
+  if (!/^[A-Z][A-Z0-9./=^_-]{0,30}$/.test(reading.sourceTicker || reading.ticker || '')
+    || !['validated', 'indexed'].includes(reading.qualityStatus)
+    || !/^\d{4}-\d{2}-\d{2}$/.test(reading.date || '')
+    || !/^https:\/\/app\.hedgeye\.com\/feed_items\/\d+\/?$/.test(reading.sourceUrl || '')
+    || typeof reading.sourceProduct !== 'string' || !reading.sourceProduct
+    || ['mock', 'seed', 'seeded', 'inferred', 'synthetic', 'stale', 'cacheOnly', 'offline', 'disconnected'].some(flag => reading[flag] === true)) return false;
+  const parsed = new Date(`${reading.date}T12:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === reading.date;
+}
 function validReadings(readings) {
-  return Array.isArray(readings) && readings.length <= 100_000 && readings.every(reading => {
-    if (!reading || !['BULLISH', 'BEARISH', 'NEUTRAL'].includes(reading.value)
-      || !/^[A-Z][A-Z0-9./=^_-]{0,30}$/.test(reading.sourceTicker || reading.ticker || '')
-      || !isExplicitTradeProvenance(reading.signalProvenance)
-      || !['validated', 'indexed'].includes(reading.qualityStatus)
-      || !/^\d{4}-\d{2}-\d{2}$/.test(reading.date || '')
-      || !/^https:\/\/app\.hedgeye\.com\/feed_items\/\d+\/?$/.test(reading.sourceUrl || '')
-      || typeof reading.sourceProduct !== 'string' || !reading.sourceProduct
-      || ['mock', 'seed', 'seeded', 'inferred', 'synthetic', 'stale', 'cacheOnly', 'offline', 'disconnected'].some(flag => reading[flag] === true)) return false;
-    const parsed = new Date(`${reading.date}T12:00:00Z`);
-    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === reading.date;
-  });
+  return Array.isArray(readings) && readings.length <= 100_000 && readings.every(reading => reading
+    && ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(reading.value)
+    && isExplicitTradeProvenance(reading.signalProvenance) && publishedSource(reading));
+}
+// Reference Trade, stated Trend and Alpha Codes are each re-read from their own clause.
+function validStatements(statements) {
+  return statements && typeof statements === 'object' && STATEMENT_KINDS.every(kind => Array.isArray(statements[kind])
+    && statements[kind].length <= 100_000 && statements[kind].every(reading => reading && publishedSource(reading) && isStatedReading(reading)));
 }
 
 /** Keep AWS deserialization, source extraction and disk IO off the API thread. */
@@ -33,7 +40,9 @@ function createPublishedTradeArchiveWorkerService({
   let retryAt = 0;
   let disposed = false;
   let readings = [];
+  let statements = Object.fromEntries(STATEMENT_KINDS.map(kind => [kind, []]));
   let hasResult = false;
+  let refreshedAt = null;
   const requests = new Map();
   const inFlight = new Map();
 
@@ -85,12 +94,16 @@ function createPublishedTradeArchiveWorkerService({
         if (message?.type === 'ready') { target.ready = true; dispatch(); return; }
         const request = requests.get(message?.id);
         if (!request) return;
-        if (message.type !== 'readings' || !validReadings(message.readings)) {
+        // A reply without statements carries Trade only.
+        const replied = message.statements ?? Object.fromEntries(STATEMENT_KINDS.map(kind => [kind, []]));
+        if (message.type !== 'readings' || !validReadings(message.readings) || !validStatements(replied)) {
           fail(target, message.type === 'failure' ? 'ARCHIVE_READ_FAILED' : 'WORKER_RESPONSE_INVALID');
           return;
         }
         readings = message.readings;
+        statements = replied;
         hasResult = true;
+        refreshedAt = Number.isFinite(message.verifiedAt) ? new Date(message.verifiedAt).toISOString() : null;
         settle(request, readings);
       };
       target.onExit = () => fail(target, 'WORKER_EXIT');
@@ -125,7 +138,15 @@ function createPublishedTradeArchiveWorkerService({
     stop(previous);
     for (const request of [...requests.values()]) settle(request, readings);
   }
-  return { load, dispose };
+  // When the archive last read every snapshot type successfully, so a reader can
+  // tell current readings from ones retained through failed reads or a backoff.
+  const status = () => ({ refreshedAt, retrying: Number(now()) < retryAt });
+  /** Reference Trade, stated Trend and Alpha Codes from the same archive read as load(). */
+  async function loadStatements({ date = '9999-12-31', waitForRefresh = false } = {}) {
+    await load({ date, waitForRefresh });
+    return Object.fromEntries(STATEMENT_KINDS.map(kind => [kind, statements[kind].filter(reading => reading.date <= date)]));
+  }
+  return { load, loadStatements, status, dispose };
 }
 
-module.exports = { createPublishedTradeArchiveWorkerService, validReadings };
+module.exports = { createPublishedTradeArchiveWorkerService, validReadings, validStatements };

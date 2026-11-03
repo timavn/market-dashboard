@@ -1,5 +1,7 @@
 # Security Universe Documentation
 
+> **Per-ticker facts now have one record:** names, research decisions, product calls, risk, sizing and activity come from `GET /api/security-universe` (see `docs/SECURITY_RECORD.md`). This page describes the static 118-security list and its ticker mappings; the record resolves a dashboard symbol's Yahoo instrument through `resolveHistoryInstrument` in `server.js`.
+
 ## Overview
 
 The security universe consists of **118 securities** across 5 asset classes, providing comprehensive coverage of global financial markets.

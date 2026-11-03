@@ -506,3 +506,33 @@ test('the loader asks for each market’s own price history and the CPI consensu
   assert.equal(board.sourceStatus.cpiConsensus, 'failed');
   assert.equal(board.rows.find((row) => row.id === 'gold').zScore, null);
 });
+
+test('Trade comes from what the morning products state: yields from the shared projection, metals from their spot reference', () => {
+  const { extractPublishedStatements } = require('../utils/publishedResearchSignals.cjs');
+  const { buildSecurityIntelligenceV2 } = require('../utils/securityIntelligenceV2.cjs');
+  const earlyLook = {
+    date: '2026-11-02', snapshotType: 'early-look', source: 'gmail-html', publishedAt: '2026-11-02T00:00:00+00:00',
+    htmlSource: 'hedgeye-email/messages/2026-11-02/early-look/original.html',
+    article: { feedUrl: 'https://app.hedgeye.com/feed_items/189309', bodyText: [
+      '11/02/2026 07:27 AM EST',
+      'Gold remains Bearish TRADE and TREND, so we’ll see when we get The Signal to go bullish in #Quad4',
+      'UST 2yr Yield down -11 basis points last week to Signal Bearish TRADE, but Bullish TREND',
+      'UST 30yr Yield down -3 basis points last week and already signaling Bearish TRADE and TREND',
+    ].join('\n') },
+  };
+  const statements = extractPublishedStatements(earlyLook);
+  const stamp = (reading) => ({ ...reading, sourceProduct: 'early-look', sourceLabel: 'Early Look', qualityStatus: 'validated' });
+  const securityIntelligence = buildSecurityIntelligenceV2({ symbols: ['UST2Y', 'UST30Y', 'GLD', 'GOLD'], marketDate: '2026-11-02', historyDays: 0,
+    now: new Date('2026-11-02T16:00:00Z'), publishedTradeReadings: statements.trade.map(stamp) });
+  const board = buildSetupBoard({ securityIntelligence, marketDate: '2026-11-02',
+    publishedStatements: { references: statements.references.map(stamp), trends: [], alphaCodes: [] } });
+  const trade = (id) => board.rows.find((row) => row.id === id).trade;
+  assert.deepEqual([trade('ust2y').direction, trade('ust2y').date, trade('ust2y').source], ['BEARISH', '2026-11-02', 'Early Look']);
+  assert.equal(trade('ust30y').direction, 'BEARISH');
+  assert.equal(trade('ust10y'), null, 'nothing published for the 10-year');
+  assert.deepEqual([trade('gold').direction, trade('gold').ticker, trade('gold').reference], ['BEARISH', 'GOLD', true]);
+  // Gold spot never becomes the Trade of GOLD (the listed company) or the GLD ETF.
+  assert.equal(securityIntelligence.bySymbol.GOLD?.lastVerifiedDecision?.trade?.value ?? null, null);
+  assert.equal(securityIntelligence.bySymbol.GLD?.lastVerifiedDecision?.trade?.value ?? null, null);
+  assert.equal(trade('silver'), null);
+});

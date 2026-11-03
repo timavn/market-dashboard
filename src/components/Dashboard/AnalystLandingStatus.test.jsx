@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import AnalystLandingStatus, { landingQuads, usQuad } from './AnalystLandingStatus';
+import AnalystLandingStatus, { landingDate, landingQuads, usQuad } from './AnalystLandingStatus';
 import { useGlobalQuads } from '../../hooks/useGlobalQuads';
 
 jest.mock('../../hooks/useGlobalQuads', () => ({ useGlobalQuads: jest.fn() }));
@@ -36,6 +36,12 @@ test("in November, before the November update, monthly shows October's published
   });
 });
 
+test('the status line leads with the market day, with its ordinal', () => {
+  expect(['2026-11-02', '2026-11-01', '2026-11-03', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-21', '2026-11-30'].map(landingDate)).toEqual([
+    "Monday, November 2nd", "Sunday, November 1st", "Tuesday, November 3rd", "Wednesday, November 11th",
+    "Thursday, November 12th", "Friday, November 13th", "Saturday, November 21st", "Monday, November 30th"]);
+});
+
 test('the status line shows the game, holdings, the verified close, and the three quads', async () => {
   jest.useFakeTimers({ now: new Date('2026-10-16T20:30:00Z'), doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
   useGlobalQuads.mockReturnValue(quads(2));
@@ -45,7 +51,7 @@ test('the status line shows the game, holdings, the verified close, and the thre
     : { status: 'ready', sessionDate: '2026-10-15', capturedAt: '2026-10-15T20:31:00Z' }) }));
   render(<AnalystLandingStatus holdingsCount={42} />);
   const status = screen.getByRole('group', { name: 'Portfolio status' });
-  await waitFor(() => expect(status).toHaveTextContent('SEASON 2026GAME 199/251HOLDINGS 42CLOSE 10/15 VERIFIEDGLOBAL QUAD Q3QUARTERLY QUAD Q2MONTHLY QUAD Q2'));
+  await waitFor(() => expect(status).toHaveTextContent("Friday, October 16thSEASON 2026GAME 199/251HOLDINGS 42CLOSE 10/15 VERIFIEDGLOBAL QUAD Q3QUARTERLY QUAD Q2MONTHLY QUAD Q2"));
   expect(screen.getByText('10/15 VERIFIED')).toHaveClass('is-positive');
   expect(screen.getByText('Q3')).toHaveClass('is-q3');
   expect(screen.getAllByText('Q2').map(node => node.className)).toEqual(['is-q2', 'is-q2']);

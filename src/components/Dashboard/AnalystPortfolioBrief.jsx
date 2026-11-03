@@ -253,7 +253,9 @@ function PortfolioExposure({ metrics, comparison, asOf, loading, state }) {
   const previousUnavailable = rows.every(row => row.metric.previous === null);
   const previousDate = portfolioComparisonDateline(comparison?.currentAsOf || asOf, comparison?.baselineAsOf, comparison).text
     .replace(/^Previous close snapshot:/, 'Previous:');
-  const sectionState = state || (previousUnavailable ? loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Previous close unavailable' : null);
+  // A close missed by the evening capture is rebuilt from this review's read when nothing has traded since.
+  const sectionState = state || (previousUnavailable ? loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Previous close unavailable'
+    : comparison?.baselineRebuilt ? 'Previous close rebuilt from this read: no trades since' : null);
   return <section className="portfolio-review-section portfolio-review-exposure" aria-label="Exposure and risk" aria-busy={(state || previousUnavailable) && loading || undefined}><h2>Exposure &amp; risk</h2>
     <PortfolioReviewDateline text={`Positioning: ${portfolioDate(asOf)}`} previous={previousDate} />
     <div className="portfolio-review-section-body"><div className="portfolio-brief-table-scroll"><table className="portfolio-brief-table portfolio-brief-exposure" aria-label="Portfolio exposure">

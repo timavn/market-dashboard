@@ -1,4 +1,5 @@
 const { randomUUID, createHash } = require('node:crypto');
+const { SECURITY_SYMBOL } = require('../../utils/securitySymbols.cjs');
 
 const INTERVAL_MS = 30_000;
 // A queued or acquiring review may postpone at most this many scan cycles.
@@ -10,6 +11,12 @@ const ENABLED_CACHE_MS = 60_000;
 const STANCE_BOOK_KEY = 'stance-book-v1';
 const STANCE_HISTORY_DAYS = 90;
 const STANCE_HISTORY_RETRY_MS = 3_600_000;
+// The day's Alpha Code lines and which side of each the price is on.
+const ALPHA_CODE_WATCH_KEY = 'alpha-code-watch-v1';
+// Names for held securities come from the central security record, read in
+// route-sized batches; a slow read leaves cards unnamed rather than holding the scan.
+const SECURITY_BATCH = 50;
+const SECURITY_TIMEOUT_MS = 8_000;
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 function unavailableFinding(channel, now) {
@@ -25,14 +32,24 @@ function unavailableFinding(channel, now) {
     presentation: { subject, date: now.toISOString().slice(0, 10), rows: [{ label: 'Issue', text }], sourceLinks: [] } };
 }
 
-function createAttentionWorkflow({ call: workspaceCall, request, now = () => new Date(), fetchJson, collectOperations, evaluateResearch, loadStanceHistory }) {
-  const get = fetchJson || (async path => {
+function createAttentionWorkflow({ call: workspaceCall, request, now = () => new Date(), fetchJson, collectOperations, evaluateResearch, loadStanceHistory, loadSecurities, loadAlphaCodeLines }) {
+  const get = fetchJson || (async (path, { timeoutMs = 45_000 } = {}) => {
     if (!path.startsWith('/api/')) throw new Error('Unexpected attention source');
-    const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3001}${path}`, { signal: AbortSignal.timeout(45_000) });
+    const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3001}${path}`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) throw new Error('Dashboard evidence unavailable');
     return response.json();
   });
   const stanceHistory = loadStanceHistory || (() => get(`/api/analyst/stance-ledger?days=${STANCE_HISTORY_DAYS}`));
+  const alphaCodeLines = loadAlphaCodeLines || (() => get('/api/analyst/alpha-code-lines', { timeoutMs: 20_000 }));
+  const securities = loadSecurities || (async symbols => {
+    const batches = [];
+    for (let offset = 0; offset < symbols.length; offset += SECURITY_BATCH) batches.push(symbols.slice(offset, offset + SECURITY_BATCH));
+    const results = await Promise.allSettled(batches.map(batch => get(`/api/security-universe?fields=identity&symbols=${encodeURIComponent(batch.join(','))}`, { timeoutMs: SECURITY_TIMEOUT_MS })));
+    return Object.assign({}, ...results.map(result => (result.status === 'fulfilled' && result.value?.rows) || {}));
+  });
+  // The stance book this workflow last scored, with the source-enriched events
+  // (SOME partials) folded in: what the Inbox stance cards read.
+  let scoredStanceBook = null;
   let stanceHistoryAttemptAt = -Infinity;
   let running = null;
   let queuedReset = null;
@@ -73,8 +90,21 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
         changed = true;
       } catch { /* Retried later; today's feed still reaches the book. */ }
     }
-    if (changed) await call('setting', { key: STANCE_BOOK_KEY, value: book });
+    // A failed save keeps the book that was read and folded; the next scan saves it.
+    if (changed) await call('setting', { key: STANCE_BOOK_KEY, value: book }).catch(() => {});
     return book;
+  }
+
+  // Each scan reads the lines' live prices; unreadable lines or prices leave the
+  // stored watch as it stood, so the day's breaks still show.
+  async function alphaCodeWatch(at) {
+    const { foldAlphaCodeWatch } = require('./alphaCodeWatch.cjs');
+    const stored = (await call('setting', { key: ALPHA_CODE_WATCH_KEY })).value || null;
+    const current = await alphaCodeLines().catch(() => null);
+    if (!current || !Array.isArray(current.lines)) return stored;
+    const { watch, changed } = foldAlphaCodeWatch(stored, { marketDate: current.marketDate, lines: current.lines, prices: current.prices || {}, now: at });
+    if (changed) await call('setting', { key: ALPHA_CODE_WATCH_KEY, value: watch }).catch(() => {});
+    return watch;
   }
 
   async function scan({ reset = false, events = [] } = {}) {
@@ -88,8 +118,23 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
       // The book updates beside the holdings capture; an unreadable book still
       // lets the evaluation fold the journal it is given.
       Promise.all([stanceBook([...retained, ...events], startedAt).catch(() => undefined),
-        request('/internal/workspace/attention-context', { method: 'POST', body: { events: [...retained, ...events] }, timeoutMs: 75_000 })])
-        .then(([book, context]) => (evaluateResearch || require('./attentionResearch.cjs').evaluateResearchAttention)({ ...context, stanceBook: book }, now())),
+        request('/internal/workspace/attention-context', { method: 'POST', body: { events: [...retained, ...events] }, timeoutMs: 75_000 }),
+        alphaCodeWatch(startedAt).catch(() => null)])
+        .then(async ([book, context, alphaCodes]) => {
+          // Holdings freshness is judged when the context arrived, not after the name read.
+          const at = now();
+          const { foldStanceEvents, symbolOf } = require('./stanceBook.cjs');
+          const held = [...new Set((context?.holdings?.positions || [])
+            .filter(position => position?.category !== 'event_contract' && typeof position?.quantity === 'number' && position.quantity)
+            .map(position => symbolOf(position.symbol)).filter(symbol => SECURITY_SYMBOL.test(symbol)))];
+          const records = held.length ? await securities(held).catch(() => ({})) : {};
+          const scored = foldStanceEvents(book, context?.events || [], at).book;
+          // A book that could not be read is folded from today's journal alone; the
+          // evaluation still uses it, but the record reports the book unavailable.
+          scoredStanceBook = book ? { book: scored, scoredAt: at.toISOString() } : { book: null, scoredAt: at.toISOString(), reason: 'stance-book-unreadable' };
+          return (evaluateResearch || require('./attentionResearch.cjs').evaluateResearchAttention)({ ...context, stanceBook: scored, securities: records,
+            ...(alphaCodes ? { alphaCodeWatch: alphaCodes } : {}) }, at);
+        }),
     ]);
     const findings = [];
     const completeKinds = new Set();
@@ -152,7 +197,7 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
     return start({ events });
   }
 
-  return { enabled, start, tick, isRunning: () => Boolean(running),
+  return { enabled, start, tick, isRunning: () => Boolean(running), scoredStanceBook: () => scoredStanceBook,
     getStatus: async () => status || (await call('setting', { key: 'pm-attention-status' })).value || { state: 'idle' } };
 }
 

@@ -26,7 +26,7 @@ test('returns only verified descriptive names for exact normalized tickers outsi
   assert.equal(res.code, 200);
   assert.equal(res.headers['Cache-Control'], 'no-store');
   assert.deepEqual(res.body, { historicalOnly: true, executable: false, status: 'available', rows: [
-    { ticker: 'YCL', name: 'ProShares Ultra Yen', nameVerified: true, nameSource: YAHOO_NAME_SOURCE },
+    { ticker: 'YCL', name: 'ProShares Ultra Yen', nameVerified: true, nameSource: YAHOO_NAME_SOURCE, displayName: 'ProShares Ultra Yen', displayNameSource: YAHOO_NAME_SOURCE },
   ] });
 });
 
@@ -83,7 +83,7 @@ test('partial results omit catalog, unverified, malformed, unrequested and flagg
   await createSecurityIdentitiesHandler({ resolver: { resolve: async () => ({ rows, identityDirectory: { status: 'partial' } }) } })({ query: { symbols: 'DBMF,YCL,RXL,FAKE,EMPTY' } }, res);
   assert.equal(res.code, 200);
   assert.equal(res.body.status, 'partial');
-  assert.deepEqual(res.body.rows, [verified]);
+  assert.deepEqual(res.body.rows, [{ ...verified, displayName: verified.name, displayNameSource: verified.nameSource }]);
 });
 
 test('fund identity uses the exact held ticker independently of research futures aliases and caches', async () => {
@@ -100,7 +100,7 @@ test('fund identity uses the exact held ticker independently of research futures
   const handler = createSecurityIdentitiesHandler({ resolver });
   const res = response();
   await handler({ query: { symbols: 'CORN' } }, res);
-  assert.deepEqual(res.body.rows, [{ ticker: 'CORN', name: 'Teucrium Corn Fund', nameVerified: true, nameSource: YAHOO_NAME_SOURCE }]);
+  assert.deepEqual(res.body.rows, [{ ticker: 'CORN', name: 'Teucrium Corn Fund', nameVerified: true, nameSource: YAHOO_NAME_SOURCE, displayName: 'Teucrium Corn Fund', displayNameSource: YAHOO_NAME_SOURCE }]);
   assert.equal(calls.filter(url => url.endsWith('/CORN')).length, 1);
   assert.equal((await resolver.loadYahooIdentity('CORN')).identity.name, 'Corn Futures');
   const second = response();
@@ -118,4 +118,20 @@ test('unavailable identity providers and rejected reads return quiet empty resul
     assert.equal(res.code, 503);
     assert.deepEqual(res.body, { historicalOnly: true, executable: false, status: 'unavailable', rows: [] });
   }
+});
+
+test('a readable display name is cited to its own source, not to the SEC directory', async () => {
+  const resolver = {
+    resolve: async () => ({ rows: [{ ticker: 'COST', name: 'COSTCO WHOLESALE CORP /NEW', nameVerified: true, nameSource: SEC_NAME_SOURCE },
+      { ticker: 'GS', name: 'GOLDMAN SACHS GROUP INC', nameVerified: true, nameSource: SEC_NAME_SOURCE }] }),
+    loadYahooIdentity: async ticker => (ticker === 'COST'
+      ? { status: 'available', identity: { ticker, name: 'Costco Wholesale Corporation', nameSource: YAHOO_NAME_SOURCE, instrumentType: 'EQUITY' } }
+      : { status: 'unavailable', identity: null }),
+  };
+  const res = response();
+  await createSecurityIdentitiesHandler({ resolver })({ query: { symbols: 'COST,GS' } }, res);
+  assert.deepEqual(res.body.rows.map(row => [row.ticker, row.name, row.nameSource, row.displayName, row.displayNameSource]), [
+    ['COST', 'COSTCO WHOLESALE CORP /NEW', SEC_NAME_SOURCE, 'Costco Wholesale Corporation', YAHOO_NAME_SOURCE],
+    ['GS', 'GOLDMAN SACHS GROUP INC', SEC_NAME_SOURCE, 'Goldman Sachs Group Inc', SEC_NAME_SOURCE],
+  ]);
 });

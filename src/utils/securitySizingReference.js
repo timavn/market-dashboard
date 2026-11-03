@@ -1,4 +1,4 @@
-import { calculateSizingBand, SIZING_CONSTANTS } from './signalWeightedPositionSizing';
+import { calculateSizingBand, SIZING_CONSTANTS } from './signalWeightedPositionSizing.js';
 import { expectedSizingSession } from './volatilitySizingBand.cjs';
 
 const SOURCE = 'Yahoo Finance chart API';
