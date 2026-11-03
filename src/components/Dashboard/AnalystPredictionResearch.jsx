@@ -4,6 +4,7 @@ import { portfolioReviewTickers, portfolioTickerRanges } from '../../utils/portf
 import { previousTradingDateKey } from '../../utils/usEquityMarketCalendar.cjs';
 import { analystWorkspaceApi } from '../../services/analyst/analystClient';
 import AnalystSourceEmail from './AnalystSourceEmail';
+import AnalystSourcePanel from './AnalystSourcePanel';
 
 // What this morning's Hedgeye products say about each market in a setup-board
 // section, emitted by the renderer as an ```analyst-research JSON block: one
@@ -131,22 +132,19 @@ function byProduct(entries) {
   return [...groups.values()].flat();
 }
 
-function Entry({ entry, market, first, continued, span }) {
-  const [open, setOpen] = useState(false);
+const Quote = ({ entry, market }) => <blockquote className="analyst-research__quote"><ResearchText value={entry.source} names={[market]} /></blockquote>;
+const entryTime = entry => (entry.time ? `${entry.date ? `${entry.date} ` : ''}${entry.time} PT` : null);
+
+function Entry({ entry, market, first, continued, span, open, onSource }) {
   const names = [market];
-  const quote = <blockquote className="analyst-research__quote"><ResearchText value={entry.source} names={names} /></blockquote>;
   return <tr className={first ? 'analyst-research__first' : continued ? 'analyst-research__continued' : undefined}>
     {first && <td className="analyst-research__market" rowSpan={span}>{market}</td>}
-    <td className="analyst-research__product" title={entry.time ? `${entry.date ? `${entry.date} ` : ''}${entry.time} PT` : undefined}>{continued ? null : entry.product}</td>
+    <td className="analyst-research__product" title={entryTime(entry) || undefined}>{continued ? null : entry.product}</td>
     <td className="analyst-research__context">
       {entry.facts ? <Facts facts={entry.facts} names={names} /> : <ResearchText value={entry.context} names={names} />}
-      {/* The product's own email, scrolled to the quoted line; the line alone when the email was not stored. */}
-      {open && (entry.messageId
-        ? <AnalystSourceEmail messageId={entry.messageId} quote={entry.source} title={entry.product} excerpt={entry.source} fallback={quote} />
-        : quote)}
     </td>
     <td className="analyst-research__source">
-      {entry.source && <button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>Source</button>}
+      {entry.source && <button type="button" aria-expanded={open} onClick={onSource}>Source</button>}
     </td>
   </tr>;
 }
@@ -191,7 +189,11 @@ export default function AnalystPredictionResearch({ research: saved }) {
   const days = saved.marketDate && saved.section ? researchDays(saved.marketDate) : null;
   const reading = shown && shown !== saved.marketDate ? earlier[shown] || { status: 'loading' } : null;
   const research = reading?.status === 'ready' ? reading.research : saved;
+  // The Source being read, in a panel beside the Analyst window; another row's Source swaps it, its own closes it.
+  const [source, setSource] = useState(null);
+  const toggleSource = (key, entry, market) => setSource(current => (current?.key === key ? null : { key, entry, market }));
   const pick = day => {
+    setSource(null);
     setShown(day);
     if (day === saved.marketDate || earlier[day]?.status === 'ready') return;
     setEarlier(current => ({ ...current, [day]: { status: 'loading' } }));
@@ -203,6 +205,8 @@ export default function AnalystPredictionResearch({ research: saved }) {
   // Every fact list in the table shares the widest label's column, so values line up across entries
   // (Market Structure's signals and its levels read as one column of values).
   const frame = useRef(null);
+  const [host, setHost] = useState(null);
+  useLayoutEffect(() => { setHost(frame.current?.closest('.analyst-panel') || document.body); }, []);
   useLayoutEffect(() => {
     if (!frame.current) return;
     // Measure each list at its own width first, so a narrower update can shrink the shared column.
@@ -226,8 +230,12 @@ export default function AnalystPredictionResearch({ research: saved }) {
           <td className="analyst-research__quiet" colSpan={4}>{reading.status === 'loading' ? `Reading ${dayLabel(shown)}…`
             : reading.status === 'empty' ? `No research read for ${dayLabel(shown)}.` : `Research for ${dayLabel(shown)} is unavailable.`}</td>
         </tr> : research.markets.map(row => (row.entries.length
-          ? byProduct(row.entries).map((entry, index, entries) => <Entry key={`${row.market}-${index}`} entry={entry} market={row.market}
-            first={index === 0} continued={index > 0 && entries[index - 1].product === entry.product} span={entries.length} />)
+          ? byProduct(row.entries).map((entry, index, entries) => {
+            const key = `${shown}-${row.market}-${index}`;
+            return <Entry key={key} entry={entry} market={row.market} first={index === 0}
+              continued={index > 0 && entries[index - 1].product === entry.product} span={entries.length}
+              open={source?.key === key} onSource={() => toggleSource(key, entry, row.market)} />;
+          })
           : <tr key={row.market} className="analyst-research__first">
             <td className="analyst-research__market">{row.market}</td>
             {/* A sentence that already reads under another market adds nothing here. */}
@@ -235,5 +243,13 @@ export default function AnalystPredictionResearch({ research: saved }) {
           </tr>))}
       </tbody>
     </table>
+    {source && <AnalystSourcePanel host={host} title={source.entry.product} onClose={() => setSource(null)}
+      meta={[source.market, entryTime(source.entry)].filter(Boolean).join(' · ')}>
+      {/* The product's own email, scrolled to the quoted line; the line alone when the email was not stored. */}
+      {source.entry.messageId
+        ? <AnalystSourceEmail key={source.key} messageId={source.entry.messageId} quote={source.entry.source} title={source.entry.product}
+          excerpt={source.entry.source} fallback={<Quote entry={source.entry} market={source.market} />} />
+        : <Quote entry={source.entry} market={source.market} />}
+    </AnalystSourcePanel>}
   </section>;
 }

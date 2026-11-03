@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from portfolio_rollup_metrics import build_factor_exposure, build_review_comparison, previous_session_baseline
+from portfolio_rollup_metrics import build_factor_exposure, build_review_comparison, previous_session_baseline, rebuilt_session_close
 
 
 def position(value=200, category="stock", **changes):
@@ -169,6 +169,33 @@ class ReviewComparisonTests(unittest.TestCase):
                 result = build_review_comparison(current, {**self.previous, "observedAt": observed}, session_baseline=session)
                 self.assertEqual(result["baselineSessionDate"], "2026-10-16")
                 self.assertEqual(result["status"], status)
+
+    def rebuild_inputs(self, *, executions=0, prior_date="2026-10-30", dpnl=-150, short_count=1):
+        current = self.account_metrics(observed="2026-11-02T14:09:05Z", long_value=600, short_value=-400)
+        current["observedAt"] = "2026-11-02T14:09:04Z"
+        shorts = [{"symbol": "BYD", "quantity": -5, "priorClose": 76, "priorCloseSessionDate": prior_date,
+                   "priorCloseSource": "ibkr_historical_daily_close"}][:short_count]
+        balance = {"data": {"current": {"activity": {"sameDayExecutionCount": executions}, "eventPositions": [],
+                                        "shortPositions": shorts, "positions": [{"symbol": "BYD", "quantity": -5}, {"symbol": "CVI", "quantity": 10}]}}}
+        portfolio = {"data": {"pnl": [{"account": "account-a", "pnl": {"dailyPnL": dpnl}}]}}
+        return current, portfolio, balance, previous_session_baseline(current["observedAt"])
+
+    def test_a_missed_close_is_rebuilt_from_a_later_read_with_no_trades_since(self):
+        current, portfolio, balance, session = self.rebuild_inputs()
+        closing = rebuilt_session_close(current, portfolio, balance, session)
+        # Shorts at the official Oct 30 close (-5 x 76); NLV and net less the day's -150 P&L; longs the remainder.
+        self.assertEqual([closing[key] for key in ("shortMarketValue", "netLiquidation", "netExposure", "longMarketValue", "grossExposure")],
+                         [-380, 1150, 350, 730, 1110])
+        self.assertEqual(closing["observedAt"], "2026-10-30T20:00:00Z")
+        result = build_review_comparison(current, closing, session_baseline=session)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["baselineAsOf"], "2026-10-30T20:00:00Z")
+        self.assertEqual(result["metrics"]["shortMarketValue"], {"previous": -380, "current": -400})
+
+    def test_a_close_is_not_rebuilt_after_a_trade_or_without_full_closing_evidence(self):
+        for change in ({"executions": 1}, {"prior_date": "2026-10-29"}, {"short_count": 0}, {"dpnl": None}):
+            with self.subTest(change=change):
+                self.assertIsNone(rebuilt_session_close(*self.rebuild_inputs(**change)))
 
 
 class ExposureTests(unittest.TestCase):

@@ -1369,6 +1369,35 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
   },
   marketDateFor: (now) => defaultResearchMarketDate(now),
 });
+// The market day's Alpha Code lines with live prices, for the Analyst's line watch. The
+// levels are re-read every few minutes as the morning's products arrive; prices on every call.
+const ALPHA_CODE_LEVELS_MS = 5 * 60_000;
+let alphaCodeLevels = null;
+app.get('/api/analyst/alpha-code-lines', async (req, res) => {
+  try {
+    const { alphaCodeLines } = require('./src/services/analyst/alphaCodeWatch.cjs');
+    const now = new Date();
+    const marketDate = defaultResearchMarketDate(now);
+    if (!alphaCodeLevels || alphaCodeLevels.marketDate !== marketDate || now.getTime() - alphaCodeLevels.at > ALPHA_CODE_LEVELS_MS) {
+      const board = await loadPredictionSetupBoard({ now, researchDate: marketDate });
+      alphaCodeLevels = { at: now.getTime(), marketDate, lines: alphaCodeLines(board) };
+    }
+    const { lines } = alphaCodeLevels;
+    const prices = Object.fromEntries((await Promise.all([...new Set(lines.map((line) => line.symbol))].map(async (symbol) => {
+      const quote = await getQuote(symbol).catch(() => null);
+      const price = Number(quote?.price);
+      // A delayed quote keeps the time it was observed, so a break is dated when the price was seen.
+      return quote && Number.isFinite(price) && price > 0 && isQuoteUsableNow(quote, symbol)
+        ? [symbol, { price, asOf: quote.observedAt || now.toISOString(), source: quote.observation?.source || null,
+          delayed: quote.observation?.dataType === 'delayed' }] : null;
+    }))).filter(Boolean));
+    res.json({ marketDate, lines, prices });
+  } catch (error) {
+    console.error('[alpha-code-lines]', error.message);
+    res.status(503).json({ error: 'Alpha Code lines unavailable' });
+  }
+});
+
 // ?date=YYYY-MM-DD reads an earlier market day's morning research for the report's date picker.
 const predictionResearchBoards = new Map();
 app.get('/api/prediction-markets/setup-board', async (req, res) => {

@@ -99,6 +99,49 @@ test('orders urgent concerns before newer ideas and colors directional words and
   expect(screen.queryByText('short', { exact: true })).not.toBeInTheDocument();
 });
 
+test('a security card names its source products right under the position', () => {
+  const citation = (title, product) => ({ id: `cite_${product}`, title, product, sourceUri: `https://mail.google.com/mail/#all/${product}` });
+  const idea = attention('idea', { kind: 'opportunity', presentation: { subject: 'KDP', date: '2026-11-02', rows: [
+    { label: 'Current position', text: 'Not held' }, { label: 'Action', text: 'New Long idea → review' },
+  ], sourceLinks: [
+    { label: 'The Call', citation: citation('The Call @ Hedgeye | Replay & Summary | 11/02/2026', 'the-call') },
+    { label: 'Trade source', citation: citation('Signal Strength Shorts', 'signal-strength-shorts') },
+    { label: 'Counterpoint source', citation: citation('The Call @ Hedgeye | Replay & Summary | 11/02/2026', 'the-call') },
+  ] } });
+  const wti = attention('wti', { kind: 'market', presentation: { subject: 'WTI', date: '2026-11-02', rows: [{ label: 'Trade line', text: 'Broke 97 at 96.85 (06:53)' }],
+    sourceLinks: [{ label: 'Top 3 Things Alpha Code', citation: citation('Top 3 Things: WTI Alpha Code', 'top-3-things') }] } });
+  render(<AnalystInbox findings={[idea, wti, attention('gateway')]} />);
+  const labels = [...document.querySelectorAll('.analyst-inbox-copy dt')].map(term => term.textContent.trim());
+  expect(labels.slice(0, 4)).toEqual(['Ticker:', 'Current position:', 'Source:', 'Action:']);
+  expect(screen.getAllByText('Source:').map(term => term.nextSibling.textContent)).toEqual(['The Call, Signal Strength Shorts', 'Top 3 Things']);
+  // A product name is not a directional call.
+  expect(screen.getByText('The Call, Signal Strength Shorts')).not.toHaveClass('analyst-inbox-signal--negative');
+  // Operational cards are not about a security.
+  expect(screen.getAllByText('Source:')).toHaveLength(2);
+});
+
+test('alerts dismissed in the last 24 hours open from one button at the bottom of the Inbox', () => {
+  const ago = hours => new Date(Date.now() - hours * 3_600_000).toISOString();
+  const dismissed = (id, subject, hours) => ({ ...attention(id, { dismissed: { at: ago(hours) },
+    presentation: { subject, date: '2026-09-22', rows: [{ label: 'Issue', text: `${subject} is disconnected.` }] } }), unread: 0 });
+  render(<AnalystInbox findings={[attention('gateway'), dismissed('older', 'Early Look', 5), dismissed('recent', 'HedgAI Signals', 1), dismissed('stale', 'Old feed', 30)]} />);
+  expect(screen.getAllByRole('heading', { level: 3 }).map(item => item.textContent)).toEqual(['IB Gateway']);
+  const toggle = screen.getByRole('button', { name: 'Dismissed (2)' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(toggle);
+  // Most recently dismissed first; a day-old dismissal is gone.
+  expect(screen.getAllByRole('heading', { level: 3 }).map(item => item.textContent)).toEqual(['IB Gateway', 'HedgAI Signals', 'Early Look']);
+  expect(screen.getAllByRole('button', { name: 'Dismiss' })).toHaveLength(1);
+  expect(screen.getAllByText(/^Dismissed [A-Z][a-z]{2} \d+ \d\d:\d\d$/)).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Hide dismissed' }));
+  expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(1);
+});
+
+test('no dismissals, no Dismissed button', () => {
+  render(<AnalystInbox findings={[attention('gateway')]} />);
+  expect(screen.queryByRole('button', { name: /dismissed/i })).not.toBeInTheDocument();
+});
+
 test('fresh holdings expiry removes portfolio actions while retaining research ideas without stale portfolio claims', () => {
   jest.useFakeTimers();
   jest.setSystemTime(new Date('2026-09-22T15:30:00Z'));

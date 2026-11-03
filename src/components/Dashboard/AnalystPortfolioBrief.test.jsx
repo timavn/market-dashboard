@@ -656,6 +656,18 @@ test('previous-close comparison renders original account observation times and b
   expect(JSON.stringify(data)).toBe(original);
 });
 
+test('a previous close rebuilt from the review read says so under the comparison', () => {
+  const data = brief(); data.comparison = {
+    status: 'available', baselineKind: 'previous-session-close', baselineSessionDate: '2026-10-30', baselineRebuilt: true,
+    baselineSessionCloseAt: '2026-10-30T20:00:00Z', baselineAsOf: '2026-10-30T20:00:00Z', currentAsOf: '2026-11-02T14:09:05Z',
+    metrics: { grossLeverage: { previous: 1.3558, current: 1.3702 }, netExposurePctOfNlv: { previous: 0.17, current: -0.6 } },
+  };
+  render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
+  const section = screen.getByRole('region', { name: 'Exposure and risk' });
+  expect(section).toHaveTextContent('Previous close rebuilt from this read: no trades since');
+  expect(section).not.toHaveTextContent('Previous close unavailable');
+});
+
 test('current and previous exposure use their own captured NLV and directional colors', () => {
   const data = brief();
   data.metrics = { longMarketValue: 50000, shortMarketValue: -150000, grossExposure: 200000,

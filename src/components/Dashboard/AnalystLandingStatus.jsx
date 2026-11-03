@@ -83,6 +83,15 @@ const Item = ({ label, children, tone, title }) => <span className="analyst-land
   {label} <span className={tone ? `is-${tone}` : undefined}>{children}</span>
 </span>;
 
+// "Monday, November 2nd, '26": the market day the line describes, in New York time.
+export function landingDate(date) {
+  const day = new Date(`${date}T12:00:00Z`);
+  const n = day.getUTCDate();
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th';
+  const part = options => new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(day);
+  return `${part({ weekday: 'long' })}, ${part({ month: 'long' })} ${n}${suffix}, '${date.slice(2, 4)}`;
+}
+
 const QuadItem = ({ label, value, missing }) => <Item label={label} title={value?.title || missing} tone={value && `q${value.quad}`}>{value ? `Q${value.quad}` : '—'}</Item>;
 
 export default function AnalystLandingStatus({ holdingsCount }) {
@@ -90,10 +99,12 @@ export default function AnalystLandingStatus({ holdingsCount }) {
   const baseline = useLoaded(loadBaseline);
   const published = usePublishedQuadReadings();
   const quads = landingQuads(snapshot.data, loadPortfolioQuadReadings(published));
-  const game = seasonGame(quadReadingDate());
+  const today = quadReadingDate();
+  const game = seasonGame(today);
   const close = baseline.data;
   const verified = baseline.state === 'ready' && close?.status === 'ready';
   return <div className="analyst-landing-status" role="group" aria-label="Portfolio status">
+    <span className="analyst-landing-stat analyst-landing-date">{landingDate(today)}</span>
     <Item label="SEASON">{game.year}</Item>
     <Item label="GAME">{game.game}/{game.totalGames}</Item>
     <Item label="HOLDINGS">{Number.isInteger(holdingsCount) ? holdingsCount : '—'}</Item>

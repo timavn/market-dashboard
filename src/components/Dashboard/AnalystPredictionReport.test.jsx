@@ -330,8 +330,11 @@ test('analyst-research blocks list one row per mention under its product, named 
   expect(source).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(source);
   expect(source).toHaveAttribute('aria-expanded', 'true');
-  expect(table.querySelector('blockquote')).toHaveTextContent(/sold all Ethereum/);
-  expect(within(table.querySelector('blockquote')).getByText('Ethereum')).toHaveClass('analyst-process--ticker');
+  const panel = screen.getByRole('complementary', { name: 'Source: The Macro Show' });
+  expect(panel).toHaveTextContent('Bitcoin · Oct 22 07:55 PT');
+  expect(panel.querySelector('blockquote')).toHaveTextContent(/sold all Ethereum/);
+  expect(within(panel.querySelector('blockquote')).getByText('Ethereum')).toHaveClass('analyst-process--ticker');
+  expect(table.querySelector('blockquote')).toBeNull();
 });
 
 test('the research title is its market day; the four before it open above and read what was said that day', async () => {
@@ -560,18 +563,65 @@ test('a research Source opens the product\'s own email at the quoted line, and t
   analystWorkspaceApi.request.mockImplementation(path => (path === '/source-email/1a18c949d0c80bdd'
     ? Promise.resolve({ messageId: '1a18c949d0c80bdd', html: '<html><body><p>Our Levels</p></body></html>', found: false })
     : Promise.reject(Object.assign(new Error('Source email not stored'), { code: 'HTTP_404' }))));
-  render(<Pre node={node}><code>ignored</code></Pre>);
-  const table = within(screen.getByRole('region', { name: 'Morning research' })).getByRole('table');
+  // The Analyst window's own Escape, which a Source panel must not reach.
+  const closeAnalyst = jest.fn();
+  const windowEscape = event => { if (event.key === 'Escape') closeAnalyst(); };
+  window.addEventListener('keydown', windowEscape);
+  render(<div className="analyst-panel"><Pre node={node}><code>ignored</code></Pre></div>);
+  const region = screen.getByRole('region', { name: 'Morning research' });
+  const table = within(region).getByRole('table');
+  const tableMarkup = table.outerHTML;
   const [ranges, quant, macro] = within(table).getAllByRole('button', { name: 'Source' });
   fireEvent.click(ranges);
   expect(analystWorkspaceApi.request).toHaveBeenCalledWith('/source-email/1a18c949d0c80bdd');
-  expect(await within(table).findByTitle('Original email: Risk Ranges')).toHaveAttribute('srcdoc', expect.stringContaining('Our Levels'));
-  // An email that was not stored falls back to the quoted line.
+  // The email reads in one panel beside the window, outside the table, which keeps its rows as they were.
+  const panel = screen.getByRole('complementary', { name: 'Source: Risk Ranges' });
+  expect(panel.parentElement).toHaveClass('analyst-panel');
+  expect(region).not.toContainElement(panel);
+  expect(await within(panel).findByTitle('Original email: Risk Ranges')).toHaveAttribute('srcdoc', expect.stringContaining('Our Levels'));
+  expect(table.outerHTML).toBe(tableMarkup.replace('aria-expanded="false"', 'aria-expanded="true"'));
+  // Another row's Source swaps the panel; an email that was not stored falls back to the quoted line.
   fireEvent.click(quant);
-  await waitFor(() => expect(table.querySelectorAll('blockquote.analyst-research__quote')).toHaveLength(1));
+  expect(ranges).toHaveAttribute('aria-expanded', 'false');
+  expect(quant).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getAllByRole('complementary')).toHaveLength(1);
+  expect(screen.getByRole('complementary', { name: 'Source: Crypto Quant' })).toBe(panel);
+  await waitFor(() => expect(panel.querySelector('blockquote.analyst-research__quote')).toHaveTextContent('BTC is bearish'));
+  expect(within(panel).queryByTitle('Original email: Risk Ranges')).not.toBeInTheDocument();
   fireEvent.click(macro);
   expect(analystWorkspaceApi.request).toHaveBeenCalledTimes(2);
-  expect(table.querySelectorAll('blockquote.analyst-research__quote')).toHaveLength(2);
+  expect(panel.querySelector('blockquote.analyst-research__quote')).toHaveTextContent('Long Bitcoin (BTC)');
+  expect(table.querySelector('blockquote')).toBeNull();
+  // Escape closes the panel and not the Analyst window; the next Escape is the window's again.
+  fireEvent.keyDown(document.body, { key: 'Escape' });
+  expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  expect(macro).toHaveAttribute('aria-expanded', 'false');
+  expect(closeAnalyst).not.toHaveBeenCalled();
+  fireEvent.keyDown(document.body, { key: 'Escape' });
+  expect(closeAnalyst).toHaveBeenCalledTimes(1);
+  window.removeEventListener('keydown', windowEscape);
+  // Its close button closes it too, and so does its own row's Source.
+  fireEvent.click(macro);
+  fireEvent.click(within(screen.getByRole('complementary', { name: 'Source: The Macro Show' })).getByRole('button', { name: 'Close source' }));
+  expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  fireEvent.click(macro);
+  fireEvent.click(macro);
+  expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+});
+
+test('one research Source panel shows at a time across the report\'s tables', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Crypto" />);
+  const { pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const block = (market, product) => ({ children: [{ tagName: 'code', properties: { className: ['language-analyst-research'] },
+    children: [{ type: 'text', value: JSON.stringify({ markets: [{ market, entries: [{ product, context: `${market} is bullish`, source: `${market} is bullish` }] }] }) }] }] });
+  render(<><Pre node={block('Bitcoin', 'Crypto Quant')}><code /></Pre><Pre node={block('Gold', 'Early Look')}><code /></Pre></>);
+  const [bitcoin, gold] = screen.getAllByRole('button', { name: 'Source' });
+  fireEvent.click(bitcoin);
+  fireEvent.click(gold);
+  expect(screen.getAllByRole('complementary')).toHaveLength(1);
+  expect(screen.getByRole('complementary', { name: 'Source: Early Look' })).toHaveTextContent('Gold is bullish');
+  expect(bitcoin).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('findQuote finds a quoted line across the email\'s markup, without the label the dashboard added', () => {

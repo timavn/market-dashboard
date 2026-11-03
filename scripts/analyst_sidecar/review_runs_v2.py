@@ -531,25 +531,44 @@ class ReviewRunV2Store:
             _, payload = self._saved_evidence_payload(run, name, evidence_payloads)
             return self._decode_saved_evidence_payload(payload)
 
-        metrics = portfolio_metrics(project_portfolio_context(captured("portfolio")), captured("portfolioBalance"))
+        portfolio, balance = captured("portfolio"), captured("portfolioBalance")
+        metrics = portfolio_metrics(project_portfolio_context(portfolio), balance)
         cutoff = ((run.get("dependencies") or {}).get("dailyResearch") or {}).get("asOf") or run.get("createdAt")
         previous = change.get("comparison") or {}
-        change["comparison"] = self.portfolio_close_comparison(metrics, cutoff, bound_source=previous.get("baselineSource"))
+        change["comparison"] = self.portfolio_close_comparison(metrics, cutoff, bound_source=previous.get("baselineSource"),
+                                                               rebuild=(portfolio, balance))
         return change["comparison"]
 
-    def portfolio_close_comparison(self, metrics, review_as_of, *, bound_source=None):
-        """Use surviving immutable accounting, independently of deleted chats."""
+    def portfolio_close_comparison(self, metrics, review_as_of, *, bound_source=None, rebuild=None):
+        """Use surviving immutable accounting, independently of deleted chats.
+
+        Without a capture after the previous close, a review read taken before
+        any trade since that close rebuilds it (``rebuild``: that read's
+        portfolio and balance evidence).
+        """
         from portfolio_capture import project_portfolio_context
         from portfolio_review import portfolio_metrics
         from portfolio_rollup_metrics import (
             _time, build_review_comparison, comparison_observed_at,
-            is_previous_session_close, previous_session_baseline,
+            is_previous_session_close, previous_session_baseline, rebuilt_session_close,
         )
         session = previous_session_baseline(review_as_of)
         cutoff = _time(review_as_of)
         unavailable = build_review_comparison(metrics, {}, session_baseline=session)
         if cutoff is None or not session:
             return unavailable
+
+        def rebuilt():
+            closing = rebuilt_session_close(metrics, *rebuild, session) if rebuild else None
+            if not closing:
+                return unavailable
+            comparison = build_review_comparison(metrics, closing, session_baseline=session, baseline_source={
+                "source": "ibkr", "method": "rebuilt-from-review-read", **closing["rebuiltFrom"]})
+            return {**comparison, "baselineRebuilt": True} if comparison["status"] == "available" else unavailable
+
+        # A rebuilt close is recomputed from the same saved read; it names no capture run.
+        if bound_source and bound_source.get("method") == "rebuilt-from-review-read":
+            return rebuilt()
         # This exact historical horizon survives later review volume. A saved
         # bound source is read directly; legacy projections only scan the target
         # session, never the latest global review window or full reports.
@@ -624,7 +643,7 @@ class ReviewRunV2Store:
             comparison = build_review_comparison(metrics, candidate, session_baseline=session, baseline_source=source)
             if comparison["status"] == "available":
                 return comparison
-        return unavailable
+        return rebuilt() if not bound_source else unavailable
 
     def _hydrate_saved_position_alignment(self, run, evidence_payloads):
         """Present comparisons using only this saved post's verified evidence."""

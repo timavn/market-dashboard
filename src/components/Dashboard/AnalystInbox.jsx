@@ -42,8 +42,12 @@ function publicationLabel(time, date, receivedAt) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(day);
 }
 
-// Security alerts lead with their ticker; operational subjects are not tickers.
-const TICKER_KINDS = new Set(['portfolio', 'opportunity']);
+// When an alert was dismissed: its dismissal record, else the row's acknowledgment.
+const DISMISSED_WINDOW_MS = 24 * 60 * 60_000;
+const dismissedAt = finding => Date.parse((finding.payload || finding).dismissed?.at || finding.acknowledged_at) || 0;
+
+// Security and market alerts (an Alpha Code line break) lead with their ticker; operational subjects are not tickers.
+const TICKER_KINDS = new Set(['portfolio', 'opportunity', 'market']);
 
 // An urgent instruction remains visible during a holdings outage; say which
 // verification it rests on instead of presenting the position as current.
@@ -53,6 +57,15 @@ function staleHoldingLabel(payload) {
   return Number.isFinite(at.getTime())
     ? `${side} (last verified ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(at)}; holdings currently unavailable)`
     : `${side} (holdings currently unavailable)`;
+}
+
+// The publication a link cites, by product: "The Call", not "The Call @ Hedgeye | Replay…".
+// Generic labels ("Trade source", "atr14 evidence") fall back to the citation's own title.
+function sourceName(link) {
+  if (link.citation?.product === 'process-sizing') return 'Volatility sizing';
+  const label = String(link.label || '').replace(/\s+Alpha Code$/, '').trim();
+  if (label && !/\b(?:source|evidence)$/i.test(label)) return label;
+  return String(link.citation?.title || '').split(/:| @ | \| /)[0].trim() || null;
 }
 
 function attentionContent(finding, now) {
@@ -79,6 +92,12 @@ function attentionContent(finding, now) {
       return merged.map((item, i) => i === index ? { ...position, text: row.text, side: position.text } : item);
     }, []);
   if (!rows.length) return null;
+  // A security card names its publications at a glance, right under the position.
+  const sources = [...new Set((presentation.sourceLinks || []).filter(link => link?.citation).map(sourceName).filter(Boolean))];
+  if (TICKER_KINDS.has(payload.kind) && sources.length && !rows.some(row => row.label === 'Source')) {
+    const at = rows.findIndex(row => row.label === 'Current position') + 1;
+    rows.splice(at, 0, { label: 'Source', text: sources.join(', ') });
+  }
   return { ...presentation, rows, publicationDate: presentation.date || payload.publicationTime,
     sortTime: Date.parse(payload.publicationTime) || Date.parse(presentation.date) || 0 };
 }
@@ -196,13 +215,19 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
     const timer = setInterval(() => setNow(Date.now()), 5_000);
     return () => clearInterval(timer);
   }, []);
-  const alerts = findings.filter(finding => finding.unread !== 0 && finding.unread !== false)
+  const describe = list => list
     .map(finding => ({ finding, modern: isAttentionFinding(finding),
       content: isAttentionFinding(finding) ? attentionContent(finding, now) : describeAnalystFinding(finding, findings, now) }))
     .filter(({ finding, content }) => content && content.positionAction !== 'Neutral — no change'
-      && !['resolved', 'unavailable'].includes(finding.state || finding.payload?.state))
+      && !['resolved', 'unavailable'].includes(finding.state || finding.payload?.state));
+  const unread = finding => finding.unread !== 0 && finding.unread !== false;
+  const alerts = describe(findings.filter(unread))
     .sort((a, b) => attentionPriority(a.finding) - attentionPriority(b.finding)
       || (b.content.sortTime || Date.parse(b.content.publicationDate) || 0) - (a.content.sortTime || Date.parse(a.content.publicationDate) || 0));
+  // Alerts dismissed in the last day stay one click away, most recently dismissed first.
+  const [showDismissed, setShowDismissed] = useState(false);
+  const dismissedList = describe(findings.filter(finding => !unread(finding) && now - dismissedAt(finding) < DISMISSED_WINDOW_MS))
+    .sort((a, b) => dismissedAt(b.finding) - dismissedAt(a.finding));
   const securities = [...new Set(alerts.filter(({ modern, content }) => modern && content.rows.some(row => DURATIONS.includes(row.label)))
     .map(({ content }) => content.subject))].sort().join(',');
   useEffect(() => {
@@ -218,7 +243,18 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
     {error && <p className="analyst-inbox-error" role="alert">{error}</p>}
     {!alerts.length && <p className="analyst-inbox-empty">No new items requiring attention.</p>}
     {urgent.length > 0 && <h2 className="analyst-inbox-urgent-heading">Alerts</h2>}
-    {[...urgent, ...ordinary].map(({ finding, content, modern }, index) => {
+    {[...urgent, ...ordinary].map((item, index) => card(item, index))}
+    {showDismissed && dismissedList.length > 0 && <>
+      <h2 className="analyst-inbox-dismissed-heading">Dismissed · last 24 hours</h2>
+      {dismissedList.map((item, index) => card(item, index, dismissedAt(item.finding)))}
+    </>}
+    {dismissedList.length > 0 && <div className="analyst-inbox-dismissed-bar">
+      <button type="button" aria-expanded={showDismissed} onClick={() => setShowDismissed(open => !open)}>
+        {showDismissed ? 'Hide dismissed' : `Dismissed (${dismissedList.length})`}</button>
+    </div>}
+  </section>;
+
+  function card({ finding, content, modern }, index, dismissed = null) {
       const payload = finding.payload || finding;
       const date = publicationLabel(payload.publicationTime, content.publicationDate, payload.receivedAt);
       const subject = modern ? content.subject : finding.symbol || payload.symbol;
@@ -236,8 +272,8 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       const citations = content.sourceLinks?.length ? content.sourceLinks.filter(link => link?.citation && link.label).map(link => link.citation)
         : payload.citation ? [payload.citation] : [];
       return <React.Fragment key={finding.id}>
-      {!required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Notifications</h2>}
-      <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}`}>
+      {!dismissed && !required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Notifications</h2>}
+      <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}${dismissed ? ' is-dismissed' : ''}`}>
         <h3 className="sr-only">{subject}</h3>
         <div className={durations.length ? 'analyst-inbox-body has-horizons' : 'analyst-inbox-body'}>
         {stance ? <StanceCopy ticker={subject} stance={stance} freshHoldings={attentionEvidenceFreshness(finding, now).holdings} /> : <dl className="analyst-inbox-copy">
@@ -246,7 +282,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
           </div>}
           {modern ? rows.map((row, index) => <div key={`${row.label}-${index}`}>
             <dt>{row.label}: </dt><dd className={row.side ? toneClass(STANCE_TONES[row.side.toUpperCase()]) : ['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}>
-              {row.label === 'Order' ? <OrderText>{row.text}</OrderText> : <DirectionalText>{row.text}</DirectionalText>}</dd>
+              {row.label === 'Order' ? <OrderText>{row.text}</OrderText> : row.label === 'Source' ? row.text : <DirectionalText>{row.text}</DirectionalText>}</dd>
           </div>) : <>
           <div className="analyst-inbox-position">
             <dt>Current position: </dt><dd><DirectionalText>{content.currentPosition.label}</DirectionalText>
@@ -294,9 +330,9 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
           {stamp || <span />}
           {Boolean(finding.unread) && <button className="analyst-inbox-acknowledge" type="button" onClick={() => modern
             ? onAcknowledge(finding.id, payload.fingerprint || finding.fingerprint, payload.materialRevision ?? finding.materialRevision) : onAcknowledge(finding.id)}>Dismiss</button>}
+          {dismissed && <span className="analyst-inbox-acknowledge analyst-inbox-time">Dismissed {publicationLabel(new Date(dismissed).toISOString())}</span>}
         </footer>
       </article>
       </React.Fragment>;
-    })}
-  </section>;
+  }
 }

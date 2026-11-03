@@ -225,6 +225,54 @@ def is_previous_session_close(metrics: Any, baseline: dict[str, Any]) -> bool:
     return bool(frozen_until and observed < frozen_until)
 
 
+def rebuilt_session_close(current_metrics: Any, portfolio: Any, balance: Any, baseline: dict[str, Any]) -> dict[str, Any] | None:
+    """The previous close rebuilt from a later read taken before any trade.
+
+    With no execution since the close the book is the closing book, so the
+    close follows from the read itself: shorts at IBKR's official closing
+    prices for that session, the account at NLV less IBKR's daily P&L, and
+    longs by the rest of that P&L. Anything less than full coverage is None.
+    """
+    close_at, session_day = baseline.get("baselineSessionCloseAt"), baseline.get("baselineSessionDate")
+    if (not isinstance(current_metrics, dict) or not _comparison_complete(current_metrics)
+            or current_metrics.get("exposureBasis") != "broker_account" or not close_at or not session_day):
+        return None
+    observed = _time(comparison_observed_at(current_metrics))
+    if observed is None or observed <= _time(close_at):
+        return None
+    current = ((balance or {}).get("data") or {}).get("current") or {}
+    activity = current.get("activity") or {}
+    shorts, positions = current.get("shortPositions"), current.get("positions")
+    if (activity.get("sameDayExecutionCount") != 0 or current.get("eventPositions")
+            or not isinstance(shorts, list) or not isinstance(positions, list)
+            or len(shorts) != sum(1 for row in positions if (_number(row.get("quantity")) or 0) < 0)):
+        return None
+    short_close = 0.0
+    for row in shorts:
+        quantity, price = _number(row.get("quantity")), _number(row.get("priorClose"))
+        if (quantity is None or quantity >= 0 or price is None or price <= 0
+                or row.get("priorCloseSessionDate") != session_day
+                or row.get("priorCloseSource") != "ibkr_historical_daily_close"):
+            return None
+        short_close += quantity * price
+    accounts = current_metrics.get("accountIds") or []
+    pnl_rows = [row for row in (((portfolio or {}).get("data") or {}).get("pnl") or []) if row.get("account") in accounts]
+    daily = _number(((pnl_rows[0].get("pnl") or {}) if len(pnl_rows) == 1 else {}).get("dailyPnL"))
+    nlv, net = _number(current_metrics.get("netLiquidation")), _number(current_metrics.get("netExposure"))
+    if daily is None or nlv is None or net is None or nlv - daily <= 0:
+        return None
+    nlv, net = nlv - daily, net - daily
+    long_close = net - short_close
+    if long_close < 0:
+        return None
+    gross = long_close - short_close
+    return {**current_metrics, "observedAt": close_at, "exposureObservedAt": close_at,
+            "exposureProvenance": {**current_metrics["exposureProvenance"], "observedAt": close_at},
+            "longMarketValue": long_close, "shortMarketValue": short_close, "grossExposure": gross, "netExposure": net,
+            "netLiquidation": nlv, "grossLeverage": gross / nlv, "netExposurePctOfNlv": net / nlv * 100, "netAccruedInterest": None,
+            "rebuiltFrom": {"observedAt": comparison_observed_at(current_metrics), "dailyPnL": daily, "sameDayExecutionCount": 0}}
+
+
 def build_review_comparison(current_metrics, previous_metrics, baseline_as_of=None, *, session_baseline=None, baseline_source=None):
     """Compare complete, separately captured values for the same account book.
 
