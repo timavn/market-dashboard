@@ -97,14 +97,16 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
 
   // Each scan reads the lines' live prices; unreadable lines or prices leave the
   // stored watch as it stood, so the day's breaks still show.
+  // The last folded watch, for the setup board's Trade and Trend cells.
+  let latestAlphaCodeWatch = null;
   async function alphaCodeWatch(at) {
     const { foldAlphaCodeWatch } = require('./alphaCodeWatch.cjs');
     const stored = (await call('setting', { key: ALPHA_CODE_WATCH_KEY })).value || null;
     const current = await alphaCodeLines().catch(() => null);
-    if (!current || !Array.isArray(current.lines)) return stored;
+    if (!current || !Array.isArray(current.lines)) return (latestAlphaCodeWatch = stored);
     const { watch, changed } = foldAlphaCodeWatch(stored, { marketDate: current.marketDate, lines: current.lines, prices: current.prices || {}, now: at });
     if (changed) await call('setting', { key: ALPHA_CODE_WATCH_KEY, value: watch }).catch(() => {});
-    return watch;
+    return (latestAlphaCodeWatch = watch);
   }
 
   async function scan({ reset = false, events = [] } = {}) {
@@ -198,6 +200,8 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
   }
 
   return { enabled, start, tick, isRunning: () => Boolean(running), scoredStanceBook: () => scoredStanceBook,
+    // Before the first scan the stored watch stands in.
+    alphaCodeWatch: async () => latestAlphaCodeWatch || (await call('setting', { key: ALPHA_CODE_WATCH_KEY })).value || null,
     getStatus: async () => status || (await call('setting', { key: 'pm-attention-status' })).value || { state: 'idle' } };
 }
 

@@ -1369,6 +1369,8 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
   },
   // The archive is constructed later in this file; the board reads it per request.
   loadPublishedStatements: ({ date }) => publishedTradeArchive.loadStatements({ date }),
+  // The Analyst's live Alpha Code watch: a broken line reads its Trade or Trend Neutral.
+  loadAlphaCodeWatch: () => analystRoutes.dailyWorkflow?.alphaCodeWatch?.() ?? null,
   marketDateFor: (now) => defaultResearchMarketDate(now),
 });
 // The market day's Alpha Code lines with live prices, for the Analyst's line watch. The

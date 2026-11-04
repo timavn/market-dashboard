@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSetupBoard, createSetupBoardLoader, evaluateSetup, selectEvents } = require('./predictionSetupBoard.cjs');
+const { alphaCodeBreaks, buildSetupBoard, createSetupBoardLoader, evaluateSetup, selectEvents } = require('./predictionSetupBoard.cjs');
 
 const rule = { bottomThird: 0.3333, topThird: 0.6667 };
 const tick = (direction) => ({ direction });
@@ -535,4 +535,27 @@ test('Trade comes from what the morning products state: yields from the shared p
   assert.equal(securityIntelligence.bySymbol.GOLD?.lastVerifiedDecision?.trade?.value ?? null, null);
   assert.equal(securityIntelligence.bySymbol.GLD?.lastVerifiedDecision?.trade?.value ?? null, null);
   assert.equal(trade('silver'), null);
+});
+
+test('a published Trade or Trend whose Alpha Code line the price crossed since reads Neutral, keeping the call it replaced', () => {
+  const line = (duration, level, side, since) => ({ id: `CL=F|${duration}`, symbol: 'CL=F', duration, level, side, since, price: 95.57,
+    priceAt: '2026-11-03T14:45:00Z', product: 'top-3-things', productLabel: 'Top 3 Things', breaks: [] });
+  const watch = { lines: { 'CL=F|trade': line('trade', 97, 'below', '2026-11-02T16:22:35Z'), 'CL=F|trend': line('trend', 91, 'above', '2026-11-02T13:57:43Z') } };
+  const trade = { direction: 'BULLISH', ticker: 'WTIC', date: '2026-10-21', source: 'The Call', sourceUrl: 'https://app.hedgeye.com/feed_items/188678' };
+  const broken = alphaCodeBreaks(watch, 'CL=F', { trade, trend: 'BULLISH', trendDate: '2026-11-03' });
+  assert.deepEqual([broken.trade.direction, broken.trade.date, broken.trade.source, broken.trend], ['NEUTRAL', '2026-11-02', 'Alpha Code 97', 'BULLISH']);
+  assert.deepEqual(broken.alphaBreaks.trade, { level: 97, side: 'below', since: '2026-11-02T16:22:35Z', price: 95.57, priceAt: '2026-11-03T14:45:00Z',
+    product: 'top-3-things', productLabel: 'Top 3 Things', published: { value: 'BULLISH', date: '2026-10-21', source: 'The Call' } });
+  // No watch, or a price on the call's side, leaves the call.
+  assert.deepEqual(alphaCodeBreaks(null, 'CL=F', { trade, trend: 'BULLISH' }), { trade, trend: 'BULLISH' });
+  assert.equal(alphaCodeBreaks({ lines: { 'CL=F|trade': { ...watch.lines['CL=F|trade'], side: 'above' } } }, 'CL=F', { trade }).trade, trade);
+
+  // On the board a broken Trend reads Neutral.
+  const board = (alphaCodeWatch) => buildSetupBoard({ alphaCodeWatch, quotes: { 'CL=F': { price: 90.2 } },
+    riskRanges: { ranges: { WTIC: { lrr: 89.5, hrr: 104, trend: 'BULLISH', date: '2026-11-03' } } } }).rows.find((row) => row.id === 'wti');
+  const crossed = { lines: { 'CL=F|trend': line('trend', 91, 'below', '2026-11-03T15:00:00Z') } };
+  assert.equal(board(null).trend, 'BULLISH');
+  const wti = board(crossed);
+  assert.equal(wti.trend, 'NEUTRAL');
+  assert.deepEqual(wti.alphaBreaks.trend.published, { value: 'BULLISH', date: '2026-11-03', source: 'Risk Ranges' });
 });

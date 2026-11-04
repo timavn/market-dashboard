@@ -3,6 +3,7 @@ const { canonicalTradeResearch } = require('../utils/canonicalTradeResearch.cjs'
 const { selectLatestPublishedTrade } = require('../utils/publishedResearchSignals.cjs');
 const { PRODUCTS: MORNING_PRODUCTS, PROXY_TICKERS, buildMorningResearch } = require('./predictionMorningResearch.cjs');
 const { emailPublishedAt } = require('../utils/researchPublicationTime.cjs');
+const { brokenAlphaCodeLine } = require('./analyst/alphaCodeWatch.cjs');
 
 // One row per tracked Kalshi market: Hedgeye Tick/Trade/Trend, the verified
 // underlying price, its Risk Range position, and the rule-based setup. Line
@@ -129,6 +130,27 @@ function usdReading({ quotes, riskRanges, securityIntelligence, usdPeriods, hedg
     trend: direction(range?.trend), low: finite(range?.lrr), high: finite(range?.hrr), rangeDate: range?.date || null,
     trade: trade?.status === 'available' ? { direction: trade.direction, date: trade.sourceDate, source: trade.sourceLabel || null } : null,
     tick: tickReading({ hedgeye: { tick: { ticker: spec.tickTicker, fit: 'proxy' } } }, hedgai) };
+}
+
+// A published Trade or Trend whose Alpha Code line the price has crossed since reads
+// Neutral until the price is back on its side. The call it replaced is kept beside it.
+const easternDate = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+function alphaCodeBreaks(watch, symbol, { trade, trend, trendDate }) {
+  if (!watch || !symbol) return { trade, trend };
+  const alphaBreaks = {};
+  const breakOf = (line, published) => ({ level: line.level, side: line.side, since: line.since, price: line.price, priceAt: line.priceAt,
+    product: line.product || null, productLabel: line.productLabel || null, published });
+  const tradeLine = trade && brokenAlphaCodeLine(watch, symbol, 'trade', { value: trade.direction, date: trade.date });
+  if (tradeLine) {
+    alphaBreaks.trade = breakOf(tradeLine, { value: trade.direction, date: trade.date || null, source: trade.source || null });
+    trade = { ...trade, direction: 'NEUTRAL', date: easternDate(tradeLine.since), source: `Alpha Code ${tradeLine.level}` };
+  }
+  const trendLine = trend && brokenAlphaCodeLine(watch, symbol, 'trend', { value: trend, date: trendDate });
+  if (trendLine) {
+    alphaBreaks.trend = breakOf(trendLine, { value: trend, date: trendDate || null, source: 'Risk Ranges' });
+    trend = 'NEUTRAL';
+  }
+  return { trade, trend, ...(Object.keys(alphaBreaks).length ? { alphaBreaks } : {}) };
 }
 
 /** Each market's rolling correlation with the US Dollar from the dashboard's USD correlation table. */
@@ -395,7 +417,7 @@ const allTimeHighSymbol = (market) => market.hedgeye.riskRange?.priceSymbol || m
 
 function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations,
   usdPeriods, eventsBySeries, morningSnapshots, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory,
-  priceHistory, cpiConsensus, publishedStatements, marketDate, asOf = new Date().toISOString() } = {}) {
+  priceHistory, cpiConsensus, publishedStatements, alphaCodeWatch, marketDate, asOf = new Date().toISOString() } = {}) {
   // Saved boards from before volume keep their original shape.
   // Bond ETFs (SHY, IEF, TLT) move opposite to the yield their Trend describes.
   const volumeFor = ({ symbol, inverse } = {}, trend) => {
@@ -427,8 +449,9 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       && (rangePrice.value < (range.low + range.high) / 4 || rangePrice.value > (range.low + range.high));
     const position = mismatch ? null : rangePosition(rangePrice, range);
     const tick = tickReading(market, hedgai);
-    const trade = tradeReading(market, securityIntelligence, marketDate, publishedStatements);
-    const trend = range?.trend || null;
+    const broken = alphaCodeBreaks(alphaCodeWatch, market.price?.symbol, {
+      trade: tradeReading(market, securityIntelligence, marketDate, publishedStatements), trend: range?.trend || null, trendDate: range?.date });
+    const { trade, trend } = broken;
     return {
       id: market.id, label: market.label, group: market.group, cadence: market.cadence, events,
       price: mismatch && rangePrice === price ? null : price,
@@ -437,6 +460,7 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       volatility: volatilityReading(market, { volatility, quotes, riskRanges }),
       usdCorrelation: usdCorrelationReading(market, usdCorrelations),
       tick, trade, trend, setup: evaluateSetup({ trend, tick, trade, position }),
+      ...(broken.alphaBreaks ? { alphaBreaks: broken.alphaBreaks } : {}),
       ...(withStructure ? { structure: structureFor(market, range) } : {}),
       ...(volumeHistory ? { volume: volumeFor(market.volume, trend) } : {}),
       // Saved boards from before price history keep their original shape.
@@ -444,6 +468,10 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
     };
   });
   const usd = usdReading({ quotes, riskRanges, securityIntelligence, usdPeriods, hedgai, marketDate });
+  if (usd) {
+    const broken = alphaCodeBreaks(alphaCodeWatch, UNIVERSE.usd.symbol, { trade: usd.trade, trend: usd.trend, trendDate: usd.rangeDate });
+    Object.assign(usd, { trade: broken.trade, trend: broken.trend }, broken.alphaBreaks ? { alphaBreaks: broken.alphaBreaks } : {});
+  }
   if (usd && volumeHistory) usd.volume = volumeFor({ symbol: UNIVERSE.usd.volumeSymbol }, usd.trend);
   if (usd && priceHistory) usd.zScore = zScoreReading({ value: usd.value, asOf: usd.asOf }, priceHistory[UNIVERSE.usd.symbol]);
   if (usd && withStructure) {
@@ -493,7 +521,7 @@ const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.h
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
   loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts,
   loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
-  loadPublishedStatements, marketDateFor }) {
+  loadPublishedStatements, loadAlphaCodeWatch, marketDateFor }) {
   return async function loadSetupBoard({ now = new Date(), researchDate = null } = {}) {
     const marketDate = researchDate || marketDateFor(now);
     const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
@@ -544,6 +572,8 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       ...(priceHistory ? { priceHistory: priceHistory.value || {} } : {}),
       ...(cpiConsensus ? { cpiConsensus: cpiConsensus.value || { releases: [] } } : {}),
       ...(publishedStatements?.value ? { publishedStatements: publishedStatements.value } : {}),
+      // Today's board reads the live Alpha Code watch; an earlier day's research never does.
+      ...(loadAlphaCodeWatch && !researchDate ? { alphaCodeWatch: await Promise.resolve().then(loadAlphaCodeWatch).catch(() => null) } : {}),
     });
     board.sourceStatus = Object.fromEntries(Object.entries({ riskRanges, cryptoQuant, hedgai, securityIntelligence,
       nowcast, quotes, volatility, usdCorrelations, kalshi: events, ...(loadMorningProducts ? { morningResearch: morning } : {}),
@@ -560,5 +590,5 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
 const extraCboeSeries = () => UNIVERSE.markets.map((market) => market.volatility)
   .filter((spec) => spec?.cboeSymbol).map((spec) => ({ name: spec.key, symbol: spec.cboeSymbol }));
 
-module.exports = { allTimeHighSymbols, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents,
+module.exports = { allTimeHighSymbols, alphaCodeBreaks, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents,
   priceSymbols, seriesNames, tradeTickers };

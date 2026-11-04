@@ -91,6 +91,22 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertNotIn("front-month futures", report)
         self.assertIn("Nasdaq-100 30,883; its bar shows the COMPQ range and Nasdaq Composite price.", report)
 
+    def test_a_broken_alpha_code_line_reads_neutral_and_says_why(self):
+        data = board()
+        wti = data["rows"][1]
+        wti["trade"] = {"direction": "NEUTRAL", "date": "2026-11-02", "source": "Alpha Code 97"}
+        wti["trend"] = "NEUTRAL"
+        crossed = {"side": "below", "since": "2026-11-02T16:22:35Z", "productLabel": "Top 3 Things"}
+        wti["alphaBreaks"] = {
+            "trade": {**crossed, "level": 97, "published": {"value": "BULLISH", "date": "2026-10-21", "source": "The Call"}},
+            "trend": {**crossed, "level": 91, "since": "2026-11-03T15:00:00Z", "published": {"value": "BULLISH", "date": "2026-11-03", "source": "Risk Ranges"}}}
+        report = render_setup_board(data)
+        self.assertIn("| WTI | BIAS(N/A;;) | BIAS(Neutral;;;Below the Top 3 Things Trade line 97 since Nov 2 08:22 · The Call Bullish Oct 21 "
+                      "reads Neutral until reclaimed · inferred, not stated by the source) | BIAS(Neutral;;;Below the Top 3 Things Trend line 91 "
+                      "since Nov 3 07:00 · Risk Ranges Bullish Nov 3 reads Neutral until reclaimed · inferred, not stated by the source) | ", report)
+        # Status names the line each Neutral came from, on the day it broke.
+        self.assertIn("ASOF(N/A;,;Nov 2,Alpha Code 97;Nov 3,Alpha Code 91) |", report)
+
     def test_withheld_price_shows_na_and_names_the_rejected_quote(self):
         data = board()
         data["rows"][0].update(price=None, position=None, priceRejected={"symbol": "GC=F", "value": 41.5},

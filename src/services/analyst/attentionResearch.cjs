@@ -3,6 +3,7 @@ const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js')
 const { sourceActionEvidence, describeAnalystFinding } = require('../../utils/analystFindingPresentation.cjs');
 const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings, stanceCall } = require('./stanceBook.cjs');
 const { MESSAGE_ID, TERM } = require('../../utils/sourceEmailClip.cjs');
+const { alphaCodeVerdict, brokenAlphaCodeLine } = require('./alphaCodeWatch.cjs');
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
@@ -134,9 +135,12 @@ function durationRows(context, symbol, now) {
       at = readingTime(descriptor?.publishedAt, descriptor?.sourceDate);
     }
     // A line broken after the latest reading reads the side the price crossed to.
-    const broken = ['trade', 'trend'].includes(field) && alphaCodeBreak(context.alphaCodeWatch, symbol, field);
-    if (broken && time(broken.at) > Math.max(at, listed?.at ?? -Infinity)) return alphaCodeRow(label, broken.line);
-    if (listed && ['trade', 'trend'].includes(field) && !(SIGNALS.includes(value) && at >= listed.at)) {
+    const fromListing = listed && ['trade', 'trend'].includes(field) && !(SIGNALS.includes(value) && at >= listed.at);
+    // A reading whose Alpha Code line the price has crossed since reads Neutral until reclaimed.
+    const broken = ['trade', 'trend'].includes(field)
+      && brokenAlphaCodeLine(context.alphaCodeWatch, symbol, field, fromListing ? { value: listed.value, at: listed.at } : { value, at });
+    if (broken) return alphaCodeRow(label, broken, fromListing ? listed.value : value);
+    if (fromListing) {
       const text = listed.value ? listed.value[0] + listed.value.slice(1).toLowerCase() : 'N/A';
       return { ...row(label, text), basis: listed.basis, note: listed.note };
     }
@@ -145,19 +149,18 @@ function durationRows(context, symbol, now) {
 }
 // Alpha Code lines are watched by the symbol quoted for them (CL=F for WTI, USO for itself).
 const alphaLines = (watch, symbol) => Object.values(watch?.lines || {}).filter(line => line.symbol === symbol);
-function alphaCodeBreak(watch, symbol, field) {
-  const line = alphaLines(watch, symbol).find(candidate => candidate.duration === field);
-  const last = line?.breaks?.at(-1);
-  return last && line.side === last.to ? { line, at: last.at } : null;
-}
 const level = value => value.toLocaleString('en-US', { maximumFractionDigits: 2 });
 // Break times read as the dashboard's other clock times: Pacific, 24-hour.
 const clock = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value));
-const alphaSide = side => (side === 'above' ? 'Bullish' : side === 'below' ? 'Bearish' : null);
-function alphaCodeRow(label, line) {
-  const side = alphaSide(line.side);
-  return { ...row(label, side || 'N/A'), basis: 'inferred',
-    note: `Price ${side ? `${line.side} ` : 'at '}the ${line.productLabel || 'Alpha Code'} ${label} line ${level(line.level)}; inferred, not stated by the source` };
+const titled = value => (value ? value[0] + value.slice(1).toLowerCase() : null);
+// A watched line's chip: the published call while the price holds its side, Neutral once broken.
+function alphaCodeRow(label, line, published = line.reading?.value) {
+  const verdict = alphaCodeVerdict(line, published ? { ...line.reading, value: published } : line.reading);
+  const where = `Price ${line.side ? `${line.side} ` : 'at '}the ${line.productLabel || 'Alpha Code'} ${label} line ${level(line.level)}`;
+  const note = verdict === 'NEUTRAL' && published && published !== 'NEUTRAL'
+    ? `${where} since ${clock(line.since)}: the ${titled(published)} ${label} reads Neutral until the price is back on its side; inferred, not stated by the source`
+    : `${where}; inferred, not stated by the source`;
+  return { ...row(label, titled(verdict) || 'N/A'), basis: 'inferred', note };
 }
 // A broken Alpha Code line is the Trade or Trend change Hedgeye confirms the next
 // morning. One card per instrument states each break; it is red only when the
@@ -176,10 +179,10 @@ function alphaCodeFindings(context, now, verified) {
     for (const line of broken) {
       const last = line.breaks.at(-1);
       const name = line.duration === 'trade' ? 'Trade' : 'Trend';
-      const side = alphaSide(last.to);
       // Every cross of the session in order, so a reclaim never hides the break before it.
+      // A broken line reads its duration Neutral; reclaiming it restores the published call.
       const crosses = line.breaks.map(cross => `${cross.to === 'below' ? 'Broke' : 'Reclaimed'} ${level(line.level)} at ${level(cross.price)} (${clock(cross.at)})`);
-      rows.push(row(`${name} line`, `${crosses.join(' → ')} → ${name} ${side.toLowerCase()}`));
+      rows.push(row(`${name} line`, `${crosses.join(' → ')} → ${name} ${(alphaCodeVerdict(line) || 'NEUTRAL').toLowerCase()}`));
       if (held && line.side === last.to && (held === 'Long') === (last.to === 'below')) opposed ||= line.duration;
     }
     if (opposed) rows.push(row('Context', opposed === 'trade' ? `Trade broke vs ${held} → exit.` : 'Trend broke → reduce to MIN.'));

@@ -22,16 +22,24 @@ function alphaCodeLines(board) {
   const products = new Map((board?.research?.products || []).map(product => [product.key, product]));
   const markets = new Map(UNIVERSE.markets.map(market => [market.id, market]));
   const lines = [];
-  const add = (symbol, label, market, code) => {
+  const add = (symbol, label, market, code, readings = {}) => {
     const product = products.get(code.product) || {};
     for (const duration of DURATIONS) {
       const level = finite(code[duration]);
       if (level === null || level <= 0) continue;
       lines.push({ id: `${symbol}|${duration}`, symbol, label, market, duration, level, approximate: Boolean(code.approximate),
         product: code.product || null, productLabel: code.productLabel || null, publishedAt: product.publishedAt || null,
-        messageId: product.messageId || null, excerpt: code.excerpt || null, marketDate: board.marketDate || null });
+        messageId: product.messageId || null, excerpt: code.excerpt || null, marketDate: board.marketDate || null,
+        reading: readings[duration] || null });
     }
   };
+  // The market's own published Trade and Trend, as published: a board that already
+  // reads a broken line Neutral keeps the call it replaced.
+  const readingsOf = row => Object.fromEntries(DURATIONS.map(duration => {
+    const published = row.alphaBreaks?.[duration]?.published
+      || (duration === 'trade' ? row.trade && { value: row.trade.direction, date: row.trade.date, source: row.trade.source } : row.trend && { value: row.trend, date: row.range?.date || row.rangeDate || null, source: 'Risk Ranges' });
+    return [duration, published?.value ? published : null];
+  }));
   const rows = [...(board?.rows || []), ...(board?.usd ? [{ ...board.usd, id: 'usd' }] : [])];
   for (const row of rows) {
     const research = row.research;
@@ -40,7 +48,7 @@ function alphaCodeLines(board) {
     // Gold, silver and copper are quoted from futures, not the spot their codes are printed in,
     // and Treasury yields have no intraday quote here; their codes are not watched.
     if (market && research.alphaCode && market.price?.symbol && market.price.fit !== 'proxy' && !/^ust\d+y$/.test(row.id)) {
-      add(market.price.symbol, market.label || row.id, row.id, research.alphaCode);
+      add(market.price.symbol, market.label || row.id, row.id, research.alphaCode, readingsOf(row));
     }
     // An ETF printed with its own code is watched on its own quote, highest-priority product first.
     const seen = new Set();
@@ -52,6 +60,32 @@ function alphaCodeLines(board) {
     }
   }
   return lines;
+}
+
+const EXPECTED = { BULLISH: 'above', BEARISH: 'below' };
+// A date-only publication counts from the start of its day.
+const readingTime = reading => (typeof reading?.at === 'number' ? reading.at
+  : Date.parse(reading?.at || (reading?.date ? `${String(reading.date).slice(0, 10)}T00:00:00Z` : '')) || -Infinity);
+
+/**
+ * The line a published Trade or Trend reading has lost: the price crossed to the
+ * other side of its Alpha Code line after the reading and has not come back. That
+ * duration then reads Neutral until the price is back on the reading's side.
+ * reading: { value: 'BULLISH' | 'BEARISH' | ..., at?, date? }. Returns the line or null.
+ */
+function brokenAlphaCodeLine(watch, symbol, duration, reading) {
+  const expected = EXPECTED[reading?.value];
+  if (!expected) return null;
+  const line = Object.values(watch?.lines || {}).find(item => item.symbol === symbol && item.duration === duration);
+  if (!line?.side || line.side === expected) return null;
+  return Date.parse(line.since) > readingTime(reading) ? line : null;
+}
+
+/** What a watched line makes its duration read now: the published call while it holds, Neutral once broken. */
+function alphaCodeVerdict(line, reading = line?.reading) {
+  if (EXPECTED[reading?.value]) return brokenAlphaCodeLine({ lines: { [line.id]: line } }, line.symbol, line.duration, reading) ? 'NEUTRAL' : reading.value;
+  // Without a published direction a cross has nothing to break, and implies no direction of its own.
+  return line?.breaks?.length ? 'NEUTRAL' : null;
 }
 
 const sideOf = (price, level) => (price > level * (1 + BAND) ? 'above' : price < level * (1 - BAND) ? 'below' : null);
@@ -92,8 +126,8 @@ function foldAlphaCodeWatch(stored, { marketDate = null, lines = [], prices = {}
     line.since = line.priceAt;
   }
   const watch = { version: WATCH_VERSION, marketDate, updatedAt: at, lines: watched };
-  const material = value => JSON.stringify(Object.values(value?.lines || {}).map(line => [line.id, line.level, line.marketDate, line.side, line.breaks]));
+  const material = value => JSON.stringify(Object.values(value?.lines || {}).map(line => [line.id, line.level, line.marketDate, line.side, line.breaks, line.reading || null]));
   return { watch, changed: !previous || previous.marketDate !== marketDate || material(previous) !== material(watch) };
 }
 
-module.exports = { BAND, alphaCodeLines, foldAlphaCodeWatch };
+module.exports = { BAND, alphaCodeLines, alphaCodeVerdict, brokenAlphaCodeLine, foldAlphaCodeWatch };

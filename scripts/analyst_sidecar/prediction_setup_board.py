@@ -15,6 +15,7 @@ DIRECTION = {"BULLISH": "Bullish", "BEARISH": "Bearish", "NEUTRAL": "Neutral"}
 DASH = "—"
 NA = "N/A"
 PACIFIC = ZoneInfo("America/Los_Angeles")
+EASTERN = ZoneInfo("America/New_York")
 DEFAULT_SECTIONS = ({"id": "metals", "label": "Metals"}, {"id": "crypto", "label": "Crypto"}, {"id": "oil", "label": "Oil"},
                     {"id": "indices", "label": "Indices"}, {"id": "rates", "label": "Rates"}, {"id": "inflation", "label": "CPI"})
 # Captures before the sectioned board grouped WTI as energy.
@@ -77,6 +78,14 @@ def _pacific(value: Any) -> str:
     except ValueError:
         return DASH
     return f"{MONTHS[moment.month - 1]} {moment.day} {moment:%H:%M}"
+
+
+def _eastern_date(value: Any) -> str | None:
+    """The New York market day of an instant, e.g. 2026-11-02."""
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(EASTERN).date().isoformat()
+    except ValueError:
+        return None
 
 
 def _pacific_zoned(value: Any) -> str:
@@ -180,9 +189,22 @@ def _driver_block(board: dict[str, Any], members: list[dict[str, Any]], section_
     return block
 
 
-def _bias_cell(direction: Any) -> str:
-    """Token for a bias word; its publication date and product appear in the As of cell."""
-    return f"BIAS({DIRECTION.get(direction) or NA};;)"
+def _bias_cell(direction: Any, broken: dict[str, Any] | None = None, name: str = "") -> str:
+    """Token for a bias word; its publication date and product appear in the As of cell.
+
+    A call whose Alpha Code line the price has crossed reads Neutral; the token's
+    optional fourth field says why, for the cell's tooltip only.
+    """
+    word = DIRECTION.get(direction) or NA
+    if not broken:
+        return f"BIAS({word};;)"
+    published = broken.get("published") or {}
+    clean = lambda value: re.sub(r"[;()|]", " ", str(value or "")).strip()
+    note = (f"{str(broken.get('side') or '').capitalize()} the {broken.get('productLabel') or 'Alpha Code'} {name} line "
+            f"{_number(broken.get('level'))} since {_pacific(broken.get('since'))} · {published.get('source') or 'Published'} "
+            f"{DIRECTION.get(published.get('value')) or ''} {_short_date(published.get('date'))} reads Neutral until reclaimed · "
+            "inferred, not stated by the source")
+    return f"BIAS({word};;;{clean(' '.join(note.split()))})"
 
 
 def _as_of_cell(observed: Any, readings: list[tuple[Any, Any]]) -> str:
@@ -508,13 +530,16 @@ def render_setup_board(board: dict[str, Any]) -> str:
         for row in ([dollar] if dollar else []) + members:
             price, tick, trade, risk_range = (row.get(key) or {} for key in ("price", "tick", "trade", "range"))
             trend_product = "Crypto Quant" if risk_range.get("product") == "crypto-quant" else "Risk Ranges"
-            table.append([_market_cell(row), _bias_cell(tick.get("direction")), _bias_cell(trade.get("direction")),
-                          _bias_cell(row.get("trend")), *([_volume_cell(row)] if with_volume else []), _range_cell(row),
+            breaks = row.get("alphaBreaks") or {}
+            trend_break = breaks.get("trend")
+            table.append([_market_cell(row), _bias_cell(tick.get("direction")), _bias_cell(trade.get("direction"), breaks.get("trade"), "Trade"),
+                          _bias_cell(row.get("trend"), trend_break, "Trend"), *([_volume_cell(row)] if with_volume else []), _range_cell(row),
                           *([_structure_cell(row)] if sessions else []),
                           _as_of_cell(price.get("asOf"), [
                               (tick.get("date"), f"HedgAI {tick.get('ticker') or ''}".strip() if tick else None),
                               (trade.get("date"), trade.get("source")),
-                              (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)])])
+                              (_eastern_date(trend_break.get("since")), f"Alpha Code {_number(trend_break.get('level'))}") if trend_break
+                              else (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)])])
         lines += _table(["Market", "Tick", "Trade", "Trend", *(["Volume"] if with_volume else []), "Price and Risk Range",
                          *(["Structure"] if sessions else []), "Status"], table)
         notes = []

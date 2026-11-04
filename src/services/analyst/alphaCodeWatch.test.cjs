@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { alphaCodeLines, foldAlphaCodeWatch } = require('./alphaCodeWatch.cjs');
+const { alphaCodeLines, alphaCodeVerdict, brokenAlphaCodeLine, foldAlphaCodeWatch } = require('./alphaCodeWatch.cjs');
 
 const board = {
   marketDate: '2026-11-02',
@@ -23,7 +23,33 @@ test('a market day’s lines are each Alpha Code’s Trade and Trend on the symb
   assert.equal(lines.some(line => ['gold', 'ust10y'].includes(line.market)), false);
   assert.deepEqual({ ...lines[0], excerpt: undefined }, { id: 'CL=F|trade', symbol: 'CL=F', label: 'WTI', market: 'wti', duration: 'trade', level: 97,
     approximate: false, product: 'early-look', productLabel: 'Early Look', publishedAt: '2026-11-02T10:31:00Z', messageId: '1a18c949d0c80bdd',
-    excerpt: undefined, marketDate: '2026-11-02' });
+    excerpt: undefined, marketDate: '2026-11-02', reading: null });
+});
+
+test('each market line carries the call it was published with, even where the board already reads it Neutral', () => {
+  const published = { ...board, rows: [{ ...board.rows[0], trade: { direction: 'NEUTRAL', date: '2026-11-02', source: 'Alpha Code 97' }, trend: 'BULLISH',
+    range: { date: '2026-11-02' }, alphaBreaks: { trade: { published: { value: 'BULLISH', date: '2026-10-21', source: 'The Call' } } } }] };
+  const lines = alphaCodeLines(published).filter(line => line.symbol === 'CL=F');
+  assert.deepEqual(lines.map(line => line.reading), [{ value: 'BULLISH', date: '2026-10-21', source: 'The Call' },
+    { value: 'BULLISH', date: '2026-11-02', source: 'Risk Ranges' }]);
+  // ETF proxies carry no market call of their own here.
+  assert.equal(alphaCodeLines(published).find(line => line.symbol === 'USO').reading, null);
+});
+
+test('a published call reads Neutral once the price crosses its line after it, and again holds once reclaimed', () => {
+  const line = { id: 'CL=F|trade', symbol: 'CL=F', duration: 'trade', level: 97, side: 'below', since: '2026-11-02T16:22:35Z', breaks: [] };
+  const watch = { lines: { [line.id]: line } };
+  const call = { value: 'BULLISH', date: '2026-10-21' };
+  assert.equal(brokenAlphaCodeLine(watch, 'CL=F', 'trade', call), line);
+  assert.equal(alphaCodeVerdict(line, call), 'NEUTRAL');
+  // A call published after the cross, or on the price's own side, stands.
+  assert.equal(brokenAlphaCodeLine(watch, 'CL=F', 'trade', { value: 'BULLISH', at: Date.parse('2026-11-03T12:00:00Z') }), null);
+  assert.equal(alphaCodeVerdict(line, { value: 'BEARISH', date: '2026-10-21' }), 'BEARISH');
+  assert.equal(alphaCodeVerdict({ ...line, side: 'above' }, call), 'BULLISH');
+  // Neutral or missing calls have nothing to break; a cross alone reads Neutral.
+  assert.equal(brokenAlphaCodeLine(watch, 'CL=F', 'trade', { value: 'NEUTRAL', date: '2026-10-21' }), null);
+  assert.equal(alphaCodeVerdict(line, null), null);
+  assert.equal(alphaCodeVerdict({ ...line, breaks: [{ to: 'below' }] }, null), 'NEUTRAL');
 });
 
 test('the first clear price sets each line’s side; a cross past the band is a break, a touch is not', () => {

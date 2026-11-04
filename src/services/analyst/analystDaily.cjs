@@ -612,7 +612,8 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
   });
   let collectorTimer;
   let collectorTick = 0;
-  return { tick, prepare, getReviewDiagnostics, portfolioCloseBaseline: () => closeReview.baseline(), scoredStanceBook: () => attention.scoredStanceBook(), start() { if (!timer) {
+  return { tick, prepare, getReviewDiagnostics, portfolioCloseBaseline: () => closeReview.baseline(), scoredStanceBook: () => attention.scoredStanceBook(),
+    alphaCodeWatch: () => attention.alphaCodeWatch?.() ?? null, start() { if (!timer) {
     timer = setInterval(tick, 5000); timer.unref?.();
     collectorTick = 0;
     collectorTimer = setInterval(() => {

@@ -196,6 +196,17 @@ test('bias cells stack direction, date and product; missing readings read N/A', 
   expect(container).not.toHaveTextContent(/BIAS\(|MKT\(/);
 });
 
+test('a Neutral read from a broken Alpha Code line explains itself in the tooltip only', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Oil" />);
+  const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const value = 'BIAS(Neutral;;;Below the Top 3 Things Trade line 97 since Nov 2 08:22 · The Call Bullish Oct 21 reads Neutral until reclaimed)';
+  const { container } = render(<table><tbody><tr><Cell node={{ children: [{ type: 'text', value }] }}>{value}</Cell></tr></tbody></table>);
+  const trade = container.querySelector('td');
+  expect([...trade.children].map(span => span.textContent)).toEqual(['Neutral']);
+  expect(trade).toHaveAttribute('title', 'Neutral · Below the Top 3 Things Trade line 97 since Nov 2 08:22 · The Call Bullish Oct 21 reads Neutral until reclaimed');
+});
+
 test('boards with price history stack the 20-session Z-score under the market name', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Metals" />);

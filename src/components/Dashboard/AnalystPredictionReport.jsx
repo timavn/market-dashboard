@@ -17,7 +17,8 @@ const dateValue = /^(?:(?:Published|As of|Since|Initiated|Last close) )?(?:Jan|F
 const shortReading = /^(?:Last known\s+)?(?:Long|Short|Buy|Wait|Watch|Bullish|Bearish|Neutral)$/i;
 // Setup board stacked cells: BIAS(direction;date;product) and MKT(name;sub-label). Boards with price history add
 // the 20-session Z-score as a third field, and NAME(name;;z) carries it for a market with no sub-label.
-const BIAS_TOKEN = /^BIAS\((Bullish|Bearish|Neutral|N\/A);([^;()]*);([^;()]*)\)$/;
+// An optional fourth field explains a Neutral read from a broken Alpha Code line (tooltip only).
+const BIAS_TOKEN = /^BIAS\((Bullish|Bearish|Neutral|N\/A);([^;()]*);([^;()]*)(?:;([^;()]*))?\)$/;
 const MARKET_TOKEN = /^(MKT|REF)\(([^;()]+);([^;()]+)\)$|^(MKT|REF|NAME)\(([^;()]+);([^;()]*);([-+]\d+(?:\.\d+)?)?\)$/;
 // ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct)
 const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*)\)$/;
@@ -157,8 +158,8 @@ function cellFor({ node, children }) {
   if (zScore) return <ZCell match={zScore} />;
   const bias = text.match(BIAS_TOKEN);
   if (bias) {
-    const [, direction, date, product] = bias;
-    const label = [direction, date, product].filter(Boolean).join(' · ');
+    const [, direction, date, product, note] = bias;
+    const label = [direction, date, product, note].filter(Boolean).join(' · ');
     return <td className="analyst-prediction-bias-cell" title={label}>
       <span className={`analyst-prediction-stack ${BIAS_CLASS[direction] || 'analyst-prediction-stack--muted'}`}>{direction}</span>
       {date && <span className="analyst-prediction-stack">{date}</span>}
