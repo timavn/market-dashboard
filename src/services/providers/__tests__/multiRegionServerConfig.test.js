@@ -130,7 +130,7 @@ describe('multi-region server instrument configuration', () => {
       us: ['SPX', 'RSP', 'MID', 'RUT', 'NDX', 'SMH', 'XLF', 'VNQ'],
       europe: ['STOXX600', 'SX5E', 'FTSE', 'DAX', 'CAC', 'FTSEMIB', 'IBEX', 'SMI'],
       asia: ['N225', 'HSI', 'CSI300', 'NIFTY50', 'KOSPI', 'TAIEX', 'AXJO', 'JKSE'],
-      commodities: ['CRB', 'CL', 'BZ', 'NG', 'GC', 'HG', 'SI', 'ZC', 'ZS'],
+      commodities: ['CRB', 'CL', 'BZ', 'NG', 'GC', 'SI', 'HG', 'ZC', 'ZS'],
       rates: ['UST2Y', 'UST10Y', 'UST30Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s', 'IG_OAS', 'HY_OAS'],
       crypto: ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK', 'TRX'],
     });

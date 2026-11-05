@@ -108,7 +108,7 @@ test('a security card names its source products right under the position', () =>
     { label: 'Trade source', citation: citation('Signal Strength Shorts', 'signal-strength-shorts') },
     { label: 'Counterpoint source', citation: citation('The Call @ Hedgeye | Replay & Summary | 11/02/2026', 'the-call') },
   ] } });
-  const wti = attention('wti', { kind: 'market', presentation: { subject: 'WTI', date: '2026-11-02', rows: [{ label: 'Trade line', text: 'Broke 97 at 96.85 (06:53)' }],
+  const wti = attention('wti', { kind: 'market', presentation: { subject: 'WTI', date: '2026-11-02', rows: [{ label: 'Trade line', text: 'Broke 97 at 96.85 (08:14 PST) → Trade neutral\nReclaimed 97 at 97.17 (08:09 PST)' }],
     sourceLinks: [{ label: 'Top 3 Things Alpha Code', citation: citation('Top 3 Things: WTI Alpha Code', 'top-3-things') }] } });
   render(<AnalystInbox findings={[idea, wti, attention('gateway')]} />);
   const labels = [...document.querySelectorAll('.analyst-inbox-copy dt')].map(term => term.textContent.trim());
@@ -118,6 +118,10 @@ test('a security card names its source products right under the position', () =>
   expect(screen.getByText('The Call, Signal Strength Shorts')).not.toHaveClass('analyst-inbox-signal--negative');
   // Operational cards are not about a security.
   expect(screen.getAllByText('Source:')).toHaveLength(2);
+  // A line's crosses stack newest first, the older ones muted beneath.
+  const crosses = [...document.querySelectorAll('.analyst-inbox-stack dd > span')];
+  expect(crosses.map(entry => entry.textContent)).toEqual(['Broke 97 at 96.85 (08:14 PST) → Trade neutral', 'Reclaimed 97 at 97.17 (08:09 PST)']);
+  expect(crosses.map(entry => entry.classList.contains('analyst-inbox-stack__older'))).toEqual([false, true]);
 });
 
 test('alerts dismissed in the last 24 hours open from one button at the bottom of the Inbox', () => {

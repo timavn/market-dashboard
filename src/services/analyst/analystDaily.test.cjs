@@ -674,6 +674,23 @@ test('the existing worker timer collects during an alert scan and stop clears fu
   }
 });
 
+test('the worker retakes a missed close capture after Hermes stops trying, throttled to the retry interval', async t => {
+  // Fixture time is Saturday 11:00 ET: the Friday close is still due and Hermes no longer runs.
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const subject = fixture();
+  const closeStarts = () => subject.calls.filter(call => call.path === '/internal/reviews'
+    && call.body?.requestId?.startsWith('portfolio-close:2026-09-18:')).length;
+  subject.daily.start();
+  try {
+    for (let i = 0; i < 5; i += 1) await turn();
+    assert.equal(closeStarts(), 1);
+    t.mock.timers.tick(60_000);
+    for (let i = 0; i < 5; i += 1) await turn();
+    // The fixture clock is fixed, so the saved attempt keeps later checks inside its retry window.
+    assert.equal(closeStarts(), 1);
+  } finally { subject.daily.stop(); subject.scan.resolve({ events: [] }); await turn(); }
+});
+
 for (const kind of ['portfolio-review', 'prediction-markets-review']) test(`${kind} preflight failure completes its accepted turn within the first quarter-second poll and preserves saved history`, async t => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const subject = fixture();

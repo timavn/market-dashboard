@@ -2,7 +2,8 @@ const { portfolioCaptureSession, easternDate } = require('./analystPolicy.cjs');
 const { nextTradingDateKey, previousTradingDateKey } = require('../../utils/usEquityMarketCalendar.cjs');
 
 const REVIEW_KIND = 'portfolio-review';
-const RETRY_INTERVAL_MS = 30 * 60_000;
+// A failed attempt against an unresponsive Gateway returns in milliseconds.
+const RETRY_INTERVAL_MS = 10 * 60_000;
 const badEvidence = value => value && (
   value.connected === false || value.available === false
   || ['stale', 'isStale', 'offline', 'disconnected', 'cacheOnly', 'cached', 'fromCache', 'from_cache', 'mock', 'isMock', 'seed', 'seeded', 'delayed', 'frozen', 'inferred', 'synthetic', 'fallback', 'historicalOnly'].some(flag => value[flag] === true)

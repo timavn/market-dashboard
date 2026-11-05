@@ -33,6 +33,10 @@
 .analyst-inbox-copy { display: grid; gap: 5px; margin: 0; padding: 8px 10px; text-align: left; overflow-wrap: anywhere; }
 .analyst-inbox-copy dt, .analyst-inbox-copy dd { display: inline; margin: 0; }
 .analyst-inbox-copy dt { color: var(--analyst-muted, #6b7280); font-weight: 500; }
+.analyst-inbox-copy .analyst-inbox-stack { display: flex; gap: 4px; align-items: baseline; }
+.analyst-inbox-copy .analyst-inbox-stack dt { flex: none; }
+.analyst-inbox-copy .analyst-inbox-stack dd { display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+.analyst-inbox-stack__older { color: var(--analyst-muted, #6b7280); }
 .analyst-inbox-proxy strong { font-weight: 600; }
 .analyst-inbox-context-text { display: block; }
 .analyst-inbox-context-text:first-child { display: inline; }

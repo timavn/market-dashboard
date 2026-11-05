@@ -278,7 +278,7 @@ describe('Exception-First header', () => {
       'XLK', 'XLC', 'XLY', 'XLF', 'XLV', 'XLI', 'XLE', 'XLB', 'XLP', 'XLU', 'VNQ',
       'STOXX600', 'SX5E', 'FTSE', 'DAX', 'CAC', 'FTSEMIB', 'IBEX', 'SMI',
       'N225', 'HSI', 'CSI300', 'NIFTY50', 'SSEC', 'KOSPI', 'TAIEX', 'AXJO', 'JKSE', 'KLSE',
-      'CRB', 'CL', 'BZ', 'NG', 'RB', 'GC', 'HG', 'SI', 'PL', 'PA', 'ZC', 'ZW', 'ZS',
+      'CRB', 'CL', 'BZ', 'NG', 'RB', 'GC', 'SI', 'HG', 'PL', 'PA', 'ZC', 'ZW', 'ZS',
       'UST2Y', 'UST10Y', 'UST30Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s',
       'OAT10Y', 'BTP10Y', 'ACGB10Y', 'CAN10Y', 'KTB10Y', 'IG_OAS', 'HY_OAS',
       'BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK', 'TRX',
@@ -290,7 +290,7 @@ describe('Exception-First header', () => {
         ['SPX', 'RSP', 'MID', 'RUT', 'NDX', 'SMH', 'XLF', 'VNQ'],
         ['STOXX600', 'SX5E', 'FTSE', 'DAX', 'CAC', 'FTSEMIB', 'IBEX', 'SMI'],
         ['N225', 'HSI', 'CSI300', 'NIFTY50', 'KOSPI', 'TAIEX', 'AXJO', 'JKSE'],
-        ['CRB', 'CL', 'BZ', 'NG', 'GC', 'HG', 'SI', 'ZC', 'ZS'],
+        ['CRB', 'CL', 'BZ', 'NG', 'GC', 'SI', 'HG', 'ZC', 'ZS'],
         ['UST2Y', 'UST10Y', 'UST30Y', 'BUND10Y', 'JGB10Y', 'GILT10Y', 'CURVE_2s10s', 'IG_OAS', 'HY_OAS'],
         ['BTC', 'ETH', 'BNB', 'XRP', 'SOL', 'ADA', 'DOGE', 'LINK', 'TRX'],
       ]);

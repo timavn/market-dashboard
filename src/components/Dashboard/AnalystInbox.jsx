@@ -280,7 +280,11 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
           {ticker && <div className="analyst-inbox-ticker">
             <dt>Ticker: </dt><dd>{ticker}</dd>
           </div>}
-          {modern ? rows.map((row, index) => <div key={`${row.label}-${index}`}>
+          {modern ? rows.map((row, index) => row.text.includes('\n') ? <div key={`${row.label}-${index}`} className="analyst-inbox-stack">
+            {/* A history row (line crosses) stacks one entry per line, newest on top, aligned under each other. */}
+            <dt>{row.label}: </dt><dd>{row.text.split('\n').map((entry, line) => <span key={line} className={line ? 'analyst-inbox-stack__older' : undefined}>
+              <DirectionalText>{entry}</DirectionalText></span>)}</dd>
+          </div> : <div key={`${row.label}-${index}`}>
             <dt>{row.label}: </dt><dd className={row.side ? toneClass(STANCE_TONES[row.side.toUpperCase()]) : ['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}>
               {row.label === 'Order' ? <OrderText>{row.text}</OrderText> : row.label === 'Source' ? row.text : <DirectionalText>{row.text}</DirectionalText>}</dd>
           </div>) : <>

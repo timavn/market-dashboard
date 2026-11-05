@@ -150,8 +150,8 @@ function durationRows(context, symbol, now) {
 // Alpha Code lines are watched by the symbol quoted for them (CL=F for WTI, USO for itself).
 const alphaLines = (watch, symbol) => Object.values(watch?.lines || {}).filter(line => line.symbol === symbol);
 const level = value => value.toLocaleString('en-US', { maximumFractionDigits: 2 });
-// Break times read as the dashboard's other clock times: Pacific, 24-hour.
-const clock = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value));
+// Break times read in local Pacific time, 24-hour, with the zone named ("08:14 PST").
+const clock = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).format(new Date(value));
 const titled = value => (value ? value[0] + value.slice(1).toLowerCase() : null);
 // A watched line's chip: the published call while the price holds its side, Neutral once broken.
 function alphaCodeRow(label, line, published = line.reading?.value) {
@@ -179,10 +179,12 @@ function alphaCodeFindings(context, now, verified) {
     for (const line of broken) {
       const last = line.breaks.at(-1);
       const name = line.duration === 'trade' ? 'Trade' : 'Trend';
-      // Every cross of the session in order, so a reclaim never hides the break before it.
+      // Every cross of the session, one per line, newest first: the top line is the
+      // latest cross and the call it leaves; a reclaim never hides the break before it.
       // A broken line reads its duration Neutral; reclaiming it restores the published call.
-      const crosses = line.breaks.map(cross => `${cross.to === 'below' ? 'Broke' : 'Reclaimed'} ${level(line.level)} at ${level(cross.price)} (${clock(cross.at)})`);
-      rows.push(row(`${name} line`, `${crosses.join(' → ')} → ${name} ${(alphaCodeVerdict(line) || 'NEUTRAL').toLowerCase()}`));
+      const crosses = line.breaks.map(cross => `${cross.to === 'below' ? 'Broke' : 'Reclaimed'} ${level(line.level)} at ${level(cross.price)} (${clock(cross.at)})`).reverse();
+      crosses[0] += ` → ${name} ${(alphaCodeVerdict(line) || 'NEUTRAL').toLowerCase()}`;
+      rows.push(row(`${name} line`, crosses.join('\n')));
       if (held && line.side === last.to && (held === 'Long') === (last.to === 'below')) opposed ||= line.duration;
     }
     if (opposed) rows.push(row('Context', opposed === 'trade' ? `Trade broke vs ${held} → exit.` : 'Trend broke → reduce to MIN.'));

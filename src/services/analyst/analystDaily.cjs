@@ -612,6 +612,14 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
   });
   let collectorTimer;
   let collectorTick = 0;
+  // Hermes only tries at 4:30, 5:30 and 6:30pm ET, but holdings stay frozen
+  // until the 4:00am ET pre-market open. Keep retrying the capture here for
+  // that whole span, so an IB Gateway outage at the close cannot leave the
+  // close unverified once the Gateway answers again. start() is a no-op before
+  // the capture time, while a run is in flight, once captured, and until the
+  // previous attempt's retry time.
+  let closeTimer;
+  const retryClose = () => { void closeReview.start().catch(() => {}); };
   return { tick, prepare, getReviewDiagnostics, portfolioCloseBaseline: () => closeReview.baseline(), scoredStanceBook: () => attention.scoredStanceBook(),
     alphaCodeWatch: () => attention.alphaCodeWatch?.() ?? null, start() { if (!timer) {
     timer = setInterval(tick, 5000); timer.unref?.();
@@ -622,7 +630,9 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
       // promptly. Full report generation keeps the existing one-second poll.
       if (pending.size && (reviewAcquiring() || collectorTick % 4 === 0)) void collect();
     }, 250); collectorTimer.unref?.();
+    closeTimer = setInterval(retryClose, 60_000); closeTimer.unref?.();
     tick();
-  } }, stop() { clearInterval(timer); clearInterval(collectorTimer); timer = null; collectorTimer = null; } };
+    retryClose();
+  } }, stop() { clearInterval(timer); clearInterval(collectorTimer); clearInterval(closeTimer); timer = null; collectorTimer = null; closeTimer = null; } };
 }
 module.exports = { attachDailyWorkflow };

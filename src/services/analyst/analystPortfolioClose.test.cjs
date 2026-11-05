@@ -130,18 +130,18 @@ test('the close capture is a headless run that never creates, reopens or reads a
   assert.equal((await f.service.status()).status, 'ready');
 });
 
-test('historical fallback never satisfies the close capture and retries at most once every 30 minutes', async () => {
+test('historical fallback never satisfies the close capture and retries at most once every 10 minutes', async () => {
   const f = fixture(); await f.service.start(); f.complete();
   f.run.dependencies.portfolio = { status: 'failed', asOf: '2026-09-17T20:30:01Z', detail: { liveVerified: false, providerStatus: 'unavailable' } };
   f.run.dependencies.portfolioReference = { status: 'ready', asOf: '2026-09-17T16:06:33Z', detail: { verifiedAtCapture: true } };
   assert.equal((await f.service.status()).reason, 'historical_holdings_only');
   const blocked = await f.service.start();
   assert.equal(blocked.status, 'blocked');
-  assert.equal(blocked.retryAt, '2026-09-17T21:00:00.000Z');
+  assert.equal(blocked.retryAt, '2026-09-17T20:40:00.000Z');
   f.advance(300_000);
   await f.make().start();
   assert.equal(f.starts(), 1);
-  f.advance(1_499_999);
+  f.advance(299_999);
   await f.make().start();
   assert.equal(f.starts(), 1);
   f.advance(1);

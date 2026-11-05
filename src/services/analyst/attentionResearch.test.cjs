@@ -508,9 +508,9 @@ test('a broken Alpha Code line is a notification naming the line and the price, 
   assert.equal(card.severity, undefined);
   assert.equal(card.presentation.subject, 'WTI');
   assert.deepEqual(card.presentation.rows.map(item => [item.label, item.text]), [
-    ['Trade line', 'Broke 97 at 96.85 (07:40) → Trade neutral'], ['Tick', 'N/A'], ['Trade', 'Neutral'], ['Trend', 'Bullish'], ['Tail', 'N/A']]);
+    ['Trade line', 'Broke 97 at 96.85 (07:40 PDT) → Trade neutral'], ['Tick', 'N/A'], ['Trade', 'Neutral'], ['Trend', 'Bullish'], ['Tail', 'N/A']]);
   assert.equal(card.presentation.rows[2].basis, 'inferred');
-  assert.match(card.presentation.rows[2].note, /below the Early Look Trade line 97 since 07:40: the Bullish Trade reads Neutral until the price is back on its side; inferred/);
+  assert.match(card.presentation.rows[2].note, /below the Early Look Trade line 97 since 07:40 PDT: the Bullish Trade reads Neutral until the price is back on its side; inferred/);
   assert.deepEqual(card.presentation.sourceLinks.map(link => [link.label, link.citation.title, link.citation.sourceMessageId, link.citation.clipTicker]),
     [['Early Look Alpha Code', 'Early Look: WTI Alpha Code', '1a18c949d0c80bdd', 'WTI']]);
   // A reclaim lists the break before it, each at its own time, and restores the published call.
@@ -518,10 +518,10 @@ test('a broken Alpha Code line is a notification naming the line and the price, 
   trade.breaks.push({ from: 'below', to: 'above', price: 97.17, at: '2026-09-22T14:56:32Z' });
   Object.assign(trade, { side: 'above', since: '2026-09-22T14:56:32Z' });
   const reclaimed = evaluateResearchAttention(ctx, NOW).findings.find(item => item.action.includes('line')).presentation.rows;
-  assert.deepEqual([reclaimed[0].text, reclaimed[2].text], ['Broke 97 at 96.85 (07:40) → Reclaimed 97 at 97.17 (07:56) → Trade bullish', 'Bullish']);
+  assert.deepEqual([reclaimed[0].text, reclaimed[2].text], ['Reclaimed 97 at 97.17 (07:56 PDT) → Trade bullish\nBroke 97 at 96.85 (07:40 PDT)', 'Bullish']);
   // With no published call a cross implies no direction: Neutral.
   Object.assign(trade, { side: 'below', since: '2026-09-22T15:10:00Z', reading: null });
-  assert.match(evaluateResearchAttention(ctx, NOW).findings.find(item => item.action.includes('line')).presentation.rows[0].text, /→ Trade neutral$/);
+  assert.match(evaluateResearchAttention(ctx, NOW).findings.find(item => item.action.includes('line')).presentation.rows[0].text, /^[^\n]* → Trade neutral\n/);
   // An unbroken watch raises nothing.
   ctx.alphaCodeWatch = alphaWatch(alphaLine('CL=F', 'WTI', 'trade', 97, 'above'));
   assert.equal(evaluateResearchAttention(ctx, NOW).findings.some(item => item.action.includes('line')), false);
@@ -536,7 +536,7 @@ test('a held security’s own line breaking against the position is red', () => 
   assert.equal(card.kind, 'portfolio');
   assert.equal(card.severity, 'action-required');
   assert.deepEqual(card.presentation.rows.map(item => [item.label, item.text]).slice(0, 4), [
-    ['Current position', 'Long'], ['Position size', '4.00%'], ['Trade line', 'Broke 88 at 87.5 (07:40) → Trade neutral'], ['Context', 'Trade broke vs Long → exit.']]);
+    ['Current position', 'Long'], ['Position size', '4.00%'], ['Trade line', 'Broke 88 at 87.5 (07:40 PDT) → Trade neutral'], ['Context', 'Trade broke vs Long → exit.']]);
 });
 
 test('a published reading whose line the price crossed after it reads Neutral on the security’s other cards', () => {
