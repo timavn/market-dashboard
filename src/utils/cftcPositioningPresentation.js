@@ -35,7 +35,7 @@ export const cftcValueClass = (value, { score = false } = {}) => {
   const number = cftcNumber(value);
   if (number === null) return 'is-unavailable';
   return [
-    number < 0 ? 'is-negative' : score && number > 0 ? 'is-positive' : '',
+    number < 0 ? 'is-negative' : number > 0 ? 'is-positive' : '',
     score && Math.abs(number) > 2 ? 'is-extreme' : '',
   ].filter(Boolean).join(' ');
 };

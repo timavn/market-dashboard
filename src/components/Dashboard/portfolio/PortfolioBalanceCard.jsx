@@ -353,14 +353,14 @@ const PortfolioBalanceCard = ({ accountId }) => {
                   label="Estimated debit principal"
                   value={formatCurrency(projectedDebitPrincipal)}
                   detail={`Effective ${formatSettlementDate(interestExposure.projected?.effectiveDate)} · interest model only`}
-                  tone={projectedDebitPrincipal > 0 ? 'negative' : 'positive'}
+                  tone={projectedDebitPrincipal > 0 ? 'positive' : projectedDebitPrincipal < 0 ? 'negative' : 'neutral'}
                   testId="portfolio-balance-buffered"
                 />
                 <Metric
                   label="After policy reserve"
                   value={formatCurrency(bufferedDebitPrincipal)}
                   detail={`${formatCurrency(reserve)} reserve · not a margin call or sell instruction`}
-                  tone={bufferedDebitPrincipal > 0 ? 'negative' : 'positive'}
+                  tone={bufferedDebitPrincipal > 0 ? 'positive' : bufferedDebitPrincipal < 0 ? 'negative' : 'neutral'}
                   testId="portfolio-balance-long-limit"
                 />
               </div>

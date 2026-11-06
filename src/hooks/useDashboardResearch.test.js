@@ -7,7 +7,7 @@ jest.mock('react-dom/test-utils', () => ({
   act: jest.requireActual('react').act,
 }));
 jest.mock('../services/api/marketDataService', () => ({
-  MarketDataService: { getRiskRanges: jest.fn(), getHedgeyeSnapshot: jest.fn(), getDashboardNarrativeResearch: jest.fn(), getSecurityIntelligenceV2: jest.fn(), getHedgaiResearch: jest.fn() },
+  MarketDataService: { getRiskRanges: jest.fn(), getHedgeyeSnapshot: jest.fn(), getDashboardNarrativeResearch: jest.fn(), getSecurityIntelligenceV2: jest.fn(), getHedgaiResearch: jest.fn(), getPublishedStatements: jest.fn() },
 }));
 
 const DATE = '2026-09-25';
@@ -55,6 +55,7 @@ beforeEach(() => {
   MarketDataService.getDashboardNarrativeResearch.mockReset().mockResolvedValue(emptyNarrative());
   MarketDataService.getSecurityIntelligenceV2.mockReset().mockResolvedValue({ schemaVersion: 2, bySymbol: {} });
   MarketDataService.getHedgaiResearch.mockReset().mockResolvedValue(null);
+  MarketDataService.getPublishedStatements.mockReset().mockResolvedValue(null);
 });
 afterEach(() => { jest.useRealTimers(); delete document.hidden; });
 

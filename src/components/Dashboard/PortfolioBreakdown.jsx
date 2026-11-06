@@ -274,14 +274,11 @@ const zScoreToneForValue = (value) => {
   return `is-${direction}-soft`;
 };
 
+// Beta is a signed number like any other: positive green, negative red, zero plain.
 const betaToneForValue = (value) => {
   const numeric = finiteOptionalNumber(value);
-  if (numeric === null || (numeric >= 0.8 && numeric <= 1.2)) return 'is-neutral';
-  if (numeric < 0.5) return 'is-positive-strong';
-  if (numeric < 0.8) return 'is-positive';
-  if (numeric <= 1.5) return 'is-negative-soft';
-  if (numeric <= 2) return 'is-negative';
-  return 'is-negative-strong';
+  if (numeric === null || numeric === 0) return 'is-neutral';
+  return numeric > 0 ? 'is-positive' : 'is-negative';
 };
 
 const stopToneForDistance = ({ stop, mark, atr, quantity }) => {
@@ -2231,9 +2228,11 @@ const PortfolioBreakdown = ({
           ? 'Verified live NAV contribution unavailable'
           : `${getQuadExposureLabels(holding).join(' · ') || 'Unclassified'} · signed % NAV`,
         title: 'Current signed position contribution across the displayed +EV exposures.',
+        // The displayed signed contribution reads by its own sign.
         tone: factorContribution === null
           ? 'is-muted'
-          : quantity < 0 ? 'is-negative' : 'is-positive',
+          : (quantity < 0 ? -factorContribution : factorContribution) > 0 ? 'is-positive'
+            : (quantity < 0 ? -factorContribution : factorContribution) < 0 ? 'is-negative' : '',
       },
       quad: {
         meta: quadRanking

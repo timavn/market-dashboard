@@ -19,6 +19,7 @@ const {
   formatMorningReport,
   hasExactBridgeCommandSignature,
   hasExactControllerCommandSignature,
+  hasExactAnalystHermesCommandSignature,
   hasExactAnalystHermesRuntimeSignature,
   hasExactSidecarCommandSignature,
   hasManagedSidecarRuntime,
@@ -579,6 +580,37 @@ test('sidecar reconciliation retains one owner and verifies stale process remova
     errorCode: null,
     detail: 'Exactly one managed sidecar is retained.',
   });
+});
+
+test('recognizes the Hermes bootstrap launcher that `hermes update` respawns the Analyst through', () => {
+  const home = os.homedir();
+  const script = [
+    "import os, sys, runpy; os.environ.pop('PYTHONHOME', None); os.environ.pop('PYTHONPATH', None);",
+    `os.environ.pop('VIRTUAL_ENV', None); sys.path.insert(0, '${path.join(home, '.hermes/hermes-agent')}');`,
+    'sys._hermes_pin_default_home = True; import hermes_bootstrap;',
+    "os.environ.get('HERMES_HOME') or os.environ.__setitem__('HERMES_HOME', str(__import__('hermes_constants').get_default_hermes_root()));",
+    "runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)",
+  ].join(' ');
+  const args = '-p analyst serve --isolated --skip-build --open-profile analyst --host 127.0.0.1 --port 9121';
+  const commandText = `${path.join(home, '.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3')} -I -c ${script} ${args}`;
+  assert.equal(hasExactAnalystHermesRuntimeSignature(commandText), true);
+  assert.equal(isRecoverableOrphanedAnalystHermes({ pid: 76534, commandText, environmentText: 'HERMES_UPDATE_HANDOFF_PID=1', parentPid: 1 }), true);
+  // Any other Python, or a script that does not run hermes_cli from the Hermes checkout, is not the Analyst.
+  assert.equal(hasExactAnalystHermesRuntimeSignature(commandText.replace(path.join(home, '.hermes/tools'), '/usr/local')), false);
+  assert.equal(hasExactAnalystHermesRuntimeSignature(commandText.replace("run_module('hermes_cli.main',", "run_module('other.main',")), false);
+  assert.equal(hasExactAnalystHermesRuntimeSignature(commandText.replace('--port 9121', '--port 9119')), false);
+  // The supervisor's own launch (start_hermes.sh → hermes) takes the newer multi-line
+  // variant: ps shows its newlines as \012, and it enters through `from hermes_cli.main import main`.
+  const repo = path.resolve(__dirname, '../..');
+  const launched = [
+    `${path.join(home, '.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3')} -I -c import os, re, sys\\012import contextlib, hashlib`,
+    `sys.path.insert(0, '${path.join(home, '.hermes/hermes-agent')}')\\012def _hermes_closure_repair():\\012    import hermes_bootstrap\\012`,
+    `from hermes_cli.main import main\\012main() ${args}`,
+  ].join(' ');
+  assert.equal(hasExactAnalystHermesCommandSignature(launched, repo), true);
+  assert.equal(hasExpectedDashboardSignature(launched, repo), true);
+  assert.equal(hasExactAnalystHermesCommandSignature(launched, '/tmp'), false);
+  assert.equal(hasExactAnalystHermesCommandSignature(launched.replace('import hermes_bootstrap', 'import other'), repo), false);
 });
 
 test('reclaims only an exact detached Analyst Hermes update respawn', async () => {

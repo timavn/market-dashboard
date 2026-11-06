@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from prediction_review import prediction_contract_row
+from prediction_setup_board import cited_products
 from daily_research_rollup import accepted_snapshots, publication_time, CAPTURE_SELECTION, PRODUCTS as DAILY_PRODUCTS
 from prediction_research_rollup import accepted_prediction_snapshots, PRODUCTS as PREDICTION_PRODUCTS
 from research_cadence import publication_matches_expected
@@ -596,6 +597,16 @@ def _review_sources(run, store, research_products, prediction_universe):
                 items.append(item)
                 continue
             ready = statuses.get(status_key) == "ready"
+            if source_id == "tradeResearch":
+                # Each Hedgeye product the review cites is its own row, at the latest edition it used.
+                # Risk Ranges and Crypto Quant keep their feed rows. The aggregate row stays only to
+                # show a failed Trade feed, or when the review cites no other product.
+                cited = [product for product in cited_products(board) if product["id"] not in {"risk-ranges", "crypto-quant"}]
+                for product in cited:
+                    published = product["publishedAt"] if _date(product["publishedAt"]) else None
+                    items.append(_item(product["id"], product["label"], "ready", published or captured, published))
+                if cited and ready:
+                    continue
             published = dates.get(date_key) if ready and date_key else None
             items.append(_item(source_id, label, "ready" if ready else "unavailable",
                                published or (captured if ready else None), published))

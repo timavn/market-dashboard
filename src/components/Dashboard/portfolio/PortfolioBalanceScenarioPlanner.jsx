@@ -636,6 +636,9 @@ function scalePosition(value, maximum = EXPOSURE_SCALE_MAX) {
   return `${Math.min(100, Math.max(0, Math.abs(number) / maximum * 100))}%`;
 }
 
+// Numbers read by their own sign everywhere: positive green, negative red, zero plain.
+const signTone = value => (Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : '');
+
 function ExposureBar({ label, value, percent, grossPercent, tone, currency }) {
   const formattedPercent = formatPercent(percent);
   const formattedValue = formatCurrency(value, 0, currency);
@@ -646,7 +649,7 @@ function ExposureBar({ label, value, percent, grossPercent, tone, currency }) {
 
   return (
     <div className={`portfolio-scenario-planner__exposure-bar is-${tone}`}>
-      <div className="portfolio-scenario-planner__exposure-heading">
+      <div className={`portfolio-scenario-planner__exposure-heading ${signTone(value) ? `is-${signTone(value)}` : ''}`}>
         <strong>{label}</strong>
         <span>{formattedPercent}</span>
         <b>{formattedValue}</b>
@@ -1291,7 +1294,7 @@ const PortfolioBalanceScenarioPlanner = ({ accountId }) => {
               </div>
               {capacityAvailable && interestExposureReady ? (
                 <>
-                  <div className={`portfolio-scenario-planner__capacity-action ${bufferedDebitPrincipal > 0 ? 'is-negative' : 'is-positive'}`}>
+                  <div className={`portfolio-scenario-planner__capacity-action ${bufferedDebitPrincipal > 0 ? 'is-positive' : bufferedDebitPrincipal < 0 ? 'is-negative' : ''}`}>
                     {bufferedDebitPrincipal > 0 ? (
                       <AlertTriangle size={13} aria-hidden="true" />
                     ) : (
@@ -1309,13 +1312,13 @@ const PortfolioBalanceScenarioPlanner = ({ accountId }) => {
                       label="Current debit principal"
                       value={formatCurrency(currentDebitPrincipal, 0, currency)}
                       detail={`Effective ${formatSettlementDate(interestExposure.current?.effectiveDate)}`}
-                      tone={currentDebitPrincipal > 0 ? 'negative' : 'positive'}
+                      tone={currentDebitPrincipal > 0 ? 'positive' : currentDebitPrincipal < 0 ? 'negative' : ''}
                     />
                     <MetricLine
                       label="Projected debit principal"
                       value={formatCurrency(projectedDebitPrincipal, 0, currency)}
                       detail={`Effective ${formatSettlementDate(interestExposure.projected?.effectiveDate)}`}
-                      tone={projectedDebitPrincipal > 0 ? 'negative' : 'positive'}
+                      tone={projectedDebitPrincipal > 0 ? 'positive' : projectedDebitPrincipal < 0 ? 'negative' : ''}
                     />
                   </div>
 
@@ -1373,7 +1376,7 @@ const PortfolioBalanceScenarioPlanner = ({ accountId }) => {
                   <small>{netAccruedKind || 'IBKR live'}</small>
                 </div>
                 <div
-                  className={`portfolio-scenario-planner__ledger-cell ${activeForecast && activeForecast.point > 0 ? 'is-negative' : ''}`}
+                  className={`portfolio-scenario-planner__ledger-cell ${activeForecast && activeForecast.point > 0 ? 'is-positive' : activeForecast && activeForecast.point < 0 ? 'is-negative' : ''}`}
                   aria-label={forecastAriaLabel}
                 >
                   <span>Estimate</span>
@@ -1389,7 +1392,7 @@ const PortfolioBalanceScenarioPlanner = ({ accountId }) => {
                   </small>
                 </div>
                 <div
-                  className={`portfolio-scenario-planner__ledger-cell ${borrowAggregate !== null && borrowAggregate > 0 ? 'is-negative' : ''}`}
+                  className={`portfolio-scenario-planner__ledger-cell ${borrowAggregate !== null && borrowAggregate > 0 ? 'is-positive' : borrowAggregate !== null && borrowAggregate < 0 ? 'is-negative' : ''}`}
                   aria-label={borrowAriaLabel}
                 >
                   <span>Borrow</span>
@@ -1543,8 +1546,8 @@ const PortfolioBalanceScenarioPlanner = ({ accountId }) => {
           <section className="portfolio-scenario-planner__metrics portfolio-scenario-planner__new-exposure" aria-label="New exposure">
             <h4>New Exposure</h4>
             <div className="portfolio-scenario-planner__metric-list">
-              <MetricLine label="Long" value={formatCurrency(projection.exposure.longMarketValue, 0, currency)} nlvPercent={projection.exposure.longPercent} tone="long" />
-              <MetricLine label="Short" value={formatCurrency(projection.exposure.shortMarketValue, 0, currency)} nlvPercent={projection.exposure.shortPercent} tone="short" />
+              <MetricLine label="Long" value={formatCurrency(projection.exposure.longMarketValue, 0, currency)} nlvPercent={projection.exposure.longPercent} tone={signTone(projection.exposure.longMarketValue)} />
+              <MetricLine label="Short" value={formatCurrency(projection.exposure.shortMarketValue, 0, currency)} nlvPercent={projection.exposure.shortPercent} tone={signTone(projection.exposure.shortMarketValue)} />
               <MetricLine label="Gross" value={formatCurrency(projection.exposure.grossMarketValue, 0, currency)} nlvPercent={projection.exposure.grossPercent} />
               <MetricLine label="Net" value={formatCurrency(projection.exposure.netMarketValue, 0, currency)} nlvPercent={projection.exposure.netPercent} />
               <MetricLine
@@ -1553,7 +1556,7 @@ const PortfolioBalanceScenarioPlanner = ({ accountId }) => {
                 detail={projection.exact?.trimRequired > 0
                   ? 'Interest estimate input; not a margin instruction'
                   : `${formatCurrency(projection.exact?.remainingRoom, 0, currency)} interest-free room`}
-                tone={projection.exact?.trimRequired > 0 ? 'negative' : 'positive'}
+                tone={projection.exact?.trimRequired > 0 ? 'positive' : projection.exact?.trimRequired < 0 ? 'negative' : ''}
               />
               <MetricLine
                 label="Debit principal after reserve"
@@ -1561,7 +1564,7 @@ const PortfolioBalanceScenarioPlanner = ({ accountId }) => {
                 detail={projection.buffered?.trimRequired > 0
                   ? 'Policy-reserved interest estimate'
                   : `${formatCurrency(projection.buffered?.remainingRoom, 0, currency)} room after reserve`}
-                tone={projection.buffered?.trimRequired > 0 ? 'negative' : 'positive'}
+                tone={projection.buffered?.trimRequired > 0 ? 'positive' : projection.buffered?.trimRequired < 0 ? 'negative' : ''}
               />
             </div>
             <small className="portfolio-scenario-planner__no-order">

@@ -28,6 +28,17 @@ function verifiedSourceUrl(value) {
   } catch { return false; }
 }
 
+/** A gap in publication coverage can only hide changes up to its last missing
+ * session. A row last opened, closed or reaffirmed by a verified publication
+ * after that session is stated directly, so the gap does not touch it. */
+function continuityIssueAffectsRow(issue, row) {
+  if (issue?.code !== 'publication-continuity-unverified') return true;
+  const dates = Array.isArray(issue.dates) ? issue.dates.filter(validDate) : [];
+  const confirmed = Date.parse(row?.lastConfirmedAt);
+  if (!dates.length || dates.length !== (issue.dates || []).length || !Number.isFinite(confirmed)) return true;
+  return marketDate(confirmed) <= [...dates].sort().at(-1);
+}
+
 /** Every verified source-listed position is Tick, independently of its strategy
  * statistics. This projection owns exact published tickers only; ETF references
  * are attached separately by consumers using their structured mapping catalog. */
@@ -67,7 +78,8 @@ function normalizePublishedTickResearch(payload, {
     if (invalidEvidence(row) || row.fixture === true || row.status !== 'current' || !tick
       || row.instrumentId !== `hedgai:${ticker}`
       || (row.activeDirection != null && identity(row.activeDirection) !== tick)
-      || blocking.some((issue) => !issue.instrumentId || !ids.has(issue.instrumentId) || issue.instrumentId === row.instrumentId)) return;
+      || blocking.some((issue) => (!issue.instrumentId || !ids.has(issue.instrumentId) || issue.instrumentId === row.instrumentId)
+        && continuityIssueAffectsRow(issue, row))) return;
     const positionIds = Array.isArray(row.positionSourceIds) ? row.positionSourceIds : [];
     const metricIds = Array.isArray(row.metricsSourceIds) ? row.metricsSourceIds : [];
     const positionSources = positionIds.map((id) => sources.get(id)).filter(Boolean);
@@ -108,4 +120,4 @@ function selectPublishedTickResearch(payload, ticker, options) {
   return normalizePublishedTickResearch(payload, options)[identity(ticker)] || null;
 }
 
-module.exports = { normalizePublishedTickResearch, selectPublishedTickResearch };
+module.exports = { normalizePublishedTickResearch, selectPublishedTickResearch, continuityIssueAffectsRow };

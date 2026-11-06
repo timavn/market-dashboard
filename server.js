@@ -6653,6 +6653,22 @@ async function loadCanonicalSecurityIntelligence({ symbols, date, historyDays = 
     marketDate, historyDays, now, ...inputResult.value, publishedTradeReadings });
 }
 
+// The day's repository of what each product states in prose: Trade for published
+// references (Gold/Silver/Copper spot), stated Trend and Alpha Codes. The same
+// archive read as the Predictive Markets board and the security record.
+app.get('/api/research/published-statements', async (req, res) => {
+  const marketDate = req.query.date || defaultResearchMarketDate(new Date());
+  res.setHeader('Cache-Control', 'no-store');
+  if (!isValidMarketDate(marketDate)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  try {
+    const statements = await publishedTradeArchive.loadStatements({ date: marketDate });
+    return res.json({ schemaVersion: 1, marketDate, refreshedAt: publishedTradeArchive.status()?.refreshedAt ?? null, ...statements });
+  } catch (error) {
+    console.error('[API] Error in /api/research/published-statements:', error);
+    return res.status(503).json({ error: 'Published statements unavailable', details: error.message });
+  }
+});
+
 app.get('/api/research/security-intelligence', async (req, res) => {
   const now = new Date();
   const rawSymbols = String(req.query.symbols || '')

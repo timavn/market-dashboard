@@ -1,9 +1,10 @@
 import asyncio
 import json
+import re
 import unittest
 
 from analyst_review_sources import review_sources
-from prediction_setup_board import render_setup_board, research_by_section
+from prediction_setup_board import _product_key, render_setup_board, research_by_section
 from review_runs_v2 import ReviewRunError, render_prediction_review
 
 AT = "2026-10-10T17:00:00Z"
@@ -285,13 +286,68 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertIn("| Market | Tick | Trade | Trend | Price and Risk Range | Status |", report)
 
     def test_sources_line_gives_every_publication_the_same_date_and_time(self):
-        report = render_setup_board({"rows": [], "sources": {
+        ranged = [{"id": "gold", "label": "Gold", "group": "metals", "range": {"low": 4100, "high": 4224}},
+                  {"id": "bitcoin", "label": "Bitcoin", "group": "crypto", "range": {"low": 1, "high": 2, "product": "crypto-quant"}}]
+        report = render_setup_board({"rows": ranged, "sources": {
             "riskRanges": "2026-10-15T11:37:00.000Z", "cryptoQuant": "2026-10-15T11:40:00.000Z",
             "inflationNowcast": "2026-10-14T13:29:20+00:00"}})
         self.assertIn("Sources: Risk Ranges Oct 15 04:37 PDT, Crypto Quant Oct 15 04:40 PDT, "
                       "Inflation Nowcast Oct 14 06:29 PDT, HedgAI Signals", report)
         # A publication with only a date keeps its date; no time is invented.
-        self.assertIn("Sources: Risk Ranges Oct 15, HedgAI", render_setup_board({"rows": [], "sources": {"riskRanges": "2026-10-15"}}))
+        self.assertIn("Sources: Risk Ranges Oct 15, HedgAI", render_setup_board({"rows": ranged[:1], "sources": {"riskRanges": "2026-10-15"}}))
+        # A product feed the body never draws on is not a source.
+        self.assertIn("Sources: HedgAI", render_setup_board({"rows": [], "sources": {"riskRanges": "2026-10-15"}}))
+
+    def test_sources_name_every_product_the_review_cites(self):
+        data = board()
+        data["research"] = {"version": 1, "marketDate": "2026-11-05", "products": [
+            {"key": "top-3-things", "label": "Top 3 Things", "status": "read", "publishedAt": "2026-11-05T13:44:00.000Z"},
+            {"key": "early-look", "label": "Early Look", "status": "read", "publishedAt": "2026-11-05T12:44:00.000Z"},
+            {"key": "the-macro-show", "label": "The Macro Show", "status": "missing"},
+            {"key": "the-call", "label": "The Call", "status": "read", "publishedAt": "2026-11-05T14:35:00.000Z"},
+            {"key": "real-time-alert", "label": "Real-Time Alerts", "status": "read", "publishedAt": "2026-11-05T15:39:00.000Z"},
+            {"key": "etf-pro", "label": "ETF Pro", "status": "missing"},
+            {"key": "market-structure", "label": "Market Structure", "status": "read", "publishedAt": "2026-11-05T11:30:30+00:00"},
+            {"key": "risk-ranges", "label": "Risk Ranges", "status": "read", "publishedAt": "2026-11-05T14:07:00.000Z"}]}
+        gold, wti, nasdaq, ust2y = data["rows"][:4]
+        # Quoted prose, a product's position and published data each cite their product.
+        gold["research"] = {"findings": [
+            {"product": "early-look", "productLabel": "Early Look", "kind": "mention", "fit": "exact",
+             "excerpt": "Gold remains Bearish TREND", "context": "Gold remains Bearish TREND"},
+            {"product": "etf-pro", "productLabel": "ETF Pro", "kind": "position", "side": "Short", "fit": "proxy", "instrumentLabel": "GLD"}]}
+        nasdaq["research"] = {"findings": [
+            {"product": "market-structure", "productLabel": "Market Structure", "kind": "structure", "fit": "exact",
+             "signals": [{"label": "SPX Gamma Exposure", "value": "Neutral"}], "sourceText": "Market makers remain neutral."}]}
+        ust2y["research"] = {"alphaCode": {"trade": 4.6, "trend": 4.5, "productLabel": "The Call", "unit": "%"}, "findings": []}
+        # Trade columns name their product, older editions included; the Macro Show is one product however it is spelled.
+        data["usd"]["trade"] = {"direction": "BULLISH", "date": "2026-10-28", "source": "Macro Show"}
+        gold["trade"] = {"direction": "BEARISH", "date": "2026-11-02", "source": "Early Look"}
+        wti["trade"] = {"direction": "NEUTRAL", "date": "2026-11-04", "source": "Alpha Code 97"}
+        wti["alphaBreaks"] = {"trade": {"side": "below", "level": 97, "since": "2026-11-04T16:22:35Z", "productLabel": "Top 3 Things",
+                                        "published": {"value": "BULLISH", "date": "2026-10-21", "source": "The Call"}}}
+        report = render_setup_board(data)
+        body, sources = report.split("\nSources: ", 1)
+        sources = sources.split("\n", 1)[0].split(", ")
+        listed = {_product_key(re.sub(r" [A-Z][a-z]{2} \d{1,2}(?: \d{2}:\d{2} P[DS]T)?$", "", item)) for item in sources}
+
+        # Every product the body names, read back from the rendered report itself.
+        named = set()
+        for block in re.findall(r"```analyst-research\n(.*?)\n```", body):
+            named |= {entry["product"] for market in json.loads(block)["markets"] for entry in market["entries"]}
+        named |= {fields[9] for fields in (token.split(";") for token in re.findall(r"RR\(([^)]*)\)", body)) if len(fields) == 10 and fields[9]}
+        for token in re.findall(r"ASOF\(([^)]*)\)", body):
+            named |= {part.split(",", 1)[1] for part in token.split(";")[1:]
+                      if "," in part and part.split(",", 1)[1] and not part.split(",", 1)[1].startswith(("HedgAI", "Alpha Code"))}
+        for note in re.findall(r"BIAS\([^;]*;;;([^)]*)\)", body):
+            named |= set(re.findall(r"the (.+?) (?:Trade|Trend) line", note)) | set(re.findall(r" · (.+?) (?:Bullish|Bearish|Neutral) ", note))
+        self.assertTrue({"Early Look", "ETF Pro", "Market Structure", "The Call", "Macro Show", "Top 3 Things", "Risk Ranges"} <= named)
+        missing = sorted(name for name in named if _product_key(name) not in listed)
+        self.assertEqual(missing, [], f"cited in the review but missing from Sources: {missing}")
+        # Nothing the review did not use: Real-Time Alerts was read this morning but cited nowhere.
+        self.assertNotIn("Real-Time Alerts", ", ".join(sources))
+        self.assertEqual([item for item in sources if "Macro Show" in item], ["The Macro Show Oct 28"])
+        self.assertIn("Early Look Nov 5 04:44 PST", sources)
+        self.assertIn("ETF Pro", sources)
 
     def test_saved_legacy_and_new_captures_use_their_own_renderer(self):
         sections = [{"id": "setup-board", "board": board()}]
@@ -314,12 +370,40 @@ class SetupBoardSourcesTests(unittest.TestCase):
 
     def test_each_board_input_is_its_own_source_row(self):
         items = self.project({"predictionBoard": {"status": "partial", "updatedAt": AT}}, {"predictionBoard": board()})
-        self.assertEqual(list(items), ["risk-ranges", "crypto-quant", "hedgai-signals", "tradeResearch",
+        # The Dollar's Trade cites the Macro Show, so it lists where the aggregate Trade research row stood.
+        self.assertEqual(list(items), ["risk-ranges", "crypto-quant", "hedgai-signals", "macro-show",
                                        "inflation-nowcast", "marketPrices", "volatilityIndices", "usdCorrelations", "kalshiContracts"])
         self.assertEqual(items["risk-ranges"]["status"], "ready")
         self.assertEqual(items["risk-ranges"]["publishedAt"], "2026-10-09")
         self.assertEqual(items["inflation-nowcast"]["status"], "unavailable")
         self.assertNotIn("ibGateway", items)
+
+    def test_sources_panel_lists_every_product_the_review_cites(self):
+        data = board()
+        data["research"] = {"version": 1, "marketDate": "2026-10-10", "products": [
+            {"key": "top-3-things", "label": "Top 3 Things", "status": "read", "publishedAt": "2026-10-10T13:44:00.000Z"},
+            {"key": "early-look", "label": "Early Look", "status": "read", "publishedAt": "2026-10-10T12:44:00.000Z"},
+            {"key": "the-macro-show", "label": "The Macro Show", "status": "missing"},
+            {"key": "real-time-alert", "label": "Real-Time Alerts", "status": "read", "publishedAt": "2026-10-10T15:39:00.000Z"}]}
+        data["usd"]["trade"] = {"direction": "BULLISH", "date": "2026-10-03", "source": "Macro Show"}
+        data["rows"][0]["research"] = {"findings": [{"product": "early-look", "productLabel": "Early Look", "kind": "mention",
+                                                     "fit": "exact", "excerpt": "Gold remains Bearish TREND"}]}
+        data["rows"][1]["trade"] = {"direction": "BEARISH", "date": "2026-10-09", "source": "Top 3 Things"}
+        items = self.project({"predictionBoard": {"status": "ready", "updatedAt": AT}}, {"predictionBoard": data})
+        self.assertEqual(list(items)[3:6], ["top-3-things", "early-look", "the-macro-show"])
+        self.assertEqual({key: (items[key]["label"], items[key]["status"], items[key].get("publishedAt")) for key in list(items)[3:6]}, {
+            # Cited only by an Oct 9 Trade: that is the edition used, not this morning's.
+            "top-3-things": ("Top 3 Things", "ready", "2026-10-09"),
+            "early-look": ("Early Look", "ready", "2026-10-10T12:44:00.000Z"),
+            "the-macro-show": ("The Macro Show", "ready", "2026-10-03")})
+        # Read this morning but cited nowhere in the review: not a source.
+        self.assertNotIn("real-time-alert", items)
+        self.assertNotIn("tradeResearch", items)
+        # A failed Trade feed still shows, beside the products the review could cite.
+        data["sourceStatus"]["securityIntelligence"] = "failed"
+        failed = self.project({"predictionBoard": {"status": "partial", "updatedAt": AT}}, {"predictionBoard": data})
+        self.assertEqual(failed["tradeResearch"]["status"], "unavailable")
+        self.assertIn("early-look", failed)
 
     def test_running_review_shows_board_inputs_checking(self):
         items = self.project({}, {}, state="running")

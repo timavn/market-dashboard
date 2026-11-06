@@ -256,7 +256,7 @@ describe('CFTCNetLongCard', () => {
     expect(within(dialog).getByText('2.43')).toHaveClass('is-positive', 'is-extreme');
     expect(within(dialog).getByText('1.62')).toHaveClass('is-positive');
     expect(within(dialog).getByText('1.62')).not.toHaveClass('is-extreme');
-    expect(within(dialog).getByText('25,427')).not.toHaveClass('is-positive');
+    expect(within(dialog).getByText('25,427')).toHaveClass('is-positive');
     expect(row.historyStatistics.average3M).toBe(12345.6789);
     expect(row.zScore1Y).toBe(2.42549);
     expect(within(dialog).getByText('Aug 11, 2026')).toBeInTheDocument();
@@ -414,7 +414,7 @@ describe('CFTCNetLongCard', () => {
     expect(screen.queryByText('25,427')).not.toBeInTheDocument();
   });
 
-  test('colors parenthesized negatives red across all seven ordinary columns and leaves positives neutral', () => {
+  test('colors parenthesized negatives red and positives green across all seven ordinary columns', () => {
     const rows = [-1, 1].map(sign => ({
       ...CURRENT_ROW,
       metric: sign < 0 ? 'Negative columns' : 'Positive columns',
@@ -439,7 +439,7 @@ describe('CFTCNetLongCard', () => {
     }
     for (const cell of within(positive).getAllByRole('cell').slice(0, 7)) {
       expect(cell).not.toHaveClass('is-negative');
-      expect(cell).not.toHaveClass('is-positive');
+      expect(cell).toHaveClass('is-positive');
       expect(cell).not.toHaveClass('is-extreme');
     }
   });

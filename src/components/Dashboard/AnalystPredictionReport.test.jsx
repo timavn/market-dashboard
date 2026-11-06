@@ -469,8 +469,8 @@ test('volume draws under Tick, Trade and Trend as one shaded cell per window, an
   expect(volume.colSpan).toBe(3);
   expect([...volume.querySelectorAll('.analyst-prediction-volume__window')].map(cell => cell.textContent))
     .toEqual(['1D+54%', '15D+35%', '30D+35%', '90D+8%']);
-  // A saved board without the Trend side leaves the windows uncolored.
-  expect(volume.querySelector('.analyst-prediction-volume__window')).toHaveClass('analyst-prediction-volume__window', { exact: true });
+  // A saved board without the Trend side still reads each number by its sign.
+  expect(volume.querySelector('.analyst-prediction-volume__window')).toHaveClass('analyst-prediction-volume__window', 'is-on', { exact: true });
   expect(volume).toHaveAttribute('title', 'IBIT volume on 2026-10-21 vs the prior session and its 15-, 30- and 90-day averages');
   // A saved board without the day's direction shows AV with the plain outline when it isn't against the Trend.
   expect(within(top).getByText('AV', { selector: '.analyst-prediction-structure-move' })).toHaveClass('analyst-prediction-structure-move', { exact: true });
@@ -538,22 +538,24 @@ test('an unavailable volume reads N/A in each window, and saved boards title As 
   const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
   const { container } = render(<table><tbody><tr><Cell node={{ children: [{ type: 'text', value: 'VOL(;;;-12;;)' }] }} /></tr></tbody></table>);
   expect([...container.querySelectorAll('.analyst-prediction-volume__value')].map(cell => cell.textContent)).toEqual(['N/A', 'N/A', 'N/A', '−12%']);
-  expect(container.querySelectorAll('.is-on, .is-against')).toHaveLength(0);
+  // N/A stays plain; a number reads by its own sign.
+  expect([...container.querySelectorAll('.analyst-prediction-volume__window')].map(window => window.className.replace('analyst-prediction-volume__window', '').trim()))
+    .toEqual(['', '', '', 'is-against']);
 });
 
 test.each([
-  // A pullback against the Trend: lighter is the setup (green), heavier a warning (red).
-  ['-', ['is-on', 'is-against', 'is-on', ''], 'Against the Trend: lighter volume reads green, heavier red'],
-  // A move with the Trend: heavier confirms (green), lighter says nothing.
-  ['+', ['', 'is-on', '', ''], 'With the Trend: heavier volume reads green'],
-])('volume windows on a day %s the Trend read green when good for its side and red when bad', (side, tones, sentence) => {
+  ['-', 'Day against the Trend'],
+  ['+', 'Day with the Trend'],
+  ['', 'averages'],
+])('volume windows read green when up and red when down on a day %s the Trend', (side, sentence) => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="## Metals" />);
   const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
   const value = `VOL(-12;+8;-30;0;2026-10-27;GLD;${side})`;
   const { container } = render(<table><tbody><tr><Cell node={{ children: [{ type: 'text', value }] }} /></tr></tbody></table>);
+  // The Trend never changes a number's color: positive green, negative red, zero plain.
   expect([...container.querySelectorAll('.analyst-prediction-volume__window')].map(window => window.className.replace('analyst-prediction-volume__window', '').trim()))
-    .toEqual(tones);
+    .toEqual(['is-against', 'is-on', 'is-against', '']);
   expect(container.querySelector('td').title).toContain(sentence);
 });
 

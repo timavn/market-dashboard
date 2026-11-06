@@ -29,9 +29,9 @@ describe('CFTC positioning presentation', () => {
     expect(cftcDirectionClass(-1.001, 1)).toBe('is-negative');
   });
 
-  test('colors ordinary negative values without treating positive values or magnitude as a signal', () => {
+  test('colors ordinary values by their sign without treating magnitude as a signal', () => {
     expect(cftcValueClass(-45000)).toBe('is-negative');
-    expect(cftcValueClass(45000)).toBe('');
+    expect(cftcValueClass(45000)).toBe('is-positive');
     expect(cftcValueClass(0)).toBe('');
   });
 

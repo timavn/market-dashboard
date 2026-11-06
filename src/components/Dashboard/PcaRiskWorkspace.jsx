@@ -217,7 +217,7 @@ function ComparisonResult({ result, config }) {
           <td>{exposurePair[0]}</td><td>{exposurePair[1]}</td>
           <td>{variancePair[0]}</td><td>{variancePair[1]}</td>
           <td>{sharePair[0]}</td><td>{sharePair[1]}</td>
-          <td className={finite(change) ? change > 0 ? 'is-negative' : change < 0 && !tradeoff ? 'is-positive' : '' : ''}>{comparisonChange(change)}</td>
+          <td className={finite(change) ? change > 0 ? 'is-positive' : change < 0 ? 'is-negative' : '' : ''}>{comparisonChange(change)}</td>
           <td className={flag.className}>{flag.label}</td></tr>;
       })}
       <tr><th scope="row">Other risk</th><td>—</td><td>—</td><td>{residualVariance[0]}</td><td>{residualVariance[1]}</td><td>{residualShare[0]}</td><td>{residualShare[1]}</td><td>{comparisonChange(result.residual?.riskShareDelta)}</td><td>Included</td></tr>

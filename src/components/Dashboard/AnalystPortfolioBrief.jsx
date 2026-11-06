@@ -241,12 +241,13 @@ function PortfolioExposure({ metrics, comparison, asOf, loading, state }) {
     const usePercentages = comparablePercentages || !comparableValues && percentagePair.current !== null;
     const metric = usePercentages ? percentagePair : values;
     const format = value => value === null ? '—' : usePercentages ? percent(value) : <ExposureAmount value={value} />;
+    // Every number reads by its own sign, whichever side it is: positive green, negative red.
     const color = value => value === null ? 'signal-unavailable' : name === 'Gross' || value === 0 ? undefined
-      : name === 'Short' || value < 0 ? 'signal-bearish' : 'signal-bullish';
+      : value < 0 ? 'signal-bearish' : 'signal-bullish';
     // Weights display as magnitudes, so Long and Short change by magnitude; Net keeps its sign.
     const change = metric.current === null || metric.previous === null ? null
       : !usePercentages || name === 'Net' ? metric.current - metric.previous : Math.abs(metric.current) - Math.abs(metric.previous);
-    return { name, className, metric, value: metrics[valueKey], current: format(metric.current), previous: format(metric.previous),
+    return { name, className, metric, value: metrics[valueKey], valueColor: metrics[valueKey] === null || metrics[valueKey] === undefined ? undefined : color(metrics[valueKey]), current: format(metric.current), previous: format(metric.previous),
       change: exposureChange(change, usePercentages),
       currentColor: color(metric.current), previousColor: color(metric.previous) };
   });
@@ -264,7 +265,7 @@ function PortfolioExposure({ metrics, comparison, asOf, loading, state }) {
         <th scope="col" className="portfolio-exposure-change" title="Change since previous close; weights in basis points of NLV">Δ</th><th scope="col" className="portfolio-exposure-percent">Previous</th></tr></thead>
       <tbody>{rows.map(row => <tr key={row.name} className={row.className}>
         <th scope="row"><AnalystSemanticText>{row.name}</AnalystSemanticText></th>
-        <td className="portfolio-exposure-value"><ExposureAmount value={row.value} /></td>
+        <td className={`portfolio-exposure-value ${row.valueColor || ''}`.trim()}><ExposureAmount value={row.value} /></td>
         <td className={`portfolio-exposure-percent ${row.currentColor || ''}`.trim()}>{row.current}</td>
         <td className={`portfolio-exposure-change ${row.change.color}`}>{row.change.text}</td>
         <td className={`portfolio-exposure-percent ${row.previousColor || ''}`.trim()}>{row.previous}</td>

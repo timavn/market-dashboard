@@ -505,5 +505,19 @@ class HedgaiReaderTests(unittest.IsolatedAsyncioTestCase):
             transport=httpx.MockTransport(lambda _request: httpx.Response(503))), {})
 
 
+class HedgaiContinuityScopeTests(unittest.TestCase):
+    def test_past_gap_holds_back_only_rows_not_restated_after_it(self):
+        from hedgai_review import _current_row
+        gap = {"code": "publication-continuity-unverified", "dates": ["2026-10-09"], "sourceIds": [], "blocking": True}
+        restated = {"instrumentId": "hedgai:GLD", "status": "current", "lastConfirmedAt": "2026-11-05T11:50:00+00:00"}
+        carried = {"instrumentId": "hedgai:SPY", "status": "current", "lastConfirmedAt": "2026-09-28T12:43:00Z"}
+        projection = {"book": {"rows": [restated, carried]}, "sourceQuality": {"continuity": "unknown", "issues": [gap]}}
+        self.assertTrue(_current_row(restated, projection))
+        self.assertFalse(_current_row(carried, projection))
+        other = {"code": "research-read-unavailable", "sourceIds": [], "blocking": True}
+        projection["sourceQuality"]["issues"] = [gap, other]
+        self.assertFalse(_current_row(restated, projection))
+
+
 if __name__ == "__main__":
     unittest.main()

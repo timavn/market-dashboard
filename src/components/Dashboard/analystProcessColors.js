@@ -120,8 +120,8 @@ export function analystFieldTone(label, value) {
   const amount = amountOf(value);
   if (amount !== null) {
     if (/^(?:daily|unrealized|realized)?\s*p&l$/.test(field)) return amount > 0 ? 'positive' : amount < 0 ? 'negative' : null;
-    if (/^(?:code-computed )?trim requirement(?: to clear the no-borrow condition)?$/.test(field)) return amount > 0 ? 'negative' : null;
-    if (/^(?:code-computed )?(?:add-long room|(?:policy-)?buffered room)$/.test(field)) return amount > 0 ? 'positive' : 'caution';
+    if (/^(?:code-computed )?trim requirement(?: to clear the no-borrow condition)?$/.test(field)) return amount > 0 ? 'positive' : amount < 0 ? 'negative' : null;
+    if (/^(?:code-computed )?(?:add-long room|(?:policy-)?buffered room)$/.test(field)) return amount > 0 ? 'positive' : amount < 0 ? 'negative' : null;
   }
   return null;
 }

@@ -13,6 +13,7 @@ import {
   mergeDashboardResearchReadings,
   normalizeDashboardNarrativeEnvelope,
   normalizeDashboardTickResearch,
+  normalizeDashboardReferenceTrade,
 } from './dashboardResearch';
 
 const DATE = '2026-09-25';
@@ -320,11 +321,28 @@ test('projects the complete HedgAI security roster without limiting it to front-
   ['USDEUR', 'USDGBP', 'USDCAD', 'CSI300'].forEach((ticker) => expect(readings[ticker]).toBeUndefined());
 });
 
+test('Treasury price-ETF Tick reads in the yield direction its row shows; a rate hedge does not flip', () => {
+  const rows = [
+    tickRow({ ticker: 'SHY', instrumentId: 'hedgai:SHY', sourceLabel: 'UST 2yr Yield', position: 'Short', activeDirection: null }),
+    tickRow({ ticker: 'UST', instrumentId: 'hedgai:UST', sourceLabel: 'UST 10yr Yield', position: 'Buy', activeDirection: null }),
+    tickRow({ ticker: 'PFIX', instrumentId: 'hedgai:PFIX', sourceLabel: 'UST 30yr Yield', position: 'Buy', activeDirection: null }),
+  ];
+  const readings = normalizeDashboardTickResearch(tickProjection(rows), options);
+  expect(readings.UST2Y).toMatchObject({ tick: 'BULLISH', tickEvidence: { inverse: true, sourceDirection: 'BEARISH', position: 'Short', sourceTicker: 'SHY' } });
+  expect(readings.UST10Y).toMatchObject({ tick: 'BEARISH', tickEvidence: { inverse: true, sourceDirection: 'BULLISH', position: 'Buy' } });
+  expect(readings.UST30Y.tick).toBe('BULLISH');
+  expect(readings.UST30Y.tickEvidence.inverse).toBeUndefined();
+  // The ETF's own row keeps the ETF's direction.
+  expect(readings.SHY.tick).toBe('BEARISH');
+  const wait = normalizeDashboardTickResearch(tickProjection([{ ...rows[0], position: 'Wait' }]), options);
+  expect(wait.UST2Y.tick).toBe('NEUTRAL');
+});
+
 test('scans every structured HedgAI reference while preserving the original ETF identity', () => {
   const rows = tickReferences.map(({ sourceTicker: ticker }) => tickRow({ ticker, instrumentId: `hedgai:${ticker}` }));
   const readings = normalizeDashboardTickResearch(tickProjection(rows), options);
-  tickReferences.forEach(({ symbol, sourceTicker, instrumentId }) => {
-    expect(readings[symbol]).toMatchObject({ tick: 'BULLISH', trend: null, lrr: null, hrr: null,
+  tickReferences.forEach(({ symbol, sourceTicker, instrumentId, inverse }) => {
+    expect(readings[symbol]).toMatchObject({ tick: inverse ? 'BEARISH' : 'BULLISH', trend: null, lrr: null, hrr: null,
       tickEvidence: { matchType: 'proxy', sourceTicker, instrumentId, referenceInstrument: sourceTicker,
         contextOnly: true, decisionEligible: false, executable: false } });
   });
@@ -394,6 +412,57 @@ test('an ambiguous or disputed Tick row does not remove independently verified T
   expect(Object.keys(normalizeDashboardTickResearch(tickProjection([tickRow(), tickRow(), uup]), options))).toEqual(['UUP', 'USD']);
   const sourceQuality = { continuity: 'unknown', issues: [{ blocking: true, instrumentId: 'hedgai:XLF' }] };
   expect(Object.keys(normalizeDashboardTickResearch(tickProjection([tickRow(), uup], { sourceQuality }), options))).toEqual(['UUP', 'USD']);
+});
+
+test('a past coverage gap withholds only the rows no later publication restated', () => {
+  const gap = { code: 'publication-continuity-unverified', dates: ['2026-09-23'], sourceIds: [], blocking: true };
+  const sourceQuality = { continuity: 'unknown', issues: [gap] };
+  const gld = tickRow({ ticker: 'GLD', instrumentId: 'hedgai:GLD', sourceLabel: 'Gold', position: 'Short', activeDirection: null,
+    lastConfirmedAt: '2026-09-24T11:50:00Z' });
+  const carried = tickRow({ lastConfirmedAt: '2026-09-22T12:43:00Z' });
+  const readings = normalizeDashboardTickResearch(tickProjection([carried, gld], { sourceQuality }), options);
+  expect(readings.GLD).toMatchObject({ tick: 'BEARISH' });
+  expect(readings.GC).toMatchObject({ tick: 'BEARISH', tickEvidence: { matchType: 'proxy', sourceTicker: 'GLD', basisLabel: 'GLD proxy' } });
+  expect(readings.XLF).toBeUndefined();
+  // Restated on the missing session itself, or with an unreadable gap, it stays withheld.
+  const onGap = tickRow({ ...gld, lastConfirmedAt: '2026-09-23T15:00:00Z' });
+  expect(normalizeDashboardTickResearch(tickProjection([onGap], { sourceQuality }), options)).toEqual({});
+  const unreadable = { continuity: 'unknown', issues: [{ ...gap, dates: ['not-a-date'] }] };
+  expect(normalizeDashboardTickResearch(tickProjection([gld], { sourceQuality: unreadable }), options)).toEqual({});
+  // Any other book-wide blocker still withholds every row.
+  const other = { continuity: 'unknown', issues: [gap, { code: 'research-read-unavailable', sourceIds: [], blocking: true }] };
+  expect(normalizeDashboardTickResearch(tickProjection([gld], { sourceQuality: other }), options)).toEqual({});
+});
+
+const referenceTrade = (overrides = {}) => ({
+  ticker: 'GOLD', sourceTicker: 'GOLD', value: 'BEARISH', field: 'trade', sourceText: 'Gold remains Bearish TRADE and TREND',
+  sourceProduct: 'early-look', sourceLabel: 'Early Look', sourceUrl, date: '2026-09-23', publishedAt: '2026-09-23T12:27:00.000Z',
+  signalProvenance: { field: 'trade', sourceField: 'article.bodyText', method: 'explicit-statement', sourceText: 'Gold remains Bearish TRADE and TREND' },
+  statement: 'Gold remains Bearish TRADE and TREND.', sourceInstrument: 'Gold spot', basisLabel: 'spot',
+  basisRelationship: 'Published Gold spot signal; GC is the gold futures.', instrumentKey: 'reference:GOLD', referenceOnly: true, ...overrides,
+});
+const statements = (references) => ({ schemaVersion: 1, marketDate: DATE, references, trends: [], alphaCodes: [] });
+
+test('attaches the Trade a product states for Gold and Silver spot to their overview rows, basis kept', () => {
+  const silver = referenceTrade({ ticker: 'SILVER', sourceTicker: 'SILVER', instrumentKey: 'reference:SILVER', sourceInstrument: 'Silver spot',
+    sourceText: 'Gold and Silver remain bearish on both TRADE and TREND', statement: 'Gold and Silver remain bearish on both TRADE and TREND.',
+    signalProvenance: { field: 'trade', sourceField: 'article.bodyText', method: 'explicit-statement', sourceText: 'Gold and Silver remain bearish on both TRADE and TREND' },
+    sourceLabel: 'The Call', date: '2026-09-22' });
+  const readings = normalizeDashboardReferenceTrade(statements([referenceTrade(), silver]), options);
+  expect(readings.GC).toMatchObject({ verified: true, trade: 'BEARISH', trend: null,
+    tradeEvidence: { source: 'Early Look', date: '2026-09-23', basisLabel: 'spot', referenceInstrument: 'Gold spot', sourceType: 'published-reference-trade' } });
+  expect(readings.SI).toMatchObject({ trade: 'BEARISH', tradeEvidence: { source: 'The Call', referenceInstrument: 'Silver spot' } });
+  // Never the Trade of a security sharing the code, nor a future-dated or conflicting statement.
+  expect(readings.GOLD).toBeUndefined();
+  expect(normalizeDashboardReferenceTrade(statements([referenceTrade({ date: '2026-09-28' })]), options)).toEqual({});
+  const bullish = 'Gold remains Bullish TRADE and TREND';
+  expect(normalizeDashboardReferenceTrade(statements([referenceTrade(), referenceTrade({ value: 'BULLISH', sourceText: bullish,
+    statement: `${bullish}.`, signalProvenance: { ...referenceTrade().signalProvenance, sourceText: bullish } })]), options)).toEqual({});
+  // A value its own sentence does not state is dropped on re-read.
+  expect(normalizeDashboardReferenceTrade(statements([referenceTrade({ value: 'BULLISH' })]), options)).toEqual({});
+  expect(normalizeDashboardReferenceTrade({ ...statements([referenceTrade()]), mock: true }, options)).toEqual({});
+  const merged = normalizeDashboardResearch({ riskRanges: envelope({ GOLD: row({ originalName: 'Gold Spot Price' }) }), statements: statements([referenceTrade()]) }, options);
+  expect(merged.GC).toMatchObject({ trade: 'BEARISH', trend: 'BULLISH', basisLabel: 'spot' });
 });
 
 test('a rejected or missing newer position source cannot inherit an active Tick from older evidence', () => {

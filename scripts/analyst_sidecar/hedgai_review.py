@@ -113,12 +113,26 @@ def _pct(row, side):
     return f"{value * 100:.1f}%" if value is not None and 0 <= value <= 1 else "—"
 
 
+def _continuity_issue_affects_row(issue, row):
+    """A coverage gap hides changes only up to its last missing session; a row
+    opened, closed or reaffirmed by a later verified publication is stated directly."""
+    if issue.get("code") != "publication-continuity-unverified":
+        return True
+    dates = issue.get("dates") if isinstance(issue.get("dates"), list) else []
+    confirmed = _time(row.get("lastConfirmedAt"))
+    valid = [value for value in dates if isinstance(value, str) and len(value) == 10]
+    if not valid or len(valid) != len(dates) or not confirmed:
+        return True
+    return f"{confirmed.astimezone(ZoneInfo('America/New_York')):%Y-%m-%d}" <= max(valid)
+
+
 def _current_row(row, projection):
     quality = _object(projection.get("sourceQuality"))
     blocking = [issue for issue in quality.get("issues") or [] if isinstance(issue, dict) and issue.get("blocking")]
     identities = {item.get("instrumentId") for item in _object(projection.get("book")).get("rows") or [] if isinstance(item, dict)}
-    row_blocked = any(not issue.get("instrumentId") or issue["instrumentId"] not in identities
-                      or issue["instrumentId"] == row.get("instrumentId") for issue in blocking)
+    row_blocked = any((not issue.get("instrumentId") or issue["instrumentId"] not in identities
+                       or issue["instrumentId"] == row.get("instrumentId"))
+                      and _continuity_issue_affects_row(issue, row) for issue in blocking)
     return not (_unsafe(row) or row.get("status") != "current"
                 or row_blocked or (quality.get("continuity") != "complete" and not blocking))
 

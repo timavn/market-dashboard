@@ -14,21 +14,21 @@ export default function useDashboardResearch() {
     let disposed = false;
     let sequence = 0;
     let retainedMarketDate = null;
-    let sources = { riskRanges: null, earlyLook: null, cryptoTracker: null, cryptoQuant: null, narrative: null, intelligence: null, hedgai: null };
+    let sources = { riskRanges: null, earlyLook: null, cryptoTracker: null, cryptoQuant: null, narrative: null, intelligence: null, hedgai: null, statements: null };
     const poll = async () => {
       const request = ++sequence;
       const date = todayInNewYork();
       const asOf = new Date().toISOString();
       const marketDate = dashboardResearchMarketDate(date);
       if (retainedMarketDate !== marketDate) {
-        sources = { ...sources, riskRanges: null, earlyLook: null };
+        sources = { ...sources, riskRanges: null, earlyLook: null, statements: null };
         retainedMarketDate = marketDate;
       }
       setState(() => {
         const readings = normalizeDashboardResearch(sources, { date, asOf });
         return { readings, status: Object.keys(readings).length ? 'available' : 'loading', loading: true, error: null };
       });
-      const sourceKeys = ['riskRanges', 'earlyLook', 'cryptoTracker', 'cryptoQuant', 'narrative', 'intelligence', 'hedgai'];
+      const sourceKeys = ['riskRanges', 'earlyLook', 'cryptoTracker', 'cryptoQuant', 'narrative', 'intelligence', 'hedgai', 'statements'];
       const requests = [
         MarketDataService.getRiskRanges(null, { envelope: true }),
         MarketDataService.getHedgeyeSnapshot('early-look', marketDate, { throwOnError: true }),
@@ -37,6 +37,7 @@ export default function useDashboardResearch() {
         MarketDataService.getDashboardNarrativeResearch(),
         MarketDataService.getSecurityIntelligenceV2({ symbols: DASHBOARD_RESEARCH_SYMBOLS, date: marketDate, historyDays: 5 }),
         MarketDataService.getHedgaiResearch({ asOf }),
+        MarketDataService.getPublishedStatements({ date: marketDate }),
       ];
       const results = await Promise.allSettled(requests.map(async (pending, index) => {
         let value;

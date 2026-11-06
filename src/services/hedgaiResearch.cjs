@@ -4,6 +4,7 @@ const path = require('node:path');
 const { computeResearchEventVerificationHash } = require('../utils/researchEventLedger.cjs');
 const { addCalendarDays, isTradingDateKey, previousTradingDateKey } = require('../utils/usEquityMarketCalendar.cjs');
 const instrumentCatalog = require('../../infra/lambdas/gmail_ingestor/hedgai_instruments.json');
+const { continuityIssueAffectsRow } = require('../utils/publishedTickResearch.cjs');
 
 const PRODUCT = 'hedgai-signals';
 const THRESHOLD = 0.6;
@@ -513,14 +514,14 @@ function buildHedgaiResearch({ baseline, events = [], asOf, availability = 'avai
   if (availability !== 'available') issues.push({ code: 'research-read-unavailable', message: 'Current research delivery could not be checked; the book is last-known context.', sourceIds: [], blocking: true });
   if (continuity === 'gap' || continuity === 'unknown') issues.push({ code: 'research-continuity-unverified', message: 'Research delivery continuity is not confirmed.', sourceIds: [], blocking: true });
   const hasGap = issues.some(issue => issue.blocking);
-  const globalGap = issues.some(issue => issue.blocking && (!issue.instrumentId || !byId.has(issue.instrumentId)));
   const currentEditionAvailable = marketDate(latest) === asOfDate;
   const quality = hasGap ? (continuity === 'gap' || issues.some(issue => ['publication-incomplete-or-invalid', 'publication-conflict'].includes(issue.code)) ? 'gap' : 'unknown') : 'complete';
   for (const row of rows) {
     row.bullEligible = eligible(row.metrics?.buy);
     row.bearEligible = eligible(row.metrics?.short);
     row.lastKnownDirection = row.position === 'Buy' ? 'Bullish' : row.position === 'Short' ? 'Bearish' : null;
-    const rowGap = globalGap || issues.some(issue => issue.blocking && issue.instrumentId === row.instrumentId);
+    const rowGap = issues.some(issue => issue.blocking && (!issue.instrumentId || !byId.has(issue.instrumentId) || issue.instrumentId === row.instrumentId)
+      && continuityIssueAffectsRow(issue, row));
     row.activeDirection = !rowGap && ((row.position === 'Buy' && row.bullEligible) || (row.position === 'Short' && row.bearEligible)) ? row.lastKnownDirection : null;
     row.status = rowGap ? 'last-known' : 'current';
   }

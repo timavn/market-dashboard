@@ -483,8 +483,117 @@ def research_by_section(board: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return blocks
 
 
+# Products a range or Trend names by id; the board's own feed times date their edition.
+PRODUCT_IDS = {"risk-ranges": "Risk Ranges", "crypto-quant": "Crypto Quant"}
+FEED_DATES = {"riskranges": "riskRanges", "cryptoquant": "cryptoQuant"}
+LEADING_PRODUCTS = ("riskranges", "cryptoquant")
+
+
+def _product_key(label: Any) -> str:
+    """One key per product however a feed spells it: "Macro Show" and "The Macro Show" are the same product."""
+    return re.sub(r"[^a-z0-9]", "", re.sub(r"^the\s+", "", str(label or "").strip().lower()))
+
+
+class _CitedProducts:
+    """Every Hedgeye product the review draws on, recorded as each cell or research entry is written, so the
+    Sources line names exactly the products the body uses, each at the latest edition it used."""
+
+    def __init__(self, board: dict[str, Any]):
+        research = board.get("research") if isinstance(board.get("research"), dict) else {}
+        products = [item for item in research.get("products") or [] if isinstance(item, dict) and item.get("label")]
+        self.names = {_product_key(item["label"]): str(item["label"]) for item in products}
+        self.order = {_product_key(item["label"]): index for index, item in enumerate(products)}
+        self.published = {_product_key(item["label"]): item.get("publishedAt") for item in products}
+        self.ids = {_product_key(item["label"]): item.get("key") for item in products if item.get("key")}
+        self.feeds = board.get("sources") or {}
+        self.cited: dict[str, dict[str, Any]] = {}
+
+    def cite(self, label: Any, when: Any = None) -> None:
+        name = str(label or "").strip()
+        key = _product_key(name)
+        # An Alpha Code line is named for its level; the product that printed it is cited on its own.
+        if not key or key == "research" or re.match(r"^Alpha Code\b", name):
+            return
+        item = self.cited.setdefault(key, {"name": self.names.get(key, name), "when": [], "seen": len(self.cited)})
+        if when:
+            item["when"].append(str(when))
+
+    def _published(self, key: str, item: dict[str, Any]) -> str | None:
+        """The latest edition the review used: the feed's own time for Risk Ranges and Crypto Quant."""
+        if self.feeds.get(FEED_DATES.get(key, "")):
+            return str(self.feeds[FEED_DATES[key]])
+        # Instants sort after a bare date on the same Pacific day.
+        stamp = lambda value: (_pacific_day(value), "T" in value, value)
+        return max(item["when"], key=stamp) if item["when"] else None
+
+    def items(self) -> list[dict[str, Any]]:
+        """Each cited product once, in reading order, with its research product id and latest edition used."""
+        rank = lambda key: (LEADING_PRODUCTS.index(key) if key in LEADING_PRODUCTS else len(LEADING_PRODUCTS),
+                            self.order.get(key, len(self.order)), self.cited[key]["seen"])
+        return [{"key": key, "id": self.ids.get(key) or re.sub(r"[^a-z0-9]+", "-", self.cited[key]["name"].lower()).strip("-"),
+                 "label": self.cited[key]["name"], "publishedAt": self._published(key, self.cited[key])}
+                for key in sorted(self.cited, key=rank)]
+
+    def named(self) -> list[str]:
+        return [item["label"] + (f" {_pacific_zoned(item['publishedAt'])}" if item["publishedAt"] else "")
+                for item in self.items()]
+
+
+def _pacific_day(value: Any) -> str:
+    text = str(value or "")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}T", text):
+        return text[:10]
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(PACIFIC).date().isoformat()
+    except ValueError:
+        return text[:10]
+
+
+def _cite_row(cited: _CitedProducts, row: dict[str, Any]) -> None:
+    """The products one market row's cells name: its range and Trend, its Trade, and any Alpha Code."""
+    trade, risk_range = (row.get(key) or {} for key in ("trade", "range"))
+    drawn = all(isinstance(risk_range.get(key), (int, float)) for key in ("low", "high"))
+    if drawn or row.get("trend"):
+        cited.cite(PRODUCT_IDS.get(risk_range.get("product"), "Risk Ranges"), risk_range.get("date"))
+    cited.cite(trade.get("source"), trade.get("date"))
+    for broken in (row.get("alphaBreaks") or {}).values():
+        if isinstance(broken, dict):
+            # The line's product is cited; "since" is when price crossed it, not when it was published.
+            cited.cite(broken.get("productLabel"))
+            published = broken.get("published") or {}
+            cited.cite(published.get("source"), published.get("date"))
+    code = _alpha_code(row) if drawn else None
+    if code:
+        label = code.get("productLabel")
+        cited.cite(label, code.get("publishedAt") or cited.published.get(_product_key(label)))
+
+
+def _cited(board: dict[str, Any]) -> _CitedProducts:
+    """What the rendered review draws on: every market row it lays out (the US Dollar first in each section) and
+    every research entry it prints. The report's Sources line and the Sources panel both read this."""
+    cited = _CitedProducts(board)
+    rows = [row for row in board.get("rows") or [] if isinstance(row, dict) and row.get("id") != "cpi"]
+    dollar = _dollar_row(board.get("usd"))
+    for section_id, _label, members in _section_rows(board, rows):
+        if members and section_id != "inflation":
+            for row in ([dollar] if dollar else []) + members:
+                _cite_row(cited, row)
+    if isinstance(board.get("research"), dict):
+        for block in research_by_section(board).values():
+            for market in block["markets"]:
+                for entry in market["entries"]:
+                    cited.cite(entry.get("product"), cited.published.get(_product_key(entry.get("product"))))
+    return cited
+
+
+def cited_products(board: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every Hedgeye product the review cites: id, label and the latest edition it used (an instant or a date)."""
+    return _cited(board).items() if isinstance(board, dict) else []
+
+
 def render_setup_board(board: dict[str, Any]) -> str:
     rows = [row for row in board.get("rows") or [] if isinstance(row, dict)]
+    cited = _cited(board)
     priced = [row for row in rows if row.get("id") != "cpi"]
     sources = board.get("sources") or {}
     # Boards captured with the morning's products carry Alpha Codes in the range cell and a research block.
@@ -562,10 +671,11 @@ def render_setup_board(board: dict[str, Any]) -> str:
         if block:
             lines += ["```analyst-research", json.dumps(block, ensure_ascii=False, separators=(",", ":")), "```", ""]
 
+    # Hedgeye products as the body cites them, then the CPI publications and the market data feeds.
     dated = [(label, _pacific_zoned(sources.get(key))) for key, label in (
-        ("riskRanges", "Risk Ranges"), ("cryptoQuant", "Crypto Quant"), ("inflationNowcast", "Inflation Nowcast"),
-        ("cpiConsensus", "Trading Economics CPI consensus"))]
-    named = [f"{label} {date}" for label, date in dated if date != DASH] + ["HedgAI Signals", "Cboe volatility indices", "Kalshi"]
+        ("inflationNowcast", "Inflation Nowcast"), ("cpiConsensus", "Trading Economics CPI consensus"))]
+    named = (cited.named() + [f"{label} {date}" for label, date in dated if date != DASH]
+             + ["HedgAI Signals", "Cboe volatility indices", "Kalshi"])
     lines += ["Sources: " + ", ".join(named), ""]
     if with_research:
         products = board["research"].get("products") or []

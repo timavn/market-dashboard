@@ -5,6 +5,7 @@ import { isTradingDateKey, previousTradingDateKey } from './usEquityMarketCalend
 import { normalizeDashboardCryptoResearch } from './dashboardCryptoResearch';
 import { canonicalTradeResearch } from './canonicalTradeResearch.cjs';
 import { normalizePublishedTickResearch } from './publishedTickResearch.cjs';
+import { selectLatestPublishedTrade } from './publishedResearchSignals.cjs';
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const identity = (value) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').toUpperCase() : '';
@@ -195,6 +196,35 @@ export function normalizeDashboardTradeResearch(payload, { date = todayInNewYork
   return readings;
 }
 
+/** Trade a product states for a published reference (Gold, Silver, Copper spot),
+ * attached to the overview row that names that reference, basis kept visible.
+ * The same archive and selector as the Predictive Markets board. */
+export function normalizeDashboardReferenceTrade(payload, { date = todayInNewYork() } = {}) {
+  const marketDate = dashboardResearchMarketDate(date);
+  if (payload?.schemaVersion !== 1 || !marketDate || !Array.isArray(payload.references)
+    || invalidEvidence(payload)) return {};
+  const readings = {};
+  catalog.forEach((entry) => {
+    const found = (entry.publishedReferences || []).map((reference) => ({
+      reference, signal: selectLatestPublishedTrade(payload.references, { ticker: reference.symbol, asOf: marketDate, reference: true }),
+    })).filter(({ signal }) => signal?.status === 'available' && directions.has(signal.value) && validDate(signal.date));
+    if (found.length !== 1) return;
+    const { reference, signal } = found[0];
+    const evidence = {
+      date: signal.date, source: signal.sourceLabel || signal.sourceProduct, sourceUrl: signal.sourceUrl,
+      sourceType: 'published-reference-trade', sourceTicker: signal.sourceTicker || reference.symbol,
+      publishedAt: signal.publishedAt, evidenceText: signal.signalProvenance?.sourceText || signal.sourceText,
+      signalProvenance: signal.signalProvenance, referenceInstrument: signal.sourceInstrument || reference.label,
+      basisLabel: reference.basisLabel, basisRelationship: signal.basisRelationship, referenceOnly: true,
+    };
+    readings[entry.symbol] = {
+      ...evidence, verified: true, trade: signal.value, tradeEvidence: evidence,
+      trend: null, trendEvidence: null, lrr: null, hrr: null, rangeEvidence: null,
+    };
+  });
+  return readings;
+}
+
 /** Tick is the independently published HedgAI position, including explicit Wait.
  * Historical batting averages qualify a strategy, not the publisher's reading.
  * Structured ETF references remain identified proxy context, never aliases. */
@@ -221,14 +251,17 @@ export function normalizeDashboardTickResearch(payload, { date = todayInNewYork(
     const { row, match } = candidates[0];
     const direct = readings[row.ticker];
     if (!direct) return;
+    // A Treasury price ETF moves opposite the yield the row shows (SHY Buy = yields down).
+    const tick = match.inverse === true ? { BULLISH: 'BEARISH', BEARISH: 'BULLISH', NEUTRAL: 'NEUTRAL' }[direct.tick] : direct.tick;
     const evidence = {
       ...direct.tickEvidence, matchType: match.matchType,
+      ...(match.inverse === true ? { inverse: true, sourceDirection: direct.tick } : {}),
       referenceInstrument: match.matchType === 'proxy' ? row.ticker : undefined,
       basisLabel: match.basisLabel,
       basisRelationship: match.basisRelationship,
     };
     readings[symbol] = {
-      ...direct, ...evidence, tickEvidence: evidence,
+      ...direct, ...evidence, tick, tickEvidence: evidence,
     };
   });
   return readings;
@@ -273,7 +306,7 @@ export function mergeDashboardResearchReadings(...sources) {
   return readings;
 }
 
-export function normalizeDashboardResearch({ riskRanges, earlyLook, cryptoTracker, cryptoQuant, narrative, intelligence, hedgai } = {}, options = {}) {
+export function normalizeDashboardResearch({ riskRanges, earlyLook, cryptoTracker, cryptoQuant, narrative, intelligence, hedgai, statements } = {}, options = {}) {
   const archivedCrypto = narrative?.schemaVersion === 1 && narrative?.verified === true
     && narrative?.source === 'early-look-archive' && !invalidEvidence(narrative)
     && Array.isArray(narrative.cryptoPublications) ? narrative.cryptoPublications : [];
@@ -285,6 +318,7 @@ export function normalizeDashboardResearch({ riskRanges, earlyLook, cryptoTracke
     ...archivedCrypto.map((publication) => normalizeDashboardCryptoResearch(publication, options)),
     normalizeDashboardNarrativeEnvelope(narrative, options),
     normalizeDashboardTradeResearch(intelligence, options),
+    normalizeDashboardReferenceTrade(statements, options),
     normalizeDashboardTickResearch(hedgai, options),
   );
 }

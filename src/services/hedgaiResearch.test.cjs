@@ -536,3 +536,27 @@ test('an invalid timestamp cannot reorder a later verified publication, while un
   assert.equal(result.sourceQuality.coverageThrough, '2026-09-29');
   assert.ok(result.sourceQuality.issues.some(issue => issue.code === 'HEDGAI_PUBLICATION_TIME_INVALID'));
 });
+
+test('a missed edition holds back only rows no later publication restated', () => {
+  // 2026-09-29 is never delivered; 2026-09-30 opens GLD short and reaffirms nothing else.
+  const later = publication('2026-09-30', [{ ticker: 'GLD', action: 'open-short', sourceText: 'Shorts Added: Gold' }]);
+  const result = project({ events: later, asOf: '2026-09-30T20:00:00Z' });
+  const gap = result.sourceQuality.issues.find(issue => issue.code === 'publication-continuity-unverified');
+  assert.deepEqual(gap.dates, ['2026-09-29']);
+  assert.notEqual(result.sourceQuality.continuity, 'complete');
+  assert.equal(row(result, 'GLD').status, 'current');
+  assert.equal(row(result, 'GLD').position, 'Short');
+  assert.equal(row(result, 'SLV').status, 'last-known');
+  assert.equal(row(result, 'SPY').status, 'last-known');
+});
+
+test('September 29–November 3 headings resolve to their book instruments', () => {
+  const labels = { BNO: 'Brent Oil', FXB: 'Pound To US Dollar', XLB: 'Materials XLB', YCS: 'US Dollar To Yen',
+    UNG: 'Natural Gas', XLU: 'Utilities XLU', XLY: 'Consumer Disc. XLY' };
+  const catalog = require('../../infra/lambdas/gmail_ingestor/hedgai_instruments.json').instruments;
+  const norm = value => String(value).trim().replace(/\s+/g, ' ').toLowerCase();
+  for (const [ticker, label] of Object.entries(labels)) {
+    const matches = catalog.filter(item => [item.sourceLabel, item.ticker, ...(item.aliases || [])].some(value => norm(value) === norm(label)));
+    assert.deepEqual(matches.map(item => item.ticker), [ticker], label);
+  }
+});

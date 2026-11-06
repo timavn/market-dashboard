@@ -617,11 +617,11 @@
 }
 
 .exposure-lab__legend-line i.is-common-risk {
-  background: rgba(188, 52, 47, 0.7);
+  background: rgba(28, 120, 78, 0.7);
 }
 
 .exposure-lab__legend-line i.is-offset {
-  background: rgba(42, 91, 165, 0.7);
+  background: rgba(188, 52, 47, 0.7);
 }
 
 .exposure-lab__footnote {

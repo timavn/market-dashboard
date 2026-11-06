@@ -34,13 +34,9 @@ const STRUCTURE_TOKEN = /^STRUCT\(([-+=]*);([-+]?\d+);([-+=]*);([-+]?\d+);([^;()
 // under Z, Tick, Trade and Trend when the board has a Z column. Side is the day's move with (+) or against (-) the Trend.
 const VOLUME_TOKEN = /^VOL\(([-+]?\d*);([-+]?\d*);([-+]?\d*);([-+]?\d*);([^;()]*);([^;()]*)(?:;([-+]?))?\)$/;
 const VOLUME_WINDOWS = ['1D', '15D', '30D', '90D'];
-// Each window reads green when it is good for the Trend's side and red when it is bad, like HL/HH: against the Trend
-// lighter volume is the pullback to add on and heavier a warning; with it heavier confirms and lighter says nothing.
-// Without a side (no Trend, or a saved board) the windows stay uncolored.
-const windowTone = (value, side) => (side === '-' ? (value < 0 ? ' is-on' : value > 0 ? ' is-against' : '')
-  : side === '+' && value > 0 ? ' is-on' : '');
-const VOLUME_SIDE = { '-': ' · Against the Trend: lighter volume reads green, heavier red',
-  '+': ' · With the Trend: heavier volume reads green' };
+// A signed number reads by its own sign everywhere on the site: up green, down red, zero plain.
+const windowTone = value => (value > 0 ? ' is-on' : value < 0 ? ' is-against' : '');
+const VOLUME_SIDE = { '-': ' · Day against the Trend', '+': ' · Day with the Trend' };
 function VolumeCell({ match, split, ...span }) {
   const [, d1, d15, d30, d90, date, symbol, side] = match;
   const values = [d1, d15, d30, d90];
@@ -48,7 +44,7 @@ function VolumeCell({ match, split, ...span }) {
     : `${symbol} volume${date ? ` on ${date}` : ''} vs the prior session and its 15-, 30- and 90-day averages${VOLUME_SIDE[side] || ''}`;
   const windows = VOLUME_WINDOWS.map((key, index) => {
     const value = values[index] === '' ? null : Number(values[index]);
-    const tone = value === null ? '' : windowTone(value, side);
+    const tone = value === null ? '' : windowTone(value);
     return <span key={key} className={`analyst-prediction-volume__window${tone}`}>
       <span className="analyst-prediction-volume__key">{key}</span>
       <span className="analyst-prediction-volume__value">{value === null ? 'N/A' : `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value)}%`}</span>

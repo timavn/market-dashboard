@@ -70,13 +70,13 @@
   text-align: right;
 }
 
-.portfolio-scenario-planner__exposure-bar.is-long .portfolio-scenario-planner__exposure-heading span,
-.portfolio-scenario-planner__exposure-bar.is-long .portfolio-scenario-planner__exposure-heading b {
+.portfolio-scenario-planner__exposure-heading.is-positive span,
+.portfolio-scenario-planner__exposure-heading.is-positive b {
   color: #087a4b;
 }
 
-.portfolio-scenario-planner__exposure-bar.is-short .portfolio-scenario-planner__exposure-heading span,
-.portfolio-scenario-planner__exposure-bar.is-short .portfolio-scenario-planner__exposure-heading b {
+.portfolio-scenario-planner__exposure-heading.is-negative span,
+.portfolio-scenario-planner__exposure-heading.is-negative b {
   color: #cf1e1e;
 }
 

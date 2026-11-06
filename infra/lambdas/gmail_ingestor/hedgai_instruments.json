@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "source": "Reviewed HedgAI Signals September 28, 2026 publisher tables and September 29\u2013October 6, 2026 explicit email action headings",
+  "source": "Reviewed HedgAI Signals September 28, 2026 publisher tables and September 29\u2013November 3, 2026 explicit email action headings",
   "instruments": [
     {
       "instrumentId": "hedgai:QQQ",
@@ -40,7 +40,9 @@
       "instrumentId": "hedgai:XLB",
       "ticker": "XLB",
       "sourceLabel": "Materials $XLB",
-      "aliases": []
+      "aliases": [
+        "Materials XLB"
+      ]
     },
     {
       "instrumentId": "hedgai:XLE",
@@ -101,7 +103,8 @@
       "ticker": "YCS",
       "sourceLabel": "US Dollar To Yen Cross",
       "aliases": [
-        "USD To Yen"
+        "USD To Yen",
+        "US Dollar To Yen"
       ]
     },
     {
@@ -190,7 +193,9 @@
       "instrumentId": "hedgai:XLU",
       "ticker": "XLU",
       "sourceLabel": "Utilities $XLU",
-      "aliases": []
+      "aliases": [
+        "Utilities XLU"
+      ]
     },
     {
       "instrumentId": "hedgai:XLV",
@@ -205,7 +210,8 @@
       "ticker": "XLY",
       "sourceLabel": "Consumer Discretionary $XLY",
       "aliases": [
-        "Consumer Discretionary XLY"
+        "Consumer Discretionary XLY",
+        "Consumer Disc. XLY"
       ]
     },
     {
@@ -224,13 +230,17 @@
       "instrumentId": "hedgai:BNO",
       "ticker": "BNO",
       "sourceLabel": "Brent Crude Oil",
-      "aliases": []
+      "aliases": [
+        "Brent Oil"
+      ]
     },
     {
       "instrumentId": "hedgai:UNG",
       "ticker": "UNG",
       "sourceLabel": "Natural Gas Futures",
-      "aliases": []
+      "aliases": [
+        "Natural Gas"
+      ]
     },
     {
       "instrumentId": "hedgai:CPER",
@@ -306,7 +316,9 @@
       "instrumentId": "hedgai:FXB",
       "ticker": "FXB",
       "sourceLabel": "British Pound To US Dollar Cross",
-      "aliases": []
+      "aliases": [
+        "Pound To US Dollar"
+      ]
     },
     {
       "instrumentId": "hedgai:SHY",

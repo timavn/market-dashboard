@@ -14,8 +14,8 @@
 .portfolio-brief-conflict h3 { color: var(--dashboard-attention, #f97316); }
 .portfolio-brief-conflict.is-exit { border-left-color: var(--dashboard-negative, #dc2626); }
 .portfolio-brief-conflict.is-exit h3 { color: var(--dashboard-negative, #dc2626); }
-.portfolio-brief .signal-bullish, .portfolio-brief .is-long .portfolio-exposure-value, .portfolio-brief .is-net-positive .portfolio-exposure-value { color: var(--dashboard-positive, #059669); }
-.portfolio-brief .signal-bearish, .portfolio-brief .is-short .portfolio-exposure-value, .portfolio-brief .is-net-negative .portfolio-exposure-value { color: var(--dashboard-negative, #dc2626); }
+.portfolio-brief .signal-bullish { color: var(--dashboard-positive, #059669); }
+.portfolio-brief .signal-bearish { color: var(--dashboard-negative, #dc2626); }
 .portfolio-brief .signal-neutral, .portfolio-brief .signal-unavailable { color: var(--dashboard-muted-text, #667085); }
 .portfolio-brief-source { display: block; margin-top: 4px; color: var(--analyst-muted, #667085); font-size: 10px; }
 .portfolio-brief-caption, .portfolio-brief-muted { color: var(--analyst-muted, #667085); font-size: 10px; }

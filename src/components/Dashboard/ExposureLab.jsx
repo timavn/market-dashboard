@@ -100,12 +100,13 @@ function heatStyle(value, scale = 8) {
 
 function correlationHeatStyle(value) {
   const parsed = finite(value);
-  if (parsed == null) return undefined;
+  if (parsed == null || parsed === 0) return undefined;
   const alpha = Math.min(0.78, 0.08 + Math.abs(parsed) * 0.62);
+  // Positive green, negative red, as every signed number on the site.
   return {
-    '--exposure-heat': parsed >= 0
-      ? `rgba(188, 52, 47, ${alpha})`
-      : `rgba(42, 91, 165, ${alpha})`,
+    '--exposure-heat': parsed > 0
+      ? `rgba(28, 120, 78, ${alpha})`
+      : `rgba(188, 52, 47, ${alpha})`,
   };
 }
 
@@ -417,8 +418,8 @@ function CorrelationLab({ snapshot, modeKey, window, scope, query }) {
   return (
     <div className="exposure-lab__stacked-tables">
       <div className="exposure-lab__legend-line">
-        <span><i className="is-common-risk" /> RED = positive P&amp;L co-movement / common risk</span>
-        <span><i className="is-offset" /> BLUE = offsetting P&amp;L co-movement</span>
+        <span><i className="is-common-risk" /> GREEN = positive P&amp;L co-movement / common risk</span>
+        <span><i className="is-offset" /> RED = negative (offsetting) P&amp;L co-movement</span>
         <span>{matrix?.minimumObservations || '—'} aligned observations required</span>
       </div>
       <CorrelationMatrix

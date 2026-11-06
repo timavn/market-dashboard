@@ -33,7 +33,8 @@ export function remarkAnalystAccountComparison() {
           const comparable = !unavailable && before !== null && after !== null && Number.isSafeInteger(after - before);
           const delta = comparable ? after - before : null;
           const change = cell(comparable ? formatAccountDollarChange(delta) : '—');
-          const tone = !comparable || delta === 0 ? 'muted' : metric.favorable ? delta * metric.favorable > 0 ? 'positive' : 'negative' : null;
+          // A dollar change reads by its own sign: up green, down red.
+          const tone = !comparable || delta === 0 ? 'muted' : delta > 0 ? 'positive' : 'negative';
           if (tone) change.data = { hProperties: { className: [`analyst-account-change--${tone}`] } };
           const explanation = comparable ? accountComparisonMeaning(metric, before, after, equity)
             : 'A comparable dollar amount is unavailable for one or both snapshots; the change cannot be established.';

@@ -412,12 +412,12 @@ function FlexReconciliationPanel({
         <FlexMetric
           label="Cash surplus after longs"
           value={formatFlexAmount(cashSurplus, flex.currency || currency)}
-          tone={cashSurplus >= 0 ? 'positive' : 'negative'}
+          tone={cashSurplus > 0 ? 'positive' : cashSurplus < 0 ? 'negative' : 'neutral'}
         />
         <FlexMetric
           label="Long funding gap"
           value={formatFlexAmount(fundingGap, flex.currency || currency)}
-          tone={fundingGap > 0 ? 'negative' : 'positive'}
+          tone={fundingGap > 0 ? 'positive' : fundingGap < 0 ? 'negative' : 'neutral'}
         />
         <FlexMetric
           label="Long baseline"

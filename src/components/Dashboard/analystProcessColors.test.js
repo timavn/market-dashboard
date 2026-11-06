@@ -52,8 +52,8 @@ test('balance capacity and P&L are interpreted only under their own labels, with
   expect(analystFieldTone('Short market value', '$85,592.32')).toBeNull();
   expect(analystFieldTone('Borrowing balance', 'Unavailable')).toBe('muted');
   expect(analystFieldTone('Borrowing balance', 'Unavailable as a standalone verified field')).toBe('muted');
-  expect(analystFieldTone('Add-long room', '$0.00')).toBe('caution');
-  expect(analystFieldTone('Code-computed trim requirement to clear the no-borrow condition', '$4,768.63')).toBe('negative');
+  expect(analystFieldTone('Add-long room', '$0.00')).toBeNull();
+  expect(analystFieldTone('Code-computed trim requirement to clear the no-borrow condition', '$4,768.63')).toBe('positive');
   expect(analystFieldTone('Trim requirement', '$0.00')).toBeNull();
   expect(analystFieldTone('Daily P&L', '$-18.59')).toBe('negative');
   expect(analystFieldTone('Unrealized P&L', '+$18.59')).toBe('positive');

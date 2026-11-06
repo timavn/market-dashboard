@@ -1006,6 +1006,12 @@ export class MarketDataService {
     return response.data;
   }
 
+  // Trade for published references (Gold/Silver spot), stated Trend and Alpha Codes.
+  static async getPublishedStatements({ date } = {}) {
+    const response = await dedupedGet('/api/research/published-statements', { params: date ? { date } : undefined });
+    return response.data;
+  }
+
   static async getHedgaiResearch({ asOf = new Date().toISOString() } = {}) {
     const response = await dedupedGet('/api/research/hedgai', { params: { asOf } });
     return response.data;

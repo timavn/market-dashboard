@@ -761,7 +761,8 @@ function hasExactAnalystHermesCommandSignature(commandText, cwd) {
   const resolvedCwd = cwd ? path.resolve(cwd) : '';
   const portIndex = tokens.indexOf('--port');
   const usesAnalystBinary = tokens.includes(analystBinPath)
-    || tokens.some((token) => hermesBinPaths.has(path.resolve(resolvedCwd || root, token)));
+    || tokens.some((token) => hermesBinPaths.has(path.resolve(resolvedCwd || root, token)))
+    || usesHermesBootstrapLauncher(tokens);
   const profileIndex = tokens.indexOf('-p');
   return resolvedCwd === root
     && usesAnalystBinary
@@ -771,13 +772,30 @@ function hasExactAnalystHermesCommandSignature(commandText, cwd) {
     && portIndex >= 0
     && tokens[portIndex + 1] === String(services.analystHermes.port);
 }
+// Since `hermes update` (2026-11-02) the hermes command re-executes as Hermes's
+// bundled Python, `-I -c`, an inline script that pins ~/.hermes/hermes-agent,
+// imports hermes_bootstrap and enters hermes_cli.main, then the usual CLI args.
+// Both the supervisor's own launch and an update respawn take this shape; the
+// inline script varies by Hermes release, so only its stable markers are read
+// (ps renders its newlines as a literal \012).
+function usesHermesBootstrapLauncher(tokens) {
+  const interpreter = tokens[0] || '';
+  const toolsRoot = path.join(os.homedir(), '.hermes/tools') + path.sep;
+  if (!path.resolve(interpreter).startsWith(toolsRoot) || !/^python3(\.\d+)?$/.test(path.basename(interpreter))) return false;
+  if (tokens[1] !== '-I' || tokens[2] !== '-c') return false;
+  const script = tokens.join(' ');
+  return script.includes(`sys.path.insert(0, '${path.join(os.homedir(), '.hermes/hermes-agent')}')`)
+    && /import hermes_bootstrap(?![\w.])/.test(script)
+    && (script.includes("runpy.run_module('hermes_cli.main',") || script.includes('from hermes_cli.main import main'));
+}
 function hasExactAnalystHermesRuntimeSignature(commandText) {
   const tokens = commandTokens(commandText);
   const portIndex = tokens.indexOf('--port');
   const hostIndex = tokens.indexOf('--host');
   const profileIndex = tokens.indexOf('-p');
   const usesAnalystBinary = tokens.includes(analystBinPath)
-    || tokens.some((token) => hermesBinPaths.has(path.resolve(token)));
+    || tokens.some((token) => hermesBinPaths.has(path.resolve(token)))
+    || usesHermesBootstrapLauncher(tokens);
   return usesAnalystBinary
     && profileIndex >= 0
     && tokens[profileIndex + 1] === 'analyst'

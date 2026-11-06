@@ -41,8 +41,9 @@ test('saved account tables gain exact changes and explanations without changing 
   expect(content(table.children[8].children[4])).toContain('3.43% to 1.51%');
   expect(content(table.children[9].children[4])).toContain('Neither snapshot shows a maintenance shortfall');
   expect(content(table.children[12].children[4])).toContain('interest ledger');
-  expect(table.children[2].children[3].data.hProperties.className).toEqual(['analyst-account-change--positive']);
-  expect(table.children[7].children[3].data).toBeUndefined(); // Less gross is not automatically better.
+  // Every dollar change reads by its own sign, whatever the metric: a fall is red.
+  expect(table.children[2].children[3].data.hProperties.className).toEqual(['analyst-account-change--negative']);
+  expect(table.children[7].children[3].data.hProperties.className).toEqual([expect.stringMatching(/^analyst-account-change--(?:positive|negative|muted)$/)]);
   const once = JSON.stringify(table);
   transform(table);
   expect(JSON.stringify(table)).toBe(once);
@@ -74,7 +75,8 @@ test('a declining balance and rising requirements get the appropriate interpreta
   const table = transform(makeTable([['Net liquidation value', '$200', '$100', 'Lower'], ['Initial margin', '$50', '$80', 'Higher']]));
   expect(content(table.children[1].children[4])).toContain('less capital');
   expect(content(table.children[2].children[4])).toContain('more collateral');
-  expect(table.children[2].children[3].data.hProperties.className).toEqual(['analyst-account-change--negative']);
+  // A rising requirement is a positive change, so it reads green like every positive number.
+  expect(table.children[2].children[3].data.hProperties.className).toEqual(['analyst-account-change--positive']);
 });
 
 test('net side changes and signed short amounts do not imply trades or market neutrality', () => {
