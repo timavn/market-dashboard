@@ -386,8 +386,3 @@
     column-gap: 3px;
   }
 }
-
-.market-events-day li.is-released,
-.market-events-day li.is-released time {
-  color: #2563eb;
-}

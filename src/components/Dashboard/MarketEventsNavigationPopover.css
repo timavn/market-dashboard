@@ -248,26 +248,15 @@
   }
 }
 
-/* Released events turn blue; the actual links to the page it was read from. */
-.market-events-navigation-popover .market-events-day li.is-released {
-  color: #2563eb;
-}
-
+/* The actual links to the page it was read from, styled like the other figures. */
 .market-events-navigation-popover .market-events-quick-reference a.market-events-day__actual {
-  color: #2563eb;
-  font-weight: 700;
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
 }
 
 .market-events-navigation-popover .market-events-quick-reference a.market-events-day__actual:hover {
   text-decoration: underline;
-}
-
-.market-events-navigation-popover .market-events-day li.is-released .market-events-day__figure small {
-  color: #6b8fd6;
-}
-
-.market-events-navigation-popover .market-events-day__actual.is-pending {
-  color: #8aa7e0;
 }
 
 .market-events-navigation-popover .market-events-quick-reference__sources {

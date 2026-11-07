@@ -827,6 +827,13 @@ class WorkspaceTests(unittest.TestCase):
                 self.store.dispatch('delete', {'conversationId': cid})
                 self.assertIsNone(self.store.dispatch('setting', {'key': key})['value'])
 
+    def test_review_import_adds_no_chat_for_a_close_capture(self):
+        from review_runs_v2 import ReviewRunV2Store
+        path = Path(self.temp.name) / 'reviews.sqlite3'
+        ReviewRunV2Store(path).create(review_kind='portfolio-review', request_id='portfolio-close:2026-11-05:2026-11-05T21:30:00.000Z')
+        self.store.import_reviews(ReviewRunV2Store(path))
+        self.assertEqual(self.store.dispatch('list', {})['conversations'], [])
+
     def test_review_import_skips_runs_already_owned_by_workspace(self):
         from review_runs_v2 import ReviewRunV2Store
         source = ReviewRunV2Store(Path(self.temp.name) / 'reviews.sqlite3')

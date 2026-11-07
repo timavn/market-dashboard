@@ -392,13 +392,18 @@ class SetupBoardSourcesTests(unittest.TestCase):
         items = self.project({"predictionBoard": {"status": "ready", "updatedAt": AT}}, {"predictionBoard": data})
         self.assertEqual(list(items)[3:6], ["top-3-things", "early-look", "the-macro-show"])
         self.assertEqual({key: (items[key]["label"], items[key]["status"], items[key].get("publishedAt")) for key in list(items)[3:6]}, {
-            # Cited only by an Oct 9 Trade: that is the edition used, not this morning's.
-            "top-3-things": ("Top 3 Things", "ready", "2026-10-09"),
+            # Cited only by an Oct 9 Trade, but this morning's edition was read: the row dates what was pulled.
+            "top-3-things": ("Top 3 Things", "ready", "2026-10-10T13:44:00.000Z"),
             "early-look": ("Early Look", "ready", "2026-10-10T12:44:00.000Z"),
             "the-macro-show": ("The Macro Show", "ready", "2026-10-03")})
         # Read this morning but cited nowhere in the review: not a source.
         self.assertNotIn("real-time-alert", items)
         self.assertNotIn("tradeResearch", items)
+        # Not published yet today: the cited edition, at its send time when the Trade carries one.
+        data["usd"]["trade"]["publishedAt"] = "2026-10-03T14:26:00.000Z"
+        timed = self.project({"predictionBoard": {"status": "ready", "updatedAt": AT}}, {"predictionBoard": data})
+        self.assertEqual(timed["the-macro-show"]["publishedAt"], "2026-10-03T14:26:00.000Z")
+        del data["usd"]["trade"]["publishedAt"]
         # A failed Trade feed still shows, beside the products the review could cite.
         data["sourceStatus"]["securityIntelligence"] = "failed"
         failed = self.project({"predictionBoard": {"status": "partial", "updatedAt": AT}}, {"predictionBoard": data})

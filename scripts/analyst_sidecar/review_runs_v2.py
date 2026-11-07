@@ -54,6 +54,8 @@ REVIEW_VISIBLE_MESSAGES = {
 REVIEW_CONVERSATION_IDS = {
     review_kind: f"review:{review_kind}" for review_kind in REVIEW_KINDS
 }
+# Request IDs from analystPortfolioClose.cjs. These runs stay in the shell.
+HEADLESS_CAPTURE_REQUEST_PREFIX = "portfolio-close:"
 DEADLINE_SECONDS = {
     "portfolio-review": 75,
     "prediction-markets-review": 90,
@@ -97,6 +99,15 @@ def _notify_checkpoint(
     except RuntimeError:
         # Interpreter shutdown: the durable checkpoint already committed.
         LOGGER.warning("Review checkpoint hook skipped for %s/%s during shutdown", run_id, source_name)
+
+
+def _is_headless_capture(review_kind: Any, conversation_id: Any, request_id: Any) -> bool:
+    """A scheduled close capture: a run with a baseline to store and no chat to show."""
+
+    return (
+        str(conversation_id or "") == REVIEW_CONVERSATION_IDS.get(str(review_kind or ""))
+        and str(request_id or "").startswith(HEADLESS_CAPTURE_REQUEST_PREFIX)
+    )
 
 
 def _legacy_run_conversation_id(run_id: str) -> str:
@@ -333,10 +344,15 @@ class ReviewRunV2Store:
             # its own durable conversation, in place, so its evidence/report
             # and original timestamps remain untouched.  INSERT OR IGNORE and
             # the deterministic migrated id make this safe on every startup.
-            legacy_rows = connection.execute(
-                "SELECT run_id, review_kind, conversation_id, request_id, created_at, updated_at "
-                "FROM analyst_review_runs_v2 ORDER BY created_at ASC"
-            ).fetchall()
+            # Close captures are not legacy attempts: they stay in the shell,
+            # or every startup would file each one as a chat of its own.
+            legacy_rows = [
+                row for row in connection.execute(
+                    "SELECT run_id, review_kind, conversation_id, request_id, created_at, updated_at "
+                    "FROM analyst_review_runs_v2 ORDER BY created_at ASC"
+                ).fetchall()
+                if not _is_headless_capture(row["review_kind"], row["conversation_id"], row["request_id"])
+            ]
             requires_migration = any(
                 not str(row["conversation_id"] or "")
                 or str(row["conversation_id"] or "")
@@ -402,8 +418,9 @@ class ReviewRunV2Store:
                     "DELETE FROM analyst_review_conversations_v1 "
                     "WHERE conversation_id = ? AND NOT EXISTS ("
                     "SELECT 1 FROM analyst_review_runs_v2 "
-                    "WHERE conversation_id = analyst_review_conversations_v1.conversation_id)",
-                    (replaced_id,),
+                    "WHERE conversation_id = analyst_review_conversations_v1.conversation_id "
+                    "AND request_id NOT LIKE ?)",
+                    (replaced_id, f"{HEADLESS_CAPTURE_REQUEST_PREFIX}%"),
                 )
             connection.executescript(
                 """
@@ -1121,7 +1138,7 @@ class ReviewRunV2Store:
                 "WHERE conversation_id = ?",
                 (clean_conversation,),
             ).fetchone()
-            if not conversation:
+            if not conversation and not _is_headless_capture(review_kind, clean_conversation, clean_request):
                 now = utc_now_iso()
                 connection.execute(
                     """

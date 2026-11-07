@@ -2,13 +2,12 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState
 import { createPortal } from 'react-dom';
 import './MarketEventsNavigationPopover.css';
 
-export default function MarketEventsNavigationPopover({ detail, briefingOpen, hasNotification, onNotificationDismiss, onOpen, children }) {
+export default function MarketEventsNavigationPopover({ detail, briefingOpen, onOpen, children }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({});
   const triggerRef = useRef(null);
   const panelRef = useRef(null);
   const panelId = useId();
-  const notificationId = useId();
 
   const updatePosition = useCallback(() => {
     const rect = triggerRef.current?.getBoundingClientRect();
@@ -64,18 +63,15 @@ export default function MarketEventsNavigationPopover({ detail, briefingOpen, ha
 
   return <>
     <button ref={triggerRef} type="button"
-      className={`dashboard-top-navigation__item market-events-navigation-trigger${open ? ' is-active' : ''}${hasNotification ? ' has-notification' : ''}`}
+      className={`dashboard-top-navigation__item market-events-navigation-trigger${open ? ' is-active' : ''}`}
       aria-label="Market Events" aria-haspopup="dialog"
-      aria-describedby={hasNotification ? notificationId : undefined}
       aria-expanded={open} aria-controls={open ? panelId : undefined} title={detail}
       onClick={() => {
-        onNotificationDismiss?.();
         if (open) close(true);
         else { onOpen?.(); updatePosition(); setOpen(true); }
       }}>
       <span>Market Events</span>
     </button>
-    {hasNotification && <span id={notificationId} className="sr-only">New market events today</span>}
     {open && createPortal(
       <div ref={panelRef} id={panelId} className="market-events-navigation-popover" style={position}
         role="dialog" aria-label="Market Events">

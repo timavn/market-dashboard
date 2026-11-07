@@ -598,7 +598,7 @@ def _review_sources(run, store, research_products, prediction_universe):
                 continue
             ready = statuses.get(status_key) == "ready"
             if source_id == "tradeResearch":
-                # Each Hedgeye product the review cites is its own row, at the latest edition it used.
+                # Each Hedgeye product the review cites is its own row, at the latest edition read.
                 # Risk Ranges and Crypto Quant keep their feed rows. The aggregate row stays only to
                 # show a failed Trade feed, or when the review cites no other product.
                 cited = [product for product in cited_products(board) if product["id"] not in {"risk-ranges", "crypto-quant"}]

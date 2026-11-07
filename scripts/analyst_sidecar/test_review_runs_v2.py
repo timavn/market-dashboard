@@ -857,6 +857,47 @@ class ReviewRunV2Tests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()
         self.assertIsNotNone(evidence)
 
+    async def test_close_captures_never_become_chats_across_restarts(self):
+        path = Path(self.temp.name) / "capture.sqlite3"
+        shell = review_conversation_id("portfolio-review")
+        store = ReviewRunV2Store(path)
+        captures = []
+        for attempt in ("21:30", "21:40"):
+            capture, created = store.create(
+                review_kind="portfolio-review",
+                request_id=f"portfolio-close:2026-11-05:2026-11-05T{attempt}:00.000Z",
+            )
+            self.assertTrue(created)
+            self.assertEqual(capture["conversationId"], shell)
+            store.update(capture["runId"], state="failed", phase="terminal", outcome="blocked")
+            captures.append(capture["runId"])
+        self.assertEqual(store.list_conversations(limit=10), ([], None))
+
+        restarted = ReviewRunV2Store(path)
+        self.assertEqual(restarted.list_conversations(limit=10), ([], None))
+        for run_id in captures:
+            self.assertEqual(restarted.get(run_id)["conversationId"], shell)
+        self.assertFalse(path.with_name(f"{path.stem}.pre-conversation-v1.bak{path.suffix}").exists())
+
+    async def test_legacy_attempt_leaves_the_shell_without_taking_a_close_capture(self):
+        path = Path(self.temp.name) / "shared-shell.sqlite3"
+        shell = review_conversation_id("portfolio-review")
+        store = ReviewRunV2Store(path)
+        capture, _ = store.create(
+            review_kind="portfolio-review",
+            request_id="portfolio-close:2026-11-05:2026-11-05T21:30:00.000Z",
+        )
+        store.update(capture["runId"], state="failed", phase="terminal", outcome="blocked")
+        legacy, _ = store.create(review_kind="portfolio-review", request_id="legacy-request")
+        store.update(legacy["runId"], state="failed", phase="terminal", outcome="blocked")
+
+        restarted = ReviewRunV2Store(path)
+        conversations, _cursor = restarted.list_conversations(limit=10)
+        self.assertEqual([row["conversationId"] for row in conversations],
+                         [restarted.get(legacy["runId"])["conversationId"]])
+        self.assertNotEqual(conversations[0]["conversationId"], shell)
+        self.assertEqual(restarted.get(capture["runId"])["conversationId"], shell)
+
     async def test_legacy_fixed_shell_migration_is_backed_up_transactional_and_idempotent(self):
         path = Path(self.temp.name) / "legacy.sqlite3"
         legacy = ReviewRunV2Store(path)

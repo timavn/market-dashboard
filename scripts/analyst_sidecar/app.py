@@ -1255,6 +1255,13 @@ async def _default_portfolio_pca_source(account, *, diagnostics=None, ensure_act
     return await read_portfolio_pca_review(API_BASE_URL, account, diagnostics=diagnostics, ensure_active=ensure_active)
 
 
+def _portfolio_reference_conversation_deleted(conversation_id: str) -> bool:
+    """Deleting a chat retires its runs. Close captures have no chat to delete."""
+    if conversation_id == review_conversation_id("portfolio-review"):
+        return False
+    return workspace_store.dispatch("deleted", {"conversationId": conversation_id})["deleted"]
+
+
 def _default_portfolio_review_sources() -> PortfolioReviewSources:
     return PortfolioReviewSources(
         portfolio_context=ibkr.portfolio_context,
@@ -1276,7 +1283,7 @@ def _default_portfolio_review_sources() -> PortfolioReviewSources:
         pca_research=_default_portfolio_pca_source,
         balance_context=balance_context.context,
         portfolio_reference=lambda: latest_verified_portfolio(
-            review_run_v2_store, lambda cid: workspace_store.dispatch("deleted", {"conversationId": cid})["deleted"]
+            review_run_v2_store, _portfolio_reference_conversation_deleted
         ),
         refresh_research=_portfolio_refresh_research,
     )

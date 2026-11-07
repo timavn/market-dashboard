@@ -85,6 +85,13 @@ class PortfolioRollupIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(risk["factorExposure"]["rows"], [{"label": "Stocks & ETFs", "longPct": 60,
                                                           "shortPct": 0, "netPct": 60}])
 
+    def test_close_capture_stays_a_holdings_reference_after_the_review_shell_is_deleted(self):
+        deleted = analyst_app._portfolio_reference_conversation_deleted
+        with patch.object(analyst_app.workspace_store, "dispatch", return_value={"deleted": True}) as dispatch:
+            self.assertFalse(deleted("review:portfolio-review"))
+            dispatch.assert_not_called()
+            self.assertTrue(deleted("deleted-chat"))
+
     async def test_headless_close_capture_is_the_next_sessions_baseline_including_friday_for_monday(self):
         # Hermes's 4:30 PM ET capture has no conversation (the review shell id).
         thursday = await self.run_review(None, 300)

@@ -105,15 +105,15 @@ describe('MarketEventsQuickReference', () => {
   });
   afterEach(() => { global.ResizeObserver = OriginalResizeObserver; });
 
-  test('keeps a notification glow in navigation and opens the current-week agenda and event briefing', () => {
+  test('keeps a plain navigation button with no highlight and opens the current-week agenda and event briefing', () => {
     useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([
       event(), event({ id: 'ff-tomorrow', name: 'Retail Sales', startAt: '2026-08-11T12:30:00.000Z' }),
     ]) }));
     render(<MarketEventsQuickReference compact now={now} />);
     const trigger = screen.getByRole('button', { name: 'Market Events', exact: true });
     expect(trigger).toHaveTextContent(/^Market Events$/);
-    expect(trigger).toHaveClass('has-notification');
-    expect(trigger).toHaveAccessibleDescription('New market events today');
+    expect(trigger).not.toHaveClass('has-notification');
+    expect(trigger).not.toHaveAttribute('aria-describedby');
     expect(trigger).toHaveAttribute('title', expect.stringContaining('Forex Factory'));
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(trigger.querySelector('svg')).toBeNull();
@@ -123,10 +123,7 @@ describe('MarketEventsQuickReference', () => {
       top: window.innerHeight - 60, bottom: window.innerHeight - 16, left: 400, right: 520,
     });
     trigger.focus();
-    expect(trigger).toHaveClass('has-notification');
     fireEvent.click(trigger);
-    expect(trigger).not.toHaveClass('has-notification');
-    expect(trigger).not.toHaveAttribute('aria-describedby');
     const calendar = screen.getByRole('dialog', { name: 'Market Events', exact: true });
     expect(calendar).toHaveStyle({ bottom: '67px', width: '620px' });
     expect(calendar.style.top).toBe('');
@@ -203,7 +200,7 @@ describe('MarketEventsQuickReference', () => {
     // Released without a posted figure: marked pending, never an invented value.
     expect(cpi).toHaveTextContent(/Actual\s*—/);
     expect(cpi).not.toHaveTextContent(/Actual\s*\d/);
-    expect(cpi).toHaveClass('is-released');
+    expect(cpi).not.toHaveClass('is-released');
     expect(cpi).toHaveAttribute('title', expect.stringContaining('Source: Forex Factory'));
     expect(cpi).toHaveAttribute('title', expect.stringContaining('Source updated: Aug 10, 2026 08:30 PT (11:30 ET)'));
     expect(cpi).not.toHaveAttribute('title', expect.stringMatching(/\b(?:AM|PM)\b/));
@@ -237,14 +234,14 @@ describe('MarketEventsQuickReference', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Market Events', exact: true }));
     const calendar = screen.getByRole('dialog', { name: 'Market Events', exact: true });
     const cpi = within(calendar).getByTitle(/US CPI y\/y/);
-    expect(cpi).toHaveClass('is-released');
+    expect(cpi).not.toHaveClass('is-released');
     expect(cpi).toHaveAttribute('title', expect.stringContaining('Actual source: Trading Economics'));
     const actual = within(cpi).getByRole('link', { name: /Actual\s*2\.9%/ });
     expect(actual).toHaveAttribute('href', 'https://tradingeconomics.com/united-states/inflation-cpi');
     expect(within(calendar).getByText(/checked 08:58 \(11:58\)/)).toBeInTheDocument();
   });
 
-  test('turns an upcoming event blue when its release time passes', () => {
+  test('shows the pending actual, with no highlight, when an event\'s release time passes', () => {
     jest.useFakeTimers();
     try {
       let currentTime = FIXED_NOW.getTime();
@@ -256,12 +253,12 @@ describe('MarketEventsQuickReference', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Market Events', exact: true }));
       const row = () => within(screen.getByRole('dialog', { name: 'Market Events', exact: true }))
         .getByTitle(/US CPI y\/y/);
-      expect(row()).not.toHaveClass('is-released');
       expect(row()).not.toHaveTextContent(/Actual/);
 
       currentTime += 30 * 60 * 1000;
       act(() => { jest.advanceTimersByTime(30 * 60 * 1000 + 500); });
-      expect(row()).toHaveClass('is-released');
+      expect(row()).toHaveTextContent(/Actual\s*—/);
+      expect(row()).not.toHaveClass('is-released');
     } finally {
       jest.useRealTimers();
     }
@@ -370,94 +367,15 @@ describe('MarketEventsQuickReference', () => {
     expect(trigger).not.toHaveClass('has-notification');
   });
 
-  test('notifies for late events by the Eastern date even when their UTC date is tomorrow', () => {
+  test('counts late events by the Eastern date even when their UTC date is tomorrow', () => {
     useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([
       event({ id: 'ff-late-today', startAt: '2026-08-11T03:59:00.000Z' }),
       event({ id: 'ff-early-tomorrow', startAt: '2026-08-11T04:00:00.000Z' }),
     ]) }));
     render(<MarketEventsQuickReference compact now={now} />);
     const trigger = screen.getByRole('button', { name: 'Market Events', exact: true });
-    expect(trigger).toHaveClass('has-notification');
+    expect(trigger).not.toHaveClass('has-notification');
     expect(trigger).toHaveAttribute('title', expect.stringContaining('1 high-impact event today'));
-  });
-
-  test('keeps dismissal through polling and reloads, and notifies only for a newly added event today', () => {
-    const todayEvent = event();
-    const tomorrowEvent = event({ id: 'ff-tomorrow', startAt: '2026-08-11T12:30:00.000Z' });
-    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([todayEvent, tomorrowEvent]) }));
-    const { unmount } = render(<MarketEventsQuickReference compact now={now} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Market Events', exact: true }));
-    unmount();
-
-    const { rerender } = render(<MarketEventsQuickReference compact now={now} />);
-    const trigger = screen.getByRole('button', { name: 'Market Events', exact: true });
-    expect(trigger).not.toHaveClass('has-notification');
-
-    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([
-      tomorrowEvent,
-      event({ id: 'ff-tomorrow-new', startAt: '2026-08-11T14:30:00.000Z' }),
-      todayEvent,
-    ], { sourceUpdatedAt: '2026-08-10T15:45:00.000Z' }) }));
-    rerender(<MarketEventsQuickReference compact now={now} />);
-    expect(trigger).not.toHaveClass('has-notification');
-
-    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([
-      todayEvent,
-      event({ id: 'ff-today-new', name: 'Fed Chair Speaks', startAt: '2026-08-10T17:00:00.000Z' }),
-    ]) }));
-    rerender(<MarketEventsQuickReference compact now={now} />);
-    expect(trigger).toHaveClass('has-notification');
-    fireEvent.click(trigger);
-    expect(trigger).not.toHaveClass('has-notification');
-    expect(trigger).toHaveTextContent(/^Market Events$/);
-  });
-
-  test('notifies again when the next Eastern day begins and its events become today', () => {
-    jest.useFakeTimers();
-    try {
-      let clock = new Date('2026-08-11T03:59:00.000Z');
-      const events = [
-        event(),
-        event({ id: 'ff-next-et-day', startAt: '2026-08-11T12:30:00.000Z' }),
-      ];
-      const clockNow = () => clock;
-      useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot(events, {
-        fetchedAt: clock.toISOString(), sourceUpdatedAt: clock.toISOString(),
-      }) }));
-      const { rerender } = render(<MarketEventsQuickReference compact now={clockNow} />);
-      const trigger = screen.getByRole('button', { name: 'Market Events', exact: true });
-      expect(trigger).toHaveClass('has-notification');
-      fireEvent.click(trigger);
-      expect(trigger).not.toHaveClass('has-notification');
-      fireEvent.click(trigger);
-
-      clock = new Date('2026-08-11T04:04:00.000Z');
-      useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot(events, {
-        fetchedAt: clock.toISOString(), sourceUpdatedAt: clock.toISOString(),
-      }) }));
-      act(() => { jest.advanceTimersByTime(5 * 60 * 1000); });
-      rerender(<MarketEventsQuickReference compact now={clockNow} />);
-      expect(trigger).toHaveClass('has-notification');
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-
-  test('does not notify for a newly received event until its snapshot is verified and fresh', () => {
-    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([event()]) }));
-    const { rerender } = render(<MarketEventsQuickReference compact now={now} />);
-    const trigger = screen.getByRole('button', { name: 'Market Events', exact: true });
-    fireEvent.click(trigger);
-    const events = [event(), event({ id: 'ff-new-unverified' })];
-    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot(events, {
-      fetchedAt: '2026-08-10T13:00:00.000Z', sourceUpdatedAt: '2026-08-10T13:00:00.000Z',
-    }) }));
-    rerender(<MarketEventsQuickReference compact now={now} />);
-    expect(trigger).not.toHaveClass('has-notification');
-
-    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot(events) }));
-    rerender(<MarketEventsQuickReference compact now={now} />);
-    expect(trigger).toHaveClass('has-notification');
   });
 
   test.each([
@@ -471,7 +389,7 @@ describe('MarketEventsQuickReference', () => {
     expect(trigger).not.toHaveClass('has-notification');
   });
 
-  test.each(['offline', 'stale', 'cache-only', 'seed', 'mock'])('does not notify from %s calendar data', availability => {
+  test.each(['offline', 'stale', 'cache-only', 'seed', 'mock'])('withholds %s calendar data', availability => {
     useMarketEvents.mockReturnValue(resource({ availability, data: verifiedSnapshot([event()]) }));
     render(<MarketEventsQuickReference compact now={now} />);
     const trigger = screen.getByRole('button', { name: 'Market Events', exact: true });
@@ -486,13 +404,12 @@ describe('MarketEventsQuickReference', () => {
     expect(screen.queryByRole('grid')).not.toBeInTheDocument();
   });
 
-  test('keeps a dismissed notification quiet and removes expanded events when verification is lost', () => {
+  test('removes expanded events when verification is lost', () => {
     useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([event()]) }));
     const { rerender } = render(<MarketEventsQuickReference compact now={now} />);
     fireEvent.click(screen.getByRole('button', { name: 'Market Events', exact: true }));
     useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([event()], { fetchedAt: '2026-08-10T13:00:00Z' }) }));
     rerender(<MarketEventsQuickReference compact now={now} />);
-    expect(screen.getByRole('button', { name: 'Market Events', exact: true })).not.toHaveClass('has-notification');
     expect(screen.queryByText('CPI y/y')).not.toBeInTheDocument();
     expect(screen.getByText('Calendar unavailable')).toBeInTheDocument();
   });
@@ -848,7 +765,7 @@ describe('MarketEventsQuickReference', () => {
     expect(within(screen.getByRole('dialog')).getByRole('article')).toHaveTextContent('CPI y/y');
   });
 
-  test('keeps next-week notification state independent of this week and opens its briefing', () => {
+  test('opens a next-week briefing from the navigation calendar', () => {
     const current = resource({ data: verifiedSnapshot() });
     const next = resource({ data: verifiedSnapshot([
       event({ id: 'ff-next-week', name: 'Next-week Retail Sales', startAt: '2026-08-17T12:30:00.000Z' }),

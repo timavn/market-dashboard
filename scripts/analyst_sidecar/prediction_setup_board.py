@@ -496,7 +496,8 @@ def _product_key(label: Any) -> str:
 
 class _CitedProducts:
     """Every Hedgeye product the review draws on, recorded as each cell or research entry is written, so the
-    Sources line names exactly the products the body uses, each at the latest edition it used."""
+    Sources line names exactly the products the body uses, each at the latest edition read: this market day's
+    when the board read it, even if it states no new Trade, otherwise the edition its cells cite."""
 
     def __init__(self, board: dict[str, Any]):
         research = board.get("research") if isinstance(board.get("research"), dict) else {}
@@ -519,12 +520,13 @@ class _CitedProducts:
             item["when"].append(str(when))
 
     def _published(self, key: str, item: dict[str, Any]) -> str | None:
-        """The latest edition the review used: the feed's own time for Risk Ranges and Crypto Quant."""
+        """The latest edition read: the feed's own time for Risk Ranges and Crypto Quant."""
         if self.feeds.get(FEED_DATES.get(key, "")):
             return str(self.feeds[FEED_DATES[key]])
+        when = item["when"] + ([str(self.published[key])] if self.published.get(key) else [])
         # Instants sort after a bare date on the same Pacific day.
         stamp = lambda value: (_pacific_day(value), "T" in value, value)
-        return max(item["when"], key=stamp) if item["when"] else None
+        return max(when, key=stamp) if when else None
 
     def items(self) -> list[dict[str, Any]]:
         """Each cited product once, in reading order, with its research product id and latest edition used."""
@@ -555,13 +557,13 @@ def _cite_row(cited: _CitedProducts, row: dict[str, Any]) -> None:
     drawn = all(isinstance(risk_range.get(key), (int, float)) for key in ("low", "high"))
     if drawn or row.get("trend"):
         cited.cite(PRODUCT_IDS.get(risk_range.get("product"), "Risk Ranges"), risk_range.get("date"))
-    cited.cite(trade.get("source"), trade.get("date"))
+    cited.cite(trade.get("source"), trade.get("publishedAt") or trade.get("date"))
     for broken in (row.get("alphaBreaks") or {}).values():
         if isinstance(broken, dict):
             # The line's product is cited; "since" is when price crossed it, not when it was published.
             cited.cite(broken.get("productLabel"))
             published = broken.get("published") or {}
-            cited.cite(published.get("source"), published.get("date"))
+            cited.cite(published.get("source"), published.get("publishedAt") or published.get("date"))
     code = _alpha_code(row) if drawn else None
     if code:
         label = code.get("productLabel")
@@ -587,7 +589,7 @@ def _cited(board: dict[str, Any]) -> _CitedProducts:
 
 
 def cited_products(board: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every Hedgeye product the review cites: id, label and the latest edition it used (an instant or a date)."""
+    """Every Hedgeye product the review cites: id, label and the latest edition read (an instant or a date)."""
     return _cited(board).items() if isinstance(board, dict) else []
 
 

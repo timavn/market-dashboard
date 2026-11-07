@@ -59,7 +59,7 @@ beforeEach(() => {
 });
 afterEach(() => { jest.useRealTimers(); delete document.hidden; });
 
-test('loads seven shared sources once, polls while visible, and disposes the poller', async () => {
+test('loads eight shared sources once, polls while visible, and disposes the poller', async () => {
   const { result, unmount } = renderHook(useDashboardResearch);
   await flush();
   expect(MarketDataService.getRiskRanges).toHaveBeenCalledWith(null, { envelope: true });

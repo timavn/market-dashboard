@@ -531,6 +531,9 @@ test('Trade comes from what the morning products state: yields from the shared p
   assert.equal(trade('ust30y').direction, 'BEARISH');
   assert.equal(trade('ust10y'), null, 'nothing published for the 10-year');
   assert.deepEqual([trade('gold').direction, trade('gold').ticker, trade('gold').reference], ['BEARISH', 'GOLD', true]);
+  // Each Trade keeps its edition's send time (07:27 AM EST), so Sources can show it.
+  assert.equal(trade('gold').publishedAt, '2026-11-02T12:27:00.000Z');
+  assert.equal(trade('ust2y').publishedAt, '2026-11-02T12:27:00.000Z');
   // Gold spot never becomes the Trade of GOLD (the listed company) or the GLD ETF.
   assert.equal(securityIntelligence.bySymbol.GOLD?.lastVerifiedDecision?.trade?.value ?? null, null);
   assert.equal(securityIntelligence.bySymbol.GLD?.lastVerifiedDecision?.trade?.value ?? null, null);
@@ -546,6 +549,10 @@ test('a published Trade or Trend whose Alpha Code line the price crossed since r
   assert.deepEqual([broken.trade.direction, broken.trade.date, broken.trade.source, broken.trend], ['NEUTRAL', '2026-11-02', 'Alpha Code 97', 'BULLISH']);
   assert.deepEqual(broken.alphaBreaks.trade, { level: 97, side: 'below', since: '2026-11-02T16:22:35Z', price: 95.57, priceAt: '2026-11-03T14:45:00Z',
     product: 'top-3-things', productLabel: 'Top 3 Things', published: { value: 'BULLISH', date: '2026-10-21', source: 'The Call' } });
+  // The break is dated by the crossing; the replaced call keeps its send time.
+  const timed = alphaCodeBreaks(watch, 'CL=F', { trade: { ...trade, publishedAt: '2026-10-21T12:25:00.000Z' }, trend: 'BULLISH', trendDate: '2026-11-03' });
+  assert.equal(timed.trade.publishedAt, null);
+  assert.equal(timed.alphaBreaks.trade.published.publishedAt, '2026-10-21T12:25:00.000Z');
   // No watch, or a price on the call's side, leaves the call.
   assert.deepEqual(alphaCodeBreaks(null, 'CL=F', { trade, trend: 'BULLISH' }), { trade, trend: 'BULLISH' });
   assert.equal(alphaCodeBreaks({ lines: { 'CL=F|trade': { ...watch.lines['CL=F|trade'], side: 'above' } } }, 'CL=F', { trade }).trade, trade);

@@ -56,6 +56,9 @@ function tickReading(market, hedgai) {
   };
 }
 
+// A snapshot known only by its date carries UTC midnight, which is not a send time.
+const sendTime = (value) => (value && !/T00:00:00(?:\.000)?(?:Z|\+00:00)$/.test(String(value)) ? value : null);
+
 function tradeReading(market, securityIntelligence, marketDate, publishedStatements) {
   const spec = market.hedgeye.trade;
   // Spot metals settle on their published spot reference, which no security shares.
@@ -64,6 +67,7 @@ function tradeReading(market, securityIntelligence, marketDate, publishedStateme
       { ticker: spec.reference, asOf: marketDate, reference: true });
     if (reading?.status !== 'available') return null;
     return { direction: reading.value, ticker: reading.sourceTicker, date: reading.date,
+      publishedAt: sendTime(reading.publishedAt),
       source: reading.sourceLabel || reading.sourceProduct, sourceUrl: reading.sourceUrl,
       instrument: reading.sourceInstrument || null, reference: true };
   }
@@ -72,6 +76,7 @@ function tradeReading(market, securityIntelligence, marketDate, publishedStateme
   const trade = canonicalTradeResearch(securityIntelligence, ticker, { date: marketDate });
   if (trade.status !== 'available') return null;
   return { direction: trade.direction, ticker: trade.ticker, date: trade.sourceDate,
+    publishedAt: trade.sourcePublishedAt || null,
     source: trade.sourceLabel || trade.source, sourceUrl: trade.sourceUrl };
 }
 
@@ -128,7 +133,7 @@ function usdReading({ quotes, riskRanges, securityIntelligence, usdPeriods, hedg
     d15: finite(usdPeriods?.fifteenDayChangePct), m1: finite(usdPeriods?.monthChangePct),
     asOf: quote?.observedAt || quote?.timestamp || null,
     trend: direction(range?.trend), low: finite(range?.lrr), high: finite(range?.hrr), rangeDate: range?.date || null,
-    trade: trade?.status === 'available' ? { direction: trade.direction, date: trade.sourceDate, source: trade.sourceLabel || null } : null,
+    trade: trade?.status === 'available' ? { direction: trade.direction, date: trade.sourceDate, publishedAt: trade.sourcePublishedAt || null, source: trade.sourceLabel || null } : null,
     tick: tickReading({ hedgeye: { tick: { ticker: spec.tickTicker, fit: 'proxy' } } }, hedgai) };
 }
 
@@ -142,8 +147,8 @@ function alphaCodeBreaks(watch, symbol, { trade, trend, trendDate }) {
     product: line.product || null, productLabel: line.productLabel || null, published });
   const tradeLine = trade && brokenAlphaCodeLine(watch, symbol, 'trade', { value: trade.direction, date: trade.date });
   if (tradeLine) {
-    alphaBreaks.trade = breakOf(tradeLine, { value: trade.direction, date: trade.date || null, source: trade.source || null });
-    trade = { ...trade, direction: 'NEUTRAL', date: easternDate(tradeLine.since), source: `Alpha Code ${tradeLine.level}` };
+    alphaBreaks.trade = breakOf(tradeLine, { value: trade.direction, date: trade.date || null, ...(trade.publishedAt ? { publishedAt: trade.publishedAt } : {}), source: trade.source || null });
+    trade = { ...trade, direction: 'NEUTRAL', date: easternDate(tradeLine.since), publishedAt: null, source: `Alpha Code ${tradeLine.level}` };
   }
   const trendLine = trend && brokenAlphaCodeLine(watch, symbol, 'trend', { value: trend, date: trendDate });
   if (trendLine) {

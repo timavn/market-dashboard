@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSurfaceActivity } from '../common/PersistentSurface';
-import useDockNotification from '../../hooks/useDockNotification';
 import MarketEventsBriefingModal from './MarketEventsBriefingModal';
 import MarketEventsNavigationPopover from './MarketEventsNavigationPopover';
 import { marketEventDateTime, marketEventPacificPreviousDay, marketEventTime } from '../../utils/marketEventTime';
@@ -192,7 +191,7 @@ function EventRows({ events, onOpen, currentTime, rowHeight = EVENT_ROW_HEIGHT, 
         {visibleEvents.map((event) => {
           const released = isMarketEventReleased(event, currentTime);
           return (
-          <li key={event.id} title={marketEventDetails(event)} className={released ? 'is-released' : undefined}>
+          <li key={event.id} title={marketEventDetails(event)}>
             <time dateTime={event.startAt} title={marketEventDateTime(event.startAt)} aria-label={marketEventDateTime(event.startAt)}>
               {marketEventTime(event.startAt)}
               {marketEventPacificPreviousDay(event.startAt) && <sup title="Pacific time is on the previous calendar day">−1d</sup>}
@@ -361,12 +360,6 @@ const MarketEventsQuickReference = ({ now = systemNow, compact = false }) => {
     return () => clearInterval(interval);
   }, [awaitingActual, refreshCurrent]);
 
-  const { hasNotification, dismiss } = useDockNotification({
-    channel: 'market-events',
-    scope: todayKey,
-    notificationIds: todayEvents.map(event => event.id),
-  });
-
   const calendar = (
     <section className={`market-events-quick-reference ${compact ? 'market-events-quick-reference--agenda-popover' : 'usd-card-section usd-card-section--market-events'}`} aria-label="Market events quick reference">
       <header className="market-events-quick-reference__header">
@@ -416,8 +409,7 @@ const MarketEventsQuickReference = ({ now = systemNow, compact = false }) => {
   const detail = todayCovered
     ? `${count} high-impact event${count === 1 ? '' : 's'} today · PT (ET) · Forex Factory · Source updated ${marketEventDateTime(currentState.data.sourceUpdatedAt)}`
     : currentState.status === 'loading' ? 'Loading verified calendar' : 'Calendar unavailable';
-  return <MarketEventsNavigationPopover detail={detail} briefingOpen={Boolean(selectedDay)}
-    hasNotification={hasNotification} onNotificationDismiss={dismiss} onOpen={openCalendar}>
+  return <MarketEventsNavigationPopover detail={detail} briefingOpen={Boolean(selectedDay)} onOpen={openCalendar}>
     {calendar}
   </MarketEventsNavigationPopover>;
 };
