@@ -2281,6 +2281,71 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(state["status"], "ERROR")
         self.assertEqual(state["errorCode"], "GMAIL_HEARTBEAT_WRITE_FAILED")
 
+    def test_macro_show_window_keeps_scheduled_safeguards_without_the_service_heartbeat(self):
+        ledger = FakeLedgerTable([{
+            "messageId": ingestor.RUNTIME_STATE_MESSAGE_ID,
+            "attachmentId": ingestor.HISTORY_CURSOR_ATTACHMENT_ID,
+            "status": "READY",
+            "historyId": "100",
+            "createdAt": "2026-07-27T12:00:00+00:00",
+            "updatedAt": "2026-07-27T12:00:00+00:00",
+        }])
+        database = FakeRuntimeDynamoDb(ledger)
+        secret = {
+            "client_id": "client",
+            "client_secret": "secret",
+            "refresh_token": "refresh",
+            "user_id": "me",
+            "_secret_version": "version-expired",
+        }
+        expired = RuntimeError(
+            "GET Gmail history failed with HTTP 404: start historyId expired"
+        )
+        with patch.object(ingestor, "dynamodb", database), patch.object(
+            ingestor, "cloudwatch", MagicMock()
+        ), patch.object(
+            ingestor, "load_oauth_secret", return_value=secret
+        ), patch.object(
+            ingestor, "refresh_access_token", return_value="access"
+        ), patch.object(
+            ingestor, "get_profile_history_id", return_value="200"
+        ), patch.object(
+            ingestor, "resolve_label_id", return_value="Label_1"
+        ), patch.object(
+            ingestor, "list_history_message_ids", side_effect=expired
+        ), patch.object(
+            ingestor, "list_message_ids"
+        ) as list_messages, patch.object(
+            ingestor, "write_service_heartbeat", return_value=True
+        ) as heartbeat:
+            response = ingestor.lambda_handler(
+                {
+                    "source": "aws-scheduler",
+                    "scheduleId": ingestor.GMAIL_MACRO_SHOW_SCHEDULE_ID,
+                    "poll": "incremental",
+                },
+                None,
+            )
+
+        self.assertNotEqual(json.loads(response["body"]).get("errorCode"), "GMAIL_SCHEDULE_ID_MISMATCH")
+        list_messages.assert_not_called()
+        self.assertEqual(heartbeat.call_args.kwargs["schedule_id"], ingestor.GMAIL_MACRO_SHOW_SCHEDULE_ID)
+
+    def test_macro_show_window_heartbeat_stays_off_the_scheduled_service(self):
+        heartbeats = MagicMock()
+        database = MagicMock()
+        database.Table.return_value = heartbeats
+        with patch.object(ingestor, "dynamodb", database), patch.object(ingestor, "cloudwatch", MagicMock()):
+            ingestor.write_service_heartbeat(
+                started_at="2026-11-09T15:00:00+00:00",
+                status="success",
+                trigger_source="aws-scheduler",
+                schedule_id=ingestor.GMAIL_MACRO_SHOW_SCHEDULE_ID,
+            )
+        item = heartbeats.put_item.call_args.kwargs["Item"]
+        self.assertEqual(item["serviceId"], f"{ingestor.GMAIL_SERVICE_ID}:manual")
+        self.assertFalse(item["scheduled"])
+
     def test_scheduler_invocation_with_wrong_identity_is_rejected_before_auth(self):
         database = FakeRuntimeDynamoDb(FakeLedgerTable())
         with patch.object(ingestor, "dynamodb", database), patch.object(
