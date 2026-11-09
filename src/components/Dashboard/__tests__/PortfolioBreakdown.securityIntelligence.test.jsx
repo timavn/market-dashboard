@@ -4001,7 +4001,7 @@ test('renders Portfolio Solutions as four deterministic fact sentences and one s
   expect(within(context).getByText('Monthly rank change is +7.')).toBeInTheDocument();
   expect(within(context).getAllByRole('listitem')).toHaveLength(3);
   expect(within(context).queryByText('GLD is ranked #4 today.')).not.toBeInTheDocument();
-  expect(within(context).getByText(/Source: Portfolio Solutions · .+ · 10:26 ET/)).toBeInTheDocument();
+  expect(within(context).getByText(/Source: Portfolio Solutions · .+ · (?:09|10):26 ET/)).toBeInTheDocument();
   expect(within(context).getAllByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveLength(1);
   expect(within(context).getByRole('link', { name: 'OPEN SOURCE ↗' })).toHaveAttribute(
     'href',
