@@ -758,6 +758,13 @@ class HermesInfrastructureContractTests(unittest.TestCase):
         function = resources["GmailIngestorFunction"]["Properties"]
         schedule = resources["GmailPollSchedule"]["Properties"]
 
+        window = resources["GmailMacroShowWindowSchedule"]["Properties"]
+        self.assertEqual(window["Name"], gmail_ingestor.GMAIL_MACRO_SHOW_SCHEDULE_ID)
+        self.assertEqual(window["ScheduleExpression"], "cron(* 10-11 ? * MON-FRI *)")
+        self.assertEqual(window["ScheduleExpressionTimezone"], "America/New_York")
+        self.assertEqual(window["State"], schedule["State"])
+        self.assertEqual(json.loads(window["Target"]["Input"])["scheduleId"], window["Name"])
+
         self.assertEqual(contract["aws"]["functionName"], manifest_resources["gmailFunction"])
         self.assertEqual(function["FunctionName"], contract["aws"]["functionName"])
         self.assertEqual(contract["aws"]["scheduleId"], manifest_resources["gmailSchedule"])

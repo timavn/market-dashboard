@@ -173,6 +173,13 @@ GMAIL_SCHEDULE_ID = os.environ.get(
     "HERMES_GMAIL_SCHEDULE_ID",
     "market-dashboard-gmail-v2-every-15m",
 )
+# Polls every minute while The Macro Show email is due. It keeps the scheduled
+# safeguards, but only the 15-minute job reports the service's heartbeat.
+GMAIL_MACRO_SHOW_SCHEDULE_ID = os.environ.get(
+    "HERMES_GMAIL_MACRO_SHOW_SCHEDULE_ID",
+    "market-dashboard-gmail-v2-macro-show-window",
+)
+GMAIL_POLL_SCHEDULE_IDS = frozenset({GMAIL_SCHEDULE_ID, GMAIL_MACRO_SHOW_SCHEDULE_ID})
 RUNTIME_STATE_MESSAGE_ID = f"runtime#gmail#{GMAIL_ACCOUNT.lower()}"
 HISTORY_CURSOR_ATTACHMENT_ID = "history-cursor"
 MESSAGE_QUEUE_ATTACHMENT_PREFIX = "message-queue#"
@@ -3848,7 +3855,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
             detail="Materialization version replay requires the operator replay contract.",
         )
 
-    if trigger_source == "aws-scheduler" and schedule_id != GMAIL_SCHEDULE_ID:
+    if trigger_source == "aws-scheduler" and schedule_id not in GMAIL_POLL_SCHEDULE_IDS:
         return heartbeat_response(
             status_code=400,
             body={
@@ -3998,7 +4005,7 @@ def lambda_handler(event: Optional[Dict[str, Any]], context: Any) -> Dict[str, A
 
     scheduled_invocation = (
         trigger_source == "aws-scheduler"
-        and schedule_id == GMAIL_SCHEDULE_ID
+        and schedule_id in GMAIL_POLL_SCHEDULE_IDS
     )
     if (
         scheduled_invocation

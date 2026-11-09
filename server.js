@@ -380,6 +380,7 @@ const RESEARCH_AUTHORITATIVE_REFRESH_TIMEOUT_MS = Number.isFinite(
 
 // These caches are deliberately limited to non-live research/status data. Live
 // IBKR, portfolio, and quote routes retain their existing freshness policies.
+const { inMacroShowWindow, researchRefreshMs } = require('./src/utils/macroShowWindow.cjs');
 const researchResponseCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 100 });
 const hermesLedgerCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
 const hermesRuntimeStateCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
@@ -1380,7 +1381,7 @@ app.get('/api/analyst/alpha-code-lines', async (req, res) => {
     const { alphaCodeLines } = require('./src/services/analyst/alphaCodeWatch.cjs');
     const now = new Date();
     const marketDate = defaultResearchMarketDate(now);
-    if (!alphaCodeLevels || alphaCodeLevels.marketDate !== marketDate || now.getTime() - alphaCodeLevels.at > ALPHA_CODE_LEVELS_MS) {
+    if (!alphaCodeLevels || alphaCodeLevels.marketDate !== marketDate || now.getTime() - alphaCodeLevels.at > researchRefreshMs(now.getTime(), ALPHA_CODE_LEVELS_MS)) {
       const board = await loadPredictionSetupBoard({ now, researchDate: marketDate });
       alphaCodeLevels = { at: now.getTime(), marketDate, lines: alphaCodeLines(board) };
     }
@@ -5788,6 +5789,10 @@ app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
     // the same multi-KB DynamoDB read. For latest requests, use the
     // snapshotType/date GSI first instead of probing seven dates (which was
     // especially wasteful for weekly products such as CFTC positioning).
+    // Today's Macro Show must reach the predictive rollup as soon as it is pulled.
+    if (String(snapshotType || '').trim() === 'the-macro-show' && !date && inMacroShowWindow(Date.now())) {
+      researchResponseCache.delete(cacheKey);
+    }
     const cacheResult = await researchResponseCache.get(cacheKey, async () => {
       let item = null;
       if (date) {

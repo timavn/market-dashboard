@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { RESEARCH_PRODUCTS } = require('../utils/researchProductRegistry.cjs');
+const { researchRefreshMs } = require('../utils/macroShowWindow.cjs');
 const { extractPublishedStatements, isVerifiedPublicationSnapshot, isExplicitTradeProvenance, isStatedReading,
   isExactPublishedTradeReading, publishedTradeFromEvent } = require('../utils/publishedResearchSignals.cjs');
 
@@ -113,7 +114,7 @@ function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEF
   return {
     status: () => ({ verifiedAt }),
     async load({ date = '9999-12-31', waitForRefresh = false } = {}) {
-      if (refreshedAt === null || Number(now()) - refreshedAt >= ttlMs) {
+      if (refreshedAt === null || Number(now()) - refreshedAt >= researchRefreshMs(Number(now()), ttlMs)) {
         if (!pending) pending = refresh().finally(() => { pending = null; });
         // A restart need not wait for an archive backfill to display a dated
         // publication whose original source proof is already on disk.
