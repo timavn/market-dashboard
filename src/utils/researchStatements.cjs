@@ -450,7 +450,7 @@ const NUMBER = String.raw`\$?\s?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:\s?[kKmM]
 // A number written as a price: a dollar sign, thousands, a k/m scale, or three digits.
 const PRICE = String.raw`(?:\$\s?\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$\s?\d+(?:\.\d+)?|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?\s?[kKmM]\b|\d{3,}(?:\.\d+)?)%?`;
 const NOT_A_LEVEL = String.raw`(?!\s*(?:x\b|w(?:ee)?ks?\b|mos?\b|months?|days?|yrs?\b|years?|bps|basis|-?\s*\d))`;
-const ALPHA_CODE = new RegExp(String.raw`\bAlpha\s+Code\s*(?:=|:|is|of|at|was)?\s*(?:given\s+as\s+)?(${NUMBER}(?:\s*\/\s*${NUMBER})?)(?![-–]\s*\d)`, 'gi');
+const ALPHA_CODE = new RegExp(String.raw`\bAlpha\s+Code\s*(?:=|:|is\s+now|now|is|of|at|was)?\s*(?:given\s+as\s+)?(?:roughly\s+|approximately\s+|about\s+|around\s+|~\s*)?(${NUMBER}(?:\s*\/\s*${NUMBER})?)(?![-–]\s*\d)`, 'gi');
 const PAIR_LABEL = new RegExp(String.raw`\btrade\s*(?:\/|and|&)\s*trend\s+(?:signal\s+)?(?:levels?|support|resistance)?\s*(?:=|:|of|at|are|were)\s*(${NUMBER})\s*(?:\/|and|&)\s*(${NUMBER})`, 'gi');
 const ON_THE = new RegExp(String.raw`(${NUMBER})\s+on\s+the\s+trade\s+and\s+(${NUMBER})\s+on\s+the\s+trend`, 'gi');
 // A number that is itself another label's value ("TRADE = $97, TREND …") is not a legend.
@@ -479,8 +479,18 @@ const SCALES = [1, 1e3, 1e6];
 const scaleOf = (code, printed) => SCALES.find((scale) => Math.abs(code * scale - printed) < 1e-9) ?? null;
 const digits = (value) => String(value).replace(/\.0+$/, '');
 
+// A code's printed expansion closes its statement ("… = 9792 (TRADE = 97, TREND = 92) and, after
+// breaking …"): levels after the parenthesis belong to the next thought.
+function closedAtExpansion(text) {
+  const code = new RegExp(ALPHA_CODE.source, 'i').exec(text);
+  if (!code) return text;
+  const expansion = /^\s*\([^)]*\)/.exec(text.slice(code.index + code[0].length));
+  return expansion ? text.slice(0, code.index + code[0].length + expansion[0].length) : text;
+}
+
 function alphaLevels(clause, subjects, start) {
-  const body = clause.slice(start);
+  const whole = clause.slice(start);
+  const body = closedAtExpansion(whole);
   // A label inside a direction claim is part of that claim.
   const claims = claimsIn(body);
   const free = (match, offset = 0) => !claims.some((claim) => match.index + offset >= claim.start && match.index + offset < claim.end);
@@ -495,7 +505,7 @@ function alphaLevels(clause, subjects, start) {
   const span = body.slice(0, last);
   // Everything up to the last level is this subject's, unqualified, and not a past break.
   if (first > MAX_BRIDGE || FORBIDDEN.test(clause.slice(0, start + last)) || namesOtherInstrument(span.replace(/\bAlpha\s+Codes?\b/gi, ''), subjects)
-    || handsOff(span) || QUALIFIED_TAIL.test(body.slice(last)) || (BROKEN_LEVEL.test(span) && !SAME_SESSION.test(clause))) return null;
+    || handsOff(span) || QUALIFIED_TAIL.test(whole.slice(last)) || (BROKEN_LEVEL.test(span) && !SAME_SESSION.test(clause))) return null;
   // Two different codes in one clause ("was 80/82, is now 83/86") cannot both be current.
   const codes = new Set(matches.codes.map((match) => match[1].replace(/\s+/g, '')));
   const code = matches.codes[0];
@@ -536,23 +546,94 @@ function alphaLevels(clause, subjects, start) {
   return { levels: { raw, trade, trend, unit: unitOf(raw, ...printedText.trade, ...printedText.trend), basis }, end: start + last };
 }
 
+// "Alpha Code for KOSPI = 6265/7051", "The Alpha Code for WTI is now 9792": the
+// market is named after the phrase, so the clause is read with it first.
+const ALPHA_CODE_LEAD = /^(?:(?:the|our|my)\s+)?(?:(?:@?hedgeye|ai)\s+)*alpha\s+code\s+(?:for|on|in)\s+/i;
+function subjectFirst(clause) {
+  const lead = ALPHA_CODE_LEAD.exec(clause);
+  if (!lead) return clause;
+  const rest = clause.slice(lead[0].length);
+  const subject = subjectsAt(rest);
+  return subject ? `${rest.slice(0, subject.length).trim()} Alpha Code ${rest.slice(subject.length).trim()}` : clause;
+}
+// "SPX – Alpha Code = 77037639": a bare market name, then its code after a dash.
+function withDetachedSubjects(parts) {
+  const joined = [];
+  for (const part of parts) {
+    const previous = joined.at(-1);
+    const bare = previous && subjectsAt(stripLead(previous.text));
+    if (bare && bare.length === stripLead(previous.text).length && /^alpha\s+code\b/i.test(part.text)) {
+      previous.text = `${previous.text} ${part.text}`;
+    } else joined.push({ ...part });
+  }
+  return joined;
+}
+// "… the Alpha Codes are:" (or "TRADE first") opens a roster of "TSLA 370375" lines. Each
+// row is read as the statement it abbreviates, so it can be re-read without the roster.
+const ROSTER_OPEN = /\balpha\s+codes\s+(?:are\s*)?[:=]?\s*$|\bTRADE\s+first\b/i;
+const ROSTER_ROW = /^\$?([A-Z][A-Z0-9]{1,5})(?:\s*[=:])?\s+(\d{4,}|\d[\d,.]*\s*\/\s*\d[\d,.]*)$/;
+const ROSTER_LINES = 12;
+function withRosterRows(list) {
+  let until = -1;
+  return list.map((sentence, index) => {
+    const row = index <= until && ROSTER_ROW.exec(sentence);
+    if (ROSTER_OPEN.test(sentence)) until = index + ROSTER_LINES;
+    return row && !VOCABULARY.has(row[1]) ? `${row[1]} Alpha Code = ${row[2]}` : sentence;
+  });
+}
+
+// The SPX gamma flip line: "Tier1 Alpha Gamma Flip Line = 7726", "gamma flip level near
+// 7,713", "SPX gamma flip line at 7,726". A sentence about another index, or one that dates
+// the level in the past, states nothing current. A conditional is fine: Hedgeye writes "if SPX
+// breaks out (or fails) at the Flip Line".
+const FLIP_LINE = /\b(gamma\s+flip(?:\s+(?:line|level|point))?|flip\s*line)\b\s*(?:(?:=|:|is(?:\s+now)?|at|of|near|around|about|~)\s*){0,3}(\d{1,3}(?:,\d{3})+|\d{4,6})(?![\d.,]*\d)/gi;
+const OTHER_INDEX = /\b(?:NDX|Nasdaq|QQQ|IWM|Russell|RUT|Dow|DJI|DIA)\b/i;
+const SPX_NAMED = /\b(?:SPX|S&P|SP500|SPY)\b/i;
+const FLIP_PAST = /\b(?:was|were|previously|prior|last\s+(?:week|month|session)|yesterday)\b[^,;]*$/i;
+function flipLines(sentence) {
+  if (OTHER_INDEX.test(sentence) && !SPX_NAMED.test(sentence)) return [];
+  const found = [];
+  for (const match of sentence.matchAll(FLIP_LINE)) {
+    // A bare "flip line" needs gamma or the index beside it to mean this level.
+    if (/^flip/i.test(match[1]) && !/\bgamma\b/i.test(sentence) && !SPX_NAMED.test(sentence)) continue;
+    if (FLIP_PAST.test(sentence.slice(0, match.index + match[1].length))) continue;
+    const value = Number(match[2].replace(/,/g, ''));
+    if (value < 1000 || value > 100_000) continue;
+    found.push({ field: 'flipLine', ticker: 'SPX', kind: 'security',
+      levels: { raw: match[2], trade: null, trend: null, unit: null, basis: 'flip-line', level: value },
+      approximate: /\b(?:near|around|about)\b|~/i.test(match[0]), sourceText: sentence, statement: sentence });
+  }
+  return found;
+}
+
+// A sentence printing an Alpha Code that nothing below could read: a gap for Systems.
+const CODE_MENTION = /\balpha\s+codes?\b[^.;]{0,60}?\d{2,}/i;
+const CODE_METHOD = /\bfirst\b|\bwhat\s+the\s+machine\s+reads\b/i;
+function unreadAlphaCodes(text) {
+  const read = new Set(researchStatements(text).filter((item) => item.field === 'alphaCode').map((item) => item.statement));
+  return [...new Set(sentences(text))].filter((sentence) => CODE_MENTION.test(sentence) && !CODE_METHOD.test(sentence) && !read.has(sentence));
+}
+
 /**
  * Every subject-bound statement in a text: { field: 'trade' | 'trend', value }
  * or { field: 'alphaCode', levels }, with the instrument identity, the exact
- * clause span that states it (sourceText) and its whole sentence.
+ * clause span that states it (sourceText) and its whole sentence. The SPX gamma
+ * flip line comes as { field: 'flipLine', levels: { level } }.
  */
 function researchStatements(text) {
   const result = [];
-  for (const sentence of sentences(text)) {
+  for (const sentence of withRosterRows(sentences(text))) {
     if (sentence.length > 1200) continue;
+    result.push(...flipLines(sentence));
     // A question states nothing.
-    const parts = clauses(sentence);
+    const parts = withDetachedSubjects(clauses(sentence));
     parts.forEach(({ text: raw, after }, index) => {
       const previous = parts[index - 1];
       const next = parts[index + 1];
       if (/\?/.test(raw) || (next && next.after !== ';' && CONDITIONAL_NEXT.test(next.text))
         || (previous && after !== ';' && CONDITIONAL_PREVIOUS.test(stripLead(previous.text)))) return;
-      const clause = stripLead(raw);
+      const printed = stripLead(raw);
+      const clause = subjectFirst(printed);
       const subject = subjectsAt(clause);
       if (!subject) return;
       const claims = /\b(?:trade|trend)\b/i.test(clause) ? statementClaims(clause, subject.subjects, subject.length) : null;
@@ -569,7 +650,7 @@ function researchStatements(text) {
         }
         if (alpha) {
           result.push({ field: 'alphaCode', levels: alpha.levels, ...identity,
-            sourceText: clause.slice(0, alpha.end).trim(), statement: sentence });
+            sourceText: clause === printed ? clause.slice(0, alpha.end).trim() : printed.trim(), statement: sentence });
         }
       }
     });
@@ -582,4 +663,4 @@ function claimedValues(text, field) {
   return [...new Set(claimsIn(String(text || '')).map((claim) => claim.fields[field]).filter(Boolean))];
 }
 
-module.exports = { researchStatements, claimedValues, sentences, clauses, FORBIDDEN };
+module.exports = { researchStatements, unreadAlphaCodes, claimedValues, sentences, clauses, FORBIDDEN };

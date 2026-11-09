@@ -1294,6 +1294,12 @@
 .analyst-panel-v2 .analyst-stop-button { border-radius: 0; font-weight: 400; }
 .analyst-send-button:disabled { opacity: 0.35; }
 .analyst-inline-error, .analyst-degraded-note, .analyst-inline-note { margin: 8px 0; padding: 8px 10px; color: #8a341e; background: #fff2ed; border: 1px solid #fed7c7; border-radius: 7px; font-size: 8px; }
+.analyst-composer-note { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; color: #8a341e; font-size: 8px; }
+.analyst-composer-note > span { min-width: 0; overflow-wrap: anywhere; }
+.analyst-composer-note.is-quoted > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analyst-composer-note > button { flex: none; padding: 0; color: inherit; background: none; border: 0; font: inherit; text-decoration: underline; cursor: pointer; }
+.analyst-composer-note > button:disabled { cursor: default; opacity: 0.48; }
+.dark .analyst-composer-note { color: #f0a58a; }
 .analyst-review-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .analyst-review-error > span { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
 .analyst-review-error code { color: #a24932; font-size: 6px; white-space: nowrap; }

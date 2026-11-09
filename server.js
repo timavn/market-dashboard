@@ -1380,22 +1380,38 @@ let alphaCodeLevels = null;
 app.get('/api/analyst/alpha-code-lines', async (req, res) => {
   try {
     const { alphaCodeLines } = require('./src/services/analyst/alphaCodeWatch.cjs');
+    const { buildLevelWatch, levelSymbols } = require('./src/services/analyst/marketLevels.cjs');
+    const quoted = async (symbol) => {
+      const quote = await getQuote(symbol).catch(() => null);
+      const price = Number(quote?.price);
+      return quote && Number.isFinite(price) && price > 0 && isQuoteUsableNow(quote, symbol) ? { quote, price } : null;
+    };
     const now = new Date();
     const marketDate = defaultResearchMarketDate(now);
     if (!alphaCodeLevels || alphaCodeLevels.marketDate !== marketDate || now.getTime() - alphaCodeLevels.at > ALPHA_CODE_LEVELS_MS) {
-      const board = await loadPredictionSetupBoard({ now, researchDate: marketDate });
-      alphaCodeLevels = { at: now.getTime(), marketDate, lines: alphaCodeLines(board) };
+      const [board, statements, marketStructure] = await Promise.all([
+        loadPredictionSetupBoard({ now, researchDate: marketDate }),
+        publishedTradeArchive.loadStatements({ date: marketDate }).catch(() => null),
+        queryLatestSnapshotsByType('market-structure', { limit: 30 }).catch(() => []),
+      ]);
+      const checks = Object.fromEntries((await Promise.all(levelSymbols(statements).map(async (symbol) => {
+        const seen = await quoted(symbol);
+        return seen ? [symbol, seen.price] : null;
+      }))).filter(Boolean));
+      // A restart answers before the archive has loaded; read it again shortly rather than
+      // serving five minutes of a watch with no printed codes.
+      const archiveRead = statements?.alphaCodes?.length > 0;
+      alphaCodeLevels = { at: archiveRead ? now.getTime() : now.getTime() - ALPHA_CODE_LEVELS_MS + 30_000, marketDate,
+        ...buildLevelWatch({ marketDate, boardLines: alphaCodeLines(board), statements, marketStructure, prices: checks }) };
     }
-    const { lines } = alphaCodeLevels;
+    const { lines, regime, coverage } = alphaCodeLevels;
     const prices = Object.fromEntries((await Promise.all([...new Set(lines.map((line) => line.symbol))].map(async (symbol) => {
-      const quote = await getQuote(symbol).catch(() => null);
-      const price = Number(quote?.price);
+      const seen = await quoted(symbol);
       // A delayed quote keeps the time it was observed, so a break is dated when the price was seen.
-      return quote && Number.isFinite(price) && price > 0 && isQuoteUsableNow(quote, symbol)
-        ? [symbol, { price, asOf: quote.observedAt || now.toISOString(), source: quote.observation?.source || null,
-          delayed: quote.observation?.dataType === 'delayed' }] : null;
+      return seen ? [symbol, { price: seen.price, asOf: seen.quote.observedAt || now.toISOString(), source: seen.quote.observation?.source || null,
+        delayed: seen.quote.observation?.dataType === 'delayed' }] : null;
     }))).filter(Boolean));
-    res.json({ marketDate, lines, prices });
+    res.json({ marketDate, lines, prices, regime, coverage });
   } catch (error) {
     console.error('[alpha-code-lines]', error.message);
     res.status(503).json({ error: 'Alpha Code lines unavailable' });
@@ -2410,6 +2426,7 @@ const securityUniverse = createSecurityUniverseService({
     },
     tradeArchiveStatus: () => publishedTradeArchive.status(),
     loadPublishedStatements: () => publishedTradeArchive.loadStatements({ date: defaultResearchMarketDate(new Date()) }),
+    loadAlphaCodeWatch: () => analystRoutes.dailyWorkflow?.alphaCodeWatch?.() ?? null,
   }),
   stance: createStancePiece({ getScoredStanceBook: () => analystRoutes.dailyWorkflow?.scoredStanceBook?.() }),
   marketHistory: createMarketHistoryPiece({
@@ -8515,7 +8532,7 @@ async function readAiStatusEvidence() {
     records: [gmailRecord],
     readHeartbeat: (serviceId) => getServiceHeartbeat(dynamodb, serviceId),
   });
-  return { analyst, gmail };
+  return { analyst, gmail, levels: alphaCodeLevels?.coverage || [] };
 }
 
 const systemStatusService = createSystemStatusService({

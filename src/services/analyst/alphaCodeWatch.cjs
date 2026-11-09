@@ -88,13 +88,13 @@ function alphaCodeVerdict(line, reading = line?.reading) {
   return line?.breaks?.length ? 'NEUTRAL' : null;
 }
 
-const sideOf = (price, level) => (price > level * (1 + BAND) ? 'above' : price < level * (1 - BAND) ? 'below' : null);
+const sideOf = (price, level, band = BAND) => (price > level * (1 + band) ? 'above' : price < level * (1 - band) ? 'below' : null);
 
 /**
  * Fold a market day's lines and prices into the stored watch.
  * prices: { [symbol]: { price, asOf } }. Returns { watch, changed }.
  */
-function foldAlphaCodeWatch(stored, { marketDate = null, lines = [], prices = {}, now = new Date() } = {}) {
+function foldAlphaCodeWatch(stored, { marketDate = null, lines = [], prices = {}, regime = null, now = new Date() } = {}) {
   const at = now.toISOString();
   const previous = stored?.version === WATCH_VERSION ? stored : null;
   const watched = {};
@@ -102,7 +102,7 @@ function foldAlphaCodeWatch(stored, { marketDate = null, lines = [], prices = {}
   // On a new market day a line no newer research replaces is watched one more
   // session, so a code printed only on some mornings is not dropped overnight.
   else if (previous) {
-    for (const [id, line] of Object.entries(previous.lines || {})) if (line.marketDate === previous.marketDate) watched[id] = line;
+    for (const [id, line] of Object.entries(previous.lines || {})) if (line.marketDate === previous.marketDate && line.retain !== false) watched[id] = line;
   }
   for (const line of lines) {
     const kept = watched[line.id];
@@ -118,15 +118,15 @@ function foldAlphaCodeWatch(stored, { marketDate = null, lines = [], prices = {}
     if (price === null) continue;
     line.price = price;
     line.priceAt = quote.asOf || at;
-    const side = sideOf(price, line.level);
+    const side = sideOf(price, line.level, line.band);
     if (!side || side === line.side) continue;
     // The first clear reading sets which side of the line the session starts on.
     if (line.side) line.breaks = [...(line.breaks || []), { from: line.side, to: side, price, at: line.priceAt }].slice(-KEPT_BREAKS);
     line.side = side;
     line.since = line.priceAt;
   }
-  const watch = { version: WATCH_VERSION, marketDate, updatedAt: at, lines: watched };
-  const material = value => JSON.stringify(Object.values(value?.lines || {}).map(line => [line.id, line.level, line.marketDate, line.side, line.breaks, line.reading || null]));
+  const watch = { version: WATCH_VERSION, marketDate, updatedAt: at, lines: watched, ...(regime ? { regime } : {}) };
+  const material = value => JSON.stringify([value?.regime || null, Object.values(value?.lines || {}).map(line => [line.id, line.level, line.marketDate, line.side, line.breaks, line.reading || null, line.printedDate || null, line.change || null, line.isNew || false])]);
   return { watch, changed: !previous || previous.marketDate !== marketDate || material(previous) !== material(watch) };
 }
 

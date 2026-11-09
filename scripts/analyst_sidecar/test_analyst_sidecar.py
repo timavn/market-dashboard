@@ -2469,6 +2469,53 @@ class LiveDataGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["liveVerified"])
         self.assertEqual(result["data"]["quotes"], [])
 
+    async def test_market_snapshot_resolves_futures_fx_and_keeps_bare_tickers_as_stocks(self):
+        observed = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        sent = []
+
+        def row(symbol, sec_type, currency="USD", **extra):
+            return {"symbol": symbol, "secType": sec_type, "currency": currency, "bid": 10, "ask": 12, "dataType": "live",
+                    "priceState": "market_mark", "entitlementStatus": "live", "timestamp": observed, **extra}
+
+        async def request(path, **kwargs):
+            sent.extend(kwargs["json_body"]["instruments"])
+            return {"quotes": [
+                row("ES", "STK", localSymbol="ES"),
+                row("ES", "CONTFUT", localSymbol="ESZ6", lastTradeDateOrContractMonth="20261218"),
+                row("BRR", "CONTFUT", localSymbol="BTCX6", lastTradeDateOrContractMonth="20261127"),
+                row("EUR", "CASH", localSymbol="EUR.USD"),
+                row("USD", "CASH", "JPY", localSymbol="USD.JPY"),
+            ]}
+
+        result = await IbkrReader(request=request).market_snapshot(
+            ["ES", "ES=F", "/ES", "BTC=F", "EURUSD", "USD/JPY", "XX=F"]
+        )
+        self.assertEqual(sent, [
+            {"symbol": "ES", "secType": "STK", "exchange": "SMART", "currency": "USD"},
+            {"symbol": "ES", "secType": "CONTFUT", "exchange": "CME", "currency": "USD"},
+            {"symbol": "BRR", "secType": "CONTFUT", "exchange": "CME", "currency": "USD"},
+            {"symbol": "EUR", "secType": "CASH", "exchange": "IDEALPRO", "currency": "USD"},
+            {"symbol": "USD", "secType": "CASH", "exchange": "IDEALPRO", "currency": "JPY"},
+        ])
+        quotes = {quote["symbol"]: quote for quote in result["data"]["quotes"]}
+        self.assertEqual(set(quotes), {"ES", "ES=F", "BTC=F", "EURUSD", "USD/JPY"})
+        self.assertEqual((quotes["ES"]["secType"], quotes["ES"]["localSymbol"]), ("STK", "ES"))
+        self.assertEqual((quotes["ES=F"]["localSymbol"], quotes["ES=F"]["expiry"]), ("ESZ6", "20261218"))
+        self.assertEqual(result["status"], "partial")
+        self.assertIn("No IBKR futures contract is mapped for: XX=F", result["warnings"])
+
+    async def test_market_snapshot_keeps_dotted_share_classes_as_stocks_and_names_missing_spot_crypto(self):
+        sent = []
+
+        async def request(path, **kwargs):
+            sent.extend(kwargs["json_body"]["instruments"])
+            return {"quotes": [], "errors": ["BTC: quote_timeout"]}
+
+        result = await IbkrReader(request=request).market_snapshot(["BRK.B", "BTC-USD"])
+        self.assertEqual([(row["symbol"], row["secType"]) for row in sent], [("BRK.B", "STK"), ("BTC", "CRYPTO")])
+        self.assertEqual(result["status"], "unavailable")
+        self.assertTrue(any("PAXOS spot" in warning and "BTC-USD" in warning for warning in result["warnings"]))
+
     async def test_portfolio_retries_a_missing_mark_and_keeps_only_verified_live_value(self):
         observed = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         quote_calls = 0

@@ -92,3 +92,20 @@ test('a new morning carries an unreplaced line one more session, resets a reprin
   ({ watch } = foldAlphaCodeWatch(watch, { marketDate: '2026-11-04', lines: [], prices: {}, now: new Date('2026-11-04T11:00:00Z') }));
   assert.deepEqual(Object.keys(watch.lines).sort(), ['CL=F|trade', 'CL=F|trend']);
 });
+
+test('a line can carry its own band, and a transient line is not kept into the next session', () => {
+  const vix = { id: '^VIX|19', symbol: '^VIX', duration: 'vix', level: 19, band: 0.01, marketDate: '2026-11-04', retain: false };
+  let { watch } = foldAlphaCodeWatch(null, { marketDate: '2026-11-04', lines: [vix], prices: { '^VIX': { price: 18.5 } } });
+  // 19.1 is within the 1% band, so the line holds; 19.3 clears it.
+  ({ watch } = foldAlphaCodeWatch(watch, { marketDate: '2026-11-04', lines: [vix], prices: { '^VIX': { price: 19.1 } } }));
+  assert.equal(watch.lines['^VIX|19'].side, 'below');
+  ({ watch } = foldAlphaCodeWatch(watch, { marketDate: '2026-11-04', lines: [vix], prices: { '^VIX': { price: 19.3 } } }));
+  assert.equal(watch.lines['^VIX|19'].breaks.length, 1);
+  assert.equal(foldAlphaCodeWatch(watch, { marketDate: '2026-11-05', lines: [], prices: {} }).watch.lines['^VIX|19'], undefined);
+});
+
+test('the regime is part of what makes a watch worth saving', () => {
+  const { watch } = foldAlphaCodeWatch(null, { marketDate: '2026-11-04', lines: [], regime: { date: '2026-11-04', changes: [] } });
+  assert.equal(foldAlphaCodeWatch(watch, { marketDate: '2026-11-04', lines: [], regime: { date: '2026-11-04', changes: [] } }).changed, false);
+  assert.equal(foldAlphaCodeWatch(watch, { marketDate: '2026-11-04', lines: [], regime: { date: '2026-11-05', changes: [] } }).changed, true);
+});

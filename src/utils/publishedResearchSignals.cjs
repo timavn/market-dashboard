@@ -1,5 +1,5 @@
 const instrumentCatalog = require('../constants/dashboardResearchCatalog.json');
-const { researchStatements, claimedValues, FORBIDDEN } = require('./researchStatements.cjs');
+const { researchStatements, unreadAlphaCodes, claimedValues, FORBIDDEN } = require('./researchStatements.cjs');
 const { publicationTime } = require('./researchPublicationTime.cjs');
 
 const record = (value) => value && typeof value === 'object' && !Array.isArray(value);
@@ -175,7 +175,7 @@ function withoutQualityIssues(snapshot, items, fields) {
  * Gold spot, stated TREND directions, and Alpha Code levels.
  */
 function extractPublishedStatements(snapshot, { sourceVerified = false } = {}) {
-  const empty = { trade: [], references: [], trends: [], alphaCodes: [] };
+  const empty = { trade: [], references: [], trends: [], alphaCodes: [], flipLines: [], unreadAlphaCodes: [] };
   if (!record(snapshot) || reject(snapshot)) return empty;
   if (!sourceVerified && !isVerifiedPublicationSnapshot(snapshot)) return empty;
   const meta = metadata(snapshot);
@@ -188,6 +188,9 @@ function extractPublishedStatements(snapshot, { sourceVerified = false } = {}) {
     references: withoutQualityIssues(snapshot, references, TRADE_FIELDS),
     trends: withoutQualityIssues(snapshot, others.filter((item) => item.field === 'trend'), ['trend', 'narrative']),
     alphaCodes: withoutQualityIssues(snapshot, others.filter((item) => item.field === 'alphaCode'), ['lrr', 'hrr', 'narrative']),
+    flipLines: withoutQualityIssues(snapshot, others.filter((item) => item.field === 'flipLine'), ['narrative']),
+    // Sentences printing a code the grammar could not read: a Systems gap, never a signal.
+    unreadAlphaCodes: [...new Set(prose.flatMap(([, text]) => unreadAlphaCodes(text)))].map((statement) => ({ ...meta, statement })),
   };
 }
 
@@ -199,7 +202,7 @@ function restates(item) {
     && symbol(statement.ticker) === symbol(item.sourceTicker)
     && (statement.kind === 'reference') === (item.referenceOnly === true)
     && (!fromStatement || statement.sourceText === item.sourceText)
-    && (item.field === 'alphaCode' ? sameLevels(statement.levels, item.levels) : statement.value === item.value));
+    && (['alphaCode', 'flipLine'].includes(item.field) ? sameLevels(statement.levels, item.levels) : statement.value === item.value));
 }
 // Archive replies re-check the same readings on every load; remember the verdicts.
 const statedVerdicts = new Map();

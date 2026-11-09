@@ -3787,7 +3787,11 @@ async def get_balance_context() -> dict[str, Any]:
 
 @mcp.tool(annotations=NETWORK_READ_ONLY)
 async def get_live_market_snapshot(symbols: list[str]) -> dict[str, Any]:
-    """Request new IBKR broker snapshots and return only fresh live marks; never fall back to another provider."""
+    """Request new IBKR broker snapshots and return only fresh live marks; never fall back to another provider.
+
+    A bare ticker is always a US stock or ETF (ES is Eversource). Futures: ES=F or /ES, front contract, named by
+    localSymbol and expiry; BTC=F and ETH=F are CME futures. FX: EUR/USD. Spot crypto: BTC-USD.
+    """
     return checked(await ibkr.market_snapshot(symbols))
 
 

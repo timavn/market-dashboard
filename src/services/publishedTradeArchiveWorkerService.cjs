@@ -21,10 +21,12 @@ function validReadings(readings) {
     && ['BULLISH', 'BEARISH', 'NEUTRAL'].includes(reading.value)
     && isExplicitTradeProvenance(reading.signalProvenance) && publishedSource(reading));
 }
+// A sentence the grammar could not read names no ticker; it only has to say where it came from.
+const unreadSentence = item => typeof item.statement === 'string' && item.statement && typeof item.sourceProduct === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date || '');
 // Reference Trade, stated Trend and Alpha Codes are each re-read from their own clause.
 function validStatements(statements) {
   return statements && typeof statements === 'object' && STATEMENT_KINDS.every(kind => Array.isArray(statements[kind])
-    && statements[kind].length <= 100_000 && statements[kind].every(reading => reading && publishedSource(reading) && isStatedReading(reading)));
+    && statements[kind].length <= 100_000 && statements[kind].every(reading => reading && (kind === 'unreadAlphaCodes' ? unreadSentence(reading) : publishedSource(reading) && isStatedReading(reading))));
 }
 
 /** Keep AWS deserialization, source extraction and disk IO off the API thread. */

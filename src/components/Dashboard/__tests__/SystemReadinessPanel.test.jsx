@@ -669,7 +669,7 @@ describe('SystemReadinessPanel', () => {
       name: 'Expand AI checklist',
     }));
     const aiChecklist = screen.getByRole('list', { name: 'AI checklist' });
-    expect(within(aiChecklist).getAllByText('2026-07-29')).toHaveLength(2);
+    expect(within(aiChecklist).getAllByText('2026-07-29')).toHaveLength(3);
   });
 
   test('shows the exact Analyst issue in the expanded checklist', async () => {

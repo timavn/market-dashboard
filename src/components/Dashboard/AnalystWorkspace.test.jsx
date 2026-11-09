@@ -392,6 +392,25 @@ test.each(['ANALYST_CONVERSATION_NOT_FOUND', 'ANALYST_CONVERSATION_DELETED'])('a
   expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
 });
 
+test.each(['deleted', 'archived'])('a saved row the full list omits is read and evicted once the server says it is %s', async outcome => {
+  // Deleted or archived while this page was closed: no event will ever arrive.
+  localStorage.setItem('analyst.workspace.sidebar', JSON.stringify([make('gone', 'Old capture'), conversations.a]));
+  const request = api.request.getMockImplementation();
+  api.request.mockImplementation((path, body, method) => {
+    if (path === '/conversations/gone') {
+      return outcome === 'deleted'
+        ? Promise.reject(Object.assign(new Error('Conversation was deleted'), { code: 'HTTP_410', serverCode: 'ANALYST_CONVERSATION_DELETED', status: 410 }))
+        : Promise.resolve({ conversation: { ...make('gone', 'Old capture'), archived: true }, cursor: 0 });
+    }
+    return request(path, body, method);
+  });
+  render(<AnalystPanel />);
+  await waitFor(() => expect(JSON.parse(localStorage.getItem('analyst.workspace.sidebar')).some(row => row.id === 'gone')).toBe(false));
+  expect(historyRows().queryByRole('button', { name: 'Open conversation: Chat gone' })).not.toBeInTheDocument();
+  expect(historyRows().getByRole('button', { name: 'Open conversation: Chat a' })).toBeVisible();
+  expect(api.request.mock.calls.filter(([path]) => path === '/conversations/a')).toHaveLength(0);
+});
+
 test.each(['code-less 404', 'archived'])('a %s read keeps the saved receipt, draft and reader position', async failure => {
   localStorage.setItem('analyst.workspace.selected', JSON.stringify('a'));
   localStorage.setItem('analyst.workspace.sidebar', JSON.stringify([conversations.a, conversations.b]));
@@ -786,7 +805,53 @@ test('history has no archive controls and keeps legacy hidden conversations hidd
   expect(Object.keys(conversations)).toEqual(['a', 'b', 'old']);
 });
 
-test('exhausted request reads retain the selected chat and Retry confirmation reads the same ID', async () => {
+test('a message the server never received returns to the composer once, with no banner or retry button', async () => {
+  const text = 'Find bitcoin alpha codes for today.';
+  localStorage.setItem('analyst.workspace.outbox', JSON.stringify({ requestId: 'never-arrived', conversationId: null, text }));
+  const request = api.request.getMockImplementation();
+  api.request.mockImplementation((path, body, method) => path === '/requests/never-arrived'
+    ? Promise.resolve({ status: 'missing', requestId: 'never-arrived' }) : request(path, body, method));
+  const view = render(<AnalystPanel />);
+  await screen.findByText('Not sent · ↵ to resend');
+  expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue(text);
+  expect(screen.queryByRole('button', { name: /Retry|Resend/ })).not.toBeInTheDocument();
+  expect(document.querySelector('.analyst-inline-error')).toBeNull();
+  // Its ID stays so a late arrival still reconciles, but the note is said once.
+  expect(JSON.parse(localStorage.getItem('analyst.workspace.outbox'))).toMatchObject({ requestId: 'never-arrived', settled: true });
+  view.unmount();
+  api.request.mockClear();
+  render(<AnalystPanel />);
+  await historyRows().findByRole('button', { name: 'Open conversation: Chat a' });
+  expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue(text);
+  expect(screen.queryByText('Not sent · ↵ to resend')).not.toBeInTheDocument();
+  expect(api.request.mock.calls.some(([path]) => path === '/requests/never-arrived')).toBe(false);
+});
+
+test('a stopped response states its condition once, with Retry as the only action', async () => {
+  conversations.a = { ...conversations.a, lastTurn: { id: 'stopped-turn', state: 'interrupted', request_id: 'stopped-request', error: 'Response stopped. Retry is available.' } };
+  render(<AnalystPanel />);
+  await open('a');
+  expect(await screen.findByText('Response stopped.')).toBeVisible();
+  expect(screen.queryByText(/Retry is available/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  expect(document.querySelector('.analyst-inline-error')).toBeNull();
+});
+
+test('editing a returned draft ends its not-sent note', async () => {
+  const request = api.request.getMockImplementation();
+  api.request.mockImplementation((path, body, method) => path === '/messages'
+    ? Promise.reject(Object.assign(new Error('The Analyst is connecting.'), { code: 'ANALYST_STARTING' })) : request(path, body, method));
+  render(<AnalystPanel />);
+  await open('a');
+  const input = screen.getByRole('textbox', { name: 'Message The Analyst' });
+  fireEvent.change(input, { target: { value: 'Original question' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await screen.findByText('Not sent · Analyst connecting · ↵ to resend');
+  fireEvent.change(input, { target: { value: 'Original question, revised' } });
+  expect(screen.queryByText(/Not sent/)).not.toBeInTheDocument();
+});
+
+test('exhausted request reads keep the selected chat and Resend carries the same ID', async () => {
   const requestId = 'chat-confirmation-retry';
   const owner = 'a';
   const submission = { requestId, conversationId: owner, text: 'Already submitted request' };
@@ -794,32 +859,30 @@ test('exhausted request reads retain the selected chat and Retry confirmation re
   localStorage.setItem('analyst.workspace.selected', JSON.stringify(owner));
   localStorage.setItem('analyst.workspace.drafts', JSON.stringify({ [owner]: 'Keep the newer draft' }));
   const request = api.request.getMockImplementation();
-  let available = false;
   let reads = 0;
   const accepted = { ...make('a', 'Accepted response recovered'),
     lastTurn: { id: 'accepted-turn', request_id: requestId, state: 'complete' } };
   api.request.mockImplementation((path, body, method) => {
+    if (path === '/messages') return Promise.resolve({ created: false, conversation: accepted });
     if (path !== `/requests/${requestId}`) return request(path, body, method);
     reads += 1;
-    return available ? Promise.resolve({ status: 'accepted', turn: accepted.lastTurn, conversation: accepted })
-      : Promise.reject(Object.assign(new Error('Connection interrupted.'), { code: 'ANALYST_REQUEST_TIMEOUT' }));
+    return Promise.reject(Object.assign(new Error('Connection interrupted.'), { code: 'ANALYST_REQUEST_TIMEOUT' }));
   });
   render(<AnalystPanel />);
-  await screen.findByRole('button', { name: 'Retry confirmation' }, { timeout: 2000 });
+  await screen.findByRole('button', { name: 'Resend' }, { timeout: 2000 });
+  expect(screen.getByText('Delivery unconfirmed: Already submitted request')).toBeVisible();
   expect(reads).toBe(3);
   expect(screen.queryByRole('region', { name: 'Review sources' })).not.toBeInTheDocument();
   expect(screen.getByText('Only answer A')).toBeInTheDocument();
   expect(screen.getByRole('textbox')).toHaveValue('Keep the newer draft');
   expect(JSON.parse(localStorage.getItem('analyst.workspace.outbox'))).toEqual(submission);
-  available = true;
   conversations[accepted.id] = accepted;
-  fireEvent.click(screen.getByRole('button', { name: 'Retry confirmation' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Resend' }));
   await screen.findByText('Accepted response recovered');
-  expect(reads).toBe(4);
+  expect(api.request.mock.calls.filter(([path]) => path === '/messages').map(([, body]) => body.requestId)).toEqual([requestId]);
   expect(screen.getByRole('textbox')).toHaveValue('Keep the newer draft');
-  expect(screen.queryByRole('button', { name: 'Retry confirmation' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Resend' })).not.toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.outbox'))).toBeNull();
-  expect(api.request.mock.calls.some(([path]) => path === '/messages')).toBe(false);
 });
 
 test('Portfolio launch reserves account tables before acceptance without displaying any financial values', async () => {
@@ -2577,7 +2640,7 @@ test('a slow delete keeps a disabled Deleting row in place and a stale refresh c
   expect(row).toBeDisabled();
   expect(row).toHaveTextContent('Deleting…');
   expect(row.closest('.analyst-conversation-row')).toHaveClass('is-deleting');
-  // One indicator: the rolling digits, with no seconds counting beside them.
+  // One indicator: the ring, with no seconds counting beside them.
   expect(row.querySelectorAll('.analyst-spinner')).toHaveLength(1);
   expect(row.querySelector('.analyst-spinner-elapsed')).toBeNull();
   expect(historyRows().getByRole('button', { name: 'Delete conversation: Chat a' })).toBeDisabled();
@@ -2627,7 +2690,7 @@ test.each([false, true])('a failed delete confirmed by GET restores the row and 
   if (switched) await open('b');
   await act(async () => failDelete());
   expect(api.request.mock.calls.filter(([path, , method]) => path === '/conversations/a' && method !== 'DELETE').length).toBeGreaterThanOrEqual(2);
-  expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t delete the conversation. It’s still saved. Try again.');
+  expect(screen.getByRole('alert')).toHaveTextContent('Not deleted · Chat a');
   // Deleting from the history left Chat a; the failure keeps whatever view followed.
   expect(Boolean(screen.queryByText('Only answer B'))).toBe(switched);
   expect(Boolean(screen.queryByRole('group', { name: 'Start a review' }))).toBe(!switched);
@@ -2695,7 +2758,7 @@ test('unavailable deletion verification reports uncertainty without claiming the
   await open('b');
   verificationUnavailable = true;
   await act(async () => pending.reject(new Error('Connection lost')));
-  expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t confirm deletion. Try again.');
+  expect(screen.getByRole('alert')).toHaveTextContent('Delete unconfirmed · Chat a');
   expect(screen.queryByText(/still saved/i)).not.toBeInTheDocument();
   expect(screen.getByText('Only answer B')).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem('analyst.workspace.drafts')).a).toBe('Preserve uncertain draft');
@@ -2908,7 +2971,7 @@ test.each([false, true])('send failure restores only the original empty draft an
   expect(screen.getByText('Only answer A')).toBeVisible();
   if (!edited) {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await screen.findByText('Could not send.');
+    await screen.findByText('Not sent · Analyst unreachable · ↵ to resend');
   }
   const sends = api.request.mock.calls.filter(([path]) => path === '/messages');
   expect(sends).toHaveLength(edited ? 1 : 2);
@@ -3013,7 +3076,7 @@ test('retrying an unaccepted send preserves a newer draft and the original reque
   fireEvent.click(screen.getByRole('button', { name: 'Send' }));
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'New question in progress' } });
   await act(async () => first.reject(new Error('Send failed.')));
-  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Resend' }));
   expect(screen.getByRole('textbox')).toHaveValue('New question in progress');
   const sends = api.request.mock.calls.filter(([path]) => path === '/messages');
   expect(sends[1][1]).toEqual(sends[0][1]);

@@ -1,18 +1,19 @@
-/* Muted digits rolling where the value will land. They keep rolling under reduced motion:
-   a still or fading mark read as data or blinking rather than loading. Sized from the ring
-   they replaced, so every call site keeps its size. */
+/* A thin blue arc turning on a pale ring. It keeps turning under reduced motion:
+   a still or fading mark read as data or blinking rather than loading. */
 .analyst-spinner {
   display: inline-block;
   flex: 0 0 auto;
-  min-width: 4ch;
-  color: #9ca3af;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: max(10px, calc(var(--analyst-spinner-size, 14px) * 0.8));
-  font-variant-numeric: tabular-nums;
-  font-weight: 400;
-  line-height: 1;
-  text-align: right;
   vertical-align: middle;
+  fill: none;
+  stroke-width: 3;
+  animation: analyst-spinner-turn 0.8s linear infinite;
+}
+
+.analyst-spinner-track { stroke: #e6ebf0; }
+.analyst-spinner-arc { stroke: var(--portfolio-review-blue, #2563eb); stroke-linecap: round; }
+
+@keyframes analyst-spinner-turn {
+  to { transform: rotate(360deg); }
 }
 
 .analyst-spinner-group { display: inline-flex; align-items: center; gap: 6px; }

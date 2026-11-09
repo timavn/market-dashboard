@@ -33,6 +33,7 @@ const DETAIL_DEFINITIONS = Object.freeze({
   ai: Object.freeze([
     Object.freeze({ id: 'analyst-runtime', label: 'The Analyst' }),
     Object.freeze({ id: 'gmail-ingestion', label: 'Gmail Function' }),
+    Object.freeze({ id: 'level-coverage', label: 'Level coverage' }),
   ]),
 });
 
@@ -654,6 +655,14 @@ function evaluateGmailHeartbeatEvidence(evidence, { now = new Date() } = {}) {
   return detailResult(definition, STATUS.ONLINE);
 }
 
+// A level the Analyst could not read or price is a gap to note here, never an outage:
+// it stands beside the AI checks without changing their status.
+function evaluateLevelCoverage(gaps) {
+  const definition = DETAIL_DEFINITIONS.ai[2];
+  const list = Array.isArray(gaps) ? gaps.filter((gap) => gap && typeof gap.text === 'string' && gap.text) : [];
+  return { ...definition, status: list.length ? STATUS.ATTENTION : STATUS.ONLINE, reason: list.length ? list.map((gap) => gap.text).join('; ') : null };
+}
+
 function evaluateAiEvidence(evidence, { now = new Date() } = {}) {
   const details = [
     evaluateAnalystRuntimeEvidence(evidence?.analyst),
@@ -662,9 +671,10 @@ function evaluateAiEvidence(evidence, { now = new Date() } = {}) {
   const issueByPriority = [STATUS.OFFLINE, STATUS.UNKNOWN, STATUS.ATTENTION]
     .map((status) => details.find((detail) => detail.status === status))
     .find(Boolean);
+  const withCoverage = [...details, evaluateLevelCoverage(evidence?.levels)];
   return issueByPriority
-    ? serviceResult(issueByPriority.status, issueByPriority.reason, details)
-    : serviceResult(STATUS.ONLINE, null, details);
+    ? serviceResult(issueByPriority.status, issueByPriority.reason, withCoverage)
+    : serviceResult(STATUS.ONLINE, null, withCoverage);
 }
 
 async function runBoundedProbe({

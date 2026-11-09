@@ -139,6 +139,7 @@ const DETAIL_DEFINITIONS = {
   ai: [
     { id: 'analyst-runtime', label: 'The Analyst', summary: 'On-demand research assistant' },
     { id: 'gmail-ingestion', label: 'Gmail Function', summary: 'Hedgeye email ingestion' },
+    { id: 'level-coverage', label: 'Level coverage', summary: 'Alpha Codes, flip line, PV bands' },
   ],
 };
 

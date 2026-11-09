@@ -13,7 +13,17 @@ function emptyResearch(reason) {
   return withStatus({ trade: unavailable(reason, { source: SOURCE }), trend: unavailable(reason, { source: SOURCE }),
     tail: unavailable('no-published-tail-source'), riskRange: unavailable(reason, { source: SOURCE }),
     signalStrength: unavailable(reason, { source: SOURCE }), signalStrengthShorts: unavailable(reason, { source: SOURCE }),
-    statedTrend: unavailable(reason, { source: SOURCE }), alphaCode: unavailable(reason, { source: SOURCE }) });
+    statedTrend: unavailable(reason, { source: SOURCE }), alphaCode: unavailable(reason, { source: SOURCE }),
+    alphaCodeLines: unavailable(reason, { source: SOURCE }) });
+}
+
+// Where the price stands against this security's own printed Trade and Trend lines, today.
+// An inferred read of a printed level, kept beside the published fields, never replacing them.
+function watchedLines(watch, symbol) {
+  const lines = ['trade', 'trend'].map(duration => watch?.lines?.[`${symbol}|${duration}`]).filter(Boolean);
+  if (!lines.length) return unavailable('no-watched-alpha-code', { source: 'Alpha Code watch' });
+  return available(Object.fromEntries(lines.map(line => [line.duration, { level: line.level, side: line.side || null, since: line.since || null, printedDate: line.printedDate || line.marketDate || null,
+    breaks: (line.breaks || []).length }])), { source: 'Alpha Code watch', asOf: watch.updatedAt || null, basis: 'inferred' });
 }
 
 // Trade as the Predictive Markets board and every other surface pick it
@@ -84,13 +94,14 @@ function rangeInstrument(entry, descriptor, symbol, price = null) {
 // Trade, Trend, risk range and Signal Strength from the shared security research
 // projection (AGENTS.md): the same decision descriptors every research surface reads.
 function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = async () => new Map(), tradeArchiveStatus = () => null,
-  loadPublishedStatements = async () => null, now = Date.now } = {}) {
+  loadPublishedStatements = async () => null, loadAlphaCodeWatch = null, now = Date.now } = {}) {
   if (typeof loadSecurityIntelligence !== 'function') throw new Error('loadSecurityIntelligence is required');
 
   async function loadMany(symbols) {
-    const [response, prices, statements] = await Promise.all([loadSecurityIntelligence({ symbols }),
+    const [response, prices, statements, watch] = await Promise.all([loadSecurityIntelligence({ symbols }),
       Promise.resolve().then(() => loadReferencePrices(symbols)).catch(() => new Map()),
-      Promise.resolve().then(() => loadPublishedStatements()).catch(() => null)]);
+      Promise.resolve().then(() => loadPublishedStatements()).catch(() => null),
+      Promise.resolve().then(() => loadAlphaCodeWatch?.()).catch(() => null)]);
     if (!response || flagged(response) || response.schemaVersion !== 2 || !response.bySymbol || typeof response.bySymbol !== 'object') {
       throw new Error('security-intelligence-unavailable');
     }
@@ -123,6 +134,7 @@ function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = a
         // What the prose states, beside the Risk Range Trend that sizes positions.
         statedTrend: stated('trend', 'no-stated-trend'),
         alphaCode: stated('alphaCode', 'no-published-alpha-code'),
+        alphaCodeLines: watchedLines(watch, symbol),
       })];
     }));
   }

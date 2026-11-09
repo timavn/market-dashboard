@@ -120,7 +120,7 @@ describe('lightweight system status service', () => {
       },
       {
         id: 'ai',
-        details: ['analyst-runtime', 'gmail-ingestion'],
+        details: ['analyst-runtime', 'gmail-ingestion', 'level-coverage'],
       },
     ]);
     expect(report.services.every((service) => (
@@ -143,6 +143,7 @@ describe('lightweight system status service', () => {
     expect(ai.details.map((detail) => detail.id)).toEqual([
       'analyst-runtime',
       'gmail-ingestion',
+      'level-coverage',
     ]);
     expect(JSON.stringify(report)).not.toMatch(
       /hermes-gmail|quant-analyst|quant-developer|hermes-security|research-ingestion/i,
@@ -659,5 +660,16 @@ describe('lightweight system status service', () => {
         expect.objectContaining({ id: 'market-data', status: 'online' }),
         expect.objectContaining({ id: 'live-portfolio', status: 'online' }),
       ]));
+  });
+
+  test('a level coverage gap is noted beside the AI checks without changing their status', async () => {
+    const service = createSystemStatusService({
+      readDashboardEvidence: async () => null,
+      readAiEvidence: async () => ({ analyst: null, gmail: null, levels: [{ id: 'gamma-map', text: 'No readable gamma map in the latest Market Structure — flip line from prose only.' }] }),
+    });
+    const ai = (await service.collect()).services.find((item) => item.id === 'ai');
+    const detail = ai.details.find((item) => item.id === 'level-coverage');
+    expect(detail).toMatchObject({ status: 'attention', reason: 'No readable gamma map in the latest Market Structure — flip line from prose only.' });
+    expect(ai.reason).not.toMatch(/gamma map/);
   });
 });

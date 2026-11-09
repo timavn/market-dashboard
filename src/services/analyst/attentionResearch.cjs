@@ -4,6 +4,7 @@ const { sourceActionEvidence, describeAnalystFinding } = require('../../utils/an
 const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings, stanceCall } = require('./stanceBook.cjs');
 const { MESSAGE_ID, TERM } = require('../../utils/sourceEmailClip.cjs');
 const { alphaCodeVerdict, brokenAlphaCodeLine } = require('./alphaCodeWatch.cjs');
+const { sessionsBetween } = require('./marketLevels.cjs');
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
@@ -148,8 +149,25 @@ function durationRows(context, symbol, now) {
   });
 }
 // Alpha Code lines are watched by the symbol quoted for them (CL=F for WTI, USO for itself).
-const alphaLines = (watch, symbol) => Object.values(watch?.lines || {}).filter(line => line.symbol === symbol);
+const PRICE_DURATIONS = ['trade', 'trend'];
+const alphaLines = (watch, symbol) => Object.values(watch?.lines || {}).filter(line => line.symbol === symbol && PRICE_DURATIONS.includes(line.duration));
+const priceLineSymbols = watch => [...new Set(Object.values(watch?.lines || {}).filter(line => PRICE_DURATIONS.includes(line.duration)).map(line => line.symbol))];
 const level = value => value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+const lineLevel = (line, value = line.level) => `${level(value)}${line.unit === '%' ? '%' : ''}`;
+// A code printed today or the session before can demand an exit; an older one only notifies.
+const FRESH_PRINT_SESSIONS = 1;
+// Funds that are the coded market one-for-one: holding one is holding the market. A yield
+// line runs opposite to the long-duration fund that tracks it.
+const TRACKERS = { 'BZ=F': [['BNO', 1]], '^KS11': [['EWY', 1]], 'DX-Y.NYB': [['UUP', 1]], SILVER: [['SLV', 1]], UST10Y: [['ZROZ', -1]], UST2Y: [['ZROZ', -1]] };
+function exposure(context, symbol, verified, now) {
+  const own = holdingState(context.holdings, symbol, verified, now);
+  if (own.quantity) return { state: own, sign: 1, via: null };
+  for (const [ticker, sign] of TRACKERS[symbol] || []) {
+    const state = holdingState(context.holdings, ticker, verified, now);
+    if (state.quantity) return { state, sign, via: ticker };
+  }
+  return { state: own, sign: 1, via: null };
+}
 // Break times read in local Pacific time, 24-hour, with the zone named ("08:14 PST").
 const clock = value => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).format(new Date(value));
 const titled = value => (value ? value[0] + value.slice(1).toLowerCase() : null);
@@ -168,13 +186,15 @@ function alphaCodeRow(label, line, published = line.reading?.value) {
 function alphaCodeFindings(context, now, verified) {
   const watch = context.alphaCodeWatch;
   const output = [];
-  for (const symbol of [...new Set(Object.values(watch?.lines || {}).map(line => line.symbol))]) {
+  for (const symbol of priceLineSymbols(watch)) {
     const lines = alphaLines(watch, symbol).sort((left, right) => left.duration.localeCompare(right.duration));
     const broken = lines.filter(line => line.breaks?.length);
     if (!broken.length) continue;
-    const state = holdingState(context.holdings, symbol, verified, now);
+    const { state, sign, via } = exposure(context, symbol, verified, now);
     const held = state.quantity > 0 ? 'Long' : state.quantity < 0 ? 'Short' : null;
-    const rows = [...(held ? positionRows(state) : [])];
+    // A single stock nobody holds is watched for its chips, not announced.
+    if (lines[0].scope === 'security' && !held) continue;
+    const rows = [...(held ? positionRows(state) : []), ...(via ? [row('Held via', via)] : [])];
     let opposed = null;
     for (const line of broken) {
       const last = line.breaks.at(-1);
@@ -182,12 +202,18 @@ function alphaCodeFindings(context, now, verified) {
       // Every cross of the session, one per line, newest first: the top line is the
       // latest cross and the call it leaves; a reclaim never hides the break before it.
       // A broken line reads its duration Neutral; reclaiming it restores the published call.
-      const crosses = line.breaks.map(cross => `${cross.to === 'below' ? 'Broke' : 'Reclaimed'} ${level(line.level)} at ${level(cross.price)} (${clock(cross.at)})`).reverse();
+      const crosses = line.breaks.map(cross => `${cross.to === 'below' ? 'Broke' : 'Reclaimed'} ${lineLevel(line)} at ${lineLevel(line, cross.price)} (${clock(cross.at)})`).reverse();
       crosses[0] += ` → ${name} ${(alphaCodeVerdict(line) || 'NEUTRAL').toLowerCase()}`;
       rows.push(row(`${name} line`, crosses.join('\n')));
-      if (held && line.side === last.to && (held === 'Long') === (last.to === 'below')) opposed ||= line.duration;
+      // Only a fresh print can demand an exit: a line printed days ago still notifies, in blue.
+      const printedRecently = sessionsBetween(line.printedDate || line.marketDate, watch.marketDate) <= FRESH_PRINT_SESSIONS;
+      if (held && printedRecently && line.side === last.to && (held === 'Long') === ((sign > 0) === (last.to === 'below'))) opposed ||= line;
     }
-    if (opposed) rows.push(row('Context', opposed === 'trade' ? `Trade broke vs ${held} → exit.` : 'Trend broke → reduce to MIN.'));
+    if (opposed) {
+      const name = opposed.duration === 'trade' ? 'Trade' : 'Trend';
+      const cross = opposed.breaks.at(-1);
+      rows.push(row('Context', `${opposed.label} broke ${name} ${lineLevel(opposed)} at ${lineLevel(opposed, cross.price)} vs ${held}${via ? ` ${via}` : ''} → ${opposed.duration === 'trade' ? 'exit' : 'reduce to MIN'}.`));
+    }
     rows.push(...DURATIONS.map(([field, label]) => {
       const line = lines.find(candidate => candidate.duration === field);
       return line ? alphaCodeRow(label, line) : row(label, 'N/A');
@@ -201,6 +227,121 @@ function alphaCodeFindings(context, now, verified) {
       symbol: broken[0].label, kind: opposed ? 'portfolio' : 'market', priority: opposed ? 0 : 1, severity: opposed ? ACTION_REQUIRED : null,
       action: `${broken.map(line => line.duration).join(' and ')} line ${broken.length > 1 ? 'breaks' : 'break'}`, publishedAt: latest, rows, sourceLinks,
       state: held ? state : {} }));
+  }
+  return output;
+}
+// A printed code matters on the morning it lands and the session after.
+const printedNow = (line, watch) => sessionsBetween(line.printedDate, watch.marketDate) <= FRESH_PRINT_SESSIONS;
+const printTime = line => line.publishedAt || `${line.printedDate}T12:00:00Z`;
+const lineCitation = (line, title) => ({ label: `${line.productLabel || 'Research'} Alpha Code`, citation: {
+  id: `cite_${hash(['level', line.id, line.level, line.printedDate || line.marketDate]).slice(0, 28)}`, title, product: line.product, publicationDate: line.printedDate || line.marketDate,
+  ...(line.excerpt ? { excerpt: line.excerpt } : {}), ...emailClip(line.messageId, line.label) } });
+// A code printed for the first time in the window, or a printed level moved.
+function alphaCodePrintFindings(context, now, verified) {
+  const watch = context.alphaCodeWatch;
+  const output = [];
+  for (const symbol of priceLineSymbols(watch)) {
+    const all = alphaLines(watch, symbol).sort((left, right) => left.duration.localeCompare(right.duration));
+    const lines = all.filter(line => line.printedDate && printedNow(line, watch) && (line.isNew || line.change));
+    if (!lines.length) continue;
+    const { state, via } = exposure(context, symbol, verified, now);
+    const held = state.quantity > 0 ? 'Long' : state.quantity < 0 ? 'Short' : null;
+    if (lines[0].scope === 'security' && !held) continue;
+    const named = line => (line.duration === 'trade' ? 'Trade' : 'Trend');
+    // The two levels together read as the code; a single printed level has none.
+    const code = pick => (all.length === 2 ? ` ${all.sort((left, right) => (left.duration === 'trade' ? -1 : right.duration === 'trade' ? 1 : 0)).map(pick).join('/')}` : '');
+    const moved = lines.filter(line => line.change);
+    const copy = moved.length
+      ? `${lines[0].label} Alpha Code${all.length === 2 ? `${code(line => lineLevel(line, line.change?.from ?? line.level))} →${code(line => lineLevel(line))}` : ''}: ${moved.map(line => `${named(line)} line ${lineLevel(line, line.change.from)} → ${lineLevel(line)}`).join(', ')}.`
+      : `${lines[0].label} Alpha Code${code(line => lineLevel(line))} → watching ${lines.map(line => `${named(line)} ${lineLevel(line)}`).join(', ')}.`;
+    const printed = lines[0].printedDate;
+    output.push(finding({ key: [symbol, 'alpha-code-print', printed], material: [symbol, printed, lines.map(line => [line.duration, line.level, line.change?.from ?? null])],
+      symbol: lines[0].label, kind: 'market', priority: 1, action: moved.length ? 'alpha code changed' : 'new alpha code', publishedAt: printTime(lines[0]),
+      rows: [...(held ? positionRows(state) : []), ...(via ? [row('Held via', via)] : []), row('Signal', copy)],
+      sourceLinks: lines.map(line => lineCitation(line, `${line.productLabel || 'Research'}: ${line.label} Alpha Code`)), state: held ? state : {} }));
+  }
+  return output;
+}
+// One cross per line, newest first, as the Trade and Trend line rows read.
+const crossHistory = (line, wording) => line.breaks.map(cross => `${wording(cross)} (${clock(cross.at)})`).reverse().join('\n');
+// The SPX flip line and the day's PV bands.
+function spxLevelFindings(context) {
+  const watch = context.alphaCodeWatch;
+  const output = [];
+  const lines = Object.values(watch?.lines || {});
+  const flip = lines.find(line => line.duration === 'flip');
+  if (flip && printedNow(flip, watch) && (flip.isNew || flip.change)) {
+    output.push(finding({ key: ['SPX', 'flip-line', flip.printedDate], material: ['SPX', 'flip-line', flip.printedDate, flip.level, flip.change?.from ?? null], symbol: 'SPX', kind: 'market', priority: 1,
+      action: flip.change ? 'flip line changed' : 'flip line printed', publishedAt: printTime(flip),
+      rows: [row('Signal', flip.change ? `SPX flip line ${level(flip.change.from)} → ${level(flip.level)}.` : `SPX flip line ${level(flip.level)}.`)],
+      sourceLinks: [lineCitation(flip, `${flip.productLabel || 'Research'}: SPX flip line`)] }));
+  }
+  if (flip?.breaks?.length) {
+    const last = flip.breaks.at(-1);
+    output.push(finding({ key: ['SPX', 'flip-line-cross'], material: ['SPX', 'flip-line-cross', flip.level, last], symbol: 'SPX', kind: 'market', priority: 1, action: 'flip line cross', publishedAt: last.at,
+      rows: [row('Signal', last.to === 'below' ? `SPX below flip line ${level(flip.level)} → short gamma: respect breakouts, widen stops.` : `SPX above flip line ${level(flip.level)} → long gamma: fade first touches.`),
+        ...(flip.breaks.length > 1 ? [row('Crosses', crossHistory(flip, cross => `${cross.to === 'below' ? 'Below' : 'Above'} ${level(flip.level)} at ${level(cross.price)}`))] : [])],
+      sourceLinks: [lineCitation(flip, `${flip.productLabel || 'Research'}: SPX flip line`)] }));
+  }
+  const gamma = watch?.regime?.tiles?.spxGammaExposure;
+  for (const band of lines.filter(line => ['pvUpper', 'pvLower'].includes(line.duration) && line.breaks?.length)) {
+    const last = band.breaks.at(-1);
+    const name = band.duration === 'pvUpper' ? 'upper' : 'lower';
+    const outward = last.to === (band.duration === 'pvUpper' ? 'above' : 'below');
+    const stance = gamma === 'Negative' ? ' in short gamma → respect the break' : gamma === 'Positive' ? ' in long gamma → fade the first touch' : '';
+    output.push(finding({ key: ['SPX', band.duration, band.marketDate], material: ['SPX', band.duration, band.level, last], symbol: 'SPX', kind: 'market', priority: 1, action: 'pv band cross', publishedAt: last.at,
+      rows: [row('Signal', outward ? `SPX through ${name} PV band ${level(band.level)}${stance}.` : `SPX back inside ${name} PV band ${level(band.level)}.`)],
+      sourceLinks: [lineCitation(band, 'Market Structure: SPX PV bands')] }));
+  }
+  return output;
+}
+// The VIX bucket lines, from the same bucket table the rest of the site reads.
+function vixFindings(context) {
+  const lines = Object.values(context.alphaCodeWatch?.lines || {}).filter(line => line.duration === 'vix' && line.breaks?.length);
+  if (!lines.length) return [];
+  const crosses = lines.flatMap(line => line.breaks.map(cross => ({ ...cross, line }))).sort((left, right) => left.at.localeCompare(right.at));
+  const last = crosses.at(-1);
+  const bucket = last.to === 'above' ? last.line.above : last.line.below;
+  return [finding({ key: ['VIX', 'bucket-cross'], material: ['VIX', 'bucket-cross', last.line.level, last.to, last.at], symbol: 'VIX', kind: 'market', priority: 1, action: 'vix bucket cross', publishedAt: last.at,
+    rows: [row('Signal', `VIX ${last.to} ${level(last.line.level)} → ${bucket.name}: ${bucket.posture.replace(' / ', ', ')}.`)], sourceLinks: [] })];
+}
+// The book's direction by weight, or by position count while weights are unavailable. Holdings
+// need not be current for this: a Risk Off call should not wait for a broker reconnect.
+function netLong(book) {
+  const weighted = (book?.currentHoldings || []).filter(item => number(item.quantity) && number(item.currentHolding?.weightPct) !== null);
+  if (weighted.length) return weighted.reduce((sum, item) => sum + Math.sign(item.quantity) * item.currentHolding.weightPct, 0) > 0;
+  const positions = (book?.positions || []).filter(position => position.category !== 'event_contract' && number(position.quantity));
+  return positions.length ? positions.reduce((sum, position) => sum + Math.sign(position.quantity), 0) > 0 : null;
+}
+const REGIME_ACTIONS = {
+  spxGammaExposure: { subject: 'SPX', name: 'SPX gamma', to: { Negative: 'wider ranges; respect breakouts', Positive: 'tighter ranges; fade first touches' } },
+  systematicFlowRisk: { subject: 'SPX', name: 'Systematic flow', to: { Bearish: 'expect selling on breakdowns', Bullish: 'expect buying on breakouts' } },
+  pvBandRiskReward: { subject: 'SPX', name: 'PV band risk/reward', to: {} },
+  strategicAllocation: { subject: 'Market', name: 'Strategic Allocation', to: { 'Risk Off': 'cut gross', 'Risk On': 'tighter stops' } },
+};
+// What the newest Market Structure edition changed. Risk Off against a net long book is a
+// standing instruction, so it stays up for as long as the tile reads Risk Off.
+function regimeFindings(context) {
+  const watch = context.alphaCodeWatch;
+  const regime = watch?.regime;
+  if (!regime?.date) return [];
+  const output = [];
+  const publishedAt = regime.publishedAt || `${regime.date}T12:00:00Z`;
+  const card = (tile, from, to, date, severity) => {
+    const words = REGIME_ACTIONS[tile];
+    const action = words.to[to];
+    return finding({ key: ['market-regime', tile, date, severity ? 'action' : 'note'], material: ['market-regime', tile, date, from, to], symbol: words.subject,
+      kind: severity ? 'portfolio' : 'market', priority: severity ? 0 : 1, severity, action: `${words.name.toLowerCase()} change`, publishedAt,
+      rows: [row('Signal', `${words.name} ${from} → ${to}${action ? ` → ${action}` : ''}.`),
+        ...(tile === 'spxGammaExposure' && number(regime.gammaThrottle) !== null ? [row('Gamma throttle', regime.gammaThrottle.toFixed(2))] : [])],
+      sourceLinks: [{ label: 'Market Structure', citation: { id: `cite_${hash(['market-regime', tile, date]).slice(0, 28)}`, title: `Market Structure: ${words.name}`, product: 'market-structure', publicationDate: date, excerpt: `${words.name}: ${to}` } }] });
+  };
+  const standing = regime.riskOff && regime.tiles?.strategicAllocation === 'Risk Off' && netLong(context.holdings) === true;
+  if (standing) output.push(card('strategicAllocation', regime.riskOff.from, 'Risk Off', regime.riskOff.since, ACTION_REQUIRED));
+  if (sessionsBetween(regime.date, watch.marketDate) > FRESH_PRINT_SESSIONS) return output;
+  for (const change of regime.changes || []) {
+    if (!REGIME_ACTIONS[change.id] || (standing && change.id === 'strategicAllocation')) continue;
+    output.push(card(change.id, change.from, change.to, regime.date, null));
   }
   return output;
 }
@@ -616,7 +757,8 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   const actions = [...stances, ...sourceActionFindings(context, now, verified, portfolio, sentenceMemo), ...pendingCheckFindings(context, now, verified)];
   const opportunities = opportunityFindings(context, now, verified, [...portfolio, ...stances], sentenceMemo);
   const accounts = accountFindings(context, now);
-  const alphaCodes = alphaCodeFindings(context, now, verified);
+  const alphaCodes = [...alphaCodeFindings(context, now, verified), ...alphaCodePrintFindings(context, now, verified),
+    ...spxLevelFindings(context), ...vixFindings(context), ...regimeFindings(context)];
   const completeKinds = [];
   if (verified && context.holdings.researchComplete !== false && context.research?.scanComplete === true) completeKinds.push('portfolio');
   if (context.research?.scanComplete === true && Array.isArray(context.documents?.products)) completeKinds.push('opportunity', 'market');

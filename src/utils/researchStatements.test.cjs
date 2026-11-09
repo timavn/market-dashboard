@@ -125,3 +125,22 @@ test('Alpha Code levels share one scale, and a changed or ranged code is not cur
     assert.deepEqual(levels(text), [], text);
   }
 });
+
+test('Alpha Codes named after the phrase, after a dash, or in a roster are read, and the flip line is its own statement', () => {
+  const codes = (text) => researchStatements(text).filter((item) => item.field === 'alphaCode').map((item) => [item.ticker, item.levels.raw, item.levels.trade, item.levels.trend]);
+  assert.deepEqual(codes('Alpha Code for KOSPI = 6265/7051'), [['KOSPI', '6265/7051', 6265, 7051]]);
+  assert.deepEqual(codes('Bitcoin’s Alpha Code was roughly 83 / 79'), [['BTC', '83 / 79', 83, 79]]);
+  assert.deepEqual(codes('The Alpha Code for WTI is now 9792 (TRADE = 97, TREND = 92) and, after breaking immediate-term TRADE Signal Support Brent’s TREND Signal Level of $99 is finally in play.'), [['CL', '9792', 97, 92]]);
+  assert.deepEqual(codes('SPX – Alpha Code = 77037639 (TRADE number is 1 st , TREND 2 nd ) and if you don’t think The Machine reads numbers that way, think again'), [['SPX', '77037639', null, null]]);
+  assert.deepEqual(codes('the Alpha Codes are:\n\nTSLA 370375\n\nSPCX 153143\n\nTSLA = 356-390'), [['TSLA', '370375', null, null], ['SPCX', '153143', null, null]]);
+  // A roster row outside a roster is not a code; a changed code is still not current.
+  assert.deepEqual(codes('TSLA 370375'), []);
+  assert.deepEqual(codes('Oil’s Alpha Code was 80/82 and is now 83/86'), []);
+  const flips = (text) => researchStatements(text).filter((item) => item.field === 'flipLine').map((item) => [item.ticker, item.levels.level, item.approximate]);
+  assert.deepEqual(flips('Remember what happens to dealer Gamma if SPX breaks out (or fails) at the Tier1 Alpha Gamma Flip Line = 7726.'), [['SPX', 7726, false]]);
+  assert.deepEqual(flips('Watch the SPX gamma flip line at 7,726'), [['SPX', 7726, false]]);
+  assert.deepEqual(flips('Negative gamma, an S&P 500 gamma flip level near 7,713, and one-month volatility were highlighted'), [['SPX', 7713, true]]);
+  for (const text of ['The SPX gamma flip line was 7,700 last week.', 'The NDX gamma flip line is 27000.', 'People are starting to flip this trade at 7000.', 'Our flip line of 7000 stands.']) {
+    assert.deepEqual(flips(text), [], text);
+  }
+});

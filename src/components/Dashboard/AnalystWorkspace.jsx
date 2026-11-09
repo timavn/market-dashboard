@@ -138,7 +138,7 @@ const SidebarStatus = ({ row, conversation, starting, deleting }) => {
     : balanceReady ? sidebarCountLabel({ ...conversation, message_count: undefined })
       : phase || (loading ? 'Responding…' : sidebarCountLabel(row));
   return <small>{loading
-    // A delete is quick: the rolling digits alone, no seconds counting beside them.
+    // A delete is quick: the ring alone, no seconds counting beside them.
     ? <AnalystSpinner size={10} className="analyst-conversation-running-icon" text={label} elapsed={!deleting} since={row.activeTurn?.created_at} />
     : <span className="analyst-conversation-status-text">{label}</span>}</small>;
 };
@@ -173,6 +173,13 @@ const verifiedMissing = error => ['ANALYST_CONVERSATION_NOT_FOUND', 'ANALYST_CON
 const recoverableRead = error => transientReadError(error) || (error.code === 'HTTP_404' && !error.serverCode);
 const recoveryDelay = attempt => Math.min(1000 * 2 ** attempt, 15_000);
 const EVENT_SOURCE_CLOSED = 2;
+// Saved turn errors end by offering a retry; the note's own Retry already does.
+const responseFailureLabel = error => String(error || '').replace(/\s*Retry is available\.?\s*$/i, '') || 'Response interrupted.';
+const sendFailureLabel = error => {
+  if (error.code === 'ANALYST_STARTING') return 'Not sent · Analyst connecting';
+  if (error.code === 'ANALYST_REQUEST_TIMEOUT') return 'Not sent · Timed out';
+  return error.code ? `Not sent · ${error.message}` : 'Not sent · Analyst unreachable';
+};
 // A repeated click must land on the disabled row being deleted, never on the row below it.
 const DELETE_ROW_HOLD_MS = 1000;
 // An Inbox Source docks in the empty space left of the Analyst window when there is room for it.
@@ -378,8 +385,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   const pendingRequest = useRef(saved('outbox', null));
   const recoveredRequests = useRef(new Set());
   const recoveryReads = useRef(new Map());
-  const [requestRecoveryFailed, setRequestRecoveryFailed] = useState(null);
-  const [confirmingRequest, setConfirmingRequest] = useState(false);
+  const [sendNote, setSendNote] = useState(null);
   const followReply = useRef(false);
   const removed = useRef(new Set());
   // Rows the user is deleting. Only the trash button adds to this set.
@@ -578,6 +584,10 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
                 });
                 return next;
               });
+              // The full list leaves out a saved row only once it is archived or
+              // deleted, or before a fresh acceptance lands. Its own read tells
+              // which, and only that answer evicts it.
+              if (!query) outstanding.forEach(row => { if (!deleting.current.has(row.id)) void load(row.id).catch(() => {}); });
               setHistoryReadFailed(false);
               setHistoryError('');
               // A search result is not a complete history snapshot.
@@ -607,7 +617,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       }
     })();
     return entry.promise;
-  }, [query, read, rememberSidebar]);
+  }, [query, read, rememberSidebar, load]);
   const listRef = useRef(list);
   listRef.current = list;
   useEffect(() => {
@@ -952,9 +962,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       if (removed.current.has(id)) return;
       if (deletedByEvent.current.has(id)) { await deleted(); return; }
       if (wasSelected && navigation.current === nav) choose(id);
-      setDeleteErrors(old => ({ ...old, [id]: stillSaved
-        ? 'Couldn’t delete the conversation. It’s still saved. Try again.'
-        : 'Couldn’t confirm deletion. Try again.' }));
+      setDeleteErrors(old => ({ ...old, [id]: stillSaved ? 'Not deleted' : 'Delete unconfirmed' }));
     } finally {
       deleting.current.delete(id);
       deletedByEvent.current.delete(id);
@@ -968,7 +976,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     if (!accepted?.id) return;
     update(accepted);
     receiveSidebar(accepted);
-    setRequestRecoveryFailed(current => current?.requestId === request.requestId ? null : current);
+    setSendNote(current => current?.requestId === request.requestId ? null : current);
     if (pendingRequest.current?.requestId === request.requestId) { pendingRequest.current = null; save('outbox', null); }
     if (selectedRef.current === request.conversationId) setError('');
     const key = request.conversationId || 'landing';
@@ -1011,30 +1019,30 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     recoveryReads.current.set(request.requestId, read);
     return read;
   }, [forget]);
-  const settleMissingRequest = useCallback(request => {
-    setRequestRecoveryFailed(current => current?.requestId === request.requestId ? null : current);
-    if (selectedRef.current === request.conversationId) setError('The message was not accepted. Retry.');
-  }, []);
-  const failRequestConfirmation = useCallback(request => {
-    setRequestRecoveryFailed(request);
-    if (selectedRef.current === request.conversationId) {
-      setError('Couldn’t confirm whether the message was accepted. Retry confirmation.');
+  // A message that did not go through is an unsent draft: it goes back in the
+  // composer with its reason, and sending it again reuses its request ID, so
+  // the server returns the original if it did arrive.
+  const noteUnsent = useCallback((request, label) => {
+    const key = request.conversationId || 'landing';
+    if (!draftsRef.current[key]?.trim()) {
+      const next = { ...draftsRef.current, [key]: request.text };
+      draftsRef.current = next; setDrafts(next); save('drafts', next);
     }
+    setSendNote({ ...request, label, separate: draftsRef.current[key].trim() !== request.text });
   }, []);
-  const confirmRequest = async request => {
-    if (confirmingRequest) return;
-    setConfirmingRequest(true);
-    const nav = navigation.current;
-    try {
-      const accepted = await recoverRequest(request);
-      if (accepted) receiveSubmission(request, accepted, nav);
-      else settleMissingRequest(request);
-    } catch { failRequestConfirmation(request); }
-    finally { setConfirmingRequest(false); }
-  };
+  const settleMissingRequest = useCallback(request => {
+    noteUnsent(request, 'Not sent');
+    // Say so once. The request ID stays for a late arrival, without reopening
+    // this on every reload or restoring a draft the user has since cleared.
+    if (pendingRequest.current?.requestId === request.requestId) {
+      pendingRequest.current = { ...pendingRequest.current, settled: true };
+      save('outbox', pendingRequest.current);
+    }
+  }, [noteUnsent]);
+  const failRequestConfirmation = useCallback(request => noteUnsent(request, 'Delivery unconfirmed'), [noteUnsent]);
   useEffect(() => {
     const request = pendingRequest.current;
-    if (!active || !request || sendInFlight.current || recoveredRequests.current.has(request.requestId)) return;
+    if (!active || !request || request.settled || sendInFlight.current || recoveredRequests.current.has(request.requestId)) return;
     recoveredRequests.current.add(request.requestId);
     const nav = navigation.current;
     void recoverRequest(request).then(accepted => {
@@ -1240,7 +1248,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     setPendingSend({ ...pendingRequest.current, navigation: nav, message: { id: `pending:${requestId}`, role: 'user', text } });
     if (clearSubmittedDraft) editDraft(key, '');
     followReply.current = true;
-    setSending(true); setError('');
+    setSending(true); setError(''); setSendNote(null);
     composer.current?.focus();
     const accept = accepted => {
       receiveSubmission(submission, accepted, nav);
@@ -1259,9 +1267,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
       if (confirmed) accept(confirmed);
       else {
         if (clearSubmittedDraft && !draftsRef.current[key]) editDraft(key, rawDraft);
-        if (!confirmationPending) {
-          if (navigation.current === nav) setError(e.message);
-        }
+        if (!confirmationPending) noteUnsent(submission, sendFailureLabel(e));
       }
     }
     finally {
@@ -1388,7 +1394,8 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
   for (const group of groups) group.items = placeDailyChats(group.items);
   const terminalError = conversation?.lastTurn && ['failed', 'interrupted'].includes(conversation.lastTurn.state) && !(reference && conversation.lastTurn.request_id?.startsWith('daily-')) ? conversation.lastTurn : null;
   const lastPrompt = conversation?.messages.find(m => m.turn_id === terminalError?.id && m.role === 'user')?.text;
-  const selectedRecoveryFailure = requestRecoveryFailed?.conversationId === selected ? requestRecoveryFailed : null;
+  // Editing the returned draft ends the note; a separate unsent message keeps it.
+  const visibleSendNote = sendNote?.conversationId === selected && (sendNote.separate || draft.trim() === sendNote.text) ? sendNote : null;
   const landing = !selected && !selectedSend && !launchingReview;
   // A starting review has no saved row yet; its pending opening carries the title.
   const selectedTitle = conversation?.title || launchingReview?.title || [...rows, ...pendingDisplayRows].find(row => row.id === selected)?.title || '';
@@ -1449,11 +1456,15 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
               </div>}
         </div>
         <footer className="analyst-composer-wrap">
-          {terminalError && !responsePending && <div className="analyst-inline-error" role="alert"><span>{terminalError.error || 'Response interrupted.'}</span><button disabled={sending || running} onClick={retryResponse}>Retry</button></div>}
-          {error && <div className="analyst-inline-error" role="alert"><span>{error}</span>{selectedRecoveryFailure
-            ? <button type="button" disabled={confirmingRequest} onClick={() => confirmRequest(selectedRecoveryFailure)}>Retry confirmation</button>
-            : pendingRequest.current?.conversationId === selected && <button type="button" disabled={sending || running} onClick={() => submit(pendingRequest.current.text)}>Retry</button>}</div>}
-          {Object.entries(deleteErrors).map(([id, message]) => <div key={id} className="analyst-inline-error" role="alert"><span>{message}</span><button type="button" aria-label={`Retry deleting conversation: ${entities[id]?.title || rows.find(row => row.id === id)?.title || 'Conversation'}`} onClick={() => deleteConversation(id)}>Retry delete</button></div>)}
+          {terminalError && !responsePending && <div className="analyst-composer-note" role="alert"><span>{responseFailureLabel(terminalError.error)}</span><button type="button" disabled={sending || running} onClick={retryResponse}>Retry</button></div>}
+          {error && <div className="analyst-composer-note" role="alert"><span>{error}</span></div>}
+          {visibleSendNote && <div className={`analyst-composer-note${visibleSendNote.separate ? ' is-quoted' : ''}`} role="alert">{visibleSendNote.separate
+            ? <><span>{visibleSendNote.label}: {visibleSendNote.text}</span><button type="button" disabled={sending || running} onClick={() => submit(visibleSendNote.text)}>Resend</button></>
+            : <span>{visibleSendNote.label} · ↵ to resend</span>}</div>}
+          {Object.entries(deleteErrors).map(([id, label]) => {
+            const title = entities[id]?.title || rows.find(row => row.id === id)?.title || 'Conversation';
+            return <div key={id} className="analyst-composer-note" role="alert"><span>{label} · {title}</span><button type="button" aria-label={`Retry deleting conversation: ${title}`} onClick={() => deleteConversation(id)}>Retry</button></div>;
+          })}
           <form className="analyst-composer" onSubmit={e => { e.preventDefault(); submit(); }}><textarea ref={composer} aria-label="Message The Analyst" placeholder={landing ? 'Ask about positions, exposure, regime, or a setup…' : 'Message The Analyst…'} value={draft} rows={2} disabled={Boolean(launchingReview)} onChange={e => editDraft(draftKey, e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); } }} />{landing && <span className="analyst-composer-hint" aria-hidden="true">↵ send · ⇧↵ newline</span>}{reconnecting && <span className="analyst-connection-status" role="status">Reconnecting…</span>}{running && !launchingReview ? <button type="button" className="analyst-stop-button" onClick={async () => { try { await api.request(`/conversations/${selected}/turns/${conversation.activeTurn.id}/stop`, {}); await load(selected); } catch (e) { setError(e.message); } }}><Square size={14} />Stop</button> : <button type="submit" className="analyst-send-button" disabled={sending || Boolean(launchingReview) || !draft.trim()} aria-label="Send">{landing ? <ArrowUp size={16} /> : <Send size={17} />}</button>}</form>
         </footer>
         {landing && <div className="analyst-landing-lower">

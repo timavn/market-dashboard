@@ -104,7 +104,7 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
     const stored = (await call('setting', { key: ALPHA_CODE_WATCH_KEY })).value || null;
     const current = await alphaCodeLines().catch(() => null);
     if (!current || !Array.isArray(current.lines)) return (latestAlphaCodeWatch = stored);
-    const { watch, changed } = foldAlphaCodeWatch(stored, { marketDate: current.marketDate, lines: current.lines, prices: current.prices || {}, now: at });
+    const { watch, changed } = foldAlphaCodeWatch(stored, { marketDate: current.marketDate, lines: current.lines, prices: current.prices || {}, regime: current.regime || null, now: at });
     if (changed) await call('setting', { key: ALPHA_CODE_WATCH_KEY, value: watch }).catch(() => {});
     return (latestAlphaCodeWatch = watch);
   }

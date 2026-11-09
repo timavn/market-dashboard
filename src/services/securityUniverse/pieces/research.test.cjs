@@ -133,3 +133,15 @@ test('Trade is the current or latest dated publication, and stated Trend and Alp
     loadSecurityIntelligence: intelligence(bySymbol), loadPublishedStatements: async () => statements }).loadMany(['UST2Y']);
   assert.equal(stale.get('UST2Y').statedTrend.reason, 'published-research-archive-unavailable');
 });
+
+test('the record states where the price stands against a watched security\u2019s own lines', async () => {
+  const bySymbol = { NVDA: { decision: {} } };
+  const watch = { updatedAt: '2026-11-04T15:00:00Z', lines: { 'NVDA|trade': { duration: 'trade', level: 221, side: 'below', since: '2026-11-04T14:40:00Z', printedDate: '2026-11-03', breaks: [{}] } } };
+  const piece = createResearchPiece({ now: () => NOW, tradeArchiveStatus: freshArchive, loadSecurityIntelligence: intelligence(bySymbol), loadAlphaCodeWatch: async () => watch });
+  const lines = (await piece.loadMany(['NVDA'])).get('NVDA').alphaCodeLines;
+  assert.deepEqual(lines.value, { trade: { level: 221, side: 'below', since: '2026-11-04T14:40:00Z', printedDate: '2026-11-03', breaks: 1 } });
+  assert.equal(lines.status, 'available');
+  const none = await createResearchPiece({ now: () => NOW, tradeArchiveStatus: freshArchive, loadSecurityIntelligence: intelligence(bySymbol) }).loadMany(['NVDA']);
+  assert.equal(none.get('NVDA').alphaCodeLines.reason, 'no-watched-alpha-code');
+});
+

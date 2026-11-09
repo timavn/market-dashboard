@@ -30,7 +30,9 @@ const sourceProjection = sourceFields.map((field) => field.split('.').map((part)
  * Alpha Code levels sit beside it, each re-derivable from its own clause.
  * New omissions and failed requests cannot erase a previously published signal.
  * A reread of the same source replaces its projection, including a revocation. */
-const STATEMENT_KINDS = ['references', 'trends', 'alphaCodes'];
+const STATED_KINDS = ['references', 'trends', 'alphaCodes', 'flipLines'];
+// Sentences printing a code the grammar could not read travel with the statements for Systems.
+const STATEMENT_KINDS = [...STATED_KINDS, 'unreadAlphaCodes'];
 function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEFAULT_PATH,
   products = RESEARCH_PRODUCTS, now = Date.now, ttlMs = 5 * 60 * 1000 } = {}) {
   let publications = {};
@@ -53,8 +55,9 @@ function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEF
   // Statements are kept one by one: a statement its own sentence no longer
   // states is dropped without discarding the publication's other readings.
   const withStatedStatements = (item) => item?.source && definitions.has(item.source.snapshotType) ? { ...item,
-    ...Object.fromEntries(STATEMENT_KINDS.map((kind) => [kind, (Array.isArray(item[kind]) ? item[kind] : [])
-      .filter((reading) => isStatedReading(reading) && fromSource(item, reading))])) } : item;
+    ...Object.fromEntries(STATED_KINDS.map((kind) => [kind, (Array.isArray(item[kind]) ? item[kind] : [])
+      .filter((reading) => isStatedReading(reading) && fromSource(item, reading))])),
+    unreadAlphaCodes: (Array.isArray(item.unreadAlphaCodes) ? item.unreadAlphaCodes : []).filter((reading) => typeof reading?.statement === 'string' && fromSource(item, reading)) } : item;
   if (referencePath) {
     try {
       const stored = JSON.parse(fs.readFileSync(referencePath, 'utf8'));

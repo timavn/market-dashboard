@@ -177,7 +177,8 @@ test('serves the reference Trade, stated Trend and Alpha Codes of the same reply
       sourceText: 'UST 2yr Yield down -11 basis points last week to Signal Bearish TRADE, but Bullish TREND' } };
   const alpha = { ...source, ticker: 'CL', sourceTicker: 'CL', field: 'alphaCode', sourceText: 'Oil’s (WTI) Alpha Code = 9791 (TRADE = $97, TREND = $91)',
     levels: { raw: '9791', trade: 97, trend: 91, unit: '$', basis: 'printed-levels' } };
-  const statements = { references: [], trends: [trend], alphaCodes: [alpha] };
+  const unread = { ...source, statement: 'Alpha Code for KOSPI runs 6265' };
+  const statements = { references: [], trends: [trend], alphaCodes: [alpha], flipLines: [], unreadAlphaCodes: [unread] };
   assert.equal(validStatements(statements), true);
   assert.equal(validStatements({ ...statements, trends: [{ ...trend, value: 'BEARISH' }] }), false, 'the clause says Bullish TREND');
   assert.equal(validStatements({ ...statements, alphaCodes: [{ ...alpha, mock: true }] }), false);
@@ -185,5 +186,5 @@ test('serves the reference Trade, stated Trend and Alpha Codes of the same reply
   workers[0].ready();
   workers[0].emit('message', { type: 'readings', id: workers[0].messages.at(-1).id, readings: [], statements });
   assert.deepEqual(await pending, statements);
-  assert.deepEqual(await service.loadStatements({ date: '2026-11-01' }), { references: [], trends: [], alphaCodes: [] });
+  assert.deepEqual(await service.loadStatements({ date: '2026-11-01' }), { references: [], trends: [], alphaCodes: [], flipLines: [], unreadAlphaCodes: [] });
 });

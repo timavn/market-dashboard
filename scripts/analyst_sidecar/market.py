@@ -874,6 +874,58 @@ def current_price(raw: dict[str, Any]) -> Optional[float]:
     return (float(raw["bid"]) + float(raw["ask"])) / 2
 
 
+# Bare tickers stay US stocks and ETFs: "ES" is Eversource, so a futures, FX or
+# crypto contract is only requested when the symbol's own form says so.
+_FUTURES_ROOTS = {
+    **{root: (root, "CME") for root in ("ES", "NQ", "RTY", "MES", "MNQ", "M2K", "MBT", "MET")},
+    **{root: (root, "CBOT") for root in (
+        "YM", "MYM", "ZT", "ZF", "ZN", "TN", "ZB", "UB", "ZC", "ZS", "ZW",
+    )},
+    **{root: (root, "COMEX") for root in ("GC", "MGC", "SI", "HG")},
+    **{root: (root, "NYMEX") for root in ("CL", "NG", "RB", "HO", "PL", "PA")},
+    "BTC": ("BRR", "CME"),
+    "ETH": ("ETHUSDRR", "CME"),
+    "6E": ("EUR", "CME"),
+    "6J": ("JPY", "CME"),
+    "6B": ("GBP", "CME"),
+    "6A": ("AUD", "CME"),
+    "6C": ("CAD", "CME"),
+    "6S": ("CHF", "CME"),
+    "DX": ("DX", "NYBOT"),
+    "VX": ("VIX", "CFE"),
+}
+_FX_CURRENCIES = frozenset({
+    "USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "NZD",
+    "SEK", "NOK", "DKK", "MXN", "CNH", "HKD", "SGD", "ZAR",
+})
+_SPOT_CRYPTO = frozenset({"BTC", "ETH", "LTC", "BCH"})
+
+
+def market_instrument(requested: str) -> Optional[dict[str, str]]:
+    """Return the IBKR contract a symbol names, or None for an unmapped futures root."""
+    futures = re.fullmatch(r"/([A-Z0-9]{1,5})|([A-Z0-9]{1,5})=F", requested)
+    if futures:
+        mapped = _FUTURES_ROOTS.get(futures[1] or futures[2])
+        if mapped is None:
+            return None
+        return {"symbol": mapped[0], "secType": "CONTFUT", "exchange": mapped[1], "currency": "USD"}
+    pair = re.fullmatch(r"([A-Z]{3})[/.]?([A-Z]{3})(?:=X)?", requested)
+    if pair and pair[1] in _FX_CURRENCIES and pair[2] in _FX_CURRENCIES:
+        return {"symbol": pair[1], "secType": "CASH", "exchange": "IDEALPRO", "currency": pair[2]}
+    crypto = re.fullmatch(r"([A-Z]{3})[-/]?USD", requested)
+    if crypto and crypto[1] in _SPOT_CRYPTO:
+        return {"symbol": crypto[1], "secType": "CRYPTO", "exchange": "PAXOS", "currency": "USD"}
+    return {"symbol": requested, "secType": "STK", "exchange": "SMART", "currency": "USD"}
+
+
+def _instrument_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("symbol") or row.get("localSymbol") or "").upper(),
+        str(row.get("secType") or "STK").upper(),
+        str(row.get("currency") or "USD").upper(),
+    )
+
+
 class IbkrReader:
     def __init__(
         self,
@@ -1048,11 +1100,20 @@ class IbkrReader:
     async def market_snapshot(self, symbols: list[str]) -> dict[str, Any]:
         refresh_requested_at = utc_now_iso()
         normalized = []
+        instruments: dict[str, dict[str, str]] = {}
+        requested_by_key: dict[tuple[str, str, str], str] = {}
         for symbol in symbols:
             value = str(symbol or "").strip().upper()
-            if value and value not in normalized:
-                normalized.append(value)
-        normalized = normalized[:MAX_MARKET_SYMBOLS]
+            if not value or value in normalized or len(normalized) >= MAX_MARKET_SYMBOLS:
+                continue
+            instrument = market_instrument(value)
+            if instrument is not None:
+                key = _instrument_key(instrument)
+                if key in requested_by_key:
+                    continue
+                requested_by_key[key] = value
+                instruments[value] = instrument
+            normalized.append(value)
         if not normalized:
             return envelope(
                 status="invalid_request",
@@ -1068,14 +1129,8 @@ class IbkrReader:
             payload = await self._request(
                 "/quotes",
                 method="POST",
-                json_body={
-                    "instruments": [
-                        {"symbol": symbol, "secType": "STK", "exchange": "SMART", "currency": "USD"}
-                        for symbol in normalized
-                    ],
-                    "forceRefresh": True,
-                },
-            )
+                json_body={"instruments": list(instruments.values()), "forceRefresh": True},
+            ) if instruments else {"quotes": []}
         except Exception as exc:
             return envelope(
                 status="unavailable",
@@ -1088,11 +1143,15 @@ class IbkrReader:
         accepted = []
         rejected = []
         for raw in payload.get("quotes", []):
-            symbol = str(raw.get("symbol") or raw.get("localSymbol") or "").upper()
+            key = _instrument_key(raw)
+            symbol = requested_by_key.get(key, key[0])
             if verified_live_quote(raw):
                 accepted.append(
                     {
                         "symbol": symbol,
+                        "secType": key[1],
+                        "localSymbol": raw.get("localSymbol"),
+                        "expiry": raw.get("lastTradeDateOrContractMonth"),
                         "conId": raw.get("conId"),
                         "bid": raw.get("bid"),
                         "ask": raw.get("ask"),
@@ -1114,6 +1173,16 @@ class IbkrReader:
             # The service refused before quoting. Say so without its raw message,
             # and without implying a verified IB Gateway disconnect.
             warnings.append("The IBKR session could not be verified, so no verified quotes were returned.")
+        unmapped = [symbol for symbol in normalized if symbol not in instruments]
+        if unmapped:
+            warnings.append("No IBKR futures contract is mapped for: " + ", ".join(unmapped))
+        spot_crypto = [symbol for symbol in rejected if instruments.get(symbol, {}).get("secType") == "CRYPTO"]
+        if spot_crypto:
+            warnings.append(
+                "No live PAXOS spot quote for " + ", ".join(spot_crypto)
+                + "; IBKR has reported this account as not subscribed to PAXOS data. "
+                "BTC=F and ETH=F are CME futures, not spot."
+            )
         if rejected:
             warnings.append(
                 "No current value was returned for non-live, stale, unentitled, or missing quotes: "
@@ -1133,7 +1202,7 @@ class IbkrReader:
                     "mode": "on_demand_broker_snapshot",
                     "requestedAt": refresh_requested_at,
                     "completedAt": utc_now_iso(),
-                    "brokerSnapshotRequestedCount": len(normalized),
+                    "brokerSnapshotRequestedCount": len(instruments),
                     "freshMarkCount": len(accepted),
                     "missingMarkCount": len(rejected),
                 },
