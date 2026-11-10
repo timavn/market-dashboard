@@ -99,6 +99,28 @@ test('orders urgent concerns before newer ideas and colors directional words and
   expect(screen.queryByText('short', { exact: true })).not.toBeInTheDocument();
 });
 
+test('a terse Context opens the card as the bold Action, above the ticker, in place of the Action row', () => {
+  const alert = attention('ttd', { kind: 'portfolio', severity: 'action-required', presentation: { subject: 'TTD', date: '2026-11-09', sourceLinks: [], rows: [
+    { label: 'Process limits', text: 'MIN 1.50% / MAX 2.50%' }, { label: 'Action', text: 'Reduce to MAX 2.50%' },
+    { label: 'Trim', text: '0.71 pts (3.21% → 2.50%)' }, { label: 'Context', text: 'Above MAX → trim to MAX.' },
+  ] } });
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Action:', 'Ticker:', 'Process limits:', 'Trim:']);
+  expect(screen.getByText('Action:').closest('.analyst-inbox-lead')).toHaveTextContent('Action: Above MAX → trim to MAX.');
+  expect(screen.queryByText('Reduce to MAX 2.50%')).not.toBeInTheDocument();
+  expect(screen.queryByText('Context:')).not.toBeInTheDocument();
+});
+
+test('a prose Context stays below while the Action row opens the card', () => {
+  const alert = attention('kdp', { kind: 'opportunity', presentation: { subject: 'KDP', date: '2026-11-09', sourceLinks: [], rows: [
+    { label: 'Current position', text: 'Not held' }, { label: 'Action', text: 'New Long idea → review' },
+    { label: 'Context', text: 'Margins are improving and the source started buying.' },
+  ] } });
+  render(<AnalystInbox findings={[alert]} onCitation={jest.fn()} onAcknowledge={jest.fn()} />);
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Action:', 'Ticker:', 'Current position:', 'Context:']);
+  expect(screen.getByText('Action:').closest('.analyst-inbox-lead')).toHaveTextContent('New Long idea → review');
+});
+
 test('a security card names its source products right under the position', () => {
   const citation = (title, product) => ({ id: `cite_${product}`, title, product, sourceUri: `https://mail.google.com/mail/#all/${product}` });
   const idea = attention('idea', { kind: 'opportunity', presentation: { subject: 'KDP', date: '2026-11-02', rows: [
@@ -112,7 +134,7 @@ test('a security card names its source products right under the position', () =>
     sourceLinks: [{ label: 'Top 3 Things Alpha Code', citation: citation('Top 3 Things: WTI Alpha Code', 'top-3-things') }] } });
   render(<AnalystInbox findings={[idea, wti, attention('gateway')]} />);
   const labels = [...document.querySelectorAll('.analyst-inbox-copy dt')].map(term => term.textContent.trim());
-  expect(labels.slice(0, 4)).toEqual(['Ticker:', 'Current position:', 'Source:', 'Action:']);
+  expect(labels.slice(0, 4)).toEqual(['Action:', 'Ticker:', 'Current position:', 'Source:']);
   expect(screen.getAllByText('Source:').map(term => term.nextSibling.textContent)).toEqual(['The Call, Signal Strength Shorts', 'Top 3 Things']);
   // A product name is not a directional call.
   expect(screen.getByText('The Call, Signal Strength Shorts')).not.toHaveClass('analyst-inbox-signal--negative');
@@ -160,7 +182,7 @@ test('fresh holdings expiry removes portfolio actions while retaining research i
     render(<AnalystInbox findings={[portfolio, idea]} />);
     expect(screen.getByRole('heading', { name: 'AMZN' })).toBeInTheDocument();
     // The position reads as its weight alone, green for Long.
-    expect(screen.getByText('Current position:').nextSibling).toHaveTextContent(/^1\.25%$/);
+    expect(screen.getByText('Current position:').nextSibling).toHaveTextContent(/^LONG 1\.25%$/);
     expect(screen.getByText('Current position:').nextSibling).toHaveClass('analyst-inbox-signal--positive');
     act(() => jest.advanceTimersByTime(65_000));
     expect(screen.queryByRole('heading', { name: 'AMZN' })).not.toBeInTheDocument();
@@ -655,4 +677,42 @@ test('a Trade/Trend read from list membership looks like a stated one, with its 
   within(table).getAllByText('N/A').forEach(cell => expect(cell).toHaveClass('analyst-inbox-bias-cell is-unavailable', { exact: true }));
   expect(within(table).queryByText('from list')).not.toBeInTheDocument();
   expect(within(table).queryByText('removed')).not.toBeInTheDocument();
+});
+
+test('a Risk Range card draws the full bar with its numbers, centered under the copy, and no text row', () => {
+  const card = attention('range', { kind: 'market', presentation: { subject: 'DRAM', date: '2026-11-09', rows: [
+    { label: 'Signal', text: 'At the high end of the Risk Range (70%) → reload the Short.' },
+    { label: 'Risk Range', text: '35.12–46.65', range: { low: 35.12, high: 46.65, price: 43.2, decimals: 2, unit: '' } }] } });
+  const { container } = render(<AnalystInbox findings={[card]} />);
+  const bar = screen.getByRole('img', { name: /Price 43\.20 · Risk Range 35\.12–46\.65 · 70%/ });
+  expect(bar.closest('.analyst-inbox-range')).toBeInTheDocument();
+  for (const figure of ['35.12', '46.65', '43.20', '38.96', '42.81', '70%']) expect(within(bar).getByText(figure)).toBeInTheDocument();
+  expect(container).not.toHaveTextContent('Risk Range:');
+});
+
+test('a notification leads with its Signal in the bold first line; an Action still leads when there is one', () => {
+  const signal = attention('signal', { kind: 'market', presentation: { subject: 'SPX', date: '2026-11-09', rows: [{ label: 'Gamma throttle', text: '-22.33' }, { label: 'Signal', text: 'SPX gamma Neutral → Negative.' }] } });
+  const { unmount } = render(<AnalystInbox findings={[signal]} />);
+  expect(screen.getByText('Signal:').closest('.analyst-inbox-lead')).toHaveTextContent('Signal: SPX gamma Neutral → Negative.');
+  expect(document.querySelector('.analyst-inbox-copy').firstElementChild).toHaveClass('analyst-inbox-lead');
+  unmount();
+  const action = attention('action', { kind: 'market', presentation: { subject: 'IDX', date: '2026-11-09', rows: [{ label: 'Action', text: 'Reduce to MIN' }, { label: 'Signal', text: 'Trend broke.' }] } });
+  render(<AnalystInbox findings={[action]} />);
+  expect(screen.getByText('Action:').closest('.analyst-inbox-lead')).toBeInTheDocument();
+  expect(screen.getByText('Signal:').closest('.analyst-inbox-lead')).toBeNull();
+});
+
+test('past the end of the range only the third and its percentage are blue', () => {
+  const card = attention('beyond', { kind: 'market', presentation: { subject: 'IDX', date: '2026-11-09', rows: [{ label: 'Signal', text: 'Top 1/3 RR (127%) → moving against your Short.', beyondRange: true }] } });
+  const { container } = render(<AnalystInbox findings={[card]} />);
+  expect(container.querySelector('.analyst-inbox-beyond-range')).toHaveTextContent(/^Top 1\/3 RR \(127%\)$/);
+  expect(screen.getByText('Signal:').closest('.analyst-inbox-lead')).toHaveTextContent('Signal: Top 1/3 RR (127%) → moving against your Short.');
+});
+
+test.each(['process-sizing', 'portfolio-balance', 'dashboard-health'])('an internal %s card has no Source button or Source line', product => {
+  const card = attention('internal', { kind: 'market', presentation: { subject: 'TTD', date: '2026-11-09', rows: [{ label: 'Action', text: 'Above MAX → trim to MAX.' }],
+    sourceLinks: [{ label: 'atr14 evidence', citation: { id: 'cite_internal', title: 'TTD atr14', product } }] } });
+  const { container } = render(<AnalystInbox findings={[card]} />);
+  expect(screen.queryByRole('button', { name: 'Source' })).not.toBeInTheDocument();
+  expect(container).not.toHaveTextContent('Source:');
 });

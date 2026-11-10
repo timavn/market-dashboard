@@ -3,6 +3,9 @@ import { ChevronDown, Download, Filter, RefreshCw, Search } from 'lucide-react';
 import {
   SLEEVE_ORDER, formatPct, formatPrice, holdingSourceTitle, isHistoricalReferenceMark,
 } from './portfolioPositionsModel';
+import SecurityRangeMeter from '../SecurityRangeMeter';
+import SecurityRangeChart from '../SecurityRangeChart';
+import useSecurityRiskRanges from '../../../hooks/useSecurityRiskRanges';
 
 export const HoldingMarkWarning = ({ holding }) => {
   const historicalReference = isHistoricalReferenceMark(holding);
@@ -77,12 +80,13 @@ export default function PortfolioPositionsCard({ positions, research, refresh })
     setSearch: setLedgerSearchFilter, setSortField: setLedgerSortField, setSleeve: setLedgerSleeveFilter,
   } = positions.filters;
   const { availabilityLabel: portfolioAvailabilityLabel, isRefreshing, onRefresh: handleManualRefresh } = refresh;
+  const riskRanges = useSecurityRiskRanges([...ledgerLongs, ...ledgerShorts].map(holding => holding.symbol));
 
   const renderLedgerRows = (rows, isLongs) => {
     if (rows.length === 0) {
       return (
         <tr>
-          <td colSpan={10} className="pcv2-empty">
+          <td colSpan={11} className="pcv2-empty">
             No {isLongs ? 'long' : 'short'} positions
           </td>
         </tr>
@@ -180,6 +184,11 @@ export default function PortfolioPositionsCard({ positions, research, refresh })
                 </span>
               )}
             </td>
+            <td className="pcv2-range-cell">
+              {riskRanges[holding.symbol] && mark !== null
+                ? <SecurityRangeMeter range={{ ...riskRanges[holding.symbol], price: mark.value }} />
+                : '—'}
+            </td>
             <td
               className={`pcv2-num ${dayGainLossPercent > 0 ? 'pcv2-positive' : dayGainLossPercent < 0 ? 'pcv2-negative' : ''}`}
               aria-label={dayGainLossPercent === null
@@ -203,7 +212,10 @@ export default function PortfolioPositionsCard({ positions, research, refresh })
           </tr>
           {isExpanded && (
             <tr className="pcv2-research-row">
-              <td colSpan={10}>{research.renderExpanded(holding, rowId)}</td>
+              <td colSpan={11}>
+                <SecurityRangeChart symbol={holding.symbol} />
+                {research.renderExpanded(holding, rowId)}
+              </td>
             </tr>
           )}
         </React.Fragment>
@@ -222,6 +234,7 @@ export default function PortfolioPositionsCard({ positions, research, refresh })
         <th aria-label="Factor exposures" title="Reviewed +EV exposure labels">Factors</th>
         <th className="pcv2-num" aria-label="Resize (Shares)" title="Resize in shares">Resize<br />Sh</th>
         <th className="pcv2-num" aria-label="Price" title="Verified live price or latest completed-session close">Price</th>
+        <th aria-label="Risk Range" title="Where the price sits in its published Risk Range: red bottom third, green top third">Range</th>
         <th className="pcv2-num" aria-label="Day G/L (%)" title="Day gain/loss percentage">Day G/L<br />%</th>
         <th aria-label="Action" title="Action">Action</th>
       </tr>
@@ -238,18 +251,19 @@ export default function PortfolioPositionsCard({ positions, research, refresh })
           className="pcv2-ledger-pane-scroll"
           data-layout="fit-columns"
         >
-          <table className="pcv2-ledger-table" data-column-count="10">
+          <table className="pcv2-ledger-table" data-column-count="11">
             <colgroup>
-              <col style={{ width: '17%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '9%' }} />
               <col style={{ width: '7%' }} />
               <col style={{ width: '9%' }} />
-              <col style={{ width: '11%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '10%' }} />
+              <col style={{ width: '14%' }} />
               <col style={{ width: '8%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '8%' }} />
+              <col style={{ width: '7%' }} />
             </colgroup>
             {renderLedgerTableHead()}
             <tbody>

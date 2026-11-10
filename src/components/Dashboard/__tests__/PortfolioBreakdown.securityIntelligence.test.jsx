@@ -878,7 +878,7 @@ test('uses broker NAV for the new matrix and preserves the existing ledger layou
   expect(panel.nextElementSibling).toBe(screen.getByLabelText('Hedgeye quad reference'));
   expect(panel.closest('.pcv2-factor-workspace').nextElementSibling).toBe(ledger);
   expect(ledger.querySelector('.pcv2-ledger-split').children).toHaveLength(2);
-  expect(within(getLedgerRowBySymbol('OIH')).getAllByRole('cell')).toHaveLength(10);
+  expect(within(getLedgerRowBySymbol('OIH')).getAllByRole('cell')).toHaveLength(11);
 });
 
 test('shows a dated factor valuation without enabling trade sizing from closing prices', () => {
@@ -1207,6 +1207,7 @@ test('fits every compact ledger column in both Longs and Shorts panes', async ()
     'Factors',
     'Resize / Sh',
     'Price',
+    'Range',
     'Day G/L / %',
     'Action',
   ];
@@ -1219,6 +1220,7 @@ test('fits every compact ledger column in both Longs and Shorts panes', async ()
     'Factor exposures',
     'Resize (Shares)',
     'Price',
+    'Risk Range',
     'Day G/L (%)',
     'Action',
   ];
@@ -1242,9 +1244,9 @@ test('fits every compact ledger column in both Longs and Shorts panes', async ()
       expect(within(table).getByRole('columnheader', { name })).toBeInTheDocument();
     });
     expect(positionRow).toBeInTheDocument();
-    expect(within(positionRow).getAllByRole('cell')).toHaveLength(10);
+    expect(within(positionRow).getAllByRole('cell')).toHaveLength(11);
     expect(viewport).toHaveAttribute('data-layout', 'fit-columns');
-    expect(table).toHaveAttribute('data-column-count', '10');
+    expect(table).toHaveAttribute('data-column-count', '11');
   });
 });
 
@@ -1276,16 +1278,17 @@ test('batch-loads unique symbols and independently expands stable duplicate posi
   expect(screen.getAllByRole('columnheader', { name: 'Factor exposures' }).length).toBeGreaterThan(0);
   const ledgerColumns = getLedgerTables()[0].querySelectorAll('col');
   expect([...ledgerColumns].map((column) => column.style.width)).toEqual([
-    '17%',
+    '13%',
+    '6%',
+    '8%',
+    '10%',
+    '9%',
+    '9%',
     '7%',
     '9%',
-    '11%',
-    '10%',
-    '10%',
+    '14%',
     '8%',
-    '10%',
-    '10%',
-    '8%',
+    '7%',
   ]);
 
   fireEvent.click(screen.getByRole('button', { name: 'Refresh portfolio and research' }));

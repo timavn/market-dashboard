@@ -1513,14 +1513,15 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
         const title = source.title || source.product;
         const href = source.sourceUri && source.product !== 'dashboard-health' ? safeResearchUrl(source.sourceUri) : null;
         // An emailed publication shows the original, clipped around its ticker, with the report link under it.
-        const email = citationAnchor && source.sourceMessageId && source.clipTicker;
+        const email = citationAnchor && source.sourceMessageId;
         return <article className="analyst-source-publication-entry" key={source.id || index} aria-busy={source.evidenceLoading || undefined}>
         {/* The anchored popover is just the publication, its date and the excerpt; its title opens the report. */}
         <strong>{citationAnchor && href && !email ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">{title} ↗</a> : title}</strong>
         {(source.publicationDate || source.publishedAt) && <p>{formatResearchSourceDate(source.publicationDate || source.publishedAt)}</p>}
         {!citationAnchor && source.sourceUri && source.product !== 'dashboard-health' && <p>{href ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a> : source.sourceUri}</p>}
         {email ? <>
-          <AnalystSourceEmail messageId={source.sourceMessageId} ticker={source.clipTicker} title={title} excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
+          {source.sourceImageUrl && <img className="analyst-source-image" src={source.sourceImageUrl} alt={`${title}, as published`} />}
+          <AnalystSourceEmail messageId={source.sourceMessageId} ticker={source.clipTicker} quote={source.clipTicker ? undefined : source.excerpt} title={title} excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
           {href && <p className="analyst-source-email-link"><a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a></p>}
         </> : <AnalystSourceExcerpt excerpt={source.excerpt} highlightTexts={source.highlightTexts} />}
         {source.evidenceError && <p>Source evidence unavailable.</p>}

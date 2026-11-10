@@ -11,8 +11,16 @@ const text = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').tri
 const symbolOf = value => ({ 'BRK-B': 'BRK.B', 'BRK B': 'BRK.B', 'BF-B': 'BF.B' }[String(value).toUpperCase()] || String(value || '').toUpperCase());
 // A citation to an emailed publication names the stored email and its ticker, so the
 // Source popover can show the original clipped around that ticker.
-const emailClip = (messageId, ticker) => (MESSAGE_ID.test(String(messageId || '')) && TERM.test(ticker)
-  ? { sourceMessageId: messageId, clipTicker: ticker } : {});
+// A name that cannot be searched for ("Market") still opens the email, just unmarked.
+const emailClip = (messageId, ticker) => (MESSAGE_ID.test(String(messageId || ''))
+  ? { sourceMessageId: messageId, ...(TERM.test(String(ticker || '')) ? { clipTicker: ticker } : {}) } : {});
+// A citation stored by its email's address or file path opens that email too.
+const STORED_EMAIL = /(?:gmail:\/\/message\/|\/messages\/\d{4}-\d{2}-\d{2}\/[^/]+\/)([a-f0-9]{8,32})/i;
+function withActualEmail(citation, symbol) {
+  if (!citation || citation.sourceMessageId) return citation;
+  const stored = String(citation.sourceUri || citation.sourceUrl || '').match(STORED_EMAIL)?.[1];
+  return stored ? { ...citation, ...emailClip(stored, symbol) } : citation;
+}
 const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 const time = value => Date.parse(value);
 // The display name from the central security record (/api/security-universe identity).
@@ -29,9 +37,10 @@ const row = (label, value) => ({ label, text: value });
 const pct = value => `${value.toFixed(2)}%`;
 // Each security has its own MIN / MAX, so a sizing alert states them rather
 // than relying on the reader to remember the band. ATR and the stop get their own lines.
+const processLimitRow = rule => row('Process limits', `MIN ${pct(rule.minWeight)} / ${number(rule.maxWeight) !== null ? `MAX ${pct(rule.maxWeight)}` : 'MAX unavailable'}`);
 function processLimitRows(rule) {
   if (number(rule.minWeight) === null) return [];
-  return [row('Process limits', `MIN ${pct(rule.minWeight)} / ${number(rule.maxWeight) !== null ? `MAX ${pct(rule.maxWeight)}` : 'MAX unavailable'}`),
+  return [processLimitRow(rule),
     ...(number(rule.atrPct) !== null ? [row('ATR', `${pct(rule.atrPct)} of price${rule.atrFloorApplied ? ' (1.25% floor sets the band)' : ''}`)] : []),
     ...(number(rule.stopPrice) !== null ? [row('Stop', `${rule.stopPrice.toFixed(2)} · 2 × ATR from last close${number(rule.stopLossPctNlv) !== null ? ` · ${pct(rule.stopLossPctNlv)} of NLV at this weight` : ''}`)] : [])];
 }
@@ -76,7 +85,7 @@ function finding({ key, material, symbol, kind, action, publishedAt, rows, sourc
   return { attentionVersion: 1, id, sourceId: id, symbol, action, state: 'open', kind, priority, ...(severity ? { severity } : {}),
     publicationTime: new Date(publishedAt).toISOString(), fingerprint: hash(severity ? [material, severity] : material), ...state,
     presentation: { subject: symbol, date: String(publishedAt).slice(0, 10), rows,
-      sourceLinks: sourceLinks.filter(link => linked(link.citation)).filter((link, i, all) => all.findIndex(other => (other.citation.id || other.citation.sourceUri) === (link.citation.id || link.citation.sourceUri)) === i) } };
+      sourceLinks: sourceLinks.map(link => ({ ...link, citation: withActualEmail(link.citation, symbol) })).filter(link => linked(link.citation)).filter((link, i, all) => all.findIndex(other => (other.citation.id || other.citation.sourceUri) === (link.citation.id || link.citation.sourceUri)) === i) } };
 }
 function signalEvidence(holding, field, now) {
   const source = holding.sources?.[field];
@@ -319,6 +328,36 @@ const REGIME_ACTIONS = {
   pvBandRiskReward: { subject: 'SPX', name: 'PV band risk/reward', to: {} },
   strategicAllocation: { subject: 'Market', name: 'Strategic Allocation', to: { 'Risk Off': 'cut gross', 'Risk On': 'tighter stops' } },
 };
+const GAMMA_READ = {
+  Negative: { sign: -1, text: 'Below 0, dealers hedge with the move, which widens swings both ways. Further below 0 is stronger. It says volatility, not direction.' },
+  Positive: { sign: 1, text: 'Above 0, dealers hedge against the move, which narrows swings. Further above 0 is stronger. It says volatility, not direction.' },
+};
+const MIN_THROTTLE_HISTORY = 10;
+// How unusual the reading is against the stored editions; too few editions say nothing.
+function throttleRank(value, history) {
+  if (!(history?.values?.length >= MIN_THROTTLE_HISTORY)) return null;
+  const { values, since } = history;
+  const span = `readings since ${monthDay(since)}`;
+  if (value < Math.min(...values)) return `lowest of ${values.length + 1} ${span}; prior low ${Math.min(...values).toFixed(2)}`;
+  if (value > Math.max(...values)) return `highest of ${values.length + 1} ${span}; prior high ${Math.max(...values).toFixed(2)}`;
+  return value < 0 ? `more negative than ${values.filter(item => item > value).length} of the prior ${values.length} ${span}`
+    : `higher than ${values.filter(item => item < value).length} of the prior ${values.length} ${span}`;
+}
+// One standard deviation of a day's move implied by the annualized 10-day figure.
+function realizedRow(regime) {
+  const realized = number(regime.realizedVolatility);
+  if (realized === null) return [];
+  const daily = realized / Math.sqrt(252);
+  const price = number(regime.spxPrice);
+  return [row('10-day realized', `${level(realized)}% ÷ √252 ≈ ${daily.toFixed(1)}% a day${price ? `, about ${Math.round(price * daily / 100).toLocaleString('en-US')} SPX points` : ''}.`)];
+}
+function gammaRows(regime, to) {
+  const value = number(regime.gammaThrottle);
+  if (value === null) return [];
+  const read = GAMMA_READ[to];
+  return [row('Gamma throttle', [value.toFixed(2), throttleRank(value, regime.throttleHistory)].filter(Boolean).join(' · ')),
+    ...(read && Math.sign(value) === read.sign ? [row('What it means', read.text)] : []), ...realizedRow(regime)];
+}
 // What the newest Market Structure edition changed. Risk Off against a net long book is a
 // standing instruction, so it stays up for as long as the tile reads Risk Off.
 function regimeFindings(context) {
@@ -333,8 +372,8 @@ function regimeFindings(context) {
     return finding({ key: ['market-regime', tile, date, severity ? 'action' : 'note'], material: ['market-regime', tile, date, from, to], symbol: words.subject,
       kind: severity ? 'portfolio' : 'market', priority: severity ? 0 : 1, severity, action: `${words.name.toLowerCase()} change`, publishedAt,
       rows: [row('Signal', `${words.name} ${from} → ${to}${action ? ` → ${action}` : ''}.`),
-        ...(tile === 'spxGammaExposure' && number(regime.gammaThrottle) !== null ? [row('Gamma throttle', regime.gammaThrottle.toFixed(2))] : [])],
-      sourceLinks: [{ label: 'Market Structure', citation: { id: `cite_${hash(['market-regime', tile, date]).slice(0, 28)}`, title: `Market Structure: ${words.name}`, product: 'market-structure', publicationDate: date, excerpt: `${words.name}: ${to}` } }] });
+        ...(tile === 'spxGammaExposure' ? gammaRows(regime, to) : [])],
+      sourceLinks: [{ label: 'Market Structure', citation: { id: `cite_${hash(['market-regime', tile, date]).slice(0, 28)}`, title: `Market Structure: ${words.name}`, product: 'market-structure', publicationDate: date, excerpt: `${words.name}: ${to}`, ...emailClip(regime.messageId, 'SPX'), ...(regime.chartUrl ? { sourceImageUrl: regime.chartUrl } : {}) } }] });
   };
   const standing = regime.riskOff && regime.tiles?.strategicAllocation === 'Risk Off' && netLong(context.holdings) === true;
   if (standing) output.push(card('strategicAllocation', regime.riskOff.from, 'Risk Off', regime.riskOff.since, ACTION_REQUIRED));
@@ -359,8 +398,10 @@ function portfolioFindings(context, now, verified) {
     if (rule.status !== 'conflict') continue;
     const field = rule.rule === 'TRADE_BREAK' ? 'trade' : 'trend';
     let publishedAt = candidate.sources?.[field]?.publishedAt;
-    const sources = ['trade', 'trend'].filter(key => signalEvidence(candidate, key, now)).map(key => ({ label: `${key === 'trade' ? 'Trade' : 'Trend'} source`, citation: candidate.sources[key].citation }));
-    if (['RISK_CAP', 'ABOVE_MAX'].includes(rule.rule)) {
+    const sizingRule = ['RISK_CAP', 'ABOVE_MAX'].includes(rule.rule);
+    // A sizing limit is the dashboard's own calculation; a published Trade or Trend is not what raised it.
+    const sources = sizingRule ? [] : ['trade', 'trend'].filter(key => signalEvidence(candidate, key, now)).map(key => ({ label: `${key === 'trade' ? 'Trade' : 'Trend'} source`, citation: candidate.sources[key].citation }));
+    if (sizingRule) {
       // Only ATR and the reference close size a position; a captured beta is not evidence.
       const metrics = Object.entries(candidate.sizingInputs || {}).filter(([key, value]) => ['atr14', 'referencePrice'].includes(key) && value && !invalid(value) && dated(value.asOf, now) && value.source && number(value.value) !== null);
       publishedAt = metrics.map(([, value]) => value.asOf).sort().at(-1);
@@ -742,6 +783,71 @@ function stanceFindings(context, now, verified) {
   }
   return output;
 }
+// Where a held position stands in its published range, one condition → action line each.
+const rangeFigure = value => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Past either end still reads as that end's third, with the true percentage (127%, -20%).
+const rangeWhere = (zone, pct) => `${['top', 'above'].includes(zone) ? 'Top' : 'Bottom'} 1/3 RR (${Math.round(pct)}%)`;
+const beyondRange = zone => ['above', 'below'].includes(zone);
+function rangeAction(side, zone) {
+  const withPosition = side === 'Long' ? { top: 'reduce position', above: 'reduce position', bottom: 'add to position' } : { bottom: 'reduce position', below: 'reduce position', top: 'add to position' };
+  return withPosition[zone] || `moving against your ${side}`;
+}
+const lowerFirst = value => value[0].toLowerCase() + value.slice(1);
+const rangeSource = line => (line.cadence === 'weekly' ? `${line.source}; ${monthDay(line.asOf)}` : line.source || 'Risk Ranges');
+const rangeCitation = line => [{ label: rangeSource(line), citation: { id: `cite_${hash(['risk-range', line.symbol, line.low, line.high, line.asOf]).slice(0, 28)}`,
+  title: `${line.source || 'Risk Ranges'}: ${line.symbol} Risk Range`, product: line.sourceId || 'risk-ranges', publicationDate: line.asOf, excerpt: `${line.symbol} ${rangeFigure(line.low)}–${rangeFigure(line.high)}`, ...emailClip(line.messageId, line.symbol) } }];
+function riskRangeFindings(context, now, verified) {
+  const watch = context.riskRangeWatch;
+  if (!verified || !watch) return [];
+  const output = [];
+  // The row's text stays for the Analyst's context; the card draws the bar from `range`.
+  const rangeRow = line => {
+    const printed = alphaLines(context.alphaCodeWatch, line.symbol);
+    const levelOf = duration => printed.find(item => item.duration === duration)?.level ?? null;
+    return { ...row('Risk Range', `${rangeFigure(line.low)}–${rangeFigure(line.high)} · ${rangeSource(line)}`),
+      range: { low: line.low, high: line.high, price: line.price, decimals: 2, unit: '',
+        ...(printed.length ? { alphaCode: { trade: levelOf('trade'), trend: levelOf('trend'), approximate: printed.some(item => item.approximate), dots: true, product: printed[0].productLabel || '' } } : {}) } };
+  };
+  // The security's own MIN / MAX, from the same sizing rule the Above MAX cards use.
+  const sizeLimits = (symbol, state) => {
+    const held = (context.holdings.ruleHoldings || []).find(candidate => symbolOf(candidate.holding) === symbol);
+    if (!held) return [];
+    const rule = evaluatePortfolioRule({ ...held, weightPct: state.currentHolding?.weightPct ?? null }, context.holdings.asOf);
+    return number(rule.minWeight) === null ? [] : [processLimitRow(rule)];
+  };
+  for (const line of Object.values(watch.lines || {})) {
+    const state = holdingState(context.holdings, line.symbol, true, now);
+    if (!state.quantity || line.price === null) continue;
+    const side = state.quantity > 0 ? 'Long' : 'Short';
+    const weight = state.currentHolding ? ` to ${state.currentHolding.weightPct.toFixed(2)}%` : '';
+    const add = (line.adds || []).filter(item => item.date === watch.marketDate && (item.to > 0) === (state.quantity > 0)).at(-1);
+    const card = (key, material, action, signal, publishedAt, beyond) => output.push(finding({ key, material, symbol: line.symbol, kind: 'market', priority: 1, action, publishedAt,
+      rows: [...positionRows(state), ...sizeLimits(line.symbol, state), { ...row('Signal', signal), ...(beyond ? { beyondRange: true } : {}) }, rangeRow(line), ...durationRows(context, line.symbol, now)], sourceLinks: rangeCitation(line), state }));
+    if (add) {
+      card([line.symbol, 'risk-range-add', add.date], [line.symbol, add.date, add.zone, side], 'added at the wrong end of the range',
+        `${side} added${weight} in ${lowerFirst(rangeWhere(add.zone, add.pct))} → should be MIN size.`, add.at, beyondRange(add.zone));
+      continue;
+    }
+    const entry = line.entries?.at(-1);
+    if (!entry || entry.to !== line.zone || line.zone === 'middle') continue;
+    card([line.symbol, 'risk-range'], [line.symbol, line.zone, side, entry.at], rangeAction(side, line.zone),
+      `${rangeWhere(line.zone, line.pct)} → ${rangeAction(side, line.zone)}.`, entry.at, beyondRange(line.zone));
+  }
+  for (const note of watch.sizeNotes || []) {
+    const state = holdingState(context.holdings, note.symbol, true, now);
+    if (!state.quantity) continue;
+    const side = state.quantity > 0 ? 'Long' : 'Short';
+    if (note.side && note.side !== side.toUpperCase()) continue;
+    const weight = state.currentHolding ? ` You hold ${state.currentHolding.weightPct.toFixed(2)}%.` : '';
+    const instruction = `${{ covered: 'Cover', sold: 'Sell', trimmed: 'Trim', bought: 'Buy', added: 'Add', shorted: 'Short' }[note.verb] || 'Size'} to ${note.size}`;
+    output.push(finding({ key: [note.symbol, 'size-note', note.date, note.size], material: [note.symbol, note.date, note.size], symbol: note.symbol, kind: 'market', priority: 1,
+      action: instruction.toLowerCase(), publishedAt: `${note.date}T12:00:00Z`,
+      rows: [...positionRows(state), row('Signal', `${instruction}.${weight}`), ...durationRows(context, note.symbol, now)],
+      sourceLinks: [{ label: 'Real-Time Alert', citation: { id: `cite_${hash(['size-note', note.symbol, note.date, note.size]).slice(0, 28)}`, title: `Real-Time Alert: ${note.symbol} at ${note.size}`,
+        product: 'real-time-alert', publicationDate: note.date, excerpt: note.excerpt, ...(note.sourceUri ? { sourceUri: note.sourceUri } : {}), ...emailClip(note.messageId, note.symbol) } }], state }));
+  }
+  return output;
+}
 function evaluateResearchAttention(context = {}, now = new Date()) {
   now = now instanceof Date ? now : new Date(now);
   // Reuse exact source text only within this evaluation; citations, security
@@ -758,7 +864,7 @@ function evaluateResearchAttention(context = {}, now = new Date()) {
   const opportunities = opportunityFindings(context, now, verified, [...portfolio, ...stances], sentenceMemo);
   const accounts = accountFindings(context, now);
   const alphaCodes = [...alphaCodeFindings(context, now, verified), ...alphaCodePrintFindings(context, now, verified),
-    ...spxLevelFindings(context), ...vixFindings(context), ...regimeFindings(context)];
+    ...spxLevelFindings(context), ...vixFindings(context), ...regimeFindings(context), ...riskRangeFindings(context, now, verified)];
   const completeKinds = [];
   if (verified && context.holdings.researchComplete !== false && context.research?.scanComplete === true) completeKinds.push('portfolio');
   if (context.research?.scanComplete === true && Array.isArray(context.documents?.products)) completeKinds.push('opportunity', 'market');

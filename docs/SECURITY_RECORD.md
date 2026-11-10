@@ -30,6 +30,7 @@ Every leaf is a **Field**: `{ status, value, source, asOf, reason, …}`. A miss
   - **Aliases.** Readings routed through a research alias (SPX → SPY, RUT → IWM, DXY → UUP) are `proxy`. The only exceptions are tickers that `src/constants/instrumentEquivalence.json` lists as measuring the same instrument (BITCOIN ≡ BTC).
   - **Ingest rewrites.** The email parser files GOLD as GLD and WTI as USO (`rewrittenAtIngest`), so those are `proxy` too.
   - **Scale check.** A range more than 2× away from the security's own completed close is `proxy` whatever its key says.
+  - **Weekly fallback.** When the daily sheet does not carry a security, `riskRange` is ETF Pro's printed range for that exact ticker: `source: 'ETF Pro'`, `cadence: 'weekly'`, `asOf` the full-book edition, for at most 14 days, with the same 2× scale check. It never replaces an available daily range and does not change `trend`.
   - **Live, 2026-10-30.** SPY/SPX, IWM/RUT, UUP/DXY, USO/WTIC and GLD/GOLD are `proxy`; AAPL, XLV and BTC/BITCOIN are `direct`.
 
 ## Published statements: the day's repository

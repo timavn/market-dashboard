@@ -3,6 +3,8 @@ import { analystWorkspaceApi as api } from '../../services/analyst/analystClient
 import AnalystAlertThread from './AnalystAlertThread';
 import { describeAnalystFinding } from '../../utils/analystFindingPresentation.cjs';
 import { activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, isActionRequired, isAttentionFinding } from '../../utils/analystInboxAlerts.cjs';
+import AnalystPredictionRangeBar from './AnalystPredictionRangeBar';
+import './AnalystPredictionReport.css';
 import './AnalystInbox.css';
 
 const DURATIONS = ['Tick', 'Trade', 'Trend', 'Tail'];
@@ -48,6 +50,9 @@ const dismissedAt = finding => Date.parse((finding.payload || finding).dismissed
 
 // Security and market alerts (an Alpha Code line break) lead with their ticker; operational subjects are not tickers.
 const TICKER_KINDS = new Set(['portfolio', 'opportunity', 'market']);
+// Source is for published products. The dashboard's own calculations and health checks have none to show.
+const INTERNAL_SOURCES = new Set(['process-sizing', 'portfolio-balance', 'dashboard-health']);
+const publishedSource = link => Boolean(link?.citation) && !INTERNAL_SOURCES.has(link.citation.product);
 
 // An urgent instruction remains visible during a holdings outage; say which
 // verification it rests on instead of presenting the position as current.
@@ -62,10 +67,22 @@ function staleHoldingLabel(payload) {
 // The publication a link cites, by product: "The Call", not "The Call @ Hedgeye | Replay…".
 // Generic labels ("Trade source", "atr14 evidence") fall back to the citation's own title.
 function sourceName(link) {
-  if (link.citation?.product === 'process-sizing') return 'Volatility sizing';
   const label = String(link.label || '').replace(/\s+Alpha Code$/, '').trim();
   if (label && !/\b(?:source|evidence)$/i.test(label)) return label;
   return String(link.citation?.title || '').split(/:| @ | \| /)[0].trim() || null;
+}
+
+// The card opens on what it is about. A terse "condition → action" Context says that and replaces the
+// plainer Action row, which only restates it; prose Context stays below as explanation and the Action row leads.
+function leadWithAction(rows) {
+  const context = rows.find(row => row.label === 'Context' && row.text.includes('→'));
+  const lead = context || rows.find(row => row.label === 'Action');
+  // A notification has no Action; its Signal takes the same bold first line.
+  if (!lead) {
+    const signal = rows.find(row => row.label === 'Signal');
+    return signal ? [{ ...signal, lead: true }, ...rows.filter(row => row !== signal)] : rows;
+  }
+  return [{ ...lead, label: 'Action', lead: true }, ...rows.filter(row => row !== lead && !(context && row.label === 'Action'))];
 }
 
 function attentionContent(finding, now) {
@@ -93,12 +110,12 @@ function attentionContent(finding, now) {
     }, []);
   if (!rows.length) return null;
   // A security card names its publications at a glance, right under the position.
-  const sources = [...new Set((presentation.sourceLinks || []).filter(link => link?.citation).map(sourceName).filter(Boolean))];
+  const sources = [...new Set((presentation.sourceLinks || []).filter(publishedSource).map(sourceName).filter(Boolean))];
   if (TICKER_KINDS.has(payload.kind) && sources.length && !rows.some(row => row.label === 'Source')) {
     const at = rows.findIndex(row => row.label === 'Current position') + 1;
     rows.splice(at, 0, { label: 'Source', text: sources.join(', ') });
   }
-  return { ...presentation, rows, publicationDate: presentation.date || payload.publicationTime,
+  return { ...presentation, rows: leadWithAction(rows), publicationDate: presentation.date || payload.publicationTime,
     sortTime: Date.parse(payload.publicationTime) || Date.parse(presentation.date) || 0 };
 }
 
@@ -268,8 +285,11 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       const stance = modern && content.stance?.calls?.length ? content.stance : null;
       // Every linked publication opens from one Source popover beside the button.
       const durations = modern ? DURATIONS.map(label => content.rows.find(row => row.label === label)).filter(Boolean) : [];
-      const rows = modern ? content.rows.filter(row => !DURATIONS.includes(row.label)) : [];
-      const citations = content.sourceLinks?.length ? content.sourceLinks.filter(link => link?.citation && link.label).map(link => link.citation)
+      const lead = modern ? content.rows.find(row => row.lead) : null;
+      // The Risk Range is drawn as its bar under the copy, with its numbers on it, not as a line of text.
+      const rows = modern ? content.rows.filter(row => !DURATIONS.includes(row.label) && !row.lead && !row.range) : [];
+      const riskRange = modern ? content.rows.find(row => row.range)?.range : null;
+      const citations = content.sourceLinks?.length ? content.sourceLinks.filter(link => publishedSource(link) && link.label).map(link => link.citation)
         : payload.citation ? [payload.citation] : [];
       return <React.Fragment key={finding.id}>
       {!dismissed && !required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Notifications</h2>}
@@ -277,6 +297,11 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
         <h3 className="sr-only">{subject}</h3>
         <div className={durations.length ? 'analyst-inbox-body has-horizons' : 'analyst-inbox-body'}>
         {stance ? <StanceCopy ticker={subject} stance={stance} freshHoldings={attentionEvidenceFreshness(finding, now).holdings} /> : <dl className="analyst-inbox-copy">
+          {lead && <div className="analyst-inbox-lead">
+            <dt>{lead.label}: </dt><dd>{lead.beyondRange && lead.text.includes(' → ')
+              ? <><span className="analyst-inbox-beyond-range">{lead.text.split(' → ')[0]}</span> → <DirectionalText>{lead.text.split(' → ').slice(1).join(' → ')}</DirectionalText></>
+              : <DirectionalText>{lead.text}</DirectionalText>}</dd>
+          </div>}
           {ticker && <div className="analyst-inbox-ticker">
             <dt>Ticker: </dt><dd>{ticker}</dd>
           </div>}
@@ -286,7 +311,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
               <DirectionalText>{entry}</DirectionalText></span>)}</dd>
           </div> : <div key={`${row.label}-${index}`}>
             <dt>{row.label}: </dt><dd className={row.side ? toneClass(STANCE_TONES[row.side.toUpperCase()]) : ['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}>
-              {row.label === 'Order' ? <OrderText>{row.text}</OrderText> : row.label === 'Source' ? row.text : <DirectionalText>{row.text}</DirectionalText>}</dd>
+              {row.side && `${row.side.toUpperCase()} `}{row.label === 'Order' ? <OrderText>{row.text}</OrderText> : row.label === 'Source' ? row.text : <DirectionalText>{row.text}</DirectionalText>}</dd>
           </div>) : <>
           <div className="analyst-inbox-position">
             <dt>Current position: </dt><dd><DirectionalText>{content.currentPosition.label}</DirectionalText>
@@ -318,6 +343,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
             </dd>
           </div>}
           </>}
+          {riskRange && <div className="analyst-inbox-range"><dd><AnalystPredictionRangeBar range={riskRange} /></dd></div>}
         </dl>}
         {durations.length > 0 && <HorizonTable durations={durations} stats={horizonStats[content.subject]} />}
         </div>

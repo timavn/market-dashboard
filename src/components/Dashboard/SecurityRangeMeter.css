@@ -1,0 +1,14 @@
+.security-range-meter { display: inline-flex; align-items: center; gap: 6px; width: 100%; min-width: 0; vertical-align: middle; font-variant-numeric: tabular-nums; }
+.security-range-meter__track { position: relative; flex: 1 1 auto; min-width: 28px; height: 12px; }
+.security-range-meter__track::before { content: ''; position: absolute; top: 5px; left: 0; right: 0; height: 2px; background: var(--analyst-border, #c9d1db); }
+.security-range-meter__mark { position: absolute; top: 2px; width: 1.5px; height: 8px; }
+.security-range-meter__mark--bottom { left: 33.33%; background: var(--dashboard-negative, #dc2626); }
+.security-range-meter__mark--top { left: 66.67%; background: var(--dashboard-positive, #059669); }
+.security-range-meter__dot { position: absolute; top: 2.5px; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--analyst-ink, #172033); }
+.security-range-meter__reading { flex: 0 0 auto; color: var(--analyst-ink, #172033); }
+.security-range-meter.is-top .security-range-meter__reading, .security-range-meter.is-above .security-range-meter__reading { color: var(--dashboard-positive, #059669); }
+.security-range-meter.is-bottom .security-range-meter__reading, .security-range-meter.is-below .security-range-meter__reading { color: var(--dashboard-negative, #dc2626); }
+.security-range-meter.is-top .security-range-meter__dot, .security-range-meter.is-above .security-range-meter__dot { background: var(--dashboard-positive, #059669); }
+.security-range-meter.is-bottom .security-range-meter__dot, .security-range-meter.is-below .security-range-meter__dot { background: var(--dashboard-negative, #dc2626); }
+.pcv2-range-cell { padding-left: 4px; padding-right: 4px; }
+.security-range-chart { height: 116px; margin: 2px 0 8px; }

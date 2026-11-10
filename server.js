@@ -380,6 +380,7 @@ const RESEARCH_AUTHORITATIVE_REFRESH_TIMEOUT_MS = Number.isFinite(
 
 // These caches are deliberately limited to non-live research/status data. Live
 // IBKR, portfolio, and quote routes retain their existing freshness policies.
+const { inMacroShowWindow, researchRefreshMs } = require('./src/utils/macroShowWindow.cjs');
 const researchResponseCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 100 });
 const hermesLedgerCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
 const hermesRuntimeStateCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 1 });
@@ -1388,11 +1389,11 @@ app.get('/api/analyst/alpha-code-lines', async (req, res) => {
     };
     const now = new Date();
     const marketDate = defaultResearchMarketDate(now);
-    if (!alphaCodeLevels || alphaCodeLevels.marketDate !== marketDate || now.getTime() - alphaCodeLevels.at > ALPHA_CODE_LEVELS_MS) {
+    if (!alphaCodeLevels || alphaCodeLevels.marketDate !== marketDate || now.getTime() - alphaCodeLevels.at > researchRefreshMs(now.getTime(), ALPHA_CODE_LEVELS_MS)) {
       const [board, statements, marketStructure] = await Promise.all([
         loadPredictionSetupBoard({ now, researchDate: marketDate }),
         publishedTradeArchive.loadStatements({ date: marketDate }).catch(() => null),
-        queryLatestSnapshotsByType('market-structure', { limit: 30 }).catch(() => []),
+        queryLatestSnapshotsByType('market-structure', { limit: 120 }).catch(() => []),
       ]);
       const checks = Object.fromEntries((await Promise.all(levelSymbols(statements).map(async (symbol) => {
         const seen = await quoted(symbol);
@@ -1403,6 +1404,10 @@ app.get('/api/analyst/alpha-code-lines', async (req, res) => {
       const archiveRead = statements?.alphaCodes?.length > 0;
       alphaCodeLevels = { at: archiveRead ? now.getTime() : now.getTime() - ALPHA_CODE_LEVELS_MS + 30_000, marketDate,
         ...buildLevelWatch({ marketDate, boardLines: alphaCodeLines(board), statements, marketStructure, prices: checks }) };
+      // Market Structure's levels and tiles open the email they were printed in.
+      const structureEmail = date => (date ? marketStructureEmailId(date).catch(() => null) : null);
+      if (alphaCodeLevels.regime) alphaCodeLevels.regime.messageId = await structureEmail(alphaCodeLevels.regime.date);
+      for (const line of alphaCodeLevels.lines.filter(item => item.product === 'market-structure' && !item.messageId)) line.messageId = await structureEmail(line.printedDate);
     }
     const { lines, regime, coverage } = alphaCodeLevels;
     const prices = Object.fromEntries((await Promise.all([...new Set(lines.map((line) => line.symbol))].map(async (symbol) => {
@@ -1415,6 +1420,101 @@ app.get('/api/analyst/alpha-code-lines', async (req, res) => {
   } catch (error) {
     console.error('[alpha-code-lines]', error.message);
     res.status(503).json({ error: 'Alpha Code lines unavailable' });
+  }
+});
+
+// The email a stored product snapshot was read from, for Source links. Editions never change.
+const snapshotEmailIds = new Map();
+async function snapshotEmailId(snapshotType, date) {
+  const key = `${snapshotType}|${date}`;
+  if (snapshotEmailIds.has(key)) return snapshotEmailIds.get(key);
+  const result = await dynamodb.get({ TableName: 'HedgeyeDailySnapshot', Key: { date, snapshotType }, ProjectionExpression: 'htmlSource' }).promise().catch(() => null);
+  const messageId = String(result?.Item?.htmlSource || '').match(/\/messages\/\d{4}-\d{2}-\d{2}\/[^/]+\/([a-f0-9]{8,32})-/i)?.[1] || null;
+  if (messageId) snapshotEmailIds.set(key, messageId);
+  return messageId;
+}
+// Market Structure's snapshot does not name its email; the research ledger does. The newest wins.
+const marketStructureEmailIds = new Map();
+async function marketStructureEmailId(marketDate) {
+  if (marketStructureEmailIds.has(marketDate)) return marketStructureEmailIds.get(marketDate);
+  const ids = new Set();
+  let ExclusiveStartKey;
+  do {
+    const page = await dynamodb.query({ TableName: 'ResearchEntityEventsV1', IndexName: 'marketDate-index', KeyConditionExpression: '#date = :date', FilterExpression: '#product = :product',
+      ProjectionExpression: 'sourceMessageId', ExpressionAttributeNames: { '#date': 'marketDate', '#product': 'productKey' }, ExpressionAttributeValues: { ':date': marketDate, ':product': 'market-structure' },
+      ...(ExclusiveStartKey ? { ExclusiveStartKey } : {}) }).promise();
+    for (const item of page.Items || []) if (item.sourceMessageId) ids.add(item.sourceMessageId);
+    ExclusiveStartKey = page.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  const messageId = [...ids].sort().at(-1) || null;
+  if (messageId) marketStructureEmailIds.set(marketDate, messageId);
+  return messageId;
+}
+
+// Each held security's published range with a live price, for the Analyst's range watch,
+// and what Keith has said about his own size in the last week of Real-Time Alerts.
+const RISK_RANGE_NOTES_MS = 5 * 60_000;
+const RISK_RANGE_MAX_SYMBOLS = 200;
+let riskRangeSizeNotes = null;
+app.get('/api/analyst/risk-range-lines', async (req, res) => {
+  try {
+    const { sizeNotesFromEvents } = require('./src/services/analyst/riskRangeWatch.cjs');
+    const { loadStanceLedger } = require('./src/services/analyst/stanceBook.cjs');
+    const symbols = [...new Set(String(req.query.symbols || '').split(',').map(symbol => symbol.trim().toUpperCase()).filter(Boolean))].slice(0, RISK_RANGE_MAX_SYMBOLS);
+    const now = new Date();
+    const batches = [];
+    for (let offset = 0; offset < symbols.length; offset += securityUniverse.MAX_SYMBOLS) batches.push(symbols.slice(offset, offset + securityUniverse.MAX_SYMBOLS));
+    const records = await Promise.all(batches.map(batch => securityUniverse.load(batch, { fields: ['research'] }).catch(() => null)));
+    const ranges = records.flatMap(record => Object.values(record?.rows || {})).map(({ symbol, research }) => {
+      const field = research?.riskRange;
+      const [low, high] = [Number(field?.value?.lrr), Number(field?.value?.hrr)];
+      // A proxy or unmatched reading is another instrument's range; this security has no bar of its own.
+      return field?.status === 'available' && field.match === 'direct' && low > 0 && high > low
+        ? { symbol, low, high, source: field.source || null, sourceId: field.sourceId || null, asOf: field.asOf || null, cadence: field.cadence || 'daily', messageId: field.sourceMessageId || null } : null;
+    }).filter(Boolean);
+    // The daily sheet's own email, named by its stored copy.
+    for (const range of ranges.filter(item => item.sourceId === 'risk-ranges' && item.asOf)) range.messageId = await snapshotEmailId('risk-ranges', range.asOf);
+    const prices = Object.fromEntries((await Promise.all(ranges.map(async ({ symbol }) => {
+      const quote = await getQuote(symbol).catch(() => null);
+      const price = Number(quote?.price);
+      return quote && Number.isFinite(price) && price > 0 && isQuoteUsableNow(quote, symbol)
+        ? [symbol, { price, asOf: quote.observedAt || now.toISOString(), source: quote.observation?.source || null, delayed: quote.observation?.dataType === 'delayed' }] : null;
+    }))).filter(Boolean));
+    if (!riskRangeSizeNotes || now.getTime() - riskRangeSizeNotes.at > RISK_RANGE_NOTES_MS) {
+      const ledger = await loadStanceLedger(dynamodb, { days: 7, now }).catch(() => null);
+      if (ledger) riskRangeSizeNotes = { at: now.getTime(), notes: sizeNotesFromEvents(ledger.events) };
+    }
+    res.json({ marketDate: defaultResearchMarketDate(now), complete: records.every(Boolean), ranges, prices, sizeNotes: riskRangeSizeNotes?.notes || [] });
+  } catch (error) {
+    console.error('[risk-range-lines]', error.message);
+    res.status(503).json({ error: 'Risk range lines unavailable' });
+  }
+});
+
+// A security's closes under its published range: the daily sheet where it printed one,
+// ETF Pro's weekly range carried forward from each edition where it did not.
+const RISK_RANGE_HISTORY_SESSIONS = 60;
+app.get('/api/analyst/risk-range-history', async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return res.status(400).json({ error: 'symbol is required' });
+    const { rangeHistory } = require('./src/services/analyst/riskRangeWatch.cjs');
+    const instrument = resolveHistoryInstrument(symbol);
+    const [history, daily, editions] = await Promise.all([
+      fetchYahooSizingHistory(symbol).catch(() => null),
+      dynamodb.query({ TableName: 'RiskRangeData', KeyConditionExpression: 'ticker = :ticker', ExpressionAttributeValues: { ':ticker': symbol } }).promise().then(result => result.Items || []).catch(() => []),
+      getEtfProEmailSnapshots().catch(() => []),
+    ]);
+    const bars = (history?.bars || []).map(bar => ({ date: String(bar.date || '').slice(0, 10), close: Number(bar.rawClose ?? bar.close ?? bar.adjustedClose) }));
+    const weekly = editions.map(edition => {
+      const row = (edition?.data?.rows || []).find(candidate => String(candidate?.ticker || '').toUpperCase() === symbol);
+      return row ? { date: edition.date, low: Number(row.trendLowEnd), high: Number(row.trendHighEnd) } : null;
+    }).filter(Boolean);
+    const rows = rangeHistory({ bars, daily: daily.map(item => ({ date: item.date, low: Number(item.lrr), high: Number(item.hrr) })), weekly, sessions: RISK_RANGE_HISTORY_SESSIONS });
+    res.json({ symbol, listing: instrument?.yahooSymbol || symbol, rows });
+  } catch (error) {
+    console.error('[risk-range-history]', error.message);
+    res.status(503).json({ error: 'Risk range history unavailable' });
   }
 });
 
@@ -2406,6 +2506,25 @@ const exposureLabSecurityIdentityResolver = createExposureLabSecurityIdentityRes
   resolveYahooSymbol: (ticker) => resolveHistoryInstrument(ticker)?.yahooSymbol || null,
 });
 
+// ETF Pro's printed range for each ETF it lists, keyed by ticker and dated by the
+// full-book edition that printed it. The last good read stands if a refresh fails.
+const ETF_PRO_RANGES_MS = 5 * 60_000;
+let etfProWeeklyRanges = null;
+async function loadEtfProWeeklyRanges() {
+  if (etfProWeeklyRanges && Date.now() - etfProWeeklyRanges.at < ETF_PRO_RANGES_MS) return etfProWeeklyRanges.ranges;
+  const stale = etfProWeeklyRanges?.ranges || new Map();
+  const book = await buildEtfProResponse().catch(() => null);
+  const asOf = book?.meta?.baseSnapshotDate || book?.meta?.snapshotDate || null;
+  if (!book || book.available === false || book.current === false || !Array.isArray(book.rows) || !asOf) return stale;
+  // The full-book edition that printed the ranges, not a later action email applied on top of it.
+  const messageId = book.meta?.baseSourceMessageId || book.meta?.sourceMessageId || null;
+  const ranges = new Map(book.rows
+    .filter(row => row?.ticker && Number(row.trendLowEnd) > 0 && Number(row.trendHighEnd) > Number(row.trendLowEnd))
+    .map(row => [String(row.ticker).toUpperCase(), { lrr: Number(row.trendLowEnd), hrr: Number(row.trendHighEnd), asOf, messageId }]));
+  etfProWeeklyRanges = { at: Date.now(), ranges };
+  return ranges;
+}
+
 // The central per-ticker security record. Every loader is a lazy closure: the
 // research, archive and analyst services it reads are created later in this file.
 const securityUniverse = createSecurityUniverseService({
@@ -2427,6 +2546,7 @@ const securityUniverse = createSecurityUniverseService({
     tradeArchiveStatus: () => publishedTradeArchive.status(),
     loadPublishedStatements: () => publishedTradeArchive.loadStatements({ date: defaultResearchMarketDate(new Date()) }),
     loadAlphaCodeWatch: () => analystRoutes.dailyWorkflow?.alphaCodeWatch?.() ?? null,
+    loadWeeklyRanges: () => loadEtfProWeeklyRanges(),
   }),
   stance: createStancePiece({ getScoredStanceBook: () => analystRoutes.dailyWorkflow?.scoredStanceBook?.() }),
   marketHistory: createMarketHistoryPiece({
@@ -5807,6 +5927,10 @@ app.get('/api/hedgeye/snapshot/:snapshotType', async (req, res) => {
     // the same multi-KB DynamoDB read. For latest requests, use the
     // snapshotType/date GSI first instead of probing seven dates (which was
     // especially wasteful for weekly products such as CFTC positioning).
+    // Today's Macro Show must reach the predictive rollup as soon as it is pulled.
+    if (String(snapshotType || '').trim() === 'the-macro-show' && !date && inMacroShowWindow(Date.now())) {
+      researchResponseCache.delete(cacheKey);
+    }
     const cacheResult = await researchResponseCache.get(cacheKey, async () => {
       let item = null;
       if (date) {

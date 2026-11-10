@@ -5,7 +5,7 @@
 // alphaCodeWatch.cjs folds prices into the lines and attentionResearch.cjs words them.
 const hermesRules = require('../../constants/hermesRules.json');
 const { PRODUCTS } = require('../predictionMorningResearch.cjs');
-const { verifiedMarketStructureChartMetrics } = require('../../utils/marketStructureReport.cjs');
+const { buildPublicMarketStructureSnapshot, verifiedMarketStructureChartMetrics } = require('../../utils/marketStructureReport.cjs');
 
 // A code is watched for this many market days after it was last printed, and a
 // ticker with no code in that long reads as a new one when one is printed.
@@ -143,7 +143,7 @@ function vixLines({ marketDate, buckets = hermesRules.volatility.vixBuckets }) {
     above: { name: BUCKET_NAMES[bucket.key] || bucket.label, posture: bucket.posture }, below: { name: BUCKET_NAMES[buckets[index].key] || buckets[index].label, posture: buckets[index].posture } }));
 }
 /** What the newest Market Structure edition changed from the last edition printing each tile. */
-function marketRegime(editions) {
+function marketRegime(editions, spxPrice = null) {
   const signals = editions.filter(({ snapshot }) => Array.isArray(snapshot.data?.signals) && snapshot.data.signals.length).map(({ snapshot, metrics }) => ({ snapshot, metrics, tiles: new Map(snapshot.data.signals.map(tile => [tile.id, tile])) }));
   const latest = signals[0];
   if (!latest) return null;
@@ -153,8 +153,14 @@ function marketRegime(editions) {
     return before && before.value !== tile.value ? [{ id: tile.id, label: tile.label, from: before.value, to: tile.value, fromDate: prior.snapshot.date }] : [];
   });
   const throttle = latest.metrics.spxGammaVolatilityThrottle;
-  return { date: latest.snapshot.date, publishedAt: latest.snapshot.publishedAt || null, tiles: Object.fromEntries([...latest.tiles.values()].map(tile => [tile.id, tile.value])), changes,
-    gammaThrottle: finite(throttle?.gammaThrottle), riskOff: riskOffSince(signals) };
+  return { date: latest.snapshot.date, publishedAt: latest.snapshot.publishedAt || null, chartUrl: buildPublicMarketStructureSnapshot(latest.snapshot)?.data?.signalMatrixImageUrl || null, tiles: Object.fromEntries([...latest.tiles.values()].map(tile => [tile.id, tile.value])), changes,
+    gammaThrottle: finite(throttle?.gammaThrottle), throttleHistory: throttleHistory(editions, latest.snapshot.date), realizedVolatility: finite(throttle?.tenDayRealizedVolatility), spxPrice: finite(spxPrice), riskOff: riskOffSince(signals) };
+}
+// Every earlier throttle reading, oldest date included, to say how unusual the newest one is.
+function throttleHistory(editions, latestDate) {
+  const prior = editions.filter(({ snapshot }) => snapshot.date !== latestDate)
+    .flatMap(({ snapshot, metrics }) => (finite(metrics.spxGammaVolatilityThrottle?.gammaThrottle) === null ? [] : [{ value: metrics.spxGammaVolatilityThrottle.gammaThrottle, date: snapshot.date }]));
+  return prior.length ? { values: prior.map(item => item.value), since: prior.at(-1).date } : null;
 }
 // When the current Risk Off began, so the call stands until the tile turns back.
 function riskOffSince(signals) {
@@ -194,7 +200,7 @@ function buildLevelWatch({ marketDate, boardLines = [], statements = null, marke
   const flip = flipLine({ statements, editions, marketDate, price: finite(prices['^GSPC']) });
   if (flip) lines.push(flip);
   lines.push(...pvBandLines({ editions, marketDate }), ...vixLines({ marketDate }));
-  return { lines, regime: marketRegime(editions), coverage: coverageGaps({ editions, statements, unwatched, marketDate }) };
+  return { lines, regime: marketRegime(editions, prices['^GSPC']), coverage: coverageGaps({ editions, statements, unwatched, marketDate }) };
 }
 /** Every symbol a level-watch build needs a price for before it can check printed levels. */
 function levelSymbols(statements) {

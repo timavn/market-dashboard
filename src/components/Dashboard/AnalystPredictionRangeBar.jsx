@@ -50,11 +50,8 @@ export default function AnalystPredictionRangeBar({ range }) {
   const below = price !== null && price < low;
   const above = price !== null && price > high;
   const x = exact === null ? null : Math.max(0, Math.min(100, exact));
-  // Near either end the label aligns inward so it never runs past the bar.
-  const inside = x === null || below || above ? null
-    : x < 18 ? { left: `${x}%`, transform: 'translateX(-4px)' }
-      : x > 82 ? { right: `${100 - x}%`, transform: 'translateX(4px)' }
-        : { left: `${x}%`, transform: 'translateX(-50%)' };
+  // Inside the range the price sits centered over the ball; past either end it takes the arrow beside the bar.
+  const inside = x === null || below || above ? null : { left: `${x}%`, transform: 'translateX(-50%)' };
   return <div className="analyst-range-bar" role="img" aria-label={text} title={text}>
     {below && <span className="analyst-range-bar__price analyst-range-bar__price--below">{format(price)} ◂</span>}
     {above && <span className="analyst-range-bar__price analyst-range-bar__price--above">▸ {format(price)}</span>}

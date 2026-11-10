@@ -8,6 +8,10 @@ const { available, flagged, unavailable, withStatus } = require('../fields.cjs')
 const SOURCE = 'Security intelligence';
 // A published trade the archive has not re-read within this long may be missing.
 const ARCHIVE_MAX_AGE_MS = 15 * 60_000;
+// ETF Pro prints a range for each ETF it lists, once a week. An edition older than
+// two weeks no longer describes where the security trades.
+const WEEKLY_RANGE_MAX_AGE_DAYS = 14;
+const DAY_MS = 86_400_000;
 
 function emptyResearch(reason) {
   return withStatus({ trade: unavailable(reason, { source: SOURCE }), trend: unavailable(reason, { source: SOURCE }),
@@ -91,25 +95,48 @@ function rangeInstrument(entry, descriptor, symbol, price = null) {
     scaleCheck: ratio === null ? 'not-checked' : offScale ? 'range-scale-differs-from-price' : 'consistent' };
 }
 
+// The weekly range for a security the daily Risk Range sheet does not carry. Dated and
+// labelled weekly, and only ever beside a daily range that is missing, never over one.
+function weeklyRangeField(weekly, symbol, price, nowMs) {
+  const lrr = Number(weekly?.lrr);
+  const hrr = Number(weekly?.hrr);
+  const asOf = String(weekly?.asOf || '');
+  if (!(lrr > 0) || !(hrr > lrr) || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return null;
+  if ((nowMs - Date.parse(`${asOf}T00:00:00Z`)) / DAY_MS > WEEKLY_RANGE_MAX_AGE_DAYS) return null;
+  const ratio = Number.isFinite(price) && price > 0 ? price / ((lrr + hrr) / 2) : null;
+  const offScale = ratio !== null && (ratio < 0.5 || ratio > 2);
+  return available({ lrr, hrr }, { source: 'ETF Pro', sourceId: 'etf-pro', asOf, cadence: 'weekly', sourceMessageId: weekly.messageId || null, sourceInstrument: symbol,
+    match: offScale ? 'proxy' : 'direct', scaleCheck: ratio === null ? 'not-checked' : offScale ? 'range-scale-differs-from-price' : 'consistent' });
+}
+
 // Trade, Trend, risk range and Signal Strength from the shared security research
 // projection (AGENTS.md): the same decision descriptors every research surface reads.
 function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = async () => new Map(), tradeArchiveStatus = () => null,
-  loadPublishedStatements = async () => null, loadAlphaCodeWatch = null, now = Date.now } = {}) {
+  loadPublishedStatements = async () => null, loadAlphaCodeWatch = null, loadWeeklyRanges = null, now = Date.now } = {}) {
   if (typeof loadSecurityIntelligence !== 'function') throw new Error('loadSecurityIntelligence is required');
 
   async function loadMany(symbols) {
-    const [response, prices, statements, watch] = await Promise.all([loadSecurityIntelligence({ symbols }),
+    const [response, prices, statements, watch, weeklyRanges] = await Promise.all([loadSecurityIntelligence({ symbols }),
       Promise.resolve().then(() => loadReferencePrices(symbols)).catch(() => new Map()),
       Promise.resolve().then(() => loadPublishedStatements()).catch(() => null),
-      Promise.resolve().then(() => loadAlphaCodeWatch?.()).catch(() => null)]);
+      Promise.resolve().then(() => loadAlphaCodeWatch?.()).catch(() => null),
+      Promise.resolve().then(() => loadWeeklyRanges?.()).catch(() => null)]);
     if (!response || flagged(response) || response.schemaVersion !== 2 || !response.bySymbol || typeof response.bySymbol !== 'object') {
       throw new Error('security-intelligence-unavailable');
     }
     const archive = tradeArchiveStatus?.();
     const archiveCurrent = Boolean(archive) && now() - Date.parse(archive.refreshedAt) <= ARCHIVE_MAX_AGE_MS;
+    // Fills a range the daily sheet left missing; everything else stays as read.
+    const withWeeklyRange = (symbol, research) => {
+      if (research.riskRange?.status === 'available') return research;
+      const riskRange = weeklyRangeField(weeklyRanges?.get?.(symbol), symbol, prices?.get?.(symbol) ?? null, now());
+      if (!riskRange) return research;
+      const { status: _status, ...fields } = research;
+      return withStatus({ ...fields, riskRange });
+    };
     return new Map(symbols.map(symbol => {
       const entry = response.bySymbol[symbol];
-      if (!entry || flagged(entry) || !entry.decision) return [symbol, emptyResearch('symbol-not-in-security-intelligence')];
+      if (!entry || flagged(entry) || !entry.decision) return [symbol, withWeeklyRange(symbol, emptyResearch('symbol-not-in-security-intelligence'))];
       const { decision } = entry;
       const range = rangeInstrument(entry, decision.riskRange, symbol, prices?.get?.(symbol) ?? null);
       const sameRangeSource = decision.trend?.sourceId && decision.trend.sourceId === decision.riskRange?.sourceId
@@ -122,7 +149,7 @@ function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = a
         ? statedField(statements[field === 'trend' ? 'trends' : 'alphaCodes'], symbol, field, missing)
         : unavailable('published-research-archive-unavailable', { source: 'Published research archive' }));
       const riskRange = descriptorField(decision.riskRange, range);
-      return [symbol, withStatus({
+      return [symbol, withWeeklyRange(symbol, withStatus({
         trade,
         trend: descriptorField(decision.trend, sameRangeSource ? range : {}),
         tail: unavailable('no-published-tail-source'),
@@ -135,7 +162,7 @@ function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = a
         statedTrend: stated('trend', 'no-stated-trend'),
         alphaCode: stated('alphaCode', 'no-published-alpha-code'),
         alphaCodeLines: watchedLines(watch, symbol),
-      })];
+      }))];
     }));
   }
 

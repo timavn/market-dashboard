@@ -619,7 +619,7 @@ test.each(['draft', 'activeTurn', 'running', 'accepted'])('empty Miscellaneous w
   await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue(activity === 'draft' ? 'An unsent question' : ''));
 });
 
-test('operational inbox source evidence shows the concern without raw API plumbing', async () => {
+test('a Systems health card has no Source, since it cites no published product', async () => {
   const request = api.request.getMockImplementation();
   const citation = { title: 'Systems', product: 'dashboard-health', publicationDate: '2026-09-22',
     sourceUri: '/api/system-readiness', excerpt: 'IB Gateway is disconnected. Portfolio holdings and balances cannot refresh.' };
@@ -629,12 +629,8 @@ test('operational inbox source evidence shows the concern without raw API plumbi
   api.request.mockImplementation((path, body, method) => path === '/inbox' ? Promise.resolve({ attentionVersion: 1, findings: [alert], unread: 1 }) : request(path, body, method));
   render(<AnalystPanel />);
   fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Source', exact: true }));
-  const evidence = screen.getByRole('dialog', { name: 'Citation source' });
-  expect(evidence).toHaveTextContent('Portfolio holdings and balances cannot refresh.');
-  expect(evidence).toHaveTextContent('Systems');
-  expect(evidence).not.toHaveTextContent('/api/system-readiness');
-  expect(within(evidence).queryByRole('link')).not.toBeInTheDocument();
+  expect(await screen.findByText('IB Gateway is disconnected.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Source', exact: true })).not.toBeInTheDocument();
 });
 
 // Opens an Inbox Source whose citation names a stored email; `stored` says whether the server has it.

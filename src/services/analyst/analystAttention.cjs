@@ -13,6 +13,8 @@ const STANCE_HISTORY_DAYS = 90;
 const STANCE_HISTORY_RETRY_MS = 3_600_000;
 // The day's Alpha Code lines and which side of each the price is on.
 const ALPHA_CODE_WATCH_KEY = 'alpha-code-watch-v1';
+// Which part of its published range each held security sits in.
+const RISK_RANGE_WATCH_KEY = 'risk-range-watch-v1';
 // Names for held securities come from the central security record, read in
 // route-sized batches; a slow read leaves cards unnamed rather than holding the scan.
 const SECURITY_BATCH = 50;
@@ -32,7 +34,7 @@ function unavailableFinding(channel, now) {
     presentation: { subject, date: now.toISOString().slice(0, 10), rows: [{ label: 'Issue', text }], sourceLinks: [] } };
 }
 
-function createAttentionWorkflow({ call: workspaceCall, request, now = () => new Date(), fetchJson, collectOperations, evaluateResearch, loadStanceHistory, loadSecurities, loadAlphaCodeLines }) {
+function createAttentionWorkflow({ call: workspaceCall, request, now = () => new Date(), fetchJson, collectOperations, evaluateResearch, loadStanceHistory, loadSecurities, loadAlphaCodeLines, loadRiskRangeLines }) {
   const get = fetchJson || (async (path, { timeoutMs = 45_000 } = {}) => {
     if (!path.startsWith('/api/')) throw new Error('Unexpected attention source');
     const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3001}${path}`, { signal: AbortSignal.timeout(timeoutMs) });
@@ -41,6 +43,7 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
   });
   const stanceHistory = loadStanceHistory || (() => get(`/api/analyst/stance-ledger?days=${STANCE_HISTORY_DAYS}`));
   const alphaCodeLines = loadAlphaCodeLines || (() => get('/api/analyst/alpha-code-lines', { timeoutMs: 20_000 }));
+  const riskRangeLines = loadRiskRangeLines || (symbols => get(`/api/analyst/risk-range-lines?symbols=${encodeURIComponent(symbols.join(','))}`, { timeoutMs: 20_000 }));
   const securities = loadSecurities || (async symbols => {
     const batches = [];
     for (let offset = 0; offset < symbols.length; offset += SECURITY_BATCH) batches.push(symbols.slice(offset, offset + SECURITY_BATCH));
@@ -109,6 +112,20 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
     return (latestAlphaCodeWatch = watch);
   }
 
+  // Held quantities reach the fold only from a verified book, so a disconnected
+  // Gateway never reads as positions opened or closed. Unreadable lines leave the
+  // stored watch as it stood.
+  async function riskRangeWatch(at, symbols, positions) {
+    const { foldRiskRangeWatch } = require('./riskRangeWatch.cjs');
+    const stored = (await call('setting', { key: RISK_RANGE_WATCH_KEY })).value || null;
+    const current = symbols.length ? await riskRangeLines(symbols).catch(() => null) : null;
+    if (!current || !Array.isArray(current.ranges)) return stored;
+    const { watch, changed } = foldRiskRangeWatch(stored, { marketDate: current.marketDate, ranges: current.ranges, prices: current.prices || {},
+      positions, sizeNotes: current.sizeNotes || [], complete: current.complete !== false, now: at });
+    if (changed) await call('setting', { key: RISK_RANGE_WATCH_KEY, value: watch }).catch(() => {});
+    return watch;
+  }
+
   async function scan({ reset = false, events = [] } = {}) {
     const startedAt = now();
     const runId = randomUUID();
@@ -130,12 +147,16 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
             .filter(position => position?.category !== 'event_contract' && typeof position?.quantity === 'number' && position.quantity)
             .map(position => symbolOf(position.symbol)).filter(symbol => SECURITY_SYMBOL.test(symbol)))];
           const records = held.length ? await securities(held).catch(() => ({})) : {};
+          const { freshBook } = require('./attentionResearch.cjs');
+          const quantities = freshBook(context?.holdings, at) ? Object.fromEntries(held.map(symbol => [symbol, context.holdings.positions
+            .filter(position => position?.category !== 'event_contract' && symbolOf(position.symbol) === symbol).reduce((sum, position) => sum + position.quantity, 0)])) : null;
+          const riskRanges = await riskRangeWatch(at, held, quantities).catch(() => null);
           const scored = foldStanceEvents(book, context?.events || [], at).book;
           // A book that could not be read is folded from today's journal alone; the
           // evaluation still uses it, but the record reports the book unavailable.
           scoredStanceBook = book ? { book: scored, scoredAt: at.toISOString() } : { book: null, scoredAt: at.toISOString(), reason: 'stance-book-unreadable' };
           return (evaluateResearch || require('./attentionResearch.cjs').evaluateResearchAttention)({ ...context, stanceBook: scored, securities: records,
-            ...(alphaCodes ? { alphaCodeWatch: alphaCodes } : {}) }, at);
+            ...(alphaCodes ? { alphaCodeWatch: alphaCodes } : {}), ...(riskRanges ? { riskRangeWatch: riskRanges } : {}) }, at);
         }),
     ]);
     const findings = [];

@@ -145,3 +145,15 @@ test('the record states where the price stands against a watched security\u2019s
   assert.equal(none.get('NVDA').alphaCodeLines.reason, 'no-watched-alpha-code');
 });
 
+
+test('fills a missing range from ETF Pro, dated and weekly; never over a daily one or from a stale edition', async () => {
+  const loadSecurityIntelligence = async () => ({ schemaVersion: 2, marketDate: '2026-10-31', bySymbol: {
+    DRAM: entry(missing('symbol-not-in-verified-primary-publication'), []), AAPL: entry(range(90, 110), [reference('AAPL', 90, 110)]) } });
+  const piece = (asOf) => createResearchPiece({ now: () => NOW, loadSecurityIntelligence, loadReferencePrices: async () => new Map([['DRAM', 41], ['AAPL', 100]]),
+    loadWeeklyRanges: async () => new Map([['DRAM', { lrr: 35.12, hrr: 46.65, asOf }], ['AAPL', { lrr: 1, hrr: 2, asOf }]]) });
+  const rows = await piece('2026-10-25').loadMany(['DRAM', 'AAPL']);
+  const dram = rows.get('DRAM').riskRange;
+  assert.deepEqual([dram.status, dram.value, dram.source, dram.cadence, dram.match, dram.asOf], ['available', { lrr: 35.12, hrr: 46.65 }, 'ETF Pro', 'weekly', 'direct', '2026-10-25']);
+  assert.deepEqual(rows.get('AAPL').riskRange.value, { lrr: 90, hrr: 110 });
+  assert.equal((await piece('2026-10-01').loadMany(['DRAM'])).get('DRAM').riskRange.status, 'unavailable');
+});

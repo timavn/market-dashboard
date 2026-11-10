@@ -669,6 +669,16 @@ export class MarketDataService {
     return response.data;
   }
 
+  static async getSecurityRecords(symbols, { fields = 'research', signal } = {}) {
+    const response = await dedupedGet('/api/security-universe', { params: { symbols: symbols.join(','), fields }, signal, timeout: 30000 });
+    return response.data;
+  }
+
+  static async getRiskRangeChart(symbol, { signal } = {}) {
+    const response = await dedupedGet('/api/analyst/risk-range-history', { params: { symbol }, signal, timeout: 30000 });
+    return response.data;
+  }
+
   static async getExposureLabUniverse({ forceRefresh = false, signal = null } = {}) {
     try {
       const response = await dedupedGet(ENDPOINTS.EXPOSURE_LAB_UNIVERSE, {

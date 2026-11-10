@@ -862,7 +862,7 @@
 .analyst-panel-v2 .analyst-chat-v2.is-landing .analyst-transcript-v2.is-landing {
   flex: 0 0 auto;
   overflow: visible;
-  padding: clamp(24px, 9vh, 96px) max(24px, calc((100% - var(--landing-width)) / 2)) 14px;
+  padding: 14px max(24px, calc((100% - var(--landing-width)) / 2)) 14px;
 }
 .analyst-landing { display: grid; gap: 6px; }
 .analyst-landing-title {
@@ -875,7 +875,7 @@
 }
 .analyst-landing h1 {
   margin: 0;
-  color: var(--landing-ink);
+  color: var(--portfolio-review-blue, #2563eb);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -1619,3 +1619,5 @@
 .analyst-reference-note { margin: 10px 0 20px; padding: 10px 14px; border-left: 3px solid var(--analyst-accent); background: var(--analyst-accent-soft); color: var(--analyst-ink); font-size: 9px; line-height: 1.6; }
 .analyst-reference-note p { margin: 3px 0; }
 .analyst-reference-history { padding: 4px 0; border: 0; background: transparent; color: var(--analyst-accent); font: inherit; text-decoration: underline; cursor: pointer; }
+/* A product's published image (Market Structure's signal tiles) above its email. */
+.analyst-source-image { display: block; width: 100%; height: auto; margin-top: 8px; }

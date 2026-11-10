@@ -437,7 +437,7 @@ test('a quiet security notes the ATR floor, and an ATR too large to size exits',
   assert.equal(rows.Stop, undefined);
   assert.equal(rows.Context, 'Too volatile to size → exit.');
   assert.equal(rows.Order, 'Sell 10 shares');
-  assert.deepEqual(finding.presentation.sourceLinks.map(link => link.label), ['Trade source', 'Trend source', 'atr14 evidence', 'referencePrice evidence']);
+  assert.deepEqual(finding.presentation.sourceLinks.map(link => link.label), ['atr14 evidence', 'referencePrice evidence']);
 });
 test('a published Tick fills the Tick line; a stale or future one stays N/A', () => {
   for (const [tick, expected] of [[{ value: 'BEARISH', status: 'published', publishedAt: '2026-09-22T13:00:00Z' }, 'Bearish'],
@@ -652,10 +652,32 @@ test('each Market Structure tile change is one line with the process action', ()
   assert.deepEqual(signals(ctx).sort(), ['PV band risk/reward Neutral → Long.', 'SPX gamma Neutral → Negative → wider ranges; respect breakouts.', 'Systematic flow Bullish → Bearish → expect selling on breakdowns.'].sort());
   const gamma = evaluateResearchAttention(ctx, NOW).findings.find(item => item.action === 'spx gamma change');
   assert.equal(gamma.presentation.rows.find(row => row.label === 'Gamma throttle').text, '-3.07');
+  assert.equal(gamma.presentation.rows.some(row => row.label === '10-day realized'), false);
   assert.equal(gamma.kind, 'market');
   // A tile change two sessions old has passed.
   ctx.alphaCodeWatch = { ...ctx.alphaCodeWatch, regime: { ...ctx.alphaCodeWatch.regime, date: '2026-09-18' } };
   assert.deepEqual(signals(ctx), []);
+});
+
+test('the gamma card says how unusual the throttle is and what realized vol means per day', () => {
+  const ctx = context();
+  const history = { values: [-11.56, -10.67, -8.28, -5.89, -3.07, 0.11, 2, 2.66, 7.46, 9.94], since: '2026-09-14' };
+  const rowsFor = (gammaThrottle, to, extra = {}) => {
+    ctx.alphaCodeWatch = regimeWatch({ gammaThrottle, throttleHistory: history, changes: [{ id: 'spxGammaExposure', from: 'Neutral', to }], ...extra });
+    return Object.fromEntries(evaluateResearchAttention(ctx, NOW).findings.find(item => item.action === 'spx gamma change').presentation.rows.map(row => [row.label, row.text]));
+  };
+  const record = rowsFor(-22.33, 'Negative', { realizedVolatility: 30.1, spxPrice: 7566.6 });
+  assert.equal(record['Gamma throttle'], '-22.33 · lowest of 11 readings since Sep 14; prior low -11.56');
+  assert.match(record['What it means'], /^Below 0, dealers hedge with the move/);
+  assert.equal(record['10-day realized'], '30.1% ÷ √252 ≈ 1.9% a day, about 143 SPX points.');
+  assert.equal(rowsFor(-6, 'Negative')['Gamma throttle'], '-6.00 · more negative than 7 of the prior 10 readings since Sep 14');
+  assert.equal(rowsFor(12, 'Positive')['Gamma throttle'], '12.00 · highest of 11 readings since Sep 14; prior high 9.94');
+  assert.match(rowsFor(3, 'Positive')['What it means'], /^Above 0, dealers hedge against the move/);
+  // The explanation never contradicts the reading, and a thin history makes no claim.
+  assert.equal(rowsFor(0.5, 'Negative')['What it means'], undefined);
+  assert.equal(rowsFor(-0.11, 'Neutral')['What it means'], undefined);
+  assert.equal(rowsFor(-4, 'Negative', { throttleHistory: { values: [-1, 2], since: '2026-11-01' } })['Gamma throttle'], '-4.00');
+  assert.equal(rowsFor(-4, 'Negative', { realizedVolatility: 12.4 })['10-day realized'], '12.4% ÷ √252 ≈ 0.8% a day.');
 });
 
 test('Risk Off against a net long book is red and stands until the tile turns back; otherwise it is blue', () => {
@@ -676,3 +698,76 @@ test('Risk Off against a net long book is red and stands until the tile turns ba
   assert.deepEqual([card().severity, card().presentation.rows[0].text], [undefined, 'Strategic Allocation Risk Off → Risk On → tighter stops.']);
 });
 
+
+const rangeLine = (extra = {}) => ({ symbol: 'DRAM', low: 35.12, high: 46.65, source: 'ETF Pro', sourceId: 'etf-pro', asOf: '2026-09-20', cadence: 'weekly', price: 36, pct: 7.6, zone: 'bottom',
+  entries: [{ from: 'middle', to: 'bottom', price: 36, pct: 7.6, at: NOW.toISOString() }], adds: [], ...extra });
+function rangeContext(quantity, line, sizeNotes = []) {
+  const ctx = context();
+  ctx.holdings.positions = [{ symbol: 'DRAM', quantity }];
+  ctx.riskRangeWatch = { marketDate: '2026-09-22', lines: { DRAM: line }, sizeNotes };
+  return ctx;
+}
+const signal = finding => finding.presentation.rows.find(row => row.label === 'Signal').text;
+
+test('a short entering the bottom third is a blue cover-some notification with the range bar', () => {
+  const [card] = evaluateResearchAttention(rangeContext(-100, rangeLine()), NOW).findings;
+  assert.equal(signal(card), 'Bottom 1/3 RR (8%) → reduce position.');
+  assert.equal(card.severity, undefined);
+  assert.deepEqual(card.presentation.rows.find(row => row.label === 'Risk Range').range, { low: 35.12, high: 46.65, price: 36, decimals: 2, unit: '' });
+});
+
+test('a range card states the security\'s own MIN and MAX, and omits them when sizing is unavailable', () => {
+  const metric = (value, observations) => ({ value, observations, status: 'available', source: 'Yahoo Finance chart API', asOf: '2026-09-21' });
+  const limits = ctx => evaluateResearchAttention(ctx, NOW).findings[0].presentation.rows.find(row => row.label === 'Process limits')?.text;
+  const ctx = rangeContext(-100, rangeLine());
+  // ATR 3.70 on 185 is 2% of price: MIN 3.25%, MAX 6.25%.
+  ctx.holdings.ruleHoldings = [{ holding: 'DRAM', heldSide: 'SHORT', sizingInputs: { atr14: metric(3.7, 14), referencePrice: metric(185, 1) } }];
+  assert.equal(limits(ctx), 'MIN 3.25% / MAX 6.25%');
+  ctx.holdings.ruleHoldings = [];
+  assert.equal(limits(ctx), undefined);
+});
+
+test('each side and end reads its own action', () => {
+  const text = (quantity, zone) => signal(evaluateResearchAttention(rangeContext(quantity, rangeLine({ zone, pct: { top: 80, above: 127, below: -20 }[zone] ?? 20, entries: [{ to: zone, at: NOW.toISOString() }] })), NOW).findings[0]);
+  assert.equal(text(-100, 'top'), 'Top 1/3 RR (80%) → add to position.');
+  assert.equal(text(100, 'top'), 'Top 1/3 RR (80%) → reduce position.');
+  assert.equal(text(100, 'bottom'), 'Bottom 1/3 RR (20%) → add to position.');
+  assert.equal(text(100, 'below'), 'Bottom 1/3 RR (-20%) → moving against your Long.');
+  assert.equal(text(-100, 'above'), 'Top 1/3 RR (127%) → moving against your Short.');
+  assert.equal(text(-100, 'below'), 'Bottom 1/3 RR (-20%) → reduce position.');
+});
+
+test('an add in the wrong zone replaces the zone card; no entry, no card; unheld, no card', () => {
+  const add = { date: '2026-09-22', from: -21, to: -138, price: 36, pct: 7.6, zone: 'bottom', at: NOW.toISOString() };
+  const cards = evaluateResearchAttention(rangeContext(-138, rangeLine({ adds: [add] })), NOW).findings;
+  assert.deepEqual(cards.map(signal), ['Short added in bottom 1/3 RR (8%) → should be MIN size.']);
+  assert.equal(evaluateResearchAttention(rangeContext(-100, rangeLine({ entries: [] })), NOW).findings.length, 0);
+  assert.equal(evaluateResearchAttention(rangeContext(0, rangeLine()), NOW).findings.length, 0);
+});
+
+test('a stated size reaches a held position on the same side only', () => {
+  const note = { symbol: 'DRAM', date: '2026-09-22', size: 'MIN', verb: 'covered', side: 'SHORT', excerpt: 'Covered my DRAM down to its MIN position SIZE', messageId: '1a1c0f0dd5950feb', sourceUri: 'gmail://message/1a1c0f0dd5950feb' };
+  const line = rangeLine({ entries: [] });
+  assert.deepEqual(evaluateResearchAttention(rangeContext(-100, line, [note]), NOW).findings.map(signal), ['Cover to MIN.']);
+  assert.equal(evaluateResearchAttention(rangeContext(100, line, [note]), NOW).findings.length, 0);
+});
+
+test('only a price past either end of the range marks the Signal line blue', () => {
+  const marked = zone => evaluateResearchAttention(rangeContext(-100, rangeLine({ zone, pct: 127, entries: [{ to: zone, at: NOW.toISOString() }] })), NOW).findings[0].presentation.rows.find(item => item.label === 'Signal').beyondRange;
+  assert.equal(marked('above'), true);
+  assert.equal(marked('top'), undefined);
+});
+
+test('a range card opens the email that printed the range', () => {
+  const [card] = evaluateResearchAttention(rangeContext(-100, rangeLine({ messageId: '1a1bda9a2b12d3e9' })), NOW).findings;
+  const { citation } = card.presentation.sourceLinks[0];
+  assert.deepEqual([citation.sourceMessageId, citation.clipTicker], ['1a1bda9a2b12d3e9', 'DRAM']);
+});
+
+test('a Market Structure card opens its email and carries the published tile image', () => {
+  const ctx = context();
+  ctx.alphaCodeWatch = { marketDate: '2026-09-22', lines: {}, regime: { date: '2026-09-22', messageId: '1a1c0131a287c21e', chartUrl: '/api/hedgeye/market-structure/2026-09-22/charts/abc',
+    tiles: { spxGammaExposure: 'Negative' }, changes: [{ id: 'spxGammaExposure', from: 'Neutral', to: 'Negative' }] } };
+  const { citation } = evaluateResearchAttention(ctx, NOW).findings[0].presentation.sourceLinks[0];
+  assert.deepEqual([citation.sourceMessageId, citation.clipTicker, citation.sourceImageUrl], ['1a1c0131a287c21e', 'SPX', '/api/hedgeye/market-structure/2026-09-22/charts/abc']);
+});
