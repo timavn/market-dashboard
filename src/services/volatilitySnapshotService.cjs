@@ -6,6 +6,7 @@ const {
   addCalendarDays,
   isTradingDateKey,
   previousTradingDateKey,
+  usEquityCloseMinutes,
 } = require('../utils/usEquityMarketCalendar.cjs');
 
 const NEW_YORK_TIME_ZONE = 'America/New_York';
@@ -159,11 +160,14 @@ function newYorkParts(dateLike) {
   };
 }
 
+// Cboe's index session runs 15 minutes past the cash close, early closes included.
+const indexSessionCloseMinutes = (dateKey) => usEquityCloseMinutes(dateKey) + 15;
+
 function isUsMarketOpen(now) {
   const parts = newYorkParts(now);
   if (!isTradingDateKey(parts.dateKey)) return false;
   const minutes = (parts.hour * 60) + parts.minute;
-  return minutes >= (9 * 60 + 30) && minutes < (16 * 60 + 15);
+  return minutes >= (9 * 60 + 30) && minutes < indexSessionCloseMinutes(parts.dateKey);
 }
 
 function mostRecentCompletedTradingDateKey(now) {
@@ -174,7 +178,7 @@ function mostRecentCompletedTradingDateKey(now) {
     return candidate;
   }
   const minutes = (parts.hour * 60) + parts.minute;
-  return minutes >= (16 * 60 + 15) ? parts.dateKey : previousTradingDateKey(parts.dateKey);
+  return minutes >= indexSessionCloseMinutes(parts.dateKey) ? parts.dateKey : previousTradingDateKey(parts.dateKey);
 }
 
 function parseCboeAsOf(lastTradeTime, payloadTimestamp) {

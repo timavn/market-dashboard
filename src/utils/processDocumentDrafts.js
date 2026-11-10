@@ -1,6 +1,10 @@
 import { analystWorkspaceApi } from '../services/analyst/analystClient';
 const DRAFT_SCHEMA_VERSION = 1;
 const DRAFT_STORAGE_PREFIX = 'marketDashboard.processDocumentDraft.v1.';
+// One "uploaded" marker per stored draft. Drafts are stored per document and
+// base version; a marker per document alone made two versions of one document
+// overwrite each other's marker, so each pass uploaded one of them again.
+const SYNCED_MARKER_PREFIX = 'analyst.process.draftSynced.v2.';
 const MAX_REGION_HTML_LENGTH = 250_000;
 
 const ALLOWED_ELEMENTS = new Set([
@@ -160,10 +164,10 @@ export async function synchronizeProcessDrafts(storage = getDefaultStorage()) {
   const work = [];
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index);
-    if (!key?.startsWith('marketDashboard.processDocumentDraft.v1.')) continue;
+    if (!key?.startsWith(DRAFT_STORAGE_PREFIX)) continue;
     try {
       const document = JSON.parse(storage.getItem(key));
-      const marker = `analyst.process.synced.${document.documentId}`;
+      const marker = `${SYNCED_MARKER_PREFIX}${key.slice(DRAFT_STORAGE_PREFIX.length)}`;
       if (!document.updatedAt || storage.getItem(marker) === document.updatedAt || processSyncInFlight.has(key)) continue;
       processSyncInFlight.add(key);
       work.push(analystWorkspaceApi.request('/process', { document }, 'PUT').then(() => {

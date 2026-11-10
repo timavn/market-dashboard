@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('node:crypto');
+const { MessageChannel } = require('node:worker_threads');
 const { parseFlexResponse, parseFlexStatementDocument } = require('../utils/ibkrFlexExposure.cjs');
 
 const DEFAULT_BASE_URL = 'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
@@ -96,20 +97,93 @@ function maskAccountId(accountId) {
   return `${raw.slice(0, 1)}${'*'.repeat(Math.max(3, raw.length - 3))}${raw.slice(-2)}`;
 }
 
+const SNAPSHOT_FILE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:_\d{4}-\d{2}-\d{2})?\.json$/;
+// "2025-11-07_2026-11-06.json" runs through its second date; "2026-06-23.json" is that day.
+const snapshotFileThroughDate = (name) => name.slice(0, -'.json'.length).split('_').at(-1);
+const snapshotThroughDate = (snapshot) => String(snapshot.toDate || snapshot.date || '');
+
 function latestSnapshot(config) {
   const dir = path.join(config.dataDir, 'snapshots');
   try {
     const files = fs.readdirSync(dir)
-      .filter((name) => /^\d{4}-\d{2}-\d{2}(?:_\d{4}-\d{2}-\d{2})?\.json$/.test(name))
+      .filter((name) => SNAPSHOT_FILE_PATTERN.test(name))
       .sort();
     if (files.length === 0) return null;
+    // Each statement is tens of megabytes. Read from the newest file name
+    // backwards and stop at the first one whose own dates agree with its name,
+    // instead of parsing every stored statement to pick one.
+    const newestFirst = [...files].sort((left, right) => (
+      snapshotFileThroughDate(right).localeCompare(snapshotFileThroughDate(left)) || right.localeCompare(left)
+    ));
+    for (const name of newestFirst) {
+      const snapshot = readJsonIfExists(path.join(dir, name));
+      if (!snapshot) continue;
+      if (snapshotThroughDate(snapshot) === snapshotFileThroughDate(name)) return snapshot;
+      break;
+    }
+    // A statement stored under a name that does not match its dates: compare every one.
     return files.map((name) => readJsonIfExists(path.join(dir, name)))
       .filter(Boolean)
-      .sort((left, right) => String(left.toDate || left.date || '').localeCompare(String(right.toDate || right.date || '')))
+      .sort((left, right) => snapshotThroughDate(left).localeCompare(snapshotThroughDate(right)))
       .at(-1) || null;
   } catch {
     return null;
   }
+}
+
+// History checks compare executions across every stored statement, and each
+// daily statement repeats almost a year of them. Holding every statement whole
+// grows without limit. For history, drop the sections no check reads, share
+// identical rows between statements, and parse a file again only if it changed.
+const HISTORY_UNREAD_FIELDS = new Set(['statementOfFunds', 'cashTransactions', 'positions']);
+const HISTORY_ROW_FIELDS = new Set(['trades', 'closedLots', 'optionEvents']);
+const HISTORY_ROW_INTERN_LIMIT = 500_000;
+const HISTORY_SNAPSHOT_CACHE_LIMIT = 2_000;
+const internedHistoryRows = new Map();
+const historySnapshotCache = new Map();
+
+function internHistoryRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  const key = JSON.stringify(row);
+  const existing = internedHistoryRows.get(key);
+  if (existing) return existing;
+  if (internedHistoryRows.size >= HISTORY_ROW_INTERN_LIMIT) internedHistoryRows.clear();
+  internedHistoryRows.set(key, row);
+  return row;
+}
+
+function projectSnapshotForHistory(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return snapshot;
+  const projected = {};
+  for (const [field, value] of Object.entries(snapshot)) {
+    if (HISTORY_UNREAD_FIELDS.has(field)) continue;
+    if (HISTORY_ROW_FIELDS.has(field) && Array.isArray(value)) projected[field] = value.map(internHistoryRow);
+    else if (field === 'accounts' && Array.isArray(value)) {
+      projected[field] = value.map((account) => ({ accountId: account?.accountId, sections: account?.sections }));
+    } else projected[field] = value;
+  }
+  return projected;
+}
+
+function readHistorySnapshot(filePath) {
+  let signature;
+  try {
+    const stat = fs.statSync(filePath);
+    signature = `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  } catch {
+    historySnapshotCache.delete(filePath);
+    return null;
+  }
+  const cached = historySnapshotCache.get(filePath);
+  if (cached?.signature === signature) return cached.snapshot;
+  const snapshot = projectSnapshotForHistory(readJsonIfExists(filePath));
+  if (!snapshot) {
+    historySnapshotCache.delete(filePath);
+    return null;
+  }
+  if (historySnapshotCache.size >= HISTORY_SNAPSHOT_CACHE_LIMIT) historySnapshotCache.clear();
+  historySnapshotCache.set(filePath, { signature, snapshot });
+  return snapshot;
 }
 
 function publicConfigStatus(config = getConfig()) {
@@ -373,13 +447,43 @@ function activityStatePath(config) {
   return path.join(config.dataDir, 'state', 'activity-sync.json');
 }
 
+// One turn of the real event loop. Timers may be mocked, so use a message port.
+function yieldToEventLoop() {
+  return new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    port1.once('message', () => { port1.close(); resolve(); });
+    port2.postMessage(null);
+  });
+}
+
+// Parse stored statements one per event-loop turn, so reading a long history
+// never freezes the API. listSnapshots then finds every unchanged file cached.
+async function warmHistorySnapshots(config) {
+  const dir = path.join(config.dataDir, 'snapshots');
+  let names;
+  try {
+    names = fs.readdirSync(dir).filter((name) => SNAPSHOT_FILE_PATTERN.test(name));
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    readHistorySnapshot(path.join(dir, name));
+    await yieldToEventLoop();
+  }
+}
+
+// Every stored statement, reduced to what the history checks read.
 function listSnapshots(config) {
   const dir = path.join(config.dataDir, 'snapshots');
   try {
-    return fs.readdirSync(dir)
-      .filter((name) => /^\d{4}-\d{2}-\d{2}(?:_\d{4}-\d{2}-\d{2})?\.json$/.test(name))
-      .map((name) => readJsonIfExists(path.join(dir, name)))
-      .filter(Boolean);
+    const files = fs.readdirSync(dir)
+      .filter((name) => SNAPSHOT_FILE_PATTERN.test(name))
+      .map((name) => path.join(dir, name));
+    const present = new Set(files);
+    for (const cachedPath of historySnapshotCache.keys()) {
+      if (path.dirname(cachedPath) === dir && !present.has(cachedPath)) historySnapshotCache.delete(cachedPath);
+    }
+    return files.map(readHistorySnapshot).filter(Boolean);
   } catch {
     return [];
   }
@@ -748,7 +852,8 @@ function createFlexActivityReader({ getConfigImpl = getConfig } = {}) {
       const raw = fs.readFileSync(file, 'utf8');
       const snapshot = JSON.parse(raw);
       sourceManifest.push({ name, sha256: crypto.createHash('sha256').update(raw).digest('hex'), reportHash: snapshot.reportHash || null });
-      return snapshot;
+      // The bytes are hashed in full; only the execution evidence stays in memory.
+      return projectSnapshotForHistory(snapshot);
     });
     const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : null;
     const sourceFingerprint = crypto.createHash('sha256').update(JSON.stringify(sourceManifest)).digest('hex');
@@ -812,6 +917,7 @@ async function syncFlexActivity({
     : monthChunks(startDate, toDate);
   const snapshots = [];
   const expectedFromDate = exactDate(fromDate) || priorState?.coverage?.fromDate || initialFromDate;
+  if (automaticRollingSync) await warmHistorySnapshots(config);
   const priorSnapshots = automaticRollingSync ? listSnapshots(config) : [];
   const validatePublishedSnapshot = (snapshot) => {
     const accountIds = snapshot.accountIds || [];
@@ -852,6 +958,7 @@ async function syncFlexActivity({
       validateSnapshot: automaticRollingSync ? validatePublishedSnapshot : null,
     }));
   }
+  await warmHistorySnapshots(config);
   const allSnapshots = listSnapshots(config);
   const accountIds = [...new Set(allSnapshots.flatMap(
     (snapshot) => snapshot.accountIds || (snapshot.accountId ? [snapshot.accountId] : []),
@@ -1164,7 +1271,10 @@ function commitPredictionPnlBackfill(previewHash) {
 }
 
 let activityTimer = null;
-function startFlexActivitySync({ onSnapshot = null, logger = console, intervalMs = 24 * 60 * 60 * 1000 } = {}) {
+function startFlexActivitySync({
+  onSnapshot = null, logger = console, intervalMs = 24 * 60 * 60 * 1000,
+  startupMinIntervalMs = 6 * 60 * 60 * 1000, now = Date.now,
+} = {}) {
   if (activityTimer) return;
   const tick = async () => {
     const config = getConfig();
@@ -1178,7 +1288,14 @@ function startFlexActivitySync({ onSnapshot = null, logger = console, intervalMs
       logger.warn?.(`[IBKR Flex] automatic activity sync paused: ${scrubFlexError(error).message}`);
     }
   };
-  tick();
+  // A restart soon after a successful sync has nothing new to fetch, and every
+  // request counts against IBKR's Flex allowance. The daily timer still runs.
+  let sinceLastSuccessMs = Number.NaN;
+  try {
+    const state = readJsonIfExists(activityStatePath(getConfig()));
+    sinceLastSuccessMs = Number(now()) - Date.parse(state?.lastSuccessfulSyncAt || '');
+  } catch { /* An unreadable state is handled by the sync itself. */ }
+  if (!(sinceLastSuccessMs >= 0 && sinceLastSuccessMs < startupMinIntervalMs)) tick();
   activityTimer = setInterval(tick, intervalMs);
   activityTimer.unref?.();
 }
@@ -1190,6 +1307,19 @@ function stopFlexActivitySync() {
 
 function getReconciliation({ date = todayLocal() } = {}) {
   const config = getConfig();
+  // The date becomes part of a file name: accept an exact calendar date, or
+  // the "from_to" pair a rolling statement is stored under, and nothing else.
+  const dateParts = String(date ?? '').split('_');
+  if (dateParts.length > 2 || !dateParts.every(exactDate)) {
+    return {
+      status: 'invalid_date',
+      date: null,
+      source: 'ibkr_flex_web_service',
+      targetCashBufferPct: config.targetCashBufferPct,
+      flex: null,
+      latestSnapshot: null,
+    };
+  }
   const snapshot = readJsonIfExists(snapshotPath(config, date));
   if (!snapshot) {
     const latest = latestSnapshot(config);

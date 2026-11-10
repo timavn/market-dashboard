@@ -168,9 +168,11 @@ def comparison_observed_at(metrics: Any) -> str | None:
     return value if _time(value) else None
 
 
+# The calendar helpers run a short Node process. Only an answer is remembered:
+# a slow start or a failed run raises here, so the next call asks again instead
+# of leaving the baseline unavailable until the sidecar restarts.
 @lru_cache(maxsize=128)
-def _previous_session(day: str) -> dict[str, Any] | None:
-    """Reuse the dashboard's exchange calendar and early-close protocol."""
+def _previous_session_from_calendar(day: str) -> dict[str, Any] | None:
     script = (
         "const c=require('./src/utils/usEquityMarketCalendar.cjs');"
         "const p=require('./src/services/analyst/analystPolicy.cjs');"
@@ -178,17 +180,22 @@ def _previous_session(day: str) -> dict[str, Any] | None:
         "const w=p.portfolioCaptureWindow(new Date(day+'T12:00:00Z'));"
         "process.stdout.write(JSON.stringify({sessionDate:day,closeMinute:w.captureMinute-30}));"
     )
+    result = subprocess.run(["node", "-e", script, day], cwd=ROOT, text=True,
+                            capture_output=True, timeout=1, check=True)
+    session = json.loads(result.stdout)
+    session_day = datetime.strptime(session["sessionDate"], "%Y-%m-%d").date()
+    minute = session["closeMinute"]
+    if session_day.isoformat() != session["sessionDate"] or minute not in {780, 960}:
+        return None
+    closing = datetime.combine(session_day, time(minute // 60, minute % 60), EASTERN)
+    return {"baselineKind": "previous-session-close", "baselineSessionDate": session_day.isoformat(),
+            "baselineSessionCloseAt": closing.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}
+
+
+def _previous_session(day: str) -> dict[str, Any] | None:
+    """Reuse the dashboard's exchange calendar and early-close protocol."""
     try:
-        result = subprocess.run(["node", "-e", script, day], cwd=ROOT, text=True,
-                                capture_output=True, timeout=1, check=True)
-        session = json.loads(result.stdout)
-        session_day = datetime.strptime(session["sessionDate"], "%Y-%m-%d").date()
-        minute = session["closeMinute"]
-        if session_day.isoformat() != session["sessionDate"] or minute not in {780, 960}:
-            return None
-        closing = datetime.combine(session_day, time(minute // 60, minute % 60), EASTERN)
-        return {"baselineKind": "previous-session-close", "baselineSessionDate": session_day.isoformat(),
-                "baselineSessionCloseAt": closing.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}
+        return _previous_session_from_calendar(day)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -199,17 +206,21 @@ def previous_session_baseline(review_as_of: Any) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=128)
-def _holdings_frozen_until(session_day: str) -> datetime | None:
-    """Holdings cannot change until the next session's 4:00am ET pre-market open."""
+def _holdings_frozen_until_from_calendar(session_day: str) -> datetime:
     script = (
         "const c=require('./src/utils/usEquityMarketCalendar.cjs');"
         "process.stdout.write(c.nextTradingDateKey(process.argv[1]));"
     )
+    result = subprocess.run(["node", "-e", script, session_day], cwd=ROOT, text=True,
+                            capture_output=True, timeout=1, check=True)
+    next_day = datetime.strptime(result.stdout.strip(), "%Y-%m-%d").date()
+    return datetime.combine(next_day, time(4, 0), EASTERN)
+
+
+def _holdings_frozen_until(session_day: str) -> datetime | None:
+    """Holdings cannot change until the next session's 4:00am ET pre-market open."""
     try:
-        result = subprocess.run(["node", "-e", script, session_day], cwd=ROOT, text=True,
-                                capture_output=True, timeout=1, check=True)
-        next_day = datetime.strptime(result.stdout.strip(), "%Y-%m-%d").date()
-        return datetime.combine(next_day, time(4, 0), EASTERN)
+        return _holdings_frozen_until_from_calendar(session_day)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
 

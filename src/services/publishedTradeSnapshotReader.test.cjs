@@ -96,3 +96,32 @@ test('authentication failures do not trigger alternate reads or scans', async ()
   } });
   await assert.rejects(read('early-look'), { code: 'AccessDeniedException' });
 });
+
+test('skips documents the caller already holds and reads their scrape time from the index', async () => {
+  const queries = [];
+  const batches = [];
+  const index = [
+    { ...key('2026-11-10'), scrapedAt: '2026-11-10T12:00:00Z' },
+    { ...key('2026-08-18'), scrapedAt: '2026-08-18T12:00:00Z' },
+    { ...key('2026-08-17'), scrapedAt: '2026-08-17T12:00:00Z' },
+  ];
+  const read = createPublishedTradeSnapshotReader({ dynamodb: {
+    query(input) { queries.push(input); return request({ Items: index }); },
+    batchGet(input) {
+      batches.push(input);
+      return request({ Responses: { HedgeyeDailySnapshot: input.RequestItems.HedgeyeDailySnapshot.Keys.map((row) => ({ ...row })) } });
+    },
+  } });
+  const held = new Map([['2026-08-18', '2026-08-18T12:00:00Z'], ['2026-08-17', 'an older scrape']]);
+  const rows = await read('early-look', { limit: 60, skipKey: (row) => held.get(row.date) === row.scrapedAt });
+
+  assert.equal(queries[0].ProjectionExpression, '#type, #date, #scrapedAt');
+  assert.equal(queries[0].ExpressionAttributeNames['#scrapedAt'], 'scrapedAt');
+  assert.deepEqual(batches[0].RequestItems.HedgeyeDailySnapshot.Keys, [key('2026-11-10'), key('2026-08-17')]);
+  assert.deepEqual(rows.map((row) => row.date), ['2026-11-10', '2026-08-17']);
+
+  // Nothing to fetch means no document read at all.
+  batches.length = 0;
+  assert.deepEqual(await read('early-look', { skipKey: () => true }), []);
+  assert.equal(batches.length, 0);
+});

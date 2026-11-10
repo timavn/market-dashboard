@@ -183,7 +183,26 @@ function nextTradingDateKey(dateKey) {
   return candidate;
 }
 
+const US_EQUITY_REGULAR_CLOSE_MINUTES = 16 * 60;
+const US_EQUITY_EARLY_CLOSE_MINUTES = 13 * 60;
+
+// The cash session ends at 13:00 ET on the Friday after Thanksgiving, on
+// Christmas Eve and on 3 July. Callers check separately that the date trades.
+function isUsEquityEarlyCloseDateKey(dateKey) {
+  const date = dateKeyToUtcDate(dateKey);
+  if (!date) return false;
+  return dateKey.endsWith('-12-24') || dateKey.endsWith('-07-03')
+    || (date.getUTCMonth() === 10 && date.getUTCDay() === 5 && date.getUTCDate() >= 23 && date.getUTCDate() <= 29);
+}
+
+// Minutes after midnight, New York time, at which the cash session closes.
+function usEquityCloseMinutes(dateKey) {
+  return isUsEquityEarlyCloseDateKey(dateKey) ? US_EQUITY_EARLY_CLOSE_MINUTES : US_EQUITY_REGULAR_CLOSE_MINUTES;
+}
+
 module.exports = {
+  US_EQUITY_EARLY_CLOSE_MINUTES,
+  US_EQUITY_REGULAR_CLOSE_MINUTES,
   UTC_DAY_MS,
   addCalendarDays,
   classifyUsEquityClosedDateKey,
@@ -192,7 +211,9 @@ module.exports = {
   easterSundayDateKey,
   getUsEquityHoliday,
   isTradingDateKey,
+  isUsEquityEarlyCloseDateKey,
   nextTradingDateKey,
   previousTradingDateKey,
+  usEquityCloseMinutes,
   usEquityMarketHolidays,
 };

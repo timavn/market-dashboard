@@ -292,6 +292,24 @@ const splitResourceKey = (key) => {
   };
 };
 
+// A fetcher that never settles would otherwise stay "in flight" for the rest
+// of the session, and every later poll would wait on it. The bound is longer
+// than the longest client timeout (120 seconds), so it only ends a request
+// that has no working timeout of its own.
+const DEFAULT_REQUEST_TIMEOUT_MS = 150_000;
+// The store cannot cancel a fetcher's request, so one it has given up on may
+// still hold one of the browser's six connections to the API. A resource
+// stops starting new requests while this many of its old ones are still open.
+const MAX_OPEN_ABANDONED_REQUESTS = 2;
+const requestTimeoutMs = (config) => {
+  const configured = Number(config?.requestTimeoutMs);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_REQUEST_TIMEOUT_MS;
+};
+const requestTimeoutError = (timeoutMs) => Object.assign(
+  new Error(`No response within ${Math.round(timeoutMs / 1000)} seconds`),
+  { code: 'RESOURCE_REQUEST_TIMEOUT' },
+);
+
 function createEntry(key, initialConfig, removeEntry) {
   let state = INITIAL_STATE;
   let config = validateResourceConfig(initialConfig);
@@ -303,6 +321,7 @@ function createEntry(key, initialConfig, removeEntry) {
   let pollingIntervalMs = null;
   let pollingInBackground = false;
   let lastRefreshCompletedAt = 0;
+  let openAbandonedRequests = 0;
   const listeners = new Set();
   const pollers = new Map();
 
@@ -536,6 +555,83 @@ function createEntry(key, initialConfig, removeEntry) {
     }
 
     const requestGeneration = generation;
+    const handleFailure = (caught) => {
+      if (requestGeneration !== generation) return null;
+      const error = normalizeError(caught);
+      const explicitInvalidation = isExplicitLiveInvalidation(error)
+        || (typeof config.isExplicitInvalidation === 'function'
+          && config.isExplicitInvalidation(error));
+
+      const informationalLive = config.resourceClass
+        === DASHBOARD_RESOURCE_CLASSIFICATIONS.INFORMATIONAL_LIVE;
+      const mixed = config.resourceClass === DASHBOARD_RESOURCE_CLASSIFICATIONS.MIXED;
+
+      // Failed verification is never executable evidence, even if the last
+      // observation has not reached its normal expiry. Transport errors do
+      // not reliably carry provider-specific error codes.
+      if (
+        config.resourceClass === DASHBOARD_RESOURCE_CLASSIFICATIONS.EXECUTABLE_LIVE
+        || config.accountScoped
+      ) {
+        invalidate(error);
+        return null;
+      }
+
+      // Dashboard reference cards should remain readable while a scheduled
+      // refresh is in flight or has failed. Retention is opt-in so live
+      // executable resources (portfolio, positions, orders) still fail
+      // closed on every failed refresh.
+      if (
+        state.data
+        && config.retainOnRefreshFailure === true
+        && informationalLive
+      ) {
+        emit({
+          ...state,
+          availability: dataIsFresh() ? 'refresh-delayed' : 'delayed-reference',
+          initialLoading: false,
+          refreshing: false,
+          error,
+        });
+        return null;
+      }
+      if (mixed) {
+        // Mixed monitors may retain dated chart/catalog context, but their
+        // executable books and sizing inputs must pass verification again.
+        invalidate(error, { preserveReference: true });
+        return null;
+      }
+      if (config.kind === 'reference' && state.data) {
+        emit({
+          ...state,
+          availability: 'refresh-delayed',
+          initialLoading: false,
+          refreshing: false,
+          error,
+        });
+        return null;
+      }
+      if (config.kind === 'live' && state.data && !explicitInvalidation && dataIsFresh()) {
+        emit({
+          ...state,
+          initialLoading: false,
+          refreshing: false,
+          error,
+        });
+        return null;
+      }
+      invalidate(error);
+      return null;
+    };
+
+    const timeoutMs = requestTimeoutMs(config);
+    if (openAbandonedRequests >= MAX_OPEN_ABANDONED_REQUESTS) {
+      // Earlier requests for this resource are still open with no answer.
+      // Say so instead of opening another connection.
+      if (!state.error) handleFailure(requestTimeoutError(timeoutMs));
+      return Promise.resolve(null);
+    }
+
     emit({
       ...state,
       initialLoading: !state.data && !state.referenceData,
@@ -553,9 +649,34 @@ function createEntry(key, initialConfig, removeEntry) {
     } catch (error) {
       fetchResult = Promise.reject(error);
     }
+    // Callers and later polls share this promise. It settles when the request
+    // does, or when the request is given up on.
+    let abandoned = false;
+    let settlePublic;
+    let rejectPublic;
+    const publicPromise = new Promise((resolve, reject) => {
+      settlePublic = resolve;
+      rejectPublic = reject;
+    });
+    const requestTimer = setTimeout(() => {
+      // No answer. Release whoever is waiting; a late answer is ignored.
+      abandoned = true;
+      openAbandonedRequests += 1;
+      if (inFlight !== publicPromise) {
+        // An invalidation or a reset has already replaced this request.
+        settlePublic(null);
+        return;
+      }
+      // Treat it as failed so the next poll can start a new request.
+      inFlight = null;
+      lastRefreshCompletedAt = Date.now();
+      settlePublic(handleFailure(requestTimeoutError(timeoutMs)));
+    }, timeoutMs);
+    requestTimer?.unref?.();
+
     const promise = Promise.resolve(fetchResult)
       .then((raw) => {
-        if (requestGeneration !== generation) return null;
+        if (abandoned || requestGeneration !== generation) return null;
         const incomingData = validateResult(raw);
         if (config.kind === 'live') {
           // A resource-specific validator gets first say so it can return its
@@ -637,81 +758,20 @@ function createEntry(key, initialConfig, removeEntry) {
         scheduleExpiry();
         return data;
       })
-      .catch((caught) => {
-        if (requestGeneration !== generation) return null;
-        const error = normalizeError(caught);
-        const explicitInvalidation = isExplicitLiveInvalidation(error)
-          || (typeof config.isExplicitInvalidation === 'function'
-            && config.isExplicitInvalidation(error));
-
-        const informationalLive = config.resourceClass
-          === DASHBOARD_RESOURCE_CLASSIFICATIONS.INFORMATIONAL_LIVE;
-        const mixed = config.resourceClass === DASHBOARD_RESOURCE_CLASSIFICATIONS.MIXED;
-
-        // Failed verification is never executable evidence, even if the last
-        // observation has not reached its normal expiry. Transport errors do
-        // not reliably carry provider-specific error codes.
-        if (
-          config.resourceClass === DASHBOARD_RESOURCE_CLASSIFICATIONS.EXECUTABLE_LIVE
-          || config.accountScoped
-        ) {
-          invalidate(error);
-          return null;
-        }
-
-        // Dashboard reference cards should remain readable while a scheduled
-        // refresh is in flight or has failed. Retention is opt-in so live
-        // executable resources (portfolio, positions, orders) still fail
-        // closed on every failed refresh.
-        if (
-          state.data
-          && config.retainOnRefreshFailure === true
-          && informationalLive
-        ) {
-          emit({
-            ...state,
-            availability: dataIsFresh() ? 'refresh-delayed' : 'delayed-reference',
-            initialLoading: false,
-            refreshing: false,
-            error,
-          });
-          return null;
-        }
-        if (mixed) {
-          // Mixed monitors may retain dated chart/catalog context, but their
-          // executable books and sizing inputs must pass verification again.
-          invalidate(error, { preserveReference: true });
-          return null;
-        }
-        if (config.kind === 'reference' && state.data) {
-          emit({
-            ...state,
-            availability: 'refresh-delayed',
-            initialLoading: false,
-            refreshing: false,
-            error,
-          });
-          return null;
-        }
-        if (config.kind === 'live' && state.data && !explicitInvalidation && dataIsFresh()) {
-          emit({
-            ...state,
-            initialLoading: false,
-            refreshing: false,
-            error,
-          });
-          return null;
-        }
-        invalidate(error);
-        return null;
-      })
+      .catch((caught) => (abandoned ? null : handleFailure(caught)))
       .finally(() => {
+        clearTimeout(requestTimer);
+        if (abandoned) {
+          openAbandonedRequests -= 1;
+          return;
+        }
         lastRefreshCompletedAt = Date.now();
-        if (inFlight === promise) inFlight = null;
+        if (inFlight === publicPromise) inFlight = null;
       });
+    promise.then(settlePublic, rejectPublic);
 
-    inFlight = promise;
-    return promise;
+    inFlight = publicPromise;
+    return publicPromise;
   };
 
   const reconcilePolling = () => {

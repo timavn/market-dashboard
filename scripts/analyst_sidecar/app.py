@@ -663,13 +663,18 @@ def feed_sweep_due(index: Optional[ResearchIndex] = None, now: Optional[datetime
 async def indexing_loop() -> None:
     await asyncio.sleep(2)
     while True:
-        if feed_sweep_due():
-            cursor = research_index.get_sync_state("research_feed_cursor", "")
-            result = await sync_research_feed()
-            advanced = research_index.get_sync_state("research_feed_cursor", "")
-            # Keep sweeping while each call advances; a stuck cursor waits.
-            if result.get("status") == "ready" and advanced and advanced != cursor:
-                continue
+        try:
+            if feed_sweep_due():
+                cursor = research_index.get_sync_state("research_feed_cursor", "")
+                result = await sync_research_feed()
+                advanced = research_index.get_sync_state("research_feed_cursor", "")
+                # Keep sweeping while each call advances; a stuck cursor waits.
+                if result.get("status") == "ready" and advanced and advanced != cursor:
+                    continue
+        except Exception as error:
+            # A locked database or a failed read ends this pass only. Without
+            # this the loop would stop for the life of the process, unnoticed.
+            LOGGER.warning("Research indexing pass failed; retrying: %s", type(error).__name__)
         await asyncio.sleep(INDEX_INTERVAL_SECONDS)
 
 

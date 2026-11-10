@@ -22,11 +22,30 @@ const config = {
   },
 };
 
-function clientOptions(options = {}) {
+// The SDK sets no time limits of its own. Against an endpoint that accepts a
+// connection and never answers, a request waits for ever, and so does the
+// refresh that made it. A laptop waking from sleep can leave exactly that.
+const CONNECTION_TIMEOUT_MS = 10_000;
+// Longest silence allowed on an open DynamoDB request, which normally answers
+// within a second. Not applied to S3 (a slow reader can pause a download) or
+// Lambda (a synchronous run is silent until it returns). The SDK's
+// `requestTimeout` is not used: in this version it only logs a warning.
+const DYNAMODB_IDLE_TIMEOUT_MS = 20_000;
+const positiveMs = (value) => (Number(value) > 0 && Number.isFinite(Number(value)) ? Number(value) : undefined);
+
+function clientOptions(options = {}, { idleTimeoutMs } = {}) {
   const merged = { ...config, ...options };
   const result = {};
   for (const key of ['region', 'credentials', 'endpoint', 'maxAttempts', 'retryMode', 'requestHandler', 'forcePathStyle']) {
     if (merged[key] !== undefined) result[key] = merged[key];
+  }
+  if (result.requestHandler === undefined) {
+    // SDK v2 call sites name these httpOptions.connectTimeout and .timeout.
+    const socketTimeout = positiveMs(merged.httpOptions?.timeout) ?? idleTimeoutMs;
+    result.requestHandler = {
+      connectionTimeout: positiveMs(merged.httpOptions?.connectTimeout) ?? CONNECTION_TIMEOUT_MS,
+      ...(socketTimeout ? { socketTimeout } : {}),
+    };
   }
   if (!result.credentials && merged.accessKeyId && merged.secretAccessKey) {
     result.credentials = { accessKeyId: merged.accessKeyId, secretAccessKey: merged.secretAccessKey,
@@ -60,7 +79,7 @@ function methods(Adapter, sdk, operations) {
 
 class DocumentClient {
   constructor(options = {}) {
-    this.client = options.client || documentSdk.DynamoDBDocumentClient.from(new ddbSdk.DynamoDBClient(clientOptions(options)), {
+    this.client = options.client || documentSdk.DynamoDBDocumentClient.from(new ddbSdk.DynamoDBClient(clientOptions(options, { idleTimeoutMs: DYNAMODB_IDLE_TIMEOUT_MS })), {
       marshallOptions: { removeUndefinedValues: true, convertEmptyValues: options.convertEmptyValues === true },
       unmarshallOptions: { wrapNumbers: options.wrapNumbers === true },
     });
@@ -148,4 +167,7 @@ methods(STS, stsSdk, { getCallerIdentity: 'GetCallerIdentityCommand' });
 function SharedIniFileCredentials(options) { return fromIni(options); }
 const DynamoDB = { DocumentClient };
 const AWS = { config, SharedIniFileCredentials, DynamoDB, S3, Lambda, SES, CloudWatch, STS };
-module.exports = { AWS, DynamoDB, S3, Lambda, SES, CloudWatch, STS, clientOptions };
+module.exports = {
+  AWS, DynamoDB, S3, Lambda, SES, CloudWatch, STS, clientOptions,
+  CONNECTION_TIMEOUT_MS, DYNAMODB_IDLE_TIMEOUT_MS,
+};

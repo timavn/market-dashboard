@@ -121,8 +121,15 @@ export function useUsdCorrelations({
   const reconciledFx = useMemo(() => (
     reconcileFxVolatility(fxReference, data.fxvlSnapshot)
   ), [data.fxvlSnapshot, fxReference]);
+  const storedFxRef = useRef(null);
   useEffect(() => {
     if (!reconciledFx) return;
+    // Restoring omitted history builds a new object each render. Storing an
+    // object with the same content again would trigger the next render, and so
+    // on without end; store a reading only when its content has changed.
+    const content = JSON.stringify(reconciledFx);
+    if (storedFxRef.current === content) return;
+    storedFxRef.current = content;
     setFxReference(reconciledFx);
     writeReferenceSnapshot({
       ...FX_REFERENCE_IDENTITY,

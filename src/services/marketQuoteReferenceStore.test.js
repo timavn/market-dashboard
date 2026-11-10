@@ -270,4 +270,31 @@ describe('marketQuoteReferenceStore', () => {
     expect(store.flush()).toBe(false);
     expect(fs.existsSync(store.filePath)).toBe(false);
   });
+
+  test('re-observing the same reading does not rewrite the file; a newer one does', () => {
+    const now = () => Date.parse('2026-09-04T17:01:00.000Z');
+    const store = createMarketQuoteReferenceStore({ dataDir, now });
+    const reconcile = (row) => store.reconcileRows({
+      mode: 'current', scope: 'us', incomingRows: [row], expectedSymbols: ['SPX'],
+    });
+    reconcile(verifiedRow());
+    expect(store.flush()).toBe(true);
+    const written = fs.statSync(store.filePath).mtimeMs;
+    const contents = fs.readFileSync(store.filePath, 'utf8');
+
+    // The same observation again, as on every poll while a market is closed.
+    reconcile(verifiedRow());
+    expect(store.flush()).toBe(false);
+    expect(fs.readFileSync(store.filePath, 'utf8')).toBe(contents);
+    expect(fs.statSync(store.filePath).mtimeMs).toBe(written);
+
+    // A restart that re-reads the file also recognises unchanged readings.
+    const restarted = createMarketQuoteReferenceStore({ dataDir, now });
+    restarted.reconcileRows({ mode: 'current', scope: 'us', incomingRows: [verifiedRow()], expectedSymbols: ['SPX'] });
+    expect(restarted.flush()).toBe(false);
+
+    reconcile(verifiedRow({ price: 7740.1, timestamp: '2026-09-04T17:00:55.000Z', quoteAsOf: '2026-09-04T17:00:55.000Z' }));
+    expect(store.flush()).toBe(true);
+    expect(JSON.parse(fs.readFileSync(store.filePath, 'utf8')).modes.current.us.SPX.price).toBe(7740.1);
+  });
 });

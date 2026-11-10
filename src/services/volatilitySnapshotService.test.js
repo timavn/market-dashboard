@@ -5,6 +5,7 @@ const {
   createVolatilitySnapshotService: createPersistentVolatilitySnapshotService,
   isTradingDateKey,
   isUsMarketOpen,
+  mostRecentCompletedTradingDateKey,
   parseCboeHistoryCsv,
   percentageChange,
 } = require('./volatilitySnapshotService.cjs');
@@ -793,5 +794,18 @@ describe('createVolatilitySnapshotService', () => {
     } finally {
       fs.rmSync(dataDir, { recursive: true, force: true });
     }
+  });
+
+  test('an early close ends the index session at 13:15 New York time', () => {
+    // Friday after Thanksgiving 2026; New York is UTC-5.
+    expect([
+      '2026-11-27T17:59:00Z', '2026-11-27T18:14:00Z', '2026-11-27T18:15:00Z', '2026-11-27T20:00:00Z',
+      '2026-12-24T18:14:00Z', '2026-12-24T18:15:00Z',
+    ].map((date) => isUsMarketOpen(new Date(date)))).toEqual([true, true, false, false, true, false]);
+    expect(mostRecentCompletedTradingDateKey(new Date('2026-11-27T18:14:00Z'))).toBe('2026-11-25');
+    expect(mostRecentCompletedTradingDateKey(new Date('2026-11-27T18:15:00Z'))).toBe('2026-11-27');
+    // A regular session still completes at 16:15.
+    expect(mostRecentCompletedTradingDateKey(new Date('2026-11-10T21:14:00Z'))).toBe('2026-11-09');
+    expect(mostRecentCompletedTradingDateKey(new Date('2026-11-10T21:15:00Z'))).toBe('2026-11-10');
   });
 });

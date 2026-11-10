@@ -352,7 +352,13 @@ class StreamManager:
                 continue
             self.reconnecting = True
             self.connected = False
-            result = await self.connect()
+            try:
+                result = await self.connect()
+            except Exception as exc:
+                # One failed attempt (for example the socket dropping while
+                # subscriptions are restored) must not end reconnection for the
+                # life of the process. Report it and try again.
+                result = {"ok": False, "message": str(exc) or exc.__class__.__name__}
             if result.get("ok"):
                 self._broadcast_status("connected", None)
                 asyncio.ensure_future(self._pre_warm_portfolio())
@@ -744,6 +750,29 @@ class StreamManager:
                         self.ib.cancelMktData(contract)
                     except Exception as exc:
                         self.last_error = f"quote_cancel: {exc}"
+                    self._forget_endpoint_ticker(contract)
+
+    def _forget_endpoint_ticker(self, contract: Contract) -> None:
+        """Release ib_insync's Ticker for a finished one-off quote.
+
+        ib_insync keeps one Ticker per contract object until the socket
+        disconnects, and a one-off quote uses its own contract object. Without
+        this, every such request leaves an object behind for the whole Gateway
+        session. A contract that still has a subscription is left alone.
+        """
+        try:
+            wrapper = self.ib.wrapper
+            ticker = wrapper.tickers.get(id(contract))
+            if ticker is None:
+                return
+            if any(ticker in subscribed for subscribed in wrapper.ticker2ReqId.values()):
+                return
+            wrapper.tickers.pop(id(contract), None)
+            for req_id in [req_id for req_id, held in wrapper.reqId2Ticker.items() if held is ticker]:
+                wrapper.reqId2Ticker.pop(req_id, None)
+        except Exception:
+            # Bookkeeping only: never disturb the quote that was just returned.
+            pass
 
     async def _capture_broker_snapshot(
         self,
@@ -783,6 +812,7 @@ class StreamManager:
                     self.ib.cancelMktData(snapshot_contract)
                 except Exception as exc:
                     self.last_error = f"forced_quote_cancel: {exc}"
+                self._forget_endpoint_ticker(snapshot_contract)
 
     async def get_quote_for_instrument(
         self,

@@ -5,8 +5,8 @@ AWS Textract cost helpers for Hedgeye ingestion planning.
 Pricing changes — verify against:
 https://aws.amazon.com/textract/pricing/
 
-Default TEXTRACT_USD_PER_1000_PAGES is conservative placeholder matching in-repo docs;
-override after confirming **Analyze Document — Tables** rate for your region.
+Default TEXTRACT_USD_PER_1000_PAGES is the **Analyze Document — Tables** rate;
+confirm it for your region and tier.
 """
 
 from __future__ import annotations
@@ -14,10 +14,13 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
-# Sync Analyze Document (TABLES) — pricing tier varies by region; verify on AWS Pricing.
-# Repo docs historically used ~$1.50 / 1k pages as a planning figure — override via env.
+# Sync Analyze Document (TABLES), which is what the PDF parsers call: $0.015 per
+# page for the first million pages a month (aws.amazon.com/textract/pricing,
+# checked 2026-11-10). The earlier $1.50 / 1k figure is the plain text-detection
+# rate and understated table analysis tenfold. Override via env for other tiers.
+ANALYZE_DOCUMENT_TABLES_USD_PER_1000_PAGES = '15.00'
 DEFAULT_TEXTRACT_USD_PER_1000_PAGES = float(
-    os.environ.get('TEXTRACT_USD_PER_1000_PAGES', '1.50')
+    os.environ.get('TEXTRACT_USD_PER_1000_PAGES', ANALYZE_DOCUMENT_TABLES_USD_PER_1000_PAGES)
 )
 
 

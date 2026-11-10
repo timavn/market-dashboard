@@ -3,12 +3,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { percentageChange, latestObservationChange } = require('../observationChange.cjs');
+const { latestObservationChange } = require('../observationChange.cjs');
 const { withQuoteObservation } = require('../normalize/quoteContract.cjs');
 const { buildQuoteMetadata, buildPeriodReturnsMetadata, toQuoteInstrument } = require('../multiRegionQuoteIntegrity.cjs');
+// The period maths and the retry window are modules the server imports, so
+// the server functions run here against the real ones.
+const { computePeriodBpsFromCloses, computePeriodPercentsFromCloses } = require('../../../utils/marketPeriodReturns.cjs');
+const { unavailableRetryMs } = require('../../../utils/unavailableRetryWindow.cjs');
 
 const server = fs.readFileSync(path.resolve(__dirname, '../../../../server.js'), 'utf8');
-const DAY_MS = 86_400_000;
 const close = (date, value) => ({ t: Date.parse(`${date}T00:00:00Z`), close: value });
 const monthly = [
   close('2025-08-01', 2), close('2026-01-01', 2.5), close('2026-02-01', 2.6),
@@ -28,13 +31,13 @@ const official = {
 
 function load(overrides = {}) {
   const names = [
-    'findCloseAtOrBefore', 'findClosestClose', 'computePeriodBpsFromCloses',
-    'computePeriodPercentsFromCloses', 'symbolIsYahooRateProxy', 'computePeriodReturnsForSymbol',
+    'symbolIsYahooRateProxy', 'computePeriodReturnsForSymbol',
     'getPeriodReturnsCached', 'fetchIntlBondQuote', 'buildQuoteRow', 'withLiveTreasuryClose',
   ];
   const context = {
-    Date, console, DAY_MS, ONE_YEAR_REFERENCE_MAX_GAP_MS: 7 * DAY_MS,
-    percentageChange, latestObservationChange, buildQuoteMetadata, buildPeriodReturnsMetadata,
+    Date, console,
+    computePeriodBpsFromCloses, computePeriodPercentsFromCloses, unavailableRetryMs,
+    latestObservationChange, buildQuoteMetadata, buildPeriodReturnsMetadata,
     toQuoteInstrument, INTL_BOND_FRED_FALLBACK: { BUND10Y: 'IRLTLT01DEM156N' },
     STOOQ_BOND_SYMBOLS: {},
     getTickerMapping: () => ({ source: 'fred', ticker: 'IRLTLT01DEM156N' }),

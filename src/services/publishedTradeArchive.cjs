@@ -8,8 +8,11 @@ const { extractPublishedStatements, isVerifiedPublicationSnapshot, isExplicitTra
   isExactPublishedTradeReading, publishedTradeFromEvent } = require('../utils/publishedResearchSignals.cjs');
 
 const DEFAULT_PATH = path.join(process.cwd(), 'data', 'research', 'published-trade-v1.json');
+const NEW_YORK_DATE = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+// Today's and yesterday's publications can still be revised; older ones are fixed.
+const RECENT_DOCUMENT_MS = 36 * 60 * 60 * 1000;
 const sourceFields = [
-  'date', 'snapshotType', 'source', 'htmlSource', 'pdfSource', 'pdfS3Key', 'data',
+  'date', 'snapshotType', 'scrapedAt', 'source', 'htmlSource', 'pdfSource', 'pdfS3Key', 'data',
   'article.feedUrl', 'article.bodyText', 'article.summary', 'article.headline', 'article.teaser', 'article.keyTakeaways',
   'publishedAt', 'sourceUrl', 'sourceEventId', 'gmailMessageId', 'sourceMessageId',
   'sourceQuality', 'metadata', 'meta', 'quality', 'flags', 'provenance', 'providerStatus',
@@ -33,9 +36,12 @@ const sourceProjection = sourceFields.map((field) => field.split('.').map((part)
  * A reread of the same source replaces its projection, including a revocation. */
 const STATEMENT_KINDS = ['references', 'trends', 'alphaCodes'];
 function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEFAULT_PATH,
-  products = RESEARCH_PRODUCTS, now = Date.now, ttlMs = 5 * 60 * 1000 } = {}) {
+  products = RESEARCH_PRODUCTS, now = Date.now, ttlMs = 5 * 60 * 1000, fullRefreshMs = 60 * 60 * 1000 } = {}) {
   let publications = {};
   let refreshedAt = null;
+  // scrapedAt of each document already extracted, and when everything was last re-read.
+  const documentVersions = new Map();
+  let fullRefreshedAt = null;
   // The last refresh in which every snapshot query succeeded; a partly failed
   // refresh keeps serving verified publications but is not a current read.
   let verifiedAt = null;
@@ -72,11 +78,21 @@ function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEF
       fs.renameSync(temporary, referencePath);
     } catch { /* Keep the verified in-process evidence when disk is unavailable. */ }
   };
+  // A document read is billed in full, and a dated publication older than
+  // yesterday does not change. Between full reads (at start and hourly), fetch
+  // only documents that are recent, new, or scraped again since their extraction.
   const refresh = async () => {
+    const startedAt = Number(now());
+    const full = fullRefreshedAt === null || startedAt - fullRefreshedAt >= fullRefreshMs;
+    if (full) documentVersions.clear();
+    const recentFrom = NEW_YORK_DATE.format(new Date(startedAt - RECENT_DOCUMENT_MS));
+    const skipKey = (row) => typeof row?.scrapedAt === 'string' && String(row.date || '') < recentFrom
+      && documentVersions.get(`${row.snapshotType}:${row.date}`) === row.scrapedAt;
     const results = await Promise.allSettled([...definitions.keys()].map(async (type) => ({
       type, snapshots: await querySnapshotsByType(type, { limit: 60,
         snapshotProjectionExpression: sourceProjection,
         snapshotAttributeNames: sourceAttributeNames,
+        ...(full ? {} : { skipKey }),
       }),
     })));
     for (const result of results) {
@@ -88,6 +104,7 @@ function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEF
         // health checks, and UI requests run between individual publications.
         await new Promise((resolve) => setImmediate(resolve));
         if (!snapshot || snapshot.snapshotType !== type || !/^\d{4}-\d{2}-\d{2}$/.test(snapshot.date || '')) continue;
+        documentVersions.set(`${type}:${snapshot.date}`, snapshot.scrapedAt ?? null);
         if (!isVerifiedPublicationSnapshot(snapshot)) continue;
         const key = publicationKey(snapshot);
         // An explicit replacement of this exact publication supersedes its
@@ -108,7 +125,10 @@ function createPublishedTradeArchive({ querySnapshotsByType, referencePath = DEF
       }
     }
     refreshedAt = Number(now());
-    if (results.every((result) => result.status === 'fulfilled')) verifiedAt = refreshedAt;
+    if (results.every((result) => result.status === 'fulfilled')) {
+      verifiedAt = refreshedAt;
+      if (full) fullRefreshedAt = startedAt;
+    }
     persist();
   };
   return {

@@ -798,4 +798,167 @@ describe('sessionResourceStore', () => {
       retainOnRefreshFailure: true,
     })).toThrow('Executable resources cannot retain stale data');
   });
+
+  describe('a request that never answers', () => {
+    const NEVER = () => new Promise(() => {});
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-06T20:00:00.000Z'));
+    });
+
+    test('is given up on, and the next refresh starts a new request', async () => {
+      const fetcher = jest.fn()
+        .mockImplementationOnce(NEVER)
+        .mockResolvedValueOnce({ observedAt: '2026-08-06T20:02:30.000Z', value: 2 });
+      const entry = getSessionResource('unanswered::first-load', {
+        kind: 'reference',
+        fetcher,
+        getObservedAt: (data) => data.observedAt,
+      });
+
+      const first = entry.refresh();
+      expect(entry.refresh()).toBe(first);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      jest.advanceTimersByTime(149_999);
+      expect(entry.getSnapshot()).toMatchObject({ initialLoading: true, error: null });
+
+      jest.advanceTimersByTime(1);
+      await expect(first).resolves.toBeNull();
+      expect(entry.getSnapshot()).toMatchObject({
+        data: null,
+        initialLoading: false,
+        refreshing: false,
+        error: expect.objectContaining({
+          code: 'RESOURCE_REQUEST_TIMEOUT',
+          message: 'No response within 150 seconds',
+        }),
+      });
+
+      await expect(entry.refresh()).resolves.toMatchObject({ value: 2 });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(entry.getSnapshot()).toMatchObject({ data: { value: 2 }, error: null });
+    });
+
+    test('keeps a reference reading on screen and ignores the late answer', async () => {
+      let answerLate;
+      const fetcher = jest.fn()
+        .mockResolvedValueOnce({ observedAt: '2026-08-06T20:00:00.000Z', value: 1 })
+        .mockImplementationOnce(() => new Promise((resolve) => { answerLate = resolve; }));
+      const entry = getSessionResource('unanswered::with-reading', {
+        kind: 'reference',
+        requestTimeoutMs: 5_000,
+        fetcher,
+        getObservedAt: (data) => data.observedAt,
+      });
+      await entry.refresh();
+
+      const second = entry.refresh();
+      jest.advanceTimersByTime(5_000);
+      await expect(second).resolves.toBeNull();
+      const givenUp = entry.getSnapshot();
+      expect(givenUp).toMatchObject({
+        data: { value: 1 },
+        availability: 'refresh-delayed',
+        refreshing: false,
+        error: expect.objectContaining({ code: 'RESOURCE_REQUEST_TIMEOUT' }),
+      });
+
+      answerLate({ observedAt: '2026-08-06T20:00:09.000Z', value: 99 });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(entry.getSnapshot()).toBe(givenUp);
+    });
+
+    test('fails closed for an executable resource', async () => {
+      const fetcher = jest.fn()
+        .mockResolvedValueOnce({ observedAt: '2026-08-06T20:00:00.000Z', value: 100 })
+        .mockImplementationOnce(NEVER);
+      const entry = getSessionResource('unanswered::balance', {
+        kind: 'live',
+        maxAgeMs: 60_000,
+        requestTimeoutMs: 5_000,
+        fetcher,
+        getObservedAt: (data) => data.observedAt,
+      });
+      await entry.refresh();
+
+      const second = entry.refresh();
+      jest.advanceTimersByTime(5_000);
+      await expect(second).resolves.toBeNull();
+      expect(entry.getSnapshot()).toMatchObject({
+        data: null,
+        availability: 'unavailable',
+        error: expect.objectContaining({ code: 'RESOURCE_REQUEST_TIMEOUT' }),
+      });
+    });
+
+    test('stops opening connections after two unanswered requests and resumes when one closes', async () => {
+      const closers = [];
+      const fetcher = jest.fn(() => new Promise((resolve, reject) => { closers.push(reject); }));
+      const entry = getSessionResource('unanswered::persistent', {
+        kind: 'reference',
+        requestTimeoutMs: 5_000,
+        fetcher,
+        getObservedAt: (data) => data.observedAt,
+      });
+
+      const first = entry.refresh();
+      jest.advanceTimersByTime(5_000);
+      await first;
+      const second = entry.refresh();
+      jest.advanceTimersByTime(5_000);
+      await second;
+      expect(fetcher).toHaveBeenCalledTimes(2);
+
+      await expect(entry.refresh()).resolves.toBeNull();
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(entry.getSnapshot()).toMatchObject({
+        initialLoading: false,
+        error: expect.objectContaining({ code: 'RESOURCE_REQUEST_TIMEOUT' }),
+      });
+
+      closers[0](new Error('socket closed'));
+      await jest.advanceTimersByTimeAsync(0);
+      entry.refresh();
+      expect(fetcher).toHaveBeenCalledTimes(3);
+    });
+
+    test('releases a caller whose request was invalidated before it answered', async () => {
+      const entry = getSessionResource('unanswered::invalidated', {
+        kind: 'reference',
+        requestTimeoutMs: 5_000,
+        fetcher: jest.fn(NEVER),
+        getObservedAt: (data) => data.observedAt,
+      });
+
+      const first = entry.refresh();
+      entry.invalidate();
+      const afterInvalidation = entry.getSnapshot();
+      jest.advanceTimersByTime(5_000);
+
+      await expect(first).resolves.toBeNull();
+      expect(entry.getSnapshot()).toBe(afterInvalidation);
+    });
+
+    test('leaves a request that answers in time alone', async () => {
+      let answer;
+      const entry = getSessionResource('unanswered::slow-but-fine', {
+        kind: 'reference',
+        requestTimeoutMs: 5_000,
+        fetcher: () => new Promise((resolve) => { answer = resolve; }),
+        getObservedAt: (data) => data.observedAt,
+      });
+
+      const first = entry.refresh();
+      jest.advanceTimersByTime(4_999);
+      answer({ observedAt: '2026-08-06T20:00:04.000Z', value: 7 });
+      await expect(first).resolves.toMatchObject({ value: 7 });
+      const committed = entry.getSnapshot();
+
+      jest.advanceTimersByTime(60_000);
+      expect(entry.getSnapshot()).toBe(committed);
+      expect(committed).toMatchObject({ data: { value: 7 }, error: null });
+    });
+  });
 });

@@ -3,6 +3,8 @@ const {
   closedUsEquityDatesBetween,
   getUsEquityHoliday,
   isTradingDateKey,
+  isUsEquityEarlyCloseDateKey,
+  usEquityCloseMinutes,
   usEquityMarketHolidays,
 } = require('./usEquityMarketCalendar.cjs');
 
@@ -86,5 +88,15 @@ describe('calendar reuse integrity', () => {
       expect(classifyUsEquityClosedDateKey(date)).toBeNull();
     }
     expect(isTradingDateKey('2024-02-29')).toBe(true);
+  });
+
+  test('early closes: the Friday after Thanksgiving, Christmas Eve and 3 July end at 13:00', () => {
+    expect(usEquityCloseMinutes('2026-11-27')).toBe(13 * 60);
+    expect(usEquityCloseMinutes('2026-12-24')).toBe(13 * 60);
+    expect(usEquityCloseMinutes('2025-07-03')).toBe(13 * 60);
+    expect(usEquityCloseMinutes('2026-11-20')).toBe(16 * 60);
+    expect(usEquityCloseMinutes('2026-11-10')).toBe(16 * 60);
+    expect(isUsEquityEarlyCloseDateKey('2027-11-26')).toBe(true);
+    expect(isUsEquityEarlyCloseDateKey('invalid')).toBe(false);
   });
 });
