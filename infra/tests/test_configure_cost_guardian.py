@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import unittest
 from copy import deepcopy
@@ -267,6 +268,30 @@ class ConfigureCostGuardianTests(unittest.TestCase):
                         for statement in policy["Statement"]
                     )
                 )
+
+    def test_pause_covers_every_schedule_that_invokes_the_gmail_function(self):
+        template = (Path(__file__).resolve().parents[1] / "template.yaml").read_text()
+        # Every Scheduler schedule gated by GmailScheduleState targets the Gmail function.
+        gmail_schedules = re.findall(
+            r"Type: AWS::Scheduler::Schedule\s+Properties:\s+Name: (\S+)\s+Description: [^\n]*\s+State: !Ref GmailScheduleState",
+            template,
+        )
+        self.assertIn("market-dashboard-gmail-v2-every-15m", gmail_schedules)
+        self.assertIn("market-dashboard-gmail-v2-macro-show-window", gmail_schedules)
+        paused = configure._lambda_environment()["COST_GUARD_SCHEDULE_NAMES"].split(",")
+        iam = mock.Mock()
+        iam.get_role.return_value = {"Role": {"Arn": "guardian-role"}}
+        configure._ensure_role({"iam": iam})
+        policy = json.loads(iam.put_role_policy.call_args.kwargs["PolicyDocument"])
+        for schedule in gmail_schedules:
+            with self.subTest(schedule=schedule):
+                self.assertIn(schedule, paused)
+                self.assertTrue(any(
+                    statement["Effect"] == "Allow"
+                    and "scheduler:UpdateSchedule" in statement["Action"]
+                    and configure.schedule_arn(schedule) in statement["Resource"]
+                    for statement in policy["Statement"]
+                ))
 
     def test_missing_budget_is_created_with_exact_matrix(self):
         budgets = FakeBudgets(missing=True)

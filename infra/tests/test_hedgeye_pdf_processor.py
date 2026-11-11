@@ -9,6 +9,7 @@ import os
 import sys
 import unittest
 from copy import deepcopy
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -626,6 +627,99 @@ class PdfProcessorTests(unittest.TestCase):
         self.assertEqual(ledger.call_args.kwargs["status"], "UNSUPPORTED")
         self.assertFalse(ledger.call_args.kwargs["extra"]["retryable"])
         self.assertEqual(result["status"], "unsupported")
+
+    def _run_tracker_job(self, extractor, *, recent_rejection=None):
+        """Process one tracker PDF with the given parser; returns (error, ledger mock)."""
+        processor.s3 = mock.Mock()
+        processor.s3.download_file.side_effect = (
+            lambda _bucket, _key, path: Path(path).write_bytes(b"%PDF")
+        )
+        ledger = mock.Mock()
+        with (
+            mock.patch.object(processor, "_object_metadata", return_value={}),
+            mock.patch.object(processor, "extract_date_from_pdf", return_value="2026-07-23"),
+            mock.patch.dict(processor.PARSERS, {"bitcoin-trend-tracker": (extractor, mock.Mock())}),
+            mock.patch.object(processor, "_manifest_snapshot", mock.Mock()),
+            mock.patch.object(processor, "_mark_ledger", ledger),
+            mock.patch.object(processor, "_recent_parse_rejection", return_value=recent_rejection),
+        ):
+            with self.assertRaises(Exception) as raised:
+                processor._process_job(
+                    {
+                        "bucket": "raw-artifacts",
+                        "key": "hedgeye-uploads/bitcoin.pdf",
+                        "reportType": "bitcoin-trend-tracker",
+                        "contentSha256": "f" * 64,
+                        "messageId": "message-9",
+                        "attachmentId": "attachment-9",
+                    }
+                )
+        return raised.exception, ledger
+
+    def test_parse_rejection_is_recorded_for_the_retry_guard(self):
+        extractor = mock.Mock(return_value={"cryptos": {}, "stocks": {}})
+        error, ledger = self._run_tracker_job(extractor)
+
+        self.assertIsInstance(error, ValueError)
+        extra = ledger.call_args.kwargs["extra"]
+        self.assertEqual(ledger.call_args.kwargs["status"], "TEXTRACT_ERROR")
+        self.assertTrue(extra["retryable"])
+        self.assertIs(extra["parseRejected"], True)
+        self.assertEqual(extra["parseRejectedBuild"], processor.BUILD_VERSION)
+        self.assertRegex(extra["parseRejectedAt"], r"^\d{4}-\d{2}-\d{2}T")
+
+    def test_retry_of_a_just_rejected_pdf_fails_before_textract_is_called(self):
+        extractor = mock.Mock(return_value={"cryptos": {"BTC": {"trend": "BULLISH"}}, "stocks": {}})
+        error, ledger = self._run_tracker_job(extractor, recent_rejection="parser extracted no usable data")
+
+        self.assertIsInstance(error, processor.ParseAlreadyRejected)
+        self.assertIn("parser extracted no usable data", str(error))
+        extractor.assert_not_called()
+        extra = ledger.call_args.kwargs["extra"]
+        self.assertEqual(ledger.call_args.kwargs["status"], "TEXTRACT_ERROR")
+        # The original verdict and its time are kept; this attempt read nothing.
+        self.assertNotIn("parseRejectedAt", extra)
+        self.assertNotIn("parseError", extra)
+
+    def test_a_transient_failure_is_not_a_parse_rejection(self):
+        extractor = mock.Mock(side_effect=RuntimeError("Textract throttled"))
+        error, ledger = self._run_tracker_job(extractor)
+
+        self.assertIsInstance(error, RuntimeError)
+        extra = ledger.call_args.kwargs["extra"]
+        self.assertIs(extra["parseRejected"], False)
+        self.assertTrue(extra["retryable"])
+        self.assertNotIn("parseRejectedAt", extra)
+
+    def test_retry_guard_reads_only_a_fresh_verdict_from_this_build(self):
+        now = processor.datetime.now(processor.timezone.utc)
+        verdict = {
+            "parseRejected": True,
+            "parseRejectedBuild": processor.BUILD_VERSION,
+            "parseRejectedAt": now.isoformat(),
+            "parseError": "momo-tracker parser extracted no usable data",
+        }
+        table = mock.Mock()
+        processor.dynamodb = mock.Mock()
+        processor.dynamodb.Table.return_value = table
+
+        def stored(item):
+            table.get_item.return_value = {"Item": item} if item is not None else {}
+            return processor._recent_parse_rejection("a" * 64)
+
+        self.assertEqual(stored(verdict), "momo-tracker parser extracted no usable data")
+        table.get_item.assert_called_with(
+            Key={"messageId": "CONTENT#" + "a" * 64, "attachmentId": processor.TEXTRACT_LEDGER_ATTACHMENT_ID}
+        )
+        old = (now - timedelta(seconds=processor.PARSE_REJECTION_GUARD_SECONDS + 5)).isoformat()
+        self.assertIsNone(stored({**verdict, "parseRejectedAt": old}))
+        self.assertIsNone(stored({**verdict, "parseRejectedBuild": "another-build"}))
+        self.assertIsNone(stored({**verdict, "parseRejected": False}))
+        self.assertIsNone(stored({**verdict, "parseRejectedAt": "not a time"}))
+        self.assertIsNone(stored(None))
+        self.assertIsNone(processor._recent_parse_rejection(""))
+        table.get_item.side_effect = RuntimeError("ledger unavailable")
+        self.assertIsNone(processor._recent_parse_rejection("a" * 64))
 
 
 if __name__ == "__main__":

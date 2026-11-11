@@ -62,7 +62,17 @@ DAILY_SNAPSHOT_TABLE = os.environ.get(
     "HedgeyeDailySnapshot",
 )
 PARSER_VERSION = "hedgeye-pdf-security-intelligence-v1"
+BUILD_VERSION = os.environ.get("BUILD_VERSION", "")
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
+# Lambda retries a failed event twice within a few minutes. A document this
+# build's parser rejected reads the same on every retry, so retries inside this
+# window fail before Textract is called again. A later delivery, or a new
+# build, is processed normally.
+PARSE_REJECTION_GUARD_SECONDS = 3600
+
+
+class ParseAlreadyRejected(ValueError):
+    """This exact PDF was rejected by this parser build moments ago."""
 MAX_MANIFEST_RETRIES = 4
 MANIFEST_STAGES = {"received", "parsed", "validated", "indexed", "failed"}
 
@@ -967,6 +977,31 @@ def _object_sha256(bucket: str, key: str) -> str:
     return digest.hexdigest()
 
 
+def _recent_parse_rejection(content_sha256: str) -> Optional[str]:
+    """The recorded reason if this build rejected this exact PDF inside the retry window."""
+    if not content_sha256:
+        return None
+    try:
+        item = dynamodb.Table(LEDGER_TABLE).get_item(
+            Key={
+                "messageId": f"CONTENT#{content_sha256}",
+                "attachmentId": TEXTRACT_LEDGER_ATTACHMENT_ID,
+            }
+        ).get("Item")
+        if not isinstance(item, dict) or item.get("parseRejected") is not True:
+            return None
+        if item.get("parseRejectedBuild") != BUILD_VERSION:
+            return None
+        rejected_at = datetime.fromisoformat(str(item.get("parseRejectedAt")))
+        age_seconds = (datetime.now(timezone.utc) - rejected_at).total_seconds()
+        if not 0 <= age_seconds < PARSE_REJECTION_GUARD_SECONDS:
+            return None
+        return str(item.get("parseError") or "the parser rejected this document")
+    except Exception:
+        # The guard only avoids repeat Textract charges; it never blocks processing.
+        return None
+
+
 def _call_extractor(extractor: Extractor, temp_path: str, s3_key: str) -> Any:
     """Pass s3_key only when supported; never retry an internal TypeError."""
     parameters = inspect.signature(extractor).parameters.values()
@@ -1104,6 +1139,12 @@ def _process_job(job: Dict[str, Any]) -> Dict[str, Any]:
             content_sha256=content_sha256,
         )
 
+        rejection = _recent_parse_rejection(content_sha256)
+        if rejection:
+            raise ParseAlreadyRejected(
+                f"{product_id} PDF was already rejected by this parser build: {rejection}"
+            )
+
         extractor, saver = PARSERS[product_id]
         data = _call_extractor(extractor, temp_path, s3_key)
         if not _nonempty(data):
@@ -1219,17 +1260,30 @@ def _process_job(job: Dict[str, Any]) -> Dict[str, Any]:
                     published_at=str(published_at) if published_at else None,
                     error=str(error),
                 )
+            extra = {
+                "materializationStatus": "ERROR",
+                "parseError": str(error)[:1000],
+                "retryable": True,
+                "researchParserVersion": PARSER_VERSION,
+            }
+            if isinstance(error, ParseAlreadyRejected):
+                # Keep the original rejection and its time; this attempt read nothing.
+                extra.pop("parseError")
+            elif isinstance(error, ValueError):
+                # The parser or a validation rule judged the document itself.
+                extra.update({
+                    "parseRejected": True,
+                    "parseRejectedAt": datetime.now(timezone.utc).isoformat(),
+                    "parseRejectedBuild": BUILD_VERSION,
+                })
+            else:
+                extra["parseRejected"] = False
             _mark_ledger(
                 message_id=message_id,
                 attachment_id=attachment_id,
                 content_sha256=content_sha256,
                 status="TEXTRACT_ERROR",
-                extra={
-                    "materializationStatus": "ERROR",
-                    "parseError": str(error)[:1000],
-                    "retryable": True,
-                    "researchParserVersion": PARSER_VERSION,
-                },
+                extra=extra,
             )
         except Exception:
             traceback.print_exc()
