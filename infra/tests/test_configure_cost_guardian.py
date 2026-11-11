@@ -138,6 +138,55 @@ class FakeCe:
         self.calls.append(deepcopy(kwargs))
 
 
+class FakeSchedulerExceptions:
+    ResourceNotFoundException = FakeNotFound
+
+
+class FakeScheduler:
+    """Live schedules by name, each with the role it hands to EventBridge Scheduler."""
+
+    exceptions = FakeSchedulerExceptions()
+
+    def __init__(self, role_arns=None, *, error=None):
+        self.role_arns = dict(role_arns or {})
+        self.error = error
+        self.requested = []
+
+    def get_schedule(self, **kwargs):
+        name = kwargs["Name"]
+        self.requested.append(name)
+        if self.error is not None:
+            raise self.error
+        if name not in self.role_arns:
+            raise FakeNotFound()
+        return {"Name": name, "Target": {"RoleArn": self.role_arns[name]}}
+
+
+SHARED_SCHEDULE_ROLE = (
+    f"arn:aws:iam::{configure.ACCOUNT_ID}:role/market-dashboard-scheduler-invoke-v2"
+)
+CFTC_SCHEDULE_ROLE = (
+    f"arn:aws:iam::{configure.ACCOUNT_ID}:role/"
+    "market-dashboard-readiness--CftcSchedulerInvokeRole-EXAMPLE"
+)
+CFTC_SCHEDULE = "market-dashboard-cftc-weekday-v1"
+
+
+def deployed_schedule_roles():
+    return {
+        name: CFTC_SCHEDULE_ROLE if name == CFTC_SCHEDULE else SHARED_SCHEDULE_ROLE
+        for name in configure.SCHEDULES
+    }
+
+
+def guardian_policy(scheduler):
+    """The runtime policy `_ensure_role` writes, and the IAM client it used."""
+    iam = mock.Mock()
+    iam.get_role.return_value = {"Role": {"Arn": "guardian-role"}}
+    configure._ensure_role({"iam": iam, "scheduler": scheduler})
+    return json.loads(iam.put_role_policy.call_args.kwargs["PolicyDocument"]), iam
+
+
 def notification(threshold, *, kind="ACTUAL"):
     return {
         "NotificationType": kind,
@@ -251,10 +300,7 @@ class ConfigureCostGuardianTests(unittest.TestCase):
         self.assertIn(cftc_schedule, environment["COST_GUARD_SCHEDULE_NAMES"].split(","))
         self.assertIn(cftc_function, environment["COST_GUARD_FUNCTION_NAMES"].split(","))
 
-        iam = mock.Mock()
-        iam.get_role.return_value = {"Role": {"Arn": "guardian-role"}}
-        configure._ensure_role({"iam": iam})
-        policy = json.loads(iam.put_role_policy.call_args.kwargs["PolicyDocument"])
+        policy, _ = guardian_policy(FakeScheduler(deployed_schedule_roles()))
         for action, resource in (
             ("scheduler:UpdateSchedule", configure.schedule_arn(cftc_schedule)),
             ("lambda:PutFunctionConcurrency", configure.function_arn(cftc_function)),
@@ -279,10 +325,7 @@ class ConfigureCostGuardianTests(unittest.TestCase):
         self.assertIn("market-dashboard-gmail-v2-every-15m", gmail_schedules)
         self.assertIn("market-dashboard-gmail-v2-macro-show-window", gmail_schedules)
         paused = configure._lambda_environment()["COST_GUARD_SCHEDULE_NAMES"].split(",")
-        iam = mock.Mock()
-        iam.get_role.return_value = {"Role": {"Arn": "guardian-role"}}
-        configure._ensure_role({"iam": iam})
-        policy = json.loads(iam.put_role_policy.call_args.kwargs["PolicyDocument"])
+        policy, _ = guardian_policy(FakeScheduler(deployed_schedule_roles()))
         for schedule in gmail_schedules:
             with self.subTest(schedule=schedule):
                 self.assertIn(schedule, paused)
@@ -292,6 +335,63 @@ class ConfigureCostGuardianTests(unittest.TestCase):
                     and configure.schedule_arn(schedule) in statement["Resource"]
                     for statement in policy["Statement"]
                 ))
+
+    def test_guardian_may_pass_exactly_the_roles_its_schedules_use(self):
+        # UpdateSchedule sends the whole schedule again, its target role included,
+        # so the guardian cannot switch one off unless it may pass that role.
+        scheduler = FakeScheduler(deployed_schedule_roles())
+        policy, _ = guardian_policy(scheduler)
+
+        pass_role = [
+            statement for statement in policy["Statement"]
+            if "iam:PassRole" in statement["Action"]
+        ]
+        self.assertEqual(pass_role, [{
+            "Effect": "Allow",
+            "Action": ["iam:PassRole"],
+            "Resource": sorted([CFTC_SCHEDULE_ROLE, SHARED_SCHEDULE_ROLE]),
+            "Condition": {"StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}},
+        }])
+        # Every schedule the guardian pauses was asked for its role, and nothing else.
+        self.assertEqual(sorted(scheduler.requested), sorted(configure.SCHEDULES))
+        template = (Path(__file__).resolve().parents[1] / "template.yaml").read_text()
+        self.assertIn("RoleName: market-dashboard-scheduler-invoke-v2", template)
+
+    def test_a_schedule_that_is_not_deployed_grants_nothing(self):
+        roles = deployed_schedule_roles()
+        del roles[CFTC_SCHEDULE]
+        policy, _ = guardian_policy(FakeScheduler(roles))
+        pass_role = [
+            statement for statement in policy["Statement"]
+            if "iam:PassRole" in statement["Action"]
+        ]
+        self.assertEqual([statement["Resource"] for statement in pass_role], [[SHARED_SCHEDULE_ROLE]])
+
+        # With no schedule deployed there is no statement at all: IAM rejects an empty resource list.
+        policy, _ = guardian_policy(FakeScheduler({}))
+        self.assertFalse(any("iam:PassRole" in statement["Action"] for statement in policy["Statement"]))
+        self.assertTrue(all(statement["Resource"] for statement in policy["Statement"]))
+
+    def test_an_unexpected_schedule_role_or_a_failed_read_writes_no_policy(self):
+        for label, scheduler in (
+            ("another account", FakeScheduler({
+                **deployed_schedule_roles(),
+                CFTC_SCHEDULE: "arn:aws:iam::111122223333:role/someone-elses-role",
+            })),
+            ("wildcard", FakeScheduler({
+                **deployed_schedule_roles(),
+                CFTC_SCHEDULE: f"arn:aws:iam::{configure.ACCOUNT_ID}:role/*",
+            })),
+            ("no role", FakeScheduler({**deployed_schedule_roles(), CFTC_SCHEDULE: ""})),
+            ("read failed", FakeScheduler(error=PermissionError("AccessDeniedException"))),
+        ):
+            with self.subTest(label):
+                iam = mock.Mock()
+                iam.get_role.return_value = {"Role": {"Arn": "guardian-role"}}
+                with self.assertRaises((RuntimeError, PermissionError)):
+                    configure._ensure_role({"iam": iam, "scheduler": scheduler})
+                # Nothing was created, described or written before the failure.
+                self.assertEqual(iam.mock_calls, [])
 
     def test_missing_budget_is_created_with_exact_matrix(self):
         budgets = FakeBudgets(missing=True)
