@@ -378,6 +378,19 @@ class SetupBoardSourcesTests(unittest.TestCase):
         self.assertEqual(items["inflation-nowcast"]["status"], "unavailable")
         self.assertNotIn("ibGateway", items)
 
+    def test_sources_date_a_product_by_its_newest_edition_received(self):
+        data = board()
+        data["research"] = {"version": 1, "marketDate": "2026-10-10", "products": [
+            {"key": "the-macro-show", "label": "The Macro Show", "status": "missing", "latestEdition": "2026-10-09T15:25:00.000Z"},
+            {"key": "top-3-things", "label": "Top 3 Things", "status": "missing", "latestEdition": "2026-10-02T13:30:00.000Z"}]}
+        # Trade cells keep their own edition; a cited edition newer than the record is not overridden.
+        data["usd"]["trade"] = {"direction": "BULLISH", "date": "2026-10-06", "publishedAt": "2026-10-06T15:45:00.000Z", "source": "Macro Show"}
+        data["rows"][1]["trade"] = {"direction": "BEARISH", "date": "2026-10-05", "publishedAt": "2026-10-05T13:30:00.000Z", "source": "Top 3 Things"}
+        items = self.project({"predictionBoard": {"status": "ready", "updatedAt": AT}}, {"predictionBoard": data})
+        self.assertEqual(items["the-macro-show"]["publishedAt"], "2026-10-09T15:25:00.000Z")
+        self.assertEqual(items["top-3-things"]["publishedAt"], "2026-10-05T13:30:00.000Z")
+        self.assertEqual(data["usd"]["trade"]["publishedAt"], "2026-10-06T15:45:00.000Z")
+
     def test_sources_panel_lists_every_product_the_review_cites(self):
         data = board()
         data["research"] = {"version": 1, "marketDate": "2026-10-10", "products": [

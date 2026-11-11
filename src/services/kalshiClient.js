@@ -2,6 +2,14 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 const DEFAULT_BASE = 'https://external-api.kalshi.com/trade-api/v2';
+// Without a limit a request that Kalshi never answers holds its caller open
+// for good, and a paginated read stops at that page.
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+function requestTimeoutMs(options) {
+  const configured = Number(options?.timeoutMs ?? process.env.KALSHI_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_TIMEOUT_MS;
+}
 
 function loadPrivateKey() {
   if (process.env.KALSHI_PRIVATE_KEY_PEM) {
@@ -72,19 +80,28 @@ async function kalshiFetch(endpointPath, query = {}, options = {}) {
     headers['KALSHI-ACCESS-SIGNATURE'] = signRequest(privateKeyPem, timestamp, method, signPath);
   }
 
-  const res = await fetch(url, { method, headers });
-  if (res.status === 429) {
-    const err = new Error('Kalshi rate limit (429)');
-    err.code = 'RATE_LIMIT';
+  const timeoutMs = requestTimeoutMs(options);
+  try {
+    // The limit covers the whole exchange, body included.
+    const res = await fetch(url, { method, headers, signal: AbortSignal.timeout(timeoutMs) });
+    if (res.status === 429) {
+      const err = new Error('Kalshi rate limit (429)');
+      err.code = 'RATE_LIMIT';
+      throw err;
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      const err = new Error(`Kalshi HTTP ${res.status}: ${body.slice(0, 200)}`);
+      err.status = res.status;
+      throw err;
+    }
+    return await res.json();
+  } catch (error) {
+    if (error?.name !== 'TimeoutError') throw error;
+    const err = new Error(`Kalshi did not respond within ${timeoutMs / 1000} seconds`);
+    err.code = 'KALSHI_TIMEOUT';
     throw err;
   }
-  if (!res.ok) {
-    const body = await res.text();
-    const err = new Error(`Kalshi HTTP ${res.status}: ${body.slice(0, 200)}`);
-    err.status = res.status;
-    throw err;
-  }
-  return res.json();
 }
 
 async function paginateKalshi(endpointPath, query = {}, itemsKey = 'markets', maxPages = 20) {

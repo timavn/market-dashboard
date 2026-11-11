@@ -10,7 +10,6 @@ const SOURCE = 'Security intelligence';
 const ARCHIVE_MAX_AGE_MS = 15 * 60_000;
 // ETF Pro prints a range for each ETF it lists, once a week. An edition older than
 // two weeks no longer describes where the security trades.
-const WEEKLY_RANGE_MAX_AGE_DAYS = 14;
 const DAY_MS = 86_400_000;
 
 function emptyResearch(reason) {
@@ -95,14 +94,14 @@ function rangeInstrument(entry, descriptor, symbol, price = null) {
     scaleCheck: ratio === null ? 'not-checked' : offScale ? 'range-scale-differs-from-price' : 'consistent' };
 }
 
-// The weekly range for a security the daily Risk Range sheet does not carry. Dated and
-// labelled weekly, and only ever beside a daily range that is missing, never over one.
-function weeklyRangeField(weekly, symbol, price, nowMs) {
+// The weekly range for a security the daily Risk Range sheet does not carry, only ever beside
+// a daily range that is missing and only from the current session's own edition.
+function weeklyRangeField(weekly, symbol, price, marketDate) {
   const lrr = Number(weekly?.lrr);
   const hrr = Number(weekly?.hrr);
   const asOf = String(weekly?.asOf || '');
   if (!(lrr > 0) || !(hrr > lrr) || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return null;
-  if ((nowMs - Date.parse(`${asOf}T00:00:00Z`)) / DAY_MS > WEEKLY_RANGE_MAX_AGE_DAYS) return null;
+  if (asOf !== marketDate) return null;
   const ratio = Number.isFinite(price) && price > 0 ? price / ((lrr + hrr) / 2) : null;
   const offScale = ratio !== null && (ratio < 0.5 || ratio > 2);
   return available({ lrr, hrr }, { source: 'ETF Pro', sourceId: 'etf-pro', asOf, cadence: 'weekly', sourceMessageId: weekly.messageId || null, sourceInstrument: symbol,
@@ -126,10 +125,13 @@ function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = a
     }
     const archive = tradeArchiveStatus?.();
     const archiveCurrent = Boolean(archive) && now() - Date.parse(archive.refreshedAt) <= ARCHIVE_MAX_AGE_MS;
+    // Risk ranges reset every session: an earlier session's range is no range at all.
+    const sessionRange = field => (field.status === 'available' && field.asOf !== response.marketDate
+      ? unavailable('range-not-from-current-session', { source: field.source, asOf: field.asOf }) : field);
     // Fills a range the daily sheet left missing; everything else stays as read.
     const withWeeklyRange = (symbol, research) => {
       if (research.riskRange?.status === 'available') return research;
-      const riskRange = weeklyRangeField(weeklyRanges?.get?.(symbol), symbol, prices?.get?.(symbol) ?? null, now());
+      const riskRange = weeklyRangeField(weeklyRanges?.get?.(symbol), symbol, prices?.get?.(symbol) ?? null, response.marketDate);
       if (!riskRange) return research;
       const { status: _status, ...fields } = research;
       return withStatus({ ...fields, riskRange });
@@ -153,9 +155,9 @@ function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = a
         trade,
         trend: descriptorField(decision.trend, sameRangeSource ? range : {}),
         tail: unavailable('no-published-tail-source'),
-        riskRange: riskRange.status === 'available'
+        riskRange: sessionRange(riskRange.status === 'available'
           ? { ...riskRange, value: { lrr: decision.riskRange.lrr ?? riskRange.value?.lrr ?? null, hrr: decision.riskRange.hrr ?? riskRange.value?.hrr ?? null } }
-          : riskRange,
+          : riskRange),
         signalStrength: descriptorField(decision.signalStrength),
         signalStrengthShorts: descriptorField(decision.signalStrengthShorts),
         // What the prose states, beside the Risk Range Trend that sizes positions.

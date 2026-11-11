@@ -25,6 +25,7 @@ import pdfplumber
 
 from hedgeye_pdf_detect import detect_pdf_type, infer_forced_type_from_path
 from hedgeye_textract_cost import (
+    DEFAULT_TEXTRACT_USD_PER_1000_PAGES,
     TRADING_DAYS_PER_YEAR_DEFAULT,
     backfill_estimate,
     steady_state_daily_estimate,
@@ -183,7 +184,7 @@ def main():
         print()
 
     # Cost model — steady state vs this corpus as backfill
-    rate = float(os.environ.get('TEXTRACT_USD_PER_1000_PAGES', '1.50'))
+    rate = DEFAULT_TEXTRACT_USD_PER_1000_PAGES
     avg_pages = {}
     for k, lst in by_type.items():
         if not lst:

@@ -568,6 +568,8 @@ function processIsAlive(pid) {
 }
 
 function processCommand(pid) {
+  // A child with no recorded PID has no command to read; do not ask `ps` about "null".
+  if (!Number.isInteger(Number(pid)) || Number(pid) <= 0) return '';
   try {
     return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim();
   } catch {

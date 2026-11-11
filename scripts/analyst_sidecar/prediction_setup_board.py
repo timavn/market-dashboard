@@ -496,8 +496,8 @@ def _product_key(label: Any) -> str:
 
 class _CitedProducts:
     """Every Hedgeye product the review draws on, recorded as each cell or research entry is written, so the
-    Sources line names exactly the products the body uses, each at the latest edition read: this market day's
-    when the board read it, even if it states no new Trade, otherwise the edition its cells cite."""
+    Sources line names exactly the products the body uses, each at the latest edition received: this market day's
+    when the board read it, even if it states no new Trade, otherwise the newest of an earlier day."""
 
     def __init__(self, board: dict[str, Any]):
         research = board.get("research") if isinstance(board.get("research"), dict) else {}
@@ -505,6 +505,7 @@ class _CitedProducts:
         self.names = {_product_key(item["label"]): str(item["label"]) for item in products}
         self.order = {_product_key(item["label"]): index for index, item in enumerate(products)}
         self.published = {_product_key(item["label"]): item.get("publishedAt") for item in products}
+        self.latest = {_product_key(item["label"]): item.get("latestEdition") for item in products}
         self.ids = {_product_key(item["label"]): item.get("key") for item in products if item.get("key")}
         self.feeds = board.get("sources") or {}
         self.cited: dict[str, dict[str, Any]] = {}
@@ -520,10 +521,10 @@ class _CitedProducts:
             item["when"].append(str(when))
 
     def _published(self, key: str, item: dict[str, Any]) -> str | None:
-        """The latest edition read: the feed's own time for Risk Ranges and Crypto Quant."""
+        """The latest edition received: the feed's own time for Risk Ranges and Crypto Quant."""
         if self.feeds.get(FEED_DATES.get(key, "")):
             return str(self.feeds[FEED_DATES[key]])
-        when = item["when"] + ([str(self.published[key])] if self.published.get(key) else [])
+        when = item["when"] + [str(known[key]) for known in (self.published, self.latest) if known.get(key)]
         # Instants sort after a bare date on the same Pacific day.
         stamp = lambda value: (_pacific_day(value), "T" in value, value)
         return max(when, key=stamp) if when else None

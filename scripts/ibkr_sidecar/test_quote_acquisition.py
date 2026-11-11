@@ -355,3 +355,71 @@ class SubscriptionOwnershipTests(unittest.IsolatedAsyncioTestCase):
         result = await task
         self.assertIsNone(result["quote"])
         self.assertEqual(result["error"], "connection_changed")
+
+
+class RetainingBroker(FakeBroker):
+    """Keeps a Ticker per contract object until told otherwise, as ib_insync does."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.wrapper = SimpleNamespace(tickers={}, reqId2Ticker={}, ticker2ReqId={"mktData": {}})
+        self._held = {}
+
+    def reqMktData(self, contract, *args):
+        ticker = super().reqMktData(contract, *args)
+        held = self.wrapper.tickers.setdefault(id(contract), object())
+        self._held[id(contract)] = held
+        self.wrapper.reqId2Ticker[self.req_count] = held
+        self.wrapper.ticker2ReqId["mktData"][held] = self.req_count
+        return ticker
+
+    def cancelMktData(self, contract):
+        super().cancelMktData(contract)
+        # ib_insync's endTicker releases the request id only.
+        self.wrapper.ticker2ReqId["mktData"].pop(self._held.get(id(contract)), None)
+
+
+class EndpointTickerReleaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_one_off_quotes_leave_no_ticker_behind(self):
+        broker = RetainingBroker(ready_after=0.01)
+        manager = make_manager(broker)
+
+        for con_id in (201, 202, 203):
+            result = await manager.get_quote_for_instrument(instrument("SPY", con_id), timeout_sec=0.5)
+            self.assertIsNotNone(result["quote"])
+
+        self.assertEqual(broker.req_count, 3)
+        self.assertEqual(broker.cancel_count, 3)
+        self.assertEqual(broker.wrapper.tickers, {})
+        self.assertEqual(broker.wrapper.reqId2Ticker, {})
+
+    async def test_forced_snapshots_leave_no_ticker_behind(self):
+        broker = RetainingBroker(ready_after=0.01)
+        manager = make_manager(broker, persistent_ids=[301])
+        manager._contracts[301] = make_contract(instrument("SPY", 301))
+
+        for _ in range(3):
+            await manager.get_quote_for_instrument(instrument("SPY", 301), timeout_sec=0.5, force_refresh=True)
+
+        self.assertEqual(broker.cancel_count, broker.req_count)
+        self.assertEqual(broker.wrapper.tickers, {})
+        self.assertEqual(broker.wrapper.reqId2Ticker, {})
+
+    async def test_a_contract_with_a_live_subscription_is_left_alone(self):
+        broker = RetainingBroker()
+        manager = make_manager(broker)
+        contract = make_contract(instrument("QQQ", 401))
+        broker.reqMktData(contract)
+
+        manager._forget_endpoint_ticker(contract)
+        self.assertIn(id(contract), broker.wrapper.tickers)
+        self.assertEqual(len(broker.wrapper.reqId2Ticker), 1)
+
+        broker.cancelMktData(contract)
+        manager._forget_endpoint_ticker(contract)
+        self.assertEqual(broker.wrapper.tickers, {})
+        self.assertEqual(broker.wrapper.reqId2Ticker, {})
+
+    async def test_a_broker_without_that_bookkeeping_is_unaffected(self):
+        manager = make_manager(FakeBroker())
+        manager._forget_endpoint_ticker(make_contract(instrument("IWM", 501)))

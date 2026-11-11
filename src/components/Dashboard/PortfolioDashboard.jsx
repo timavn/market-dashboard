@@ -1087,7 +1087,6 @@ const PortfolioDashboard = ({
                   portfolioData={portfolioData}
                   isLoading={portfolioLoading}
                   isRefreshing={portfolioRefreshing}
-                  connection={ibkrConnection}
                   onRefresh={handlePortfolioRefresh}
                 />
               </Suspense>

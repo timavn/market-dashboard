@@ -111,6 +111,8 @@ function createMarketQuoteReferenceStore({
   const filePath = path.join(resolvedDataDir, FILE_NAME);
   let snapshot = safeReadSnapshot(fileSystem, filePath);
   let dirty = false;
+  // The readings as last written to (or read from) disk.
+  let persistedModes = JSON.stringify(snapshot.modes);
 
   const ensureScope = (mode, scope) => {
     const normalizedMode = mode === 'periods' ? 'periods' : 'current';
@@ -189,6 +191,13 @@ function createMarketQuoteReferenceStore({
 
   const flush = () => {
     if (!dirty) return false;
+    // A refresh that re-observes the same readings marks the store dirty without
+    // changing anything. Skip the megabyte rewrite when the readings are identical.
+    const serializedModes = JSON.stringify(snapshot.modes);
+    if (serializedModes === persistedModes) {
+      dirty = false;
+      return false;
+    }
     const persistedAt = new Date(Number(now())).toISOString();
     snapshot.updatedAt = persistedAt;
     fileSystem.mkdirSync(resolvedDataDir, { recursive: true, mode: 0o700 });
@@ -208,6 +217,7 @@ function createMarketQuoteReferenceStore({
     } catch {
       // Some filesystems do not support POSIX permissions.
     }
+    persistedModes = serializedModes;
     dirty = false;
     return true;
   };

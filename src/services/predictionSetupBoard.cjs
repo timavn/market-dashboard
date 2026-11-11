@@ -393,7 +393,7 @@ function cpiForecasts(nowcast, currentEvent, eventsBySeries, asOf, cpiConsensus)
 // A product that prints no send time (Market Structure) shows when the dashboard read it.
 const readAt = (snapshot) => emailPublishedAt(snapshot) || (Number.isFinite(Date.parse(snapshot?.scrapedAt)) ? snapshot.scrapedAt : null);
 
-function morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, marketDate }) {
+function morningResearch({ morningSnapshots, latestEditions, cryptoQuant, rows, usd, quotes, marketDate }) {
   if (!morningSnapshots) return null;
   const references = {};
   const prices = {};
@@ -414,14 +414,14 @@ function morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, mar
   const riskRangeTickers = Object.fromEntries(UNIVERSE.markets.filter((market) => market.hedgeye.riskRange?.product === 'risk-ranges')
     .map((market) => [market.hedgeye.riskRange.ticker, market.id]).concat([[UNIVERSE.usd.riskRangeTicker, 'usd']]));
   return buildMorningResearch({ snapshots: { ...morningSnapshots, 'crypto-quant': morningSnapshots['crypto-quant'] || cryptoQuant },
-    marketDate, references, prices, riskRangeTickers, publishedAt: readAt });
+    marketDate, references, prices, riskRangeTickers, publishedAt: readAt, latestEditions });
 }
 
 // The instrument a market's range is drawn against, whose all-time high the range top is checked with.
 const allTimeHighSymbol = (market) => market.hedgeye.riskRange?.priceSymbol || market.price?.symbol || null;
 
 function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations,
-  usdPeriods, eventsBySeries, morningSnapshots, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory,
+  usdPeriods, eventsBySeries, morningSnapshots, latestEditions, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory,
   priceHistory, cpiConsensus, publishedStatements, alphaCodeWatch, marketDate, asOf = new Date().toISOString() } = {}) {
   // Saved boards from before volume keep their original shape.
   // Bond ETFs (SHY, IEF, TLT) move opposite to the yield their Trend describes.
@@ -485,7 +485,7 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
         { low: usd.low, high: usd.high, date: usd.rangeDate || riskRanges?.manifest?.publicationDate || null })
       : null;
   }
-  const research = morningResearch({ morningSnapshots, cryptoQuant, rows, usd, quotes, marketDate });
+  const research = morningResearch({ morningSnapshots, latestEditions, cryptoQuant, rows, usd, quotes, marketDate });
   if (research) {
     for (const row of rows) row.research = research.markets[row.id] || { findings: [] };
     if (usd) usd.research = research.markets.usd || { findings: [] };
@@ -524,7 +524,7 @@ const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.h
  * earlier market day's morning research needs: that day's products, read against the current ranges and prices.
  */
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
-  loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts,
+  loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts, loadLatestEditions,
   loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
   loadPublishedStatements, loadAlphaCodeWatch, marketDateFor }) {
   return async function loadSetupBoard({ now = new Date(), researchDate = null } = {}) {
@@ -535,8 +535,9 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
     const optional = (load, args) => (load && !researchDate ? settle(Promise.resolve().then(() => load(args))) : Promise.resolve(null));
     // An earlier day reads its own Crypto Quant; the current one would put today's call on that date.
     const products = MORNING_PRODUCTS.map((product) => product.key).filter((key) => researchDate || key !== 'crypto-quant');
+    const loadedMorning = settle(loadMorningProducts ? loadMorningProducts({ marketDate, products }) : Promise.resolve(null));
     const [riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations, usdPeriods,
-      events, morning, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory, priceHistory, cpiConsensus,
+      events, morning, latestEditions, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory, priceHistory, cpiConsensus,
       publishedStatements] = await Promise.all([
       loadedRanges,
       settle(loadCryptoQuant()),
@@ -549,7 +550,9 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       settle(full(() => (loadPeriodReturns ? loadPeriodReturns(UNIVERSE.usd.symbol) : null))),
       settle(full(() => Promise.all(seriesNames().map((name) => loadKalshiEvents(name)
         .then((list) => [name, list], () => [name, []]))))),
-      settle(loadMorningProducts ? loadMorningProducts({ marketDate, products }) : Promise.resolve(null)),
+      loadedMorning,
+      // Products with nothing yet today, so Sources can date them by their newest edition received.
+      loadedMorning.then((result) => optional(loadLatestEditions, { products: products.filter((key) => !result.value?.[key]) })),
       // Earlier publications than the one on the board, oldest first.
       loadedRanges.then((ranges) => optional(loadRiskRangeHistory, { before: ranges.value?.manifest?.publicationDate || null,
         sessions: STRUCTURE_SESSIONS, now })),
@@ -568,6 +571,7 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       volatility: volatility.value, usdCorrelations: usdCorrelations.value, usdPeriods: usdPeriods.value,
       eventsBySeries: Object.fromEntries(events.value || []), marketDate, asOf: now.toISOString(),
       morningSnapshots: loadMorningProducts ? (morning.value || {}) : undefined,
+      latestEditions: latestEditions?.value || {},
       // With a history loader, a failed load still yields a board with structure marked unavailable.
       ...(riskRangeHistory ? { riskRangeHistory: riskRangeHistory.value || [], cryptoQuantHistory: cryptoQuantHistory?.value || [],
         allTimeHighs: allTimeHighs?.value || {} } : {}),

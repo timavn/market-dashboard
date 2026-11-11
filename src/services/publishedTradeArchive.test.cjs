@@ -126,3 +126,72 @@ test('keeps a publication that states only references, Trend or Alpha Codes, and
   assert.deepEqual(kept.alphaCodes, []);
   assert.deepEqual([kept.references.length, kept.trends.length], [1, 1]);
 });
+
+test('between full reads only recent, new or re-scraped documents are fetched again', async () => {
+  let clock = Date.parse('2026-11-10T15:00:00Z');
+  const fetched = [];
+  const options = [];
+  const stored = [
+    publication('2026-08-10', 'SPX is BEARISH TRADE.', 'early-look', { scrapedAt: '2026-08-10T12:00:00Z' }),
+    publication('2026-11-10', 'VIX is BULLISH TRADE.', 'early-look', { scrapedAt: '2026-11-10T12:00:00Z' }),
+  ];
+  const archive = createPublishedTradeArchive({ referencePath: null, products: [products[0]], ttlMs: 0, now: () => clock,
+    querySnapshotsByType: async (_type, option) => {
+      options.push(option);
+      const rows = stored.filter(({ date, snapshotType, scrapedAt }) => !(option.skipKey && option.skipKey({ date, snapshotType, scrapedAt })));
+      fetched.push(rows.map((row) => row.date));
+      return rows;
+    },
+  });
+  const read = async () => (await archive.load({ waitForRefresh: true })).map((row) => [row.ticker, row.value]);
+
+  // The first read fetches everything.
+  assert.deepEqual(await read(), [['SPX', 'BEARISH'], ['VIX', 'BULLISH']]);
+  assert.equal(options[0].skipKey, undefined);
+  assert.deepEqual(fetched[0], ['2026-08-10', '2026-11-10']);
+
+  // Five minutes later only today's document is fetched; the old reading is kept.
+  clock += 5 * 60 * 1000;
+  assert.deepEqual(await read(), [['SPX', 'BEARISH'], ['VIX', 'BULLISH']]);
+  assert.deepEqual(fetched[1], ['2026-11-10']);
+
+  // The old document is scraped again: it is fetched and its extraction replaced.
+  stored[0] = publication('2026-08-10', 'SPX is BULLISH TRADE.', 'early-look', { scrapedAt: '2026-11-10T15:04:00Z' });
+  clock += 5 * 60 * 1000;
+  assert.deepEqual(await read(), [['SPX', 'BULLISH'], ['VIX', 'BULLISH']]);
+  assert.deepEqual(fetched[2], ['2026-08-10', '2026-11-10']);
+
+  // A new older document and one with no scrape time are always fetched.
+  stored.push(publication('2026-08-11', 'RUT is BEARISH TRADE.', 'early-look', { scrapedAt: '2026-08-11T12:00:00Z' }));
+  stored.push(publication('2026-08-12', 'NDX is NEUTRAL TRADE.', 'early-look'));
+  clock += 5 * 60 * 1000;
+  await read();
+  assert.deepEqual(fetched[3], ['2026-11-10', '2026-08-11', '2026-08-12']);
+  clock += 5 * 60 * 1000;
+  await read();
+  assert.deepEqual(fetched[4], ['2026-11-10', '2026-08-12']);
+
+  // An hour after the last full read everything is fetched again.
+  clock += 60 * 60 * 1000;
+  await read();
+  assert.equal(options.at(-1).skipKey, undefined);
+  assert.deepEqual(fetched.at(-1), ['2026-08-10', '2026-11-10', '2026-08-11', '2026-08-12']);
+});
+
+test('a failed full read is repeated in full rather than trusted', async () => {
+  let clock = Date.parse('2026-11-10T15:00:00Z');
+  let fail = true;
+  const options = [];
+  const archive = createPublishedTradeArchive({ referencePath: null, products: [products[0]], ttlMs: 0, now: () => clock,
+    querySnapshotsByType: async (_type, option) => {
+      options.push(option);
+      if (fail) throw new Error('offline');
+      return [publication('2026-08-10', 'SPX is BEARISH TRADE.', 'early-look', { scrapedAt: '2026-08-10T12:00:00Z' })];
+    },
+  });
+  await archive.load({ waitForRefresh: true });
+  fail = false;
+  clock += 5 * 60 * 1000;
+  assert.equal((await archive.load({ waitForRefresh: true })).length, 1);
+  assert.deepEqual(options.map((option) => option.skipKey), [undefined, undefined]);
+});

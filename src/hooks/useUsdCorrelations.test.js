@@ -238,6 +238,39 @@ describe('useUsdCorrelations', () => {
       .toBe(keepsHistory ? FXVL_SNAPSHOT.sixMonthChangePct : null);
   });
 
+  test('history restored from the stored FX reference settles instead of re-rendering forever', async () => {
+    // A first session stores the complete reading under the FX reference key.
+    const full = { getCorrelations: jest.fn().mockResolvedValue({ ...LIVE_RESPONSE, fxvlSnapshot: FXVL_SNAPSHOT }) };
+    const view = renderHook(() => useUsdCorrelations({
+      service: full, retryDelaysMs: STABLE_RETRY_DELAYS_MS, failurePollMs: 10000, successPollMs: 10000,
+    }));
+    await waitFor(() => expect(view.result.current.fxvlSnapshot).toEqual(FXVL_SNAPSHOT));
+    view.unmount();
+    expect(window.sessionStorage.getItem(FX_VOLATILITY_REFERENCE_STORAGE_KEY)).not.toBeNull();
+
+    // After a reload the correlation snapshot is gone but the FX reference
+    // remains, and the server repeats the same observation without history.
+    resetSessionResourceStore();
+    window.sessionStorage.removeItem(CORRELATION_REFERENCE_STORAGE_KEY);
+    const partial = { ...FXVL_SNAPSHOT, month6Ago: null, sixMonthChangePct: null };
+    const service = { getCorrelations: jest.fn().mockResolvedValue({ ...LIVE_RESPONSE, fxvlSnapshot: partial }) };
+    let hookCalls = 0;
+    const { result } = renderHook(() => {
+      hookCalls += 1;
+      return useUsdCorrelations({
+        service, retryDelaysMs: STABLE_RETRY_DELAYS_MS, failurePollMs: 10000, successPollMs: 10000,
+      });
+    });
+    await waitFor(() => expect(result.current.correlations).toEqual(LIVE_RESPONSE.correlations));
+    await waitFor(() => expect(result.current.fxvlSnapshot?.month6Ago).toBe(FXVL_SNAPSHOT.month6Ago));
+    const settledAt = hookCalls;
+    await new Promise((resolve) => { setTimeout(resolve, 200); });
+
+    // Restoring the history must not store a new object on every render.
+    expect(hookCalls - settledAt).toBeLessThan(5);
+    expect(result.current.fxvlSnapshot.sixMonthChangePct).toBe(FXVL_SNAPSHOT.sixMonthChangePct);
+  });
+
   test('retains FX volatility through partial refreshes, a later reload and provider failure, then accepts recovery', async () => {
     const service = { getCorrelations: jest.fn()
       .mockResolvedValueOnce({ ...LIVE_RESPONSE, fxvlSnapshot: FXVL_SNAPSHOT })

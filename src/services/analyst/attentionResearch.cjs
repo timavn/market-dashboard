@@ -261,12 +261,14 @@ function alphaCodePrintFindings(context, now, verified) {
     const code = pick => (all.length === 2 ? ` ${all.sort((left, right) => (left.duration === 'trade' ? -1 : right.duration === 'trade' ? 1 : 0)).map(pick).join('/')}` : '');
     const moved = lines.filter(line => line.change);
     const copy = moved.length
-      ? `${lines[0].label} Alpha Code${all.length === 2 ? `${code(line => lineLevel(line, line.change?.from ?? line.level))} →${code(line => lineLevel(line))}` : ''}: ${moved.map(line => `${named(line)} line ${lineLevel(line, line.change.from)} → ${lineLevel(line)}`).join(', ')}.`
+      ? `${lines[0].label} Alpha Code changed.`
       : `${lines[0].label} Alpha Code${code(line => lineLevel(line))} → watching ${lines.map(line => `${named(line)} ${lineLevel(line)}`).join(', ')}.`;
+    const codeAt = pick => (all.length === 2 ? code(pick).trim() : moved.map(line => `${named(line)} ${pick(line)}`).join(', '));
+    const change = moved.length ? [row('Previous', codeAt(line => lineLevel(line, line.change?.from ?? line.level))), row('New', codeAt(line => lineLevel(line)))] : [];
     const printed = lines[0].printedDate;
     output.push(finding({ key: [symbol, 'alpha-code-print', printed], material: [symbol, printed, lines.map(line => [line.duration, line.level, line.change?.from ?? null])],
       symbol: lines[0].label, kind: 'market', priority: 1, action: moved.length ? 'alpha code changed' : 'new alpha code', publishedAt: printTime(lines[0]),
-      rows: [...(held ? positionRows(state) : []), ...(via ? [row('Held via', via)] : []), row('Signal', copy)],
+      rows: [...(held ? positionRows(state) : []), ...(via ? [row('Held via', via)] : []), row('Signal', copy), ...change],
       sourceLinks: lines.map(line => lineCitation(line, `${line.productLabel || 'Research'}: ${line.label} Alpha Code`)), state: held ? state : {} }));
   }
   return output;
@@ -358,29 +360,29 @@ function gammaRows(regime, to) {
   return [row('Gamma throttle', [value.toFixed(2), throttleRank(value, regime.throttleHistory)].filter(Boolean).join(' · ')),
     ...(read && Math.sign(value) === read.sign ? [row('What it means', read.text)] : []), ...realizedRow(regime)];
 }
-// What the newest Market Structure edition changed. Risk Off against a net long book is a
-// standing instruction, so it stays up for as long as the tile reads Risk Off.
+// What the newest Market Structure edition changed, all blue notifications. Risk Off against a
+// net long book stays up for as long as the tile reads Risk Off, until dismissed.
 function regimeFindings(context) {
   const watch = context.alphaCodeWatch;
   const regime = watch?.regime;
   if (!regime?.date) return [];
   const output = [];
   const publishedAt = regime.publishedAt || `${regime.date}T12:00:00Z`;
-  const card = (tile, from, to, date, severity) => {
+  const card = (tile, from, to, date) => {
     const words = REGIME_ACTIONS[tile];
     const action = words.to[to];
-    return finding({ key: ['market-regime', tile, date, severity ? 'action' : 'note'], material: ['market-regime', tile, date, from, to], symbol: words.subject,
-      kind: severity ? 'portfolio' : 'market', priority: severity ? 0 : 1, severity, action: `${words.name.toLowerCase()} change`, publishedAt,
+    return finding({ key: ['market-regime', tile, date, 'note'], material: ['market-regime', tile, date, from, to], symbol: words.subject,
+      kind: 'market', priority: 1, severity: null, action: `${words.name.toLowerCase()} change`, publishedAt,
       rows: [row('Signal', `${words.name} ${from} → ${to}${action ? ` → ${action}` : ''}.`),
         ...(tile === 'spxGammaExposure' ? gammaRows(regime, to) : [])],
       sourceLinks: [{ label: 'Market Structure', citation: { id: `cite_${hash(['market-regime', tile, date]).slice(0, 28)}`, title: `Market Structure: ${words.name}`, product: 'market-structure', publicationDate: date, excerpt: `${words.name}: ${to}`, ...emailClip(regime.messageId, 'SPX'), ...(regime.chartUrl ? { sourceImageUrl: regime.chartUrl } : {}) } }] });
   };
   const standing = regime.riskOff && regime.tiles?.strategicAllocation === 'Risk Off' && netLong(context.holdings) === true;
-  if (standing) output.push(card('strategicAllocation', regime.riskOff.from, 'Risk Off', regime.riskOff.since, ACTION_REQUIRED));
+  if (standing) output.push(card('strategicAllocation', regime.riskOff.from, 'Risk Off', regime.riskOff.since));
   if (sessionsBetween(regime.date, watch.marketDate) > FRESH_PRINT_SESSIONS) return output;
   for (const change of regime.changes || []) {
     if (!REGIME_ACTIONS[change.id] || (standing && change.id === 'strategicAllocation')) continue;
-    output.push(card(change.id, change.from, change.to, regime.date, null));
+    output.push(card(change.id, change.from, change.to, regime.date));
   }
   return output;
 }

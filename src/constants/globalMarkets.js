@@ -2,6 +2,7 @@
  * Global market configuration for the Day-Cycle Header component.
  * Includes timezone data, market hours, and pre/post market sessions.
  */
+import usEquityCalendar from '../utils/usEquityMarketCalendar.cjs';
 
 /**
  * US Market Holidays for 2024-2026
@@ -78,6 +79,15 @@ export const UK_MARKET_HOLIDAYS = [
   '2026-08-31', // Summer Bank Holiday
   '2026-12-25', // Christmas Day
   '2026-12-28', // Boxing Day (observed)
+  // 2027 (gov.uk bank holidays, England and Wales)
+  '2027-01-01', // New Year's Day
+  '2027-03-26', // Good Friday
+  '2027-03-29', // Easter Monday
+  '2027-05-03', // Early May Bank Holiday
+  '2027-05-31', // Spring Bank Holiday
+  '2027-08-30', // Summer Bank Holiday
+  '2027-12-27', // Christmas Day (substitute)
+  '2027-12-28', // Boxing Day (substitute)
 ];
 
 /**
@@ -145,6 +155,24 @@ export const JP_MARKET_HOLIDAYS = [
   '2026-11-03', // Culture Day
   '2026-11-23', // Labor Thanksgiving Day
   '2026-12-31', // Bank Holiday
+  // 2027 (national holidays plus the exchange's year-end closure)
+  '2027-01-01', // New Year's Day
+  '2027-01-11', // Coming of Age Day
+  '2027-02-11', // National Foundation Day
+  '2027-02-23', // Emperor's Birthday
+  '2027-03-22', // Vernal Equinox Day (observed; 21 March is a Sunday)
+  '2027-04-29', // Showa Day
+  '2027-05-03', // Constitution Memorial Day
+  '2027-05-04', // Greenery Day
+  '2027-05-05', // Children's Day
+  '2027-07-19', // Marine Day
+  '2027-08-11', // Mountain Day
+  '2027-09-20', // Respect for the Aged Day
+  '2027-09-23', // Autumnal Equinox Day
+  '2027-10-11', // Sports Day
+  '2027-11-03', // Culture Day
+  '2027-11-23', // Labor Thanksgiving Day
+  '2027-12-31', // Bank Holiday
 ];
 
 /**
@@ -202,6 +230,20 @@ export const HK_MARKET_HOLIDAYS = [
   '2026-10-19', // Chung Yeung Festival (observed)
   '2026-12-25', // Christmas Day
   '2026-12-26', // Boxing Day (observed on 12/28)
+  // 2027 (HKEX circular CT/077/26, securities market holiday schedule)
+  '2027-01-01', // The first day of January
+  '2027-02-08', // The third day of Lunar New Year
+  '2027-02-09', // The fourth day of Lunar New Year
+  '2027-03-26', // Good Friday
+  '2027-03-29', // Easter Monday
+  '2027-04-05', // Ching Ming Festival
+  '2027-05-13', // The Birthday of the Buddha
+  '2027-06-09', // Tuen Ng Festival
+  '2027-07-01', // HKSAR Establishment Day
+  '2027-09-16', // The day following the Mid-Autumn Festival
+  '2027-10-01', // National Day
+  '2027-10-08', // Chung Yeung Festival
+  '2027-12-27', // The first weekday after Christmas Day
 ];
 
 /**
@@ -279,24 +321,34 @@ export const GLOBAL_MARKETS = [
     name: 'Tokyo Stock Exchange',
     timezone: 'Asia/Tokyo',
     marketOpen: { hour: 9, minute: 0 },
-    marketClose: { hour: 15, minute: 0 },
+    // The afternoon session has ended at 15:30 since 5 November 2024.
+    marketClose: { hour: 15, minute: 30 },
     // TSE has lunch break 11:30-12:30 but we simplify here
     preMarketOpen: null,
     postMarketClose: null
   }
 ];
 
+// The three U.S. rows share New York's session. Its holidays and early closes
+// come from the rule-based exchange calendar, which needs no yearly table.
+const US_MARKET_IDS = new Set(['nyc', 'chi', 'lax']);
+const US_EARLY_CLOSE_SHIFT_MINUTES = usEquityCalendar.US_EQUITY_REGULAR_CLOSE_MINUTES
+  - usEquityCalendar.US_EQUITY_EARLY_CLOSE_MINUTES;
+
+const localDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 /**
- * Get the appropriate holiday list for a market
+ * Get the published holiday list for a market outside the U.S.
  * @param {Object} market - Market configuration object
  * @returns {string[]} Array of holiday strings
  */
 const getMarketHolidays = (market) => {
   switch (market.id) {
-    case 'nyc':
-    case 'chi':
-    case 'lax':
-      return US_MARKET_HOLIDAYS;
     case 'lon':
       return UK_MARKET_HOLIDAYS;
     case 'tyo':
@@ -324,13 +376,19 @@ export const getMarketStatus = (market, zonedTime) => {
   }
 
   // Holiday check
-  const holidays = getMarketHolidays(market);
-  if (isMarketHoliday(zonedTime, holidays)) {
+  const usMarket = US_MARKET_IDS.has(market.id);
+  const dateKey = localDateKey(zonedTime);
+  const holiday = usMarket
+    ? !usEquityCalendar.isTradingDateKey(dateKey)
+    : isMarketHoliday(zonedTime, getMarketHolidays(market));
+  if (holiday) {
     return 'holiday';
   }
 
   const openMinutes = market.marketOpen.hour * 60 + market.marketOpen.minute;
-  const closeMinutes = market.marketClose.hour * 60 + market.marketClose.minute;
+  const earlyClose = usMarket && usEquityCalendar.isUsEquityEarlyCloseDateKey(dateKey);
+  const closeMinutes = market.marketClose.hour * 60 + market.marketClose.minute
+    - (earlyClose ? US_EARLY_CLOSE_SHIFT_MINUTES : 0);
 
   // Regular trading hours
   if (currentMinutes >= openMinutes && currentMinutes < closeMinutes) {

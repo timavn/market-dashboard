@@ -12,9 +12,13 @@ function createPublishedTradeSnapshotReader({ dynamodb, tableName = 'HedgeyeDail
   };
   const release = () => { const next = queue.shift(); if (next) next(); else active -= 1; };
 
-  async function query(type, { limit = 60, snapshotProjectionExpression, snapshotAttributeNames = {} } = {}) {
+  // `skipKey` receives each index row (date, snapshotType, scrapedAt) and
+  // returns true for a document the caller already holds unchanged. A read is
+  // billed on the whole document, so skipping is the only way to save one.
+  async function query(type, { limit = 60, snapshotProjectionExpression, snapshotAttributeNames = {}, skipKey = null } = {}) {
     if (!String(type || '').trim()) return [];
     const count = Math.max(1, Math.min(200, Number(limit) || 60));
+    const skips = typeof skipKey === 'function';
     const projection = snapshotProjectionExpression ? {
       ProjectionExpression: snapshotProjectionExpression,
       ExpressionAttributeNames: snapshotAttributeNames,
@@ -26,11 +30,12 @@ function createPublishedTradeSnapshotReader({ dynamodb, tableName = 'HedgeyeDail
         const response = await dynamodb.query({
           TableName: tableName, IndexName: indexName,
           KeyConditionExpression: '#type = :type',
-          ExpressionAttributeNames: { '#type': 'snapshotType', '#date': 'date' },
+          ExpressionAttributeNames: { '#type': 'snapshotType', '#date': 'date', ...(skips ? { '#scrapedAt': 'scrapedAt' } : {}) },
           ExpressionAttributeValues: { ':type': type },
-          ProjectionExpression: '#type, #date', ScanIndexForward: false, Limit: count,
+          ProjectionExpression: skips ? '#type, #date, #scrapedAt' : '#type, #date', ScanIndexForward: false, Limit: count,
         }).promise();
-        keys = (response.Items || []).map(row => ({ date: row.date, snapshotType: row.snapshotType }));
+        keys = (response.Items || []).filter(row => !(skips && skipKey(row)))
+          .map(row => ({ date: row.date, snapshotType: row.snapshotType }));
       } catch (error) {
         if (!['ResourceNotFoundException', 'ValidationException'].includes(error.code || error.name)) throw error;
         // Preserve the repository's bounded exact-key migration fallback. No

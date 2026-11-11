@@ -74,6 +74,8 @@ function sourceName(link) {
 
 // The card opens on what it is about. A terse "condition → action" Context says that and replaces the
 // plainer Action row, which only restates it; prose Context stays below as explanation and the Action row leads.
+const UNDER_LEAD = ['Previous', 'New'];
+
 function leadWithAction(rows) {
   const context = rows.find(row => row.label === 'Context' && row.text.includes('→'));
   const lead = context || rows.find(row => row.label === 'Action');
@@ -287,7 +289,10 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       const durations = modern ? DURATIONS.map(label => content.rows.find(row => row.label === label)).filter(Boolean) : [];
       const lead = modern ? content.rows.find(row => row.lead) : null;
       // The Risk Range is drawn as its bar under the copy, with its numbers on it, not as a line of text.
-      const rows = modern ? content.rows.filter(row => !DURATIONS.includes(row.label) && !row.lead && !row.range) : [];
+      const copyRows = modern ? content.rows.filter(row => !DURATIONS.includes(row.label) && !row.lead && !row.range) : [];
+      // An Alpha Code change reads Previous then New straight under its Signal.
+      const underLead = copyRows.filter(row => UNDER_LEAD.includes(row.label));
+      const rows = copyRows.filter(row => !UNDER_LEAD.includes(row.label));
       const riskRange = modern ? content.rows.find(row => row.range)?.range : null;
       const citations = content.sourceLinks?.length ? content.sourceLinks.filter(link => publishedSource(link) && link.label).map(link => link.citation)
         : payload.citation ? [payload.citation] : [];
@@ -302,6 +307,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
               ? <><span className="analyst-inbox-beyond-range">{lead.text.split(' → ')[0]}</span> → <DirectionalText>{lead.text.split(' → ').slice(1).join(' → ')}</DirectionalText></>
               : <DirectionalText>{lead.text}</DirectionalText>}</dd>
           </div>}
+          {underLead.map(row => <div key={row.label}><dt>{row.label}: </dt><dd>{row.text}</dd></div>)}
           {ticker && <div className="analyst-inbox-ticker">
             <dt>Ticker: </dt><dd>{ticker}</dd>
           </div>}

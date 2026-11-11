@@ -47,7 +47,8 @@ const stillHeld = (add, held) => held === null || (Math.sign(held) === Math.sign
  * Fold the held securities' ranges and prices into the stored watch.
  * ranges: [{ symbol, low, high, source, sourceId, asOf, cadence }]; prices: { [symbol]: { price, asOf } };
  * positions: { [symbol]: signedQuantity } from a verified book, or null when none was verified.
- * The first reading of a security sets its starting zone and raises nothing.
+ * The very first reading of the watch sets the starting zones and raises nothing. Each new range
+ * starts fresh: ranges reset every session, so its first reading counts as entering that zone.
  */
 function foldRiskRangeWatch(stored, { marketDate = null, ranges = [], prices = {}, positions = null, sizeNotes = [], complete = true, now = new Date() } = {}) {
   const at = now.toISOString();
@@ -60,8 +61,9 @@ function foldRiskRangeWatch(stored, { marketDate = null, ranges = [], prices = {
   if (previous && !complete) Object.assign(lines, previous.lines);
   for (const range of ranges) {
     const kept = previous?.lines?.[range.symbol] || null;
-    const line = { ...range, price: kept?.price ?? null, priceAt: kept?.priceAt ?? null, pct: kept?.pct ?? null, zone: kept?.zone ?? null,
-      since: kept?.since ?? null, entries: kept?.entries || [], adds: (kept?.adds || []).filter(add => add.date === marketDate && stillHeld(add, settled ? settled[range.symbol] || 0 : null)) };
+    const sameRange = kept && kept.asOf === range.asOf;
+    const line = { ...range, price: kept?.price ?? null, priceAt: kept?.priceAt ?? null, pct: kept?.pct ?? null, zone: sameRange ? kept.zone ?? null : null,
+      since: sameRange ? kept.since ?? null : null, entries: sameRange ? kept.entries || [] : [], adds: (kept?.adds || []).filter(add => add.date === marketDate && stillHeld(add, settled ? settled[range.symbol] || 0 : null)) };
     const quote = prices[range.symbol];
     const price = finite(quote?.price);
     if (price !== null) {
@@ -70,7 +72,7 @@ function foldRiskRangeWatch(stored, { marketDate = null, ranges = [], prices = {
       line.pct = rangeZone(price, line.low, line.high).pct;
       const zone = settledZone(price, line.low, line.high, line.zone);
       if (zone !== line.zone) {
-        if (line.zone) line.entries = [...line.entries, { from: line.zone, to: zone, price, pct: line.pct, at: line.priceAt }].slice(-KEPT_ENTRIES);
+        if (line.zone || previous) line.entries = [...line.entries, { from: line.zone, to: zone, price, pct: line.pct, at: line.priceAt }].slice(-KEPT_ENTRIES);
         line.zone = zone;
         line.since = line.priceAt;
       }
@@ -124,15 +126,12 @@ function sizeNotesFromEvents(events = [], { now = new Date() } = {}) {
  * Closes with the range in force each session: the daily sheet's range for its own date,
  * otherwise the latest weekly edition printed on or before the session.
  */
-function rangeHistory({ bars = [], daily = [], weekly = [], sessions = 60 } = {}) {
+function rangeHistory({ bars = [], daily = [], sessions = 60 } = {}) {
   const valid = item => item && /^\d{4}-\d{2}-\d{2}$/.test(item.date) && item.low > 0 && item.high > item.low;
   const dailyByDate = new Map(daily.filter(valid).map(item => [item.date, item]));
-  const editions = weekly.filter(valid).sort((left, right) => left.date.localeCompare(right.date));
   const rows = bars.filter(bar => /^\d{4}-\d{2}-\d{2}$/.test(bar.date) && bar.close > 0).sort((left, right) => left.date.localeCompare(right.date)).map(bar => {
-    const own = dailyByDate.get(bar.date);
-    const edition = own ? null : editions.filter(item => item.date <= bar.date).at(-1);
-    const range = own || edition;
-    return { date: bar.date, close: bar.close, low: range?.low ?? null, high: range?.high ?? null, cadence: own ? 'daily' : edition ? 'weekly' : null };
+    const range = dailyByDate.get(bar.date);
+    return { date: bar.date, close: bar.close, low: range?.low ?? null, high: range?.high ?? null };
   });
   return rows.slice(-sessions);
 }

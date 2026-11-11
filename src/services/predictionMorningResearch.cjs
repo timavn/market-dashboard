@@ -553,15 +553,19 @@ function compare(price, levelValue) {
  * snapshots: { [productKey]: snapshot } for the market date.
  * references: { [instrument]: number } live prices (yields in percent) for checking printed levels.
  * prices: { [marketId]: number } the price each Alpha Code is compared with.
+ * latestEditions: { [productKey]: snapshot } the newest edition received of a product with none for the market date.
  */
 function buildMorningResearch({ snapshots = {}, marketDate = null, references = {}, prices = {}, riskRangeTickers = {},
-  publishedAt = () => null } = {}) {
+  publishedAt = () => null, latestEditions = {} } = {}) {
   const products = PRODUCTS.map(({ key, label }) => {
     const snapshot = snapshots[key];
     const current = snapshot && (!marketDate || snapshot.date === marketDate);
     // The email the product was read from, so its Source can show the original.
     const messageId = current ? snapshot.gmailMessageId || snapshot.sourceMessageId || null : null;
-    return { key, label, date: snapshot?.date || null, publishedAt: current ? publishedAt(snapshot) : null, messageId, status: current ? 'read' : 'missing' };
+    // Dates the product in Sources only; its contents stay out of today's findings.
+    const earlier = !current && marketDate && latestEditions[key]?.date < marketDate ? latestEditions[key] : null;
+    return { key, label, date: snapshot?.date || null, publishedAt: current ? publishedAt(snapshot) : null, messageId, status: current ? 'read' : 'missing',
+      ...(earlier ? { latestEdition: publishedAt(earlier) || earlier.date } : {}) };
   });
   const findings = [];
   for (const product of products) {

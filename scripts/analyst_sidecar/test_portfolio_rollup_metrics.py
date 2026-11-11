@@ -262,3 +262,47 @@ class ExposureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalendarLookupRetryTest(unittest.TestCase):
+    """A slow or failed calendar helper is asked again, not remembered."""
+
+    def setUp(self):
+        import portfolio_rollup_metrics
+        self.module = portfolio_rollup_metrics
+        self.module._previous_session_from_calendar.cache_clear()
+        self.module._holdings_frozen_until_from_calendar.cache_clear()
+        self.addCleanup(self.module._previous_session_from_calendar.cache_clear)
+        self.addCleanup(self.module._holdings_frozen_until_from_calendar.cache_clear)
+
+    def _flaky_run(self):
+        import subprocess
+        real_run = subprocess.run
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            if len(calls) == 1:
+                raise subprocess.TimeoutExpired(cmd="node", timeout=1)
+            return real_run(*args, **kwargs)
+
+        return run, calls
+
+    def test_previous_session_is_retried_after_a_timeout_then_remembered(self):
+        from unittest import mock
+        run, calls = self._flaky_run()
+        with mock.patch.object(self.module.subprocess, "run", side_effect=run):
+            self.assertEqual(previous_session_baseline("2026-10-08T15:00:00Z"), {})
+            self.assertEqual(previous_session_baseline("2026-10-08T15:00:00Z")["baselineSessionDate"], "2026-10-07")
+            self.assertEqual(previous_session_baseline("2026-10-08T16:00:00Z")["baselineSessionDate"], "2026-10-07")
+        self.assertEqual(len(calls), 2)
+
+    def test_holdings_freeze_is_retried_after_a_timeout_then_remembered(self):
+        from unittest import mock
+        run, calls = self._flaky_run()
+        with mock.patch.object(self.module.subprocess, "run", side_effect=run):
+            self.assertIsNone(self.module._holdings_frozen_until("2026-10-07"))
+            first = self.module._holdings_frozen_until("2026-10-07")
+            self.assertEqual(first.date().isoformat(), "2026-10-08")
+            self.assertEqual(self.module._holdings_frozen_until("2026-10-07"), first)
+        self.assertEqual(len(calls), 2)

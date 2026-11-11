@@ -690,6 +690,15 @@ test('a Risk Range card draws the full bar with its numbers, centered under the 
   expect(container).not.toHaveTextContent('Risk Range:');
 });
 
+test('an Alpha Code change reads Previous then New straight under its Signal, above Ticker', () => {
+  const card = attention('code', { kind: 'market', presentation: { subject: 'WTI', date: '2026-11-10', rows: [
+    { label: 'Signal', text: 'WTI Alpha Code changed.' }, { label: 'Previous', text: '97/92' }, { label: 'New', text: '95/91' }] } });
+  render(<AnalystInbox findings={[card]} />);
+  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Signal:', 'Previous:', 'New:', 'Ticker:']);
+  expect(screen.getByText('Previous:').parentElement).toHaveTextContent('Previous: 97/92');
+  expect(screen.getByText('New:').parentElement).toHaveTextContent('New: 95/91');
+});
+
 test('a notification leads with its Signal in the bold first line; an Action still leads when there is one', () => {
   const signal = attention('signal', { kind: 'market', presentation: { subject: 'SPX', date: '2026-11-09', rows: [{ label: 'Gamma throttle', text: '-22.33' }, { label: 'Signal', text: 'SPX gamma Neutral → Negative.' }] } });
   const { unmount } = render(<AnalystInbox findings={[signal]} />);

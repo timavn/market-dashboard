@@ -150,6 +150,43 @@ describe('dashboard portfolio resource owner', () => {
     expect(MarketDataService.getProviderStatus).toHaveBeenCalledTimes(3);
     unmount();
   });
+
+  it('a status poll that changes only timestamps and diagnostics does not replace the rendered state', async () => {
+    localStorage.setItem(IBKR_SELECTED_ACCOUNT_KEY, 'A');
+    let hookCalls = 0;
+    const poll = (extra = {}) => ({
+      ...status(), timestamp: new Date(Date.now()).toISOString(),
+      market: { lastQuoteAt: new Date(Date.now()).toISOString(), lastWarning: `poll ${Date.now()}` }, ...extra,
+    });
+    MarketDataService.getProviderStatus.mockImplementation(() => Promise.resolve(poll()));
+    const { result, unmount } = renderHook(() => { hookCalls += 1; return useDashboardPortfolio({ surfaceActive: true }); });
+    await flush();
+    const firstStatus = result.current.providerStatus;
+    const firstConnection = result.current.ibkrConnection;
+    expect(firstStatus).toMatchObject({ ibkr: { connected: true } });
+    const settledCalls = hookCalls;
+
+    // Three more five-second polls with new timestamps: same objects, no re-render.
+    for (let index = 0; index < 3; index += 1) {
+      await act(async () => { jest.advanceTimersByTime(5000); });
+      await flush();
+    }
+    expect(MarketDataService.getProviderStatus.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(result.current.providerStatus).toBe(firstStatus);
+    expect(result.current.ibkrConnection).toBe(firstConnection);
+    expect(hookCalls).toBe(settledCalls);
+
+    // A real change in connection state replaces both.
+    MarketDataService.getProviderStatus.mockImplementation(() => Promise.resolve(poll({
+      ibkr: { connected: false, status: 'gateway_offline', accounts: ['A', 'B'] },
+    })));
+    await act(async () => { jest.advanceTimersByTime(5000); });
+    await flush();
+    expect(result.current.providerStatus).not.toBe(firstStatus);
+    expect(result.current.providerStatus.ibkr.connected).toBe(false);
+    expect(result.current.ibkrConnection).toMatchObject({ connected: false, kind: 'gateway_offline' });
+    unmount();
+  });
 });
 
 describe('dashboard overview and support owners', () => {

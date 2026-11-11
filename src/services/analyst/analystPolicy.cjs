@@ -1,5 +1,5 @@
 const { createHash } = require('crypto');
-const { isTradingDateKey, previousTradingDateKey } = require('../../utils/usEquityMarketCalendar.cjs');
+const { isTradingDateKey, previousTradingDateKey, usEquityCloseMinutes } = require('../../utils/usEquityMarketCalendar.cjs');
 const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js');
 const { describeAnalystFinding, typedAnalystSignal: typedSignalEvent } = require('../../utils/analystFindingPresentation.cjs');
 const { automatedSourceReadiness, sourceLibraryRows } = require('./analystSourceReadiness.cjs');
@@ -18,12 +18,8 @@ function easternMinutes(now) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', hour: '2-digit', minute: '2-digit' }).formatToParts(now);
   return Number(parts.find(p => p.type === 'hour').value) * 60 + Number(parts.find(p => p.type === 'minute').value);
 }
-function marketCloseMinutes(date) {
-  // NYSE early close: Friday after Thanksgiving, July 3 trading day, Christmas Eve.
-  const d = new Date(`${date}T12:00:00Z`);
-  const early = date.endsWith('-12-24') || date.endsWith('-07-03') || (d.getUTCMonth() === 10 && d.getUTCDay() === 5 && d.getUTCDate() >= 23 && d.getUTCDate() <= 29);
-  return early ? 780 : 960;
-}
+// The early-close rule is shared with the volatility snapshot and the market-hours header.
+const marketCloseMinutes = usEquityCloseMinutes;
 function marketSession(now = new Date()) {
   const date = easternDate(now);
   if (!isTradingDateKey(date)) return 'closed';

@@ -24,6 +24,44 @@ const withTimeout = (promise, timeoutMs, label) => new Promise((resolve, reject)
   );
 });
 
+// Provider status is polled every few seconds and each payload carries new
+// timestamps and diagnostics. Rendering reads only whether each provider is
+// connected and why not, so the state object is replaced only when that
+// changes. Otherwise every poll would re-render the whole dashboard. The
+// timestamps in state are therefore those of the poll that last changed it.
+const providerStatusDisplayKey = (status) => {
+  const ibkr = status?.ibkr || {};
+  const portfolio = status?.portfolio || {};
+  const portfolioIbkr = portfolio.ibkr || {};
+  return JSON.stringify([
+    status?.unavailable === true, status?.error ?? null, status?.status ?? null,
+    status?.statusRefreshDelayed === true, status?.statusRefreshError ?? null,
+    status?.providerStatusWarnings ?? null,
+    ibkr.connected ?? null, ibkr.status ?? null, ibkr.errorCode ?? null, ibkr.error ?? null,
+    ibkr.message ?? null, ibkr.accounts ?? null, ibkr.connectionGeneration ?? null,
+    ibkr.lastQuoteAvailability ?? null, ibkr.streamMode ?? null, ibkr.streamMessage ?? null,
+    ibkr.accountCoverageStatus ?? null,
+    status?.yahoo?.connected ?? null, status?.yahoo?.status ?? null,
+    portfolio.dataSource ?? null,
+    portfolioIbkr.connected ?? null, portfolioIbkr.status ?? null, portfolioIbkr.errorCode ?? null,
+    portfolioIbkr.accounts ?? null, portfolioIbkr.portfolioVerified ?? null,
+    portfolioIbkr.portfolioStatus ?? null, portfolioIbkr.portfolioErrorCode ?? null,
+    portfolioIbkr.portfolioMessage ?? null, portfolioIbkr.portfolioPositionCount ?? null,
+    portfolioIbkr.accountCoverageStatus ?? null,
+  ]);
+};
+
+const sameProviderStatusDisplay = (previous, next) => Boolean(
+  previous && next && providerStatusDisplayKey(previous) === providerStatusDisplayKey(next)
+);
+
+const sameConnectionDisplay = (previous, next) => {
+  if (!previous || !next) return previous === next;
+  const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+  for (const key of keys) if (!Object.is(previous[key], next[key])) return false;
+  return true;
+};
+
 const isConnectedProviderStatus = (status) => Boolean(
   status?.ibkr?.connected ||
   status?.ibkr?.status === 'connected' ||
@@ -119,9 +157,24 @@ export function useDashboardPortfolio({ surfaceActive }) {
 
   const selectedAccountRef = useRef(loadSelectedAccount());
 
-  const [ibkrConnection, setIbkrConnection] = useState(null);
+  const [ibkrConnection, setIbkrConnectionState] = useState(null);
 
-  const [providerStatus, setProviderStatus] = useState(null);
+  const [providerStatus, setProviderStatusState] = useState(null);
+
+  // The last value handed to React. An unchanged poll returns before any
+  // state update is scheduled, so it costs no render at all.
+  const publishedProviderStatusRef = useRef(null);
+  const publishedConnectionRef = useRef(null);
+  const setProviderStatus = useCallback((next) => {
+    if (sameProviderStatusDisplay(publishedProviderStatusRef.current, next)) return;
+    publishedProviderStatusRef.current = next;
+    setProviderStatusState(next);
+  }, []);
+  const setIbkrConnection = useCallback((next) => {
+    if (sameConnectionDisplay(publishedConnectionRef.current, next)) return;
+    publishedConnectionRef.current = next;
+    setIbkrConnectionState(next);
+  }, []);
 
   const ibkrConnectionRef = useRef(null);
 
@@ -203,7 +256,7 @@ export function useDashboardPortfolio({ surfaceActive }) {
     });
     providerStatusInFlightRef.current = request;
     return request;
-  }, []);
+  }, [setIbkrConnection, setProviderStatus]);
 
   const resolvePortfolioAccount = useCallback((status = null) => {
     const explicit = selectedAccountRef.current || selectedAccount || '';

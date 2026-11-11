@@ -102,8 +102,17 @@ test('leaves hypothetical, lowercase or other-product statements alone', () => {
   }
 });
 
-test('the daily range wins a session; a weekly edition carries forward from its date', () => {
+test('a session shows only the range printed for it; nothing carries forward', () => {
   const rows = rangeHistory({ bars: [{ date: '2026-11-06', close: 39.29 }, { date: '2026-11-09', close: 41.74 }, { date: '2026-10-30', close: 48 }],
-    daily: [{ date: '2026-11-06', low: 38, high: 42 }], weekly: [{ date: '2026-11-01', low: 44.06, high: 54.11 }, { date: '2026-11-08', low: 35.12, high: 46.65 }] });
-  assert.deepEqual(rows.map(row => [row.date, row.low, row.cadence]), [['2026-10-30', null, null], ['2026-11-06', 38, 'daily'], ['2026-11-09', 35.12, 'weekly']]);
+    daily: [{ date: '2026-11-06', low: 38, high: 42 }] });
+  assert.deepEqual(rows.map(row => [row.date, row.low]), [['2026-10-30', null], ['2026-11-06', 38], ['2026-11-09', null]]);
+});
+
+test('a new session\'s range starts fresh and its first reading counts as entering that zone', () => {
+  const start = fold(null, 43).watch;
+  assert.deepEqual(start.lines.DRAM.entries, []);
+  const nextDay = foldRiskRangeWatch(fold(start, 37).watch, { marketDate: '2026-11-10', ranges: [{ ...range, asOf: '2026-11-10' }], prices: { DRAM: { price: 43, asOf: NOW.toISOString() } }, now: NOW }).watch;
+  assert.deepEqual(nextDay.lines.DRAM.entries.map(entry => [entry.from, entry.to]), [[null, 'top']]);
+  const gone = foldRiskRangeWatch(nextDay, { marketDate: '2026-11-11', ranges: [], now: NOW }).watch;
+  assert.deepEqual(gone.lines, {});
 });

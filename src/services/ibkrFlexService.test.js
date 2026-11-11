@@ -10,6 +10,8 @@ const {
   previewPredictionPnlBackfill,
   previewStoredPredictionPnlBackfill,
   readFlexActivityTrades,
+  startFlexActivitySync,
+  stopFlexActivitySync,
   syncFlexActivity,
   validateFlexActivitySnapshots,
 } = require('./ibkrFlexService.cjs');
@@ -532,5 +534,88 @@ describe('IBKR Flex service', () => {
       expect(refreshed.sourceManifest).toHaveLength(2);
       expect(refreshed.sourceFingerprint).not.toBe(second.sourceFingerprint);
     } finally { reads.mockRestore(); }
+  });
+
+  test('the latest statement is found from file names without parsing the older ones', async () => {
+    const snapshot = await storedFixture();
+    const directory = path.join(dataDir, 'snapshots');
+    const store = (name, value) => fs.writeFileSync(path.join(directory, name), JSON.stringify(value));
+    store('2025-01-02_2026-01-01.json', { ...snapshot, date: '2025-01-02_2026-01-01', fromDate: '2025-01-02', toDate: '2026-01-01' });
+    store('2025-02-11_2026-02-10.json', { ...snapshot, date: '2025-02-11_2026-02-10', fromDate: '2025-02-11', toDate: '2026-02-10' });
+    const reads = jest.spyOn(fs, 'readFileSync');
+    try {
+      expect(publicConfigStatus().dateCoverage.toDate).toBe('2026-02-10');
+      const statementReads = reads.mock.calls.filter(([file]) => String(file).startsWith(directory));
+      expect(statementReads).toHaveLength(1);
+      expect(String(statementReads[0][0])).toContain('2025-02-11_2026-02-10.json');
+    } finally { reads.mockRestore(); }
+    // A statement whose dates disagree with its file name falls back to comparing every statement.
+    store('2025-03-01_2026-03-01.json', { ...snapshot, date: '2026-01-15', fromDate: '2026-01-15', toDate: '2026-01-15' });
+    expect(publicConfigStatus().dateCoverage.toDate).toBe('2026-02-10');
+  });
+
+  test('a reconciliation date is an exact date or a stored range, never a path', async () => {
+    const snapshot = await storedFixture();
+    const [storedName] = fs.readdirSync(path.join(dataDir, 'snapshots'));
+    fs.writeFileSync(path.join(dataDir, 'outside.json'), JSON.stringify({ date: 'outside', exposure: { secret: true } }));
+    for (const date of ['../outside', '../../etc/passwd', '2026-01-31/../../outside', '2026-13-45', '2026-01-01_2026-01-31_x']) {
+      expect(getReconciliation({ date })).toMatchObject({ status: 'invalid_date', flex: null, latestSnapshot: null });
+    }
+    // The key a statement is stored under (one day, or "from_to") still reads it.
+    expect(getReconciliation({ date: storedName.replace(/\.json$/, '') }).status).toBe('ready');
+    expect(getReconciliation({ date: '2026-02-02' })).toMatchObject({ status: 'missing', latestSnapshot: { date: snapshot.date } });
+  });
+
+  test('stored history keeps only execution evidence in memory and shares identical rows', async () => {
+    const snapshot = await storedFixture();
+    expect(snapshot.statementOfFunds.length).toBeGreaterThan(0);
+    fs.writeFileSync(path.join(dataDir, 'snapshots', '2026-02-01.json'), JSON.stringify({ ...snapshot, fetchedAt: '2026-02-02T00:00:00Z' }));
+    const reader = createFlexActivityReader();
+    const { snapshots } = reader.readSourceSet();
+
+    expect(snapshots).toHaveLength(2);
+    for (const stored of snapshots) {
+      expect(stored).not.toHaveProperty('statementOfFunds');
+      expect(stored).not.toHaveProperty('cashTransactions');
+      expect(stored).not.toHaveProperty('positions');
+      expect(stored.trades).toEqual(snapshot.trades);
+      expect(stored.closedLots).toEqual(snapshot.closedLots);
+      expect(stored.sections).toEqual(snapshot.sections);
+      expect(stored.reportHash).toBe(snapshot.reportHash);
+    }
+    // The same execution reported by two statements is one object, not two copies.
+    expect(snapshots[0].trades[0]).toBe(snapshots[1].trades[0]);
+    // The checks read the reduced statements exactly as they read whole ones.
+    const whole = [snapshot, { ...snapshot, fetchedAt: '2026-02-02T00:00:00Z' }];
+    expect(validateFlexActivitySnapshots(snapshots, { accountId: 'U25779973' }))
+      .toEqual(validateFlexActivitySnapshots(whole, { accountId: 'U25779973' }));
+  });
+
+  test('a restart soon after a successful sync does not request another statement', async () => {
+    await storedFixture();
+    const statePath = path.join(dataDir, 'state', 'activity-sync.json');
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const requestText = jest.fn(async () => { throw new Error('no statement should be requested'); });
+    const warn = jest.fn();
+    const startedAt = Date.parse('2026-02-02T12:00:00Z');
+    const start = (lastSuccessfulSyncAt) => {
+      fs.writeFileSync(statePath, JSON.stringify({ authoritativeEnabled: true, lastThroughDate: '2026-01-31', lastSuccessfulSyncAt }));
+      stopFlexActivitySync();
+      startFlexActivitySync({ logger: { warn }, now: () => startedAt, intervalMs: 60 * 60 * 1000 });
+    };
+    const originalFetch = global.fetch;
+    global.fetch = requestText;
+    try {
+      start('2026-02-02T11:00:00Z');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(requestText).not.toHaveBeenCalled();
+      // A sync from yesterday is due again at start-up.
+      start('2026-02-01T05:00:00Z');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(requestText).toHaveBeenCalled();
+    } finally {
+      stopFlexActivitySync();
+      global.fetch = originalFetch;
+    }
   });
 });

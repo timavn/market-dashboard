@@ -21,6 +21,7 @@ if (process.env.MARKET_DASHBOARD_AWS_PROFILE_LOCKED === 'true') {
 const express = require('express');
 const cors = require('cors');
 const { createApiCorsOptions } = require('./src/services/api/corsConfig.cjs');
+const { createApiErrorHandler } = require('./src/services/api/apiErrorHandler.cjs');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
@@ -204,7 +205,13 @@ const {
   buildPeriodReturnsMetadata,
   isDisplayableQuoteRow,
 } = require('./src/services/providers/multiRegionQuoteIntegrity.cjs');
-const { percentageChange, latestObservationChange } = require('./src/services/providers/observationChange.cjs');
+const { latestObservationChange } = require('./src/services/providers/observationChange.cjs');
+const {
+  computePeriodBpsFromCloses,
+  computePeriodPercentsFromCloses,
+  computeSpreadBpsDeltas,
+} = require('./src/utils/marketPeriodReturns.cjs');
+const { unavailableRetryMs } = require('./src/utils/unavailableRetryWindow.cjs');
 const { fetchOfficialSovereignSeries } = require('./src/services/officialSovereignYields.cjs');
 const MARKET_BACKDROP_CATALOG = require('./src/constants/marketBackdropCatalog.json');
 const MARKET_PULSE_SUPPLEMENTAL_CATALOG = require('./src/constants/marketPulseSupplementalCatalog.json');
@@ -1321,6 +1328,8 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
     dynamodb.get({ TableName: 'HedgeyeDailySnapshot', Key: { date: marketDate,
       snapshotType: product === 'crypto-quant' ? 'bitcoin-trend-tracker' : product } }).promise()
       .then((result) => (result.Item ? [product, result.Item] : null))))).filter(Boolean)),
+  loadLatestEditions: async ({ products }) => Object.fromEntries(await Promise.all(products.map((product) =>
+    queryLatestSnapshotsByType(product, { limit: 1 }).then((rows) => [product, rows[0] || null])))),
   // Earlier primary Risk Ranges publications, for higher highs and higher lows. Weekdays are
   // probed back from the board's publication; holidays simply have none.
   loadRiskRangeHistory: async ({ before, sessions }) => {
@@ -1491,8 +1500,7 @@ app.get('/api/analyst/risk-range-lines', async (req, res) => {
   }
 });
 
-// A security's closes under its published range: the daily sheet where it printed one,
-// ETF Pro's weekly range carried forward from each edition where it did not.
+// A security's closes under the range the daily sheet printed for each session; none is carried forward.
 const RISK_RANGE_HISTORY_SESSIONS = 60;
 app.get('/api/analyst/risk-range-history', async (req, res) => {
   try {
@@ -1500,17 +1508,12 @@ app.get('/api/analyst/risk-range-history', async (req, res) => {
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return res.status(400).json({ error: 'symbol is required' });
     const { rangeHistory } = require('./src/services/analyst/riskRangeWatch.cjs');
     const instrument = resolveHistoryInstrument(symbol);
-    const [history, daily, editions] = await Promise.all([
+    const [history, daily] = await Promise.all([
       fetchYahooSizingHistory(symbol).catch(() => null),
       dynamodb.query({ TableName: 'RiskRangeData', KeyConditionExpression: 'ticker = :ticker', ExpressionAttributeValues: { ':ticker': symbol } }).promise().then(result => result.Items || []).catch(() => []),
-      getEtfProEmailSnapshots().catch(() => []),
     ]);
     const bars = (history?.bars || []).map(bar => ({ date: String(bar.date || '').slice(0, 10), close: Number(bar.rawClose ?? bar.close ?? bar.adjustedClose) }));
-    const weekly = editions.map(edition => {
-      const row = (edition?.data?.rows || []).find(candidate => String(candidate?.ticker || '').toUpperCase() === symbol);
-      return row ? { date: edition.date, low: Number(row.trendLowEnd), high: Number(row.trendHighEnd) } : null;
-    }).filter(Boolean);
-    const rows = rangeHistory({ bars, daily: daily.map(item => ({ date: item.date, low: Number(item.lrr), high: Number(item.hrr) })), weekly, sessions: RISK_RANGE_HISTORY_SESSIONS });
+    const rows = rangeHistory({ bars, daily: daily.map(item => ({ date: item.date, low: Number(item.lrr), high: Number(item.hrr) })), sessions: RISK_RANGE_HISTORY_SESSIONS });
     res.json({ symbol, listing: instrument?.yahooSymbol || symbol, rows });
   } catch (error) {
     console.error('[risk-range-history]', error.message);
@@ -1922,6 +1925,8 @@ async function buildWorkflowStatusSnapshot() {
 // Cache for intraday sparkline data (5-minute TTL)
 const intradayCache = new Map();
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// Symbols whose last intraday read returned nothing, with how many in a row.
+const intradayUnavailable = new Map();
 
 // FRED Series IDs for Treasury Yields and Rates. Treasury observations are
 // dated daily references; they do not advertise intraday chart ranges.
@@ -3083,12 +3088,18 @@ async function getIntradayData(symbol, range = '1d') {
 
   // Check cache
   const cached = intradayCache.get(cacheKey);
-  if (cached) {
-    console.log(`[IntradayCache] Hit for ${cacheKey}`);
-    return cached;
-  }
+  if (cached) return cached;
 
-  console.log(`[IntradayCache] Miss for ${cacheKey}, fetching...`);
+  // A symbol whose last read returned nothing is not asked for again on every
+  // poll: each such request can wait out the full timeout.
+  const missed = intradayUnavailable.get(cacheKey);
+  if (missed && Date.now() - missed.ts < unavailableRetryMs(missed.misses, INTRADAY_CACHE_TTL)) {
+    return [];
+  }
+  const rememberMiss = () => {
+    intradayUnavailable.set(cacheKey, { ts: Date.now(), misses: (missed?.misses || 0) + 1 });
+    return [];
+  };
 
   try {
     const upperSymbol = symbol.toUpperCase();
@@ -3106,7 +3117,7 @@ async function getIntradayData(symbol, range = '1d') {
     const result = response.data?.chart?.result?.[0];
     if (!result?.timestamp || !result?.indicators?.quote?.[0]?.close) {
       console.warn(`[IntradayData] No valid data for ${symbol}`);
-      return [];
+      return rememberMiss();
     }
 
     const closePrices = result.indicators.quote[0].close;
@@ -3122,16 +3133,15 @@ async function getIntradayData(symbol, range = '1d') {
 
     // Cache for 5 minutes
     intradayCache.set(cacheKey, sparklineData);
+    intradayUnavailable.delete(cacheKey);
     setTimeout(() => {
       intradayCache.delete(cacheKey);
-      console.log(`[IntradayCache] Expired and deleted ${cacheKey}`);
-    }, INTRADAY_CACHE_TTL);
+    }, INTRADAY_CACHE_TTL).unref();
 
-    console.log(`[IntradayCache] Stored sparkline for ${cacheKey}: ${sparklineData.length} points`);
     return sparklineData;
   } catch (error) {
     console.error(`[IntradayData] Failed to fetch for ${symbol}:`, error.message);
-    return [];
+    return rememberMiss();
   }
 }
 
@@ -3486,192 +3496,14 @@ async function fetchFREDHistorical(seriesId, range) {
 const periodReturnsCache = new Map();
 const PERIOD_RETURNS_CACHE_TTL = parseInt(process.env.PERIOD_RETURNS_CACHE_TTL_MS || '900000', 10);
 /** Bump when `computePeriodPercentsFromCloses` grows new fields — avoids serving stale cached objects lacking them. */
-const PERIOD_RETURNS_CACHE_KEY_VERSION = '9';
+const PERIOD_RETURNS_CACHE_KEY_VERSION = '10';
 
 function symbolIsYahooRateProxy(upperSym) {
   return upperSym === 'UST10Y' || upperSym === 'UST30Y';
 }
 
-function computePeriodPercentsFromCloses(closes, { absoluteBase = false } = {}) {
-  if (!closes || closes.length < 2) return null;
-  const n = closes.length;
-  const last = closes[n - 1].close;
-  if (last == null || !Number.isFinite(last) || last === 0) return null;
-
-  const weekIdx = Math.max(0, n - 1 - 5);
-  const fifteenDayIdx = Math.max(0, n - 1 - 15);
-  const thirtyDayIdx = Math.max(0, n - 1 - 30);
-  const ninetyDayIdx = Math.max(0, n - 1 - 90);
-  const monthIdx = Math.max(0, n - 1 - 21);
-  const threeMonthIdx = Math.max(0, n - 1 - 63);
-  const sixMonthIdx = Math.max(0, n - 1 - 126);
-  const weekRef = closes[weekIdx].close;
-  const fifteenDayRef = closes[fifteenDayIdx].close;
-  const thirtyDayRef = closes[thirtyDayIdx].close;
-  const ninetyDayRef = closes[ninetyDayIdx].close;
-  const monthRef = closes[monthIdx].close;
-  const threeMonthRef = closes[threeMonthIdx].close;
-  const sixMonthRef = closes[sixMonthIdx].close;
-
-  const nowDate = new Date();
-  const yNow = nowDate.getUTCFullYear();
-  const mNow = nowDate.getUTCMonth();
-  const qStartMonth = Math.floor(mNow / 3) * 3;
-
-  let ytdRef = null;
-  let mtdRef = null;
-  let qtdRef = null;
-  for (let i = 0; i < n; i++) {
-    const d = new Date(closes[i].t);
-    const yy = d.getUTCFullYear();
-    const mm = d.getUTCMonth();
-    if (ytdRef == null && yy === yNow) {
-      ytdRef = closes[i].close;
-    }
-    if (qtdRef == null && yy === yNow && mm >= qStartMonth && mm < qStartMonth + 3) {
-      qtdRef = closes[i].close;
-    }
-    if (mtdRef == null && yy === yNow && mm === mNow) {
-      mtdRef = closes[i].close;
-    }
-    if (ytdRef != null && qtdRef != null && mtdRef != null) break;
-  }
-  if (ytdRef == null || !Number.isFinite(ytdRef) || ytdRef === 0) {
-    ytdRef = closes[0].close;
-  }
-
-  const lastTimestamp = Number(closes[n - 1].t);
-  const oneYearTarget = Number.isFinite(lastTimestamp)
-    ? lastTimestamp - (365 * 24 * 60 * 60 * 1000)
-    : null;
-  const oneYearRef = Number.isFinite(oneYearTarget)
-    ? findClosestClose(closes, oneYearTarget)?.close
-    : null;
-
-  const pct = (ref) =>
-    ref != null && Number.isFinite(ref) && ref !== 0
-      ? absoluteBase ? percentageChange(last, ref) : Math.round((((last / ref) - 1) * 100) * 100) / 100
-      : null;
-  const absolute = (ref) => (
-    ref != null && Number.isFinite(ref)
-      ? Math.round((last - ref) * 1000000) / 1000000
-      : null
-  );
-
-  const asOfTime = Number(closes[n - 1].t);
-  return {
-    weekChangePct: pct(weekRef),
-    fifteenDayChangePct: pct(fifteenDayRef),
-    thirtyDayChangePct: pct(thirtyDayRef),
-    ninetyDayChangePct: pct(ninetyDayRef),
-    monthChangePct: pct(monthRef),
-    threeMonthChangePct: pct(threeMonthRef),
-    sixMonthChangePct: pct(sixMonthRef),
-    mtdChangePct: pct(mtdRef),
-    qtdChangePct: pct(qtdRef),
-    ytdChangePct: pct(ytdRef),
-    oneYearChangePct: pct(oneYearRef),
-    weekChangeValue: absolute(weekRef),
-    fifteenDayChangeValue: absolute(fifteenDayRef),
-    monthChangeValue: absolute(monthRef),
-    threeMonthChangeValue: absolute(threeMonthRef),
-    sixMonthChangeValue: absolute(sixMonthRef),
-    mtdChangeValue: absolute(mtdRef),
-    qtdChangeValue: absolute(qtdRef),
-    ytdChangeValue: absolute(ytdRef),
-    oneYearChangeValue: absolute(oneYearRef),
-    asOf: Number.isFinite(asOfTime) ? new Date(asOfTime).toISOString() : null
-  };
-}
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function findCloseAtOrBefore(closes, targetTimestamp, maxGapMs) {
-  if (!Array.isArray(closes) || !Number.isFinite(Number(targetTimestamp))) return null;
-  let match = null;
-  for (const row of closes) {
-    const timestamp = Number(row?.t);
-    const close = Number(row?.close);
-    if (!Number.isFinite(timestamp) || !Number.isFinite(close)) continue;
-    if (timestamp > Number(targetTimestamp)) break;
-    match = { t: timestamp, close };
-  }
-  if (!match || Number(targetTimestamp) - match.t > maxGapMs) return null;
-  return match;
-}
-
-function computePeriodBpsFromCloses(closes, { observationFrequency = 'daily' } = {}) {
-  if (!Array.isArray(closes) || closes.length < 2) return null;
-  const ordered = closes
-    .filter((row) => row?.t != null && row?.close != null && row.close !== '')
-    .map((row) => ({ t: Number(row.t), close: Number(row.close) }))
-    .filter((row) => Number.isFinite(row.t) && Number.isFinite(row.close))
-    .sort((left, right) => left.t - right.t);
-  if (ordered.length < 2) return null;
-  const latest = ordered[ordered.length - 1];
-  const targetMonthsAgo = (months) => {
-    const date = new Date(latest.t);
-    const dayOfMonth = date.getUTCDate();
-    date.setUTCDate(1);
-    date.setUTCMonth(date.getUTCMonth() - months);
-    const lastDayOfTargetMonth = new Date(Date.UTC(
-      date.getUTCFullYear(), date.getUTCMonth() + 1, 0,
-    )).getUTCDate();
-    date.setUTCDate(Math.min(dayOfMonth, lastDayOfTargetMonth));
-    return date.getTime();
-  };
-  const reference = (target, maxGapDays) => (
-    findCloseAtOrBefore(ordered, target, maxGapDays * DAY_MS)?.close ?? null
-  );
-  const toBps = (value) => (
-    Number.isFinite(value)
-      ? Math.round((latest.close - value) * 1000) / 10
-      : null
-  );
-  const latestDate = new Date(latest.t);
-  const yearStart = Date.UTC(latestDate.getUTCFullYear(), 0, 1);
-  const firstYearObservation = ordered.find((row) => row.t >= yearStart && row.t <= latest.t);
-  const ytdReference = firstYearObservation && firstYearObservation.t - yearStart <= 7 * DAY_MS
-    ? firstYearObservation.close : null;
-
-  const hasDailyObservations = observationFrequency === 'daily';
-  const references = {
-    day: hasDailyObservations ? reference(latest.t - DAY_MS, 7) : null,
-    week: hasDailyObservations ? reference(latest.t - (7 * DAY_MS), 7) : null,
-    fifteenDay: hasDailyObservations ? reference(latest.t - (15 * DAY_MS), 7) : null,
-    month: reference(targetMonthsAgo(1), 7),
-    threeMonth: reference(targetMonthsAgo(3), 7),
-    sixMonth: reference(targetMonthsAgo(6), 7),
-    ytd: ytdReference,
-    oneYear: reference(targetMonthsAgo(12), 7),
-  };
-  return {
-    ...Object.fromEntries(Object.entries(references).map(([period, value]) => [`${period}ChangeBps`, toBps(value)])),
-    // Calculate percentages from the same dated endpoints as rate deltas.
-    // Do not turn 15 monthly observations into a supposed 15-day return.
-    backdropPercentageReturns: Object.fromEntries(Object.entries(references)
-      .map(([period, value]) => [`${period}ChangePct`, percentageChange(latest.close, value)])),
-  };
-}
-
-const ONE_YEAR_REFERENCE_MAX_GAP_MS = 7 * 24 * 60 * 60 * 1000;
-
-function findClosestClose(closes, targetTimestamp) {
-  if (!Array.isArray(closes) || !Number.isFinite(Number(targetTimestamp))) return null;
-  let closest = null;
-  let closestDistance = Number.POSITIVE_INFINITY;
-  for (const row of closes) {
-    const timestamp = Number(row?.t);
-    const close = Number(row?.close);
-    if (!Number.isFinite(timestamp) || !Number.isFinite(close)) continue;
-    const distance = Math.abs(timestamp - Number(targetTimestamp));
-    if (distance < closestDistance) {
-      closest = row;
-      closestDistance = distance;
-    }
-  }
-  return closestDistance <= ONE_YEAR_REFERENCE_MAX_GAP_MS ? closest : null;
-}
+// Period maths (MTD/QTD/YTD bases, session and calendar windows) lives in
+// src/utils/marketPeriodReturns.cjs, where it is unit-tested.
 
 async function fetchYahooDailyClosesSeries(symbol, range = '1y') {
   const upperSym = symbol.toUpperCase();
@@ -3700,6 +3532,12 @@ async function fetchYahooDailyClosesSeries(symbol, range = '1y') {
     const c = quote.close?.[i];
     if (c == null || c === undefined) continue;
     out.push({ t: timestamps[i] * 1000, close: scaleRateProxyValue(c, isRateProxy) });
+  }
+  // Month, quarter and year boundaries follow the exchange's own calendar day
+  // (a Sydney session opens before midnight UTC).
+  const gmtOffsetSeconds = Number(result.meta?.gmtoffset);
+  if (Number.isFinite(gmtOffsetSeconds)) {
+    Object.defineProperty(out, 'utcOffsetMs', { value: gmtOffsetSeconds * 1000, enumerable: false });
   }
   return out.length >= 2 ? out : null;
 }
@@ -3865,11 +3703,15 @@ async function getPeriodReturnsCached(symbol, instrument = null, referenceQuote 
   const key = `${identity}:${referenceSeries}:${PERIOD_RETURNS_CACHE_KEY_VERSION}`;
   const now = Date.now();
   const hit = periodReturnsCache.get(key);
-  if (hit && now - hit.ts < PERIOD_RETURNS_CACHE_TTL) {
+  // An empty result is asked for again sooner than a good one expires.
+  const keepMs = hit?.misses
+    ? unavailableRetryMs(hit.misses, PERIOD_RETURNS_CACHE_TTL)
+    : PERIOD_RETURNS_CACHE_TTL;
+  if (hit && now - hit.ts < keepMs) {
     return hit.data;
   }
   const data = await computePeriodReturnsForSymbol(symbol, instrument, referenceQuote);
-  periodReturnsCache.set(key, { data, ts: now });
+  periodReturnsCache.set(key, { data, ts: now, misses: data ? 0 : (hit?.misses || 0) + 1 });
   return data;
 }
 
@@ -3911,7 +3753,12 @@ async function getPublishedDailyClosesCached(symbol) {
   const key = symbol.toUpperCase();
   const now = Date.now();
   const hit = dailyClosesCache.get(key);
-  if (hit && now - hit.ts < DAILY_CLOSES_CACHE_TTL) {
+  // A failed read is asked for again sooner than a good one expires, so a
+  // moment's outage does not blank the series for the full cache time.
+  const keepMs = hit?.misses
+    ? unavailableRetryMs(hit.misses, DAILY_CLOSES_CACHE_TTL)
+    : DAILY_CLOSES_CACHE_TTL;
+  if (hit && now - hit.ts < keepMs) {
     return hit.data;
   }
   const mapping = getTickerMapping(symbol);
@@ -3928,7 +3775,12 @@ async function getPublishedDailyClosesCached(symbol) {
     console.warn(`[Rates] daily closes fetch failed for ${symbol}:`, err.message);
     closes = null;
   }
-  dailyClosesCache.set(key, { data: closes, ts: now });
+  const available = Array.isArray(closes) && closes.length > 0;
+  dailyClosesCache.set(key, {
+    data: closes,
+    ts: now,
+    misses: available ? 0 : (hit?.misses || 0) + 1,
+  });
   return closes;
 }
 
@@ -3961,78 +3813,6 @@ function buildSpreadBpsSeries(longSeries, shortSeries) {
   }
   return out.length >= 2 ? out : null;
 }
-
-// Compute period deltas in bps for a spread series using the same session
-// boundaries as computePeriodPercentsFromCloses. Returns `null` if the series
-// is too short. All values are rounded to 0.1 bps for display.
-function computeSpreadBpsDeltas(spreadSeries) {
-  if (!spreadSeries || spreadSeries.length < 2) return null;
-  const n = spreadSeries.length;
-  const last = spreadSeries[n - 1].close;
-  const prev = spreadSeries[n - 2].close;
-  if (!Number.isFinite(last)) return null;
-
-  const weekIdx = Math.max(0, n - 1 - 5);
-  const fifteenDayIdx = Math.max(0, n - 1 - 15);
-  const monthIdx = Math.max(0, n - 1 - 21);
-  const threeMonthIdx = Math.max(0, n - 1 - 63);
-  const sixMonthIdx = Math.max(0, n - 1 - 126);
-  const weekRef = spreadSeries[weekIdx].close;
-  const fifteenDayRef = spreadSeries[fifteenDayIdx].close;
-  const monthRef = spreadSeries[monthIdx].close;
-  const threeMonthRef = spreadSeries[threeMonthIdx].close;
-  const sixMonthRef = spreadSeries[sixMonthIdx].close;
-
-  const lastTimestamp = Number(spreadSeries[n - 1].t);
-  const oneYearTarget = Number.isFinite(lastTimestamp)
-    ? lastTimestamp - (365 * 24 * 60 * 60 * 1000)
-    : null;
-  const oneYearRef = Number.isFinite(oneYearTarget)
-    ? findClosestClose(spreadSeries, oneYearTarget)?.close
-    : null;
-
-  const nowDate = new Date();
-  const yNow = nowDate.getUTCFullYear();
-  const mNow = nowDate.getUTCMonth();
-  const qStartMonth = Math.floor(mNow / 3) * 3;
-
-  let ytdRef = null;
-  let mtdRef = null;
-  let qtdRef = null;
-  for (let i = 0; i < n; i++) {
-    const d = new Date(spreadSeries[i].t);
-    const yy = d.getUTCFullYear();
-    const mm = d.getUTCMonth();
-    if (ytdRef == null && yy === yNow) ytdRef = spreadSeries[i].close;
-    if (qtdRef == null && yy === yNow && mm >= qStartMonth && mm < qStartMonth + 3) {
-      qtdRef = spreadSeries[i].close;
-    }
-    if (mtdRef == null && yy === yNow && mm === mNow) mtdRef = spreadSeries[i].close;
-    if (ytdRef != null && qtdRef != null && mtdRef != null) break;
-  }
-  if (ytdRef == null || !Number.isFinite(ytdRef)) ytdRef = spreadSeries[0].close;
-
-  const delta = (ref) =>
-    ref != null && Number.isFinite(ref) ? Math.round((last - ref) * 10) / 10 : null;
-
-  return {
-    dayDeltaBps: delta(prev),
-    weekDeltaBps: delta(weekRef),
-    fifteenDayDeltaBps: delta(fifteenDayRef),
-    monthDeltaBps: delta(monthRef),
-    threeMonthDeltaBps: delta(threeMonthRef),
-    sixMonthDeltaBps: delta(sixMonthRef),
-    mtdDeltaBps: delta(mtdRef),
-    qtdDeltaBps: delta(qtdRef),
-    ytdDeltaBps: delta(ytdRef),
-    oneYearDeltaBps: delta(oneYearRef),
-    latestBps: Math.round(last * 10) / 10,
-    asOf: Number.isFinite(Number(spreadSeries[n - 1].t))
-      ? new Date(Number(spreadSeries[n - 1].t)).toISOString()
-      : null
-  };
-}
-
 
 const RISK_RANGE_TICKER_ALIASES = {
   BTC: ['BITCOIN'],
@@ -7446,9 +7226,9 @@ app.get('/api/multi-region-quotes', async (req, res) => {
     const requestKey = `GET /api/multi-region-quotes?regions=${requestedRegions.join(',')}&includeSparklines=${wantSparklines}&includePeriodReturns=${wantPeriodReturns}`;
 
     const results = await runInFlight(requestKey, async () => {
-      console.log(`[API] /api/multi-region-quotes called for regions: ${requestedRegions.join(', ')}, sparklines: ${includeSparklines}, periodReturns: ${wantPeriodReturns}`);
-
       const payload = {};
+      // Verified quotes out of those requested, per region, for one log line.
+      const regionSummaries = [];
       const opts = { includeSparklines: wantSparklines, wantPeriodReturns };
 
       await Promise.all(requestedRegions.map(async (regionKey) => {
@@ -7461,17 +7241,15 @@ app.get('/api/multi-region-quotes', async (req, res) => {
         // Tabbed regions (currently just `rates`) return a nested object keyed
         // by tab. All other regions return a flat array of quote rows.
         if (region.tabs) {
-          console.log(`[API] Fetching tabbed region ${regionKey} (${Object.keys(region.tabs).join(', ')})...`);
           const tabPayload = await buildRatesPayload(region, opts);
           payload[regionKey] = tabPayload;
           const tabCounts = Object.entries(tabPayload)
             .map(([k, v]) => `${k}=${v.length}`)
-            .join(' ');
-          console.log(`[API] Completed ${regionKey}: ${tabCounts}`);
+            .join(',');
+          regionSummaries.push(`${regionKey}(${tabCounts})`);
           return;
         }
 
-        console.log(`[API] Fetching ${region.indices.length} indices for ${regionKey}...`);
         const quotes = await Promise.all(region.indices.map((index) => buildQuoteRow(index, opts)));
         const displayableQuotes = quotes.filter(isDisplayableQuoteRow);
         payload[regionKey] = marketQuoteReferenceStore.reconcileRows({
@@ -7481,7 +7259,7 @@ app.get('/api/multi-region-quotes', async (req, res) => {
           expectedSymbols: region.indices.map((index) => index.symbol),
           retentionReason: `${regionKey}_provider_refresh_unavailable`,
         });
-        console.log(`[API] Completed ${regionKey}: ${displayableQuotes.length}/${quotes.length} verified quotes fetched, ${payload[regionKey].length} rows published`);
+        regionSummaries.push(`${regionKey}=${displayableQuotes.length}/${quotes.length}`);
       }));
 
       marketQuoteReferenceStore.flush();
@@ -7491,6 +7269,7 @@ app.get('/api/multi-region-quotes', async (req, res) => {
         executable: false,
       };
       const totalTime = Date.now() - startTime;
+      console.log(`[API] /api/multi-region-quotes verified/requested: ${regionSummaries.join(' ')} (sparklines: ${wantSparklines}, periodReturns: ${wantPeriodReturns})`);
       console.log(`[API] /api/multi-region-quotes completed in ${totalTime}ms`);
       return payload;
     });
@@ -9086,6 +8865,10 @@ if (process.env.NODE_ENV === 'production') {
   console.log('📝 Development mode: React dev server should run separately on port 3000');
   console.log('   Start it with: npm start');
 }
+
+// Keep this after every route. A route that throws answers here with JSON,
+// like the rest of the API, instead of Express's HTML error page.
+app.use(createApiErrorHandler());
 
 // Start HTTP server first so we can attach WebSocket server to it
 const server = app.listen(PORT, HOST, async () => {

@@ -268,6 +268,34 @@ test('a morning product with no printed send time shows when the dashboard read 
   assert.equal(board.research.products.find((item) => item.key === 'market-structure').publishedAt, '2026-10-16T10:30:29+00:00');
 });
 
+test('a product with nothing yet today carries its newest edition received, for Sources only', async () => {
+  const empty = () => Promise.resolve(null);
+  const asked = [];
+  const options = {
+    loadRiskRanges: empty, loadCryptoQuant: empty, loadHedgai: empty, loadSecurityIntelligence: empty, loadNowcast: empty,
+    loadQuotes: () => Promise.resolve({}), loadVolatility: empty, loadUsdCorrelations: empty, loadKalshiEvents: () => Promise.resolve([]),
+    loadMorningProducts: ({ marketDate }) => Promise.resolve({ 'top-3-things': { date: marketDate, article: { bodyText: '' } } }),
+    loadLatestEditions: ({ products }) => {
+      asked.push(...products);
+      return Promise.resolve({ 'the-macro-show': { date: '2026-11-09', article: { bodyText: '11/09/2026 10:25 AM EST\nGold UST 10yr Alpha Code = 5.10/4.76' } },
+        'early-look': { date: '2026-11-10', article: { bodyText: '11/10/2026 07:00 AM EST' } } });
+    },
+    marketDateFor: () => '2026-11-10',
+  };
+  const board = await createSetupBoardLoader(options)({ now: new Date('2026-11-10T13:00:00Z') });
+  const product = (key) => board.research.products.find((item) => item.key === key);
+  assert.equal(asked.includes('top-3-things'), false);
+  assert.equal(product('the-macro-show').status, 'missing');
+  assert.equal(product('the-macro-show').latestEdition, '2026-11-09T15:25:00.000Z');
+  // Its text is not read as today's research.
+  assert.deepEqual(board.rows.find((row) => row.id === 'ust10y').research.findings, []);
+  // An edition dated today that arrived after the morning read waits for the next read.
+  assert.equal('latestEdition' in product('early-look'), false);
+  // An earlier day's board is left as it was.
+  const earlier = await createSetupBoardLoader(options)({ now: new Date('2026-11-10T13:00:00Z'), researchDate: '2026-11-06' });
+  assert.equal(earlier.research.products.some((item) => 'latestEdition' in item), false);
+});
+
 const publications = (ticker, days) => days.map(([date, lrr, hrr]) => ({ date, ranges: { [ticker]: { lrr, hrr } } }));
 
 test('counts consecutive higher lows and lower highs of the Risk Range, ending today', () => {

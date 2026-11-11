@@ -564,10 +564,13 @@ test('a new Alpha Code and a moved level each notify in one line', () => {
   ctx.alphaCodeWatch = alphaWatch(printed('^KS11', 'KOSPI', 'trade', 6265, { isNew: true, scope: 'market' }), printed('^KS11', 'KOSPI', 'trend', 7051, { isNew: true, scope: 'market' }));
   assert.deepEqual(signals(ctx), ['KOSPI Alpha Code 6,265/7,051 → watching Trade 6,265, Trend 7,051.']);
   ctx.alphaCodeWatch = alphaWatch(printed('CL=F', 'WTI', 'trade', 97, { scope: 'market' }), printed('CL=F', 'WTI', 'trend', 92, { scope: 'market', change: { from: 91, to: 92 } }));
-  assert.deepEqual(signals(ctx), ['WTI Alpha Code 97/91 → 97/92: Trend line 91 → 92.']);
-  // A single printed level has no code to quote and keeps its unit.
+  const changeRows = () => evaluateResearchAttention(ctx, NOW).findings.flatMap(item => item.presentation.rows.filter(row => ['Signal', 'Previous', 'New'].includes(row.label)).map(row => [row.label, row.text]));
+  assert.deepEqual(changeRows(), [['Signal', 'WTI Alpha Code changed.'], ['Previous', '97/91'], ['New', '97/92']]);
+  ctx.alphaCodeWatch = alphaWatch(printed('CL=F', 'WTI', 'trade', 95, { scope: 'market', change: { from: 97, to: 95 } }), printed('CL=F', 'WTI', 'trend', 91, { scope: 'market', change: { from: 92, to: 91 } }));
+  assert.deepEqual(changeRows(), [['Signal', 'WTI Alpha Code changed.'], ['Previous', '97/92'], ['New', '95/91']]);
+  // A single printed level has no code to quote, so it is named and keeps its unit.
   ctx.alphaCodeWatch = alphaWatch(printed('UST10Y', 'UST 10Y', 'trend', 4.91, { scope: 'market', unit: '%', change: { from: 4.85, to: 4.91 } }));
-  assert.deepEqual(signals(ctx), ['UST 10Y Alpha Code: Trend line 4.85% → 4.91%.']);
+  assert.deepEqual(changeRows(), [['Signal', 'UST 10Y Alpha Code changed.'], ['Previous', 'Trend 4.85%'], ['New', 'Trend 4.91%']]);
 });
 
 test('an unheld single stock is watched silently; held, it notifies', () => {
@@ -680,17 +683,16 @@ test('the gamma card says how unusual the throttle is and what realized vol mean
   assert.equal(rowsFor(-4, 'Negative', { realizedVolatility: 12.4 })['10-day realized'], '12.4% ÷ √252 ≈ 0.8% a day.');
 });
 
-test('Risk Off against a net long book is red and stands until the tile turns back; otherwise it is blue', () => {
+test('Risk Off is a blue notification that stands against a net long book until the tile turns back', () => {
   const ctx = context();
   addHolding(ctx, 'EFX', 'LONG');
   const off = { tiles: { strategicAllocation: 'Risk Off' }, changes: [{ id: 'strategicAllocation', from: 'Risk On', to: 'Risk Off' }], riskOff: { since: '2026-09-22', from: 'Risk On' } };
   ctx.alphaCodeWatch = regimeWatch(off);
   const card = () => evaluateResearchAttention(ctx, NOW).findings.find(item => item.action === 'strategic allocation change');
-  assert.deepEqual([card().severity, card().kind, card().presentation.rows[0].text], ['action-required', 'portfolio', 'Strategic Allocation Risk On → Risk Off → cut gross.']);
+  assert.deepEqual([card().severity, card().kind, card().presentation.rows[0].text], [undefined, 'market', 'Strategic Allocation Risk On → Risk Off → cut gross.']);
   // Days later, with no tile change that day, it is still up.
   ctx.alphaCodeWatch = { ...ctx.alphaCodeWatch, regime: { ...ctx.alphaCodeWatch.regime, date: '2026-09-10', changes: [] } };
-  assert.equal(card().severity, 'action-required');
-  // A net short or empty book is told, not ordered.
+  assert.ok(card());
   const flat = context();
   flat.alphaCodeWatch = regimeWatch(off);
   assert.equal(evaluateResearchAttention(flat, NOW).findings.find(item => item.action === 'strategic allocation change').severity, undefined);

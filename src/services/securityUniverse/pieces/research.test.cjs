@@ -13,7 +13,7 @@ const entry = (riskRange, references, extra = {}) => ({ decision: {
   trade: missing('no-verified-published-trade-signal'), trend: descriptor('BULLISH'), riskRange,
   signalStrength: missing('no-explicit-signal-strength-event'), signalStrengthShorts: missing('no-explicit-signal-strength-shorts-event'), ...extra,
 }, directReferences: references });
-const intelligence = bySymbol => async () => ({ schemaVersion: 2, marketDate: '2026-10-31', bySymbol });
+const intelligence = bySymbol => async () => ({ schemaVersion: 2, marketDate: '2026-10-30', bySymbol });
 // Trade as a publication states it: explicit evidence, its feed item and its own instrument.
 const publishedTrade = (ticker, value, extra = {}) => ({ status: 'available', value, sourceId: 'early-look', sourceLabel: 'Early Look',
   sourceDate: '2026-10-30', publishedAt: '2026-10-30T11:27:00.000Z', sourceUrl: 'https://app.hedgeye.com/feed_items/189000',
@@ -146,14 +146,21 @@ test('the record states where the price stands against a watched security\u2019s
 });
 
 
-test('fills a missing range from ETF Pro, dated and weekly; never over a daily one or from a stale edition', async () => {
-  const loadSecurityIntelligence = async () => ({ schemaVersion: 2, marketDate: '2026-10-31', bySymbol: {
+test('fills a missing range only from an ETF Pro edition of the same session, never over a daily one', async () => {
+  const loadSecurityIntelligence = async () => ({ schemaVersion: 2, marketDate: '2026-10-30', bySymbol: {
     DRAM: entry(missing('symbol-not-in-verified-primary-publication'), []), AAPL: entry(range(90, 110), [reference('AAPL', 90, 110)]) } });
   const piece = (asOf) => createResearchPiece({ now: () => NOW, loadSecurityIntelligence, loadReferencePrices: async () => new Map([['DRAM', 41], ['AAPL', 100]]),
     loadWeeklyRanges: async () => new Map([['DRAM', { lrr: 35.12, hrr: 46.65, asOf }], ['AAPL', { lrr: 1, hrr: 2, asOf }]]) });
-  const rows = await piece('2026-10-25').loadMany(['DRAM', 'AAPL']);
+  const rows = await piece('2026-10-30').loadMany(['DRAM', 'AAPL']);
   const dram = rows.get('DRAM').riskRange;
-  assert.deepEqual([dram.status, dram.value, dram.source, dram.cadence, dram.match, dram.asOf], ['available', { lrr: 35.12, hrr: 46.65 }, 'ETF Pro', 'weekly', 'direct', '2026-10-25']);
+  assert.deepEqual([dram.status, dram.value, dram.source, dram.cadence, dram.match, dram.asOf], ['available', { lrr: 35.12, hrr: 46.65 }, 'ETF Pro', 'weekly', 'direct', '2026-10-30']);
   assert.deepEqual(rows.get('AAPL').riskRange.value, { lrr: 90, hrr: 110 });
-  assert.equal((await piece('2026-10-01').loadMany(['DRAM'])).get('DRAM').riskRange.status, 'unavailable');
+  assert.equal((await piece('2026-10-29').loadMany(['DRAM'])).get('DRAM').riskRange.status, 'unavailable');
+});
+
+test('a daily range from an earlier session is no range', async () => {
+  const piece = createResearchPiece({ now: () => NOW, tradeArchiveStatus: freshArchive, loadSecurityIntelligence: async () => ({ schemaVersion: 2, marketDate: '2026-11-02',
+    bySymbol: { AAPL: entry(range(339, 353), [reference('AAPL', 339, 353, { matchType: 'direct' })]) } }) });
+  const field = (await piece.loadMany(['AAPL'])).get('AAPL').riskRange;
+  assert.deepEqual([field.status, field.reason, field.asOf], ['unavailable', 'range-not-from-current-session', '2026-10-30']);
 });

@@ -2,7 +2,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
-const { AWS, DynamoDB, S3, Lambda, clientOptions } = require('./clients.cjs');
+const net = require('node:net');
+const {
+  AWS, DynamoDB, S3, Lambda, clientOptions, CONNECTION_TIMEOUT_MS, DYNAMODB_IDLE_TIMEOUT_MS,
+} = require('./clients.cjs');
 
 test('document operations preserve native values, cursor and conditional writes, executing once', async () => {
   let calls = 0;
@@ -110,3 +113,57 @@ test('server startup forwards the session token when explicit environment creden
   const configured = runInNewContext(`(${update[1]})`, { process: { env: { AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test-secret', AWS_SESSION_TOKEN: 'test-session' } } });
   assert.deepEqual(clientOptions(configured).credentials, { accessKeyId: 'test', secretAccessKey: 'test-secret', sessionToken: 'test-session' });
 });
+
+test('every client limits how long a connection may take, and only DynamoDB limits a silent request', () => {
+  assert.deepEqual(clientOptions().requestHandler, { connectionTimeout: CONNECTION_TIMEOUT_MS });
+  assert.deepEqual(clientOptions({}, { idleTimeoutMs: DYNAMODB_IDLE_TIMEOUT_MS }).requestHandler,
+    { connectionTimeout: CONNECTION_TIMEOUT_MS, socketTimeout: DYNAMODB_IDLE_TIMEOUT_MS });
+  assert.equal(CONNECTION_TIMEOUT_MS, 10_000);
+  assert.equal(DYNAMODB_IDLE_TIMEOUT_MS, 20_000);
+  // SDK v2 names are honoured, and nonsense falls back to the default.
+  assert.deepEqual(clientOptions({ httpOptions: { connectTimeout: 2_000, timeout: 5_000 } }).requestHandler,
+    { connectionTimeout: 2_000, socketTimeout: 5_000 });
+  assert.deepEqual(clientOptions({ httpOptions: { connectTimeout: 0, timeout: -1 } }, { idleTimeoutMs: 7 }).requestHandler,
+    { connectionTimeout: CONNECTION_TIMEOUT_MS, socketTimeout: 7 });
+  // A caller's own handler is used as given.
+  const requestHandler = { handle: async () => ({}) };
+  assert.equal(clientOptions({ requestHandler, httpOptions: { timeout: 1 } }).requestHandler, requestHandler);
+});
+
+test('a DynamoDB request that is never answered fails instead of waiting for ever', async (t) => {
+  // Accepts the connection and then says nothing.
+  const sockets = new Set();
+  const silent = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on('error', () => {});
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise((resolve) => { silent.listen(0, '127.0.0.1', resolve); });
+  t.after(() => new Promise((resolve) => {
+    for (const socket of sockets) socket.destroy();
+    silent.close(resolve);
+  }));
+  const options = {
+    region: 'us-west-1', endpoint: `http://127.0.0.1:${silent.address().port}`,
+    accessKeyId: 'test', secretAccessKey: 'test-secret',
+  };
+
+  const started = Date.now();
+  const limited = new DynamoDB.DocumentClient({ ...options, httpOptions: { timeout: 150 } });
+  await assert.rejects(limited.get({ TableName: 'T', Key: { id: 'a' } }).promise(), { code: 'TimeoutError' });
+  // Three attempts of 150 ms plus the SDK's back-off, not minutes.
+  assert.ok(Date.now() - started < 5_000);
+
+  // A caller that passes its own handler settings without limits gets the
+  // SDK's behaviour: no answer and no error. This is what every call did before.
+  const unlimited = new DynamoDB.DocumentClient({ ...options, maxRetries: 0, requestHandler: {} });
+  const pending = unlimited.get({ TableName: 'T', Key: { id: 'a' } });
+  const outcome = await Promise.race([
+    pending.promise().then(() => 'answered', () => 'failed'),
+    new Promise((resolve) => { setTimeout(() => resolve('still waiting'), 600); }),
+  ]);
+  assert.equal(outcome, 'still waiting');
+  pending.abort();
+  await assert.rejects(pending.promise());
+});
+
