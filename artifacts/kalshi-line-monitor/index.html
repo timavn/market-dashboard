@@ -1,0 +1,367 @@
+<title>Kalshi Line Monitor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column for the framework, full-width mockup boards in the dashboard's own grid style */
+:root{
+  --bg:#f6f8fa; --surface:#ffffff; --ink:#172033; --muted:#667085; --line:#dbe1e8; --head:#eef0f3;
+  --pos:#059669; --neg:#dc2626; --warn:#b7791f; --blue:#2563eb;
+  --neg-soft:#fde8e8; --warn-soft:#fdf3dc; --blue-soft:#e6eefc; --pos-soft:#e3f5ee;
+  --code-bg:#f0f3f6;
+  --f-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f141b; --surface:#161d27; --ink:#e4e9f0; --muted:#9facbb; --line:#2a3442; --head:#1d2633;
+  --pos:#4fd1a1; --neg:#ff8f99; --warn:#f2c46d; --blue:#7aa7ff;
+  --neg-soft:#3a1f24; --warn-soft:#3a3020; --blue-soft:#1d2a44; --pos-soft:#17332b; --code-bg:#1b2330; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141b; --surface:#161d27; --ink:#e4e9f0; --muted:#9facbb; --line:#2a3442; --head:#1d2633;
+  --pos:#4fd1a1; --neg:#ff8f99; --warn:#f2c46d; --blue:#7aa7ff;
+  --neg-soft:#3a1f24; --warn-soft:#3a3020; --blue-soft:#1d2a44; --pos-soft:#17332b; --code-bg:#1b2330; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-ui);font-size:14px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:40px}
+.prose{max-width:760px}
+h1{font-size:28px;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:19px;margin:0 0 10px;text-wrap:balance}
+h3{font-size:14px;margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+p{margin:0 0 10px}
+.lede{color:var(--muted);font-size:15px}
+.num,td.n{font-variant-numeric:tabular-nums}
+code,.mono{font-family:var(--f-mono);font-size:12.5px}
+
+/* flow */
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
+.flow .step{flex:1 1 150px;min-width:0;background:var(--surface);border:1px solid var(--line);padding:10px 12px}
+.flow .step b{display:block;font-size:13px}
+.flow .step span{color:var(--muted);font-size:12px}
+.flow .step.exists{background:var(--head)}
+.flow .arrow{align-self:center;color:var(--muted)}
+
+/* rules */
+.layers{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,540px),1fr));gap:16px}
+.layer{background:var(--surface);border:1px solid var(--line);min-width:0}
+.layer header{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--head);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.layer header b{font-size:14px}
+.layer header span{color:var(--muted);font-size:12px}
+.layer .body{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+pre.rules{margin:0;background:var(--code-bg);padding:10px 12px;overflow-x:auto;font-family:var(--f-mono);font-size:12px;line-height:1.6;color:var(--ink)}
+pre.rules .k{color:var(--blue);font-weight:600}
+pre.rules .c{color:var(--muted)}
+.note{color:var(--muted);font-size:12.5px}
+
+/* chips */
+.chip{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border:1px solid transparent;white-space:nowrap}
+.chip.strong{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.chip.good{background:var(--pos-soft);color:var(--pos);border-color:var(--pos)}
+.chip.watch{background:var(--blue-soft);color:var(--blue);border-color:var(--blue)}
+.chip.pass{color:var(--muted);border-color:var(--line)}
+.chip.red{background:var(--neg-soft);color:var(--neg);border-color:var(--neg)}
+.chip.yel{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.chip.blu{background:var(--blue-soft);color:var(--blue);border-color:var(--blue)}
+.chip.hold{color:var(--pos);border-color:var(--line)}
+.chip.long{color:var(--pos);border-color:var(--pos)}
+.chip.short{color:var(--neg);border-color:var(--neg)}
+@keyframes flash{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 3px currentColor}}
+.flash{animation:flash 1.4s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.flash{animation:none;outline:2px solid currentColor;outline-offset:1px}}
+
+/* mockup boards */
+.mock{background:var(--surface);border:1px solid var(--line)}
+.mock-cap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}
+.mock-cap b{font-size:15px}
+.mock-cap span{font-size:12px;color:var(--muted)}
+.scroll{overflow-x:auto}
+table.g{border-collapse:collapse;width:100%;font-size:13px}
+table.g th,table.g td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:middle}
+table.g th{background:var(--head);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;white-space:nowrap}
+table.g td.n,table.g th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.g td.sub{color:var(--muted);font-size:12px}
+tr.dim td{color:var(--muted)}
+tr.hl-red td{background:var(--neg-soft)}
+tr.hl-yel td{background:var(--warn-soft)}
+.held{font-family:var(--f-mono);font-size:11px;color:var(--blue);font-weight:600}
+.pos{color:var(--pos)} .neg{color:var(--neg)} .mut{color:var(--muted)}
+.sec-title{display:flex;align-items:baseline;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.sec-title b{font-size:16px}
+.mkt-head{display:grid;grid-template-columns:minmax(120px,1.2fr) repeat(5,minmax(80px,1fr));border-bottom:1px solid var(--line)}
+.mkt-head>div{padding:7px 10px;border-right:1px solid var(--line);font-size:13px;min-width:0}
+.mkt-head>div:last-child{border-right:0}
+.mkt-head small{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.lines-wrap{padding:0 14px 14px 30px}
+.lines-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:10px 0 6px;display:flex;gap:10px;flex-wrap:wrap}
+.collapsed{padding:9px 14px 9px 30px;font-size:13px;border-bottom:1px solid var(--line);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.collapsed .mut{font-size:12px}
+
+/* book summary */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border-bottom:1px solid var(--line)}
+.tile{padding:12px 14px;border-right:1px solid var(--line);min-width:0}
+.tile:last-child{border-right:0}
+.tile small{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.tile .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.tile .s{font-size:12px;color:var(--muted)}
+.book-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+.book-grid>section{padding:12px 14px;border-right:1px solid var(--line);min-width:0}
+.book-grid>section:last-child{border-right:0}
+.bar-row{display:grid;grid-template-columns:70px 1fr 56px;gap:8px;align-items:center;font-size:12.5px;padding:3px 0}
+.bar{height:12px;background:var(--head);position:relative}
+.bar i{position:absolute;inset:0 auto 0 0;background:var(--blue)}
+.bar i.cpi{background:var(--pos)}
+.bar .cap{position:absolute;top:-3px;bottom:-3px;width:0;border-left:2px dashed var(--muted)}
+.flags{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.flags li{display:flex;gap:8px;align-items:baseline}
+
+.open{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+.open div{background:var(--surface);border:1px solid var(--line);padding:10px 12px;font-size:13px}
+
+/* screenshot mode: #shot-<id> shows one board alone */
+body.shot{padding:16px;background:var(--bg)}
+body.shot .wrap>*{display:none}
+body.shot .wrap>.shot-on{display:block}
+</style>
+
+<div class="wrap">
+
+<div class="prose">
+  <h1>Kalshi Line Monitor</h1>
+  <p class="lede">A rule-based layer on top of the Predictive Markets setup board. It pulls each market's Kalshi ladder, grades every line, watches what you hold, and rolls the whole book up at the end. Every state comes from an ordered list of IF/THEN rules, so the same inputs always give the same answer. Position sizing is out of scope; where a rule needs a size threshold, it names a parameter your sizing work will fill.</p>
+  <p class="note">Checked today, Nov 11: the signed Kalshi API reads the balance, all open positions (14 lines across 7 events) and live ladders. Exposure figures below come from that read. Odds, edges and flags in the mockups are illustrative.</p>
+</div>
+
+<section>
+  <h2>Where it sits</h2>
+  <div class="flow">
+    <div class="step exists"><b>Setup board</b><span>Tick, Trade, Trend, Risk Range. Already built.</span></div><div class="arrow">→</div>
+    <div class="step"><b>1 · Market gate</b><span>Long, Short or nothing, plus a grade</span></div><div class="arrow">→</div>
+    <div class="step"><b>2 · Line rules</b><span>Every line in the event, scored by edge</span></div><div class="arrow">→</div>
+    <div class="step"><b>3 · Held rules</b><span>Each line you own, checked every pull</span></div><div class="arrow">→</div>
+    <div class="step"><b>4 · Book rules</b><span>Exposure roll-up and concentration</span></div><div class="arrow">→</div>
+    <div class="step exists"><b>Inbox</b><span>Red, yellow, blue cards</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>The rules</h2>
+  <p class="prose">Each layer is evaluated top to bottom and stops at the first rule that matches. Thresholds in <code>CAPS</code> are named parameters kept in the universe catalog, so changing a number never means changing code.</p>
+  <div class="layers">
+
+    <article class="layer">
+      <header><b>1 · Market gate</b><span>per market · when an input publishes</span></header>
+      <div class="body">
+<pre class="rules"><span class="c"># direction (your existing setup rule, unchanged)</span>
+<span class="k">IF</span>   price outside Risk Range            <span class="k">THEN</span> NONE  "outside range"
+<span class="k">IF</span>   Tick=Bull <span class="k">AND</span> Trend=Bull
+     <span class="k">AND</span> price in bottom third
+     <span class="k">AND NOT</span> Trade=Bear                    <span class="k">THEN</span> LONG
+<span class="k">IF</span>   Tick=Bear <span class="k">AND</span> Trend=Bear
+     <span class="k">AND</span> price in top third
+     <span class="k">AND NOT</span> Trade=Bull                    <span class="k">THEN</span> SHORT
+<span class="k">ELSE</span>                                     NONE  + the failing input
+
+<span class="c"># grade (how many confirmations line up)</span>
+<span class="k">IF</span>   setup <span class="k">AND</span> Trade agrees <span class="k">AND</span> price in outer EDGE_BAND   <span class="k">THEN</span> A
+<span class="k">IF</span>   setup <span class="k">AND</span> (Trade agrees <span class="k">OR</span> price in EDGE_BAND)  <span class="k">THEN</span> B
+<span class="k">IF</span>   setup                                       <span class="k">THEN</span> C</pre>
+        <p class="note">NONE hides the market's lines and prints the reason ("Tick Neutral"). The grade is a label for monitoring; your sizing work can use it or ignore it.</p>
+      </div>
+    </article>
+
+    <article class="layer">
+      <header><b>2 · Line rules</b><span>per line · every quote pull</span></header>
+      <div class="body">
+<pre class="rules">side   = YES <span class="k">if</span> LONG, NO <span class="k">if</span> SHORT
+ask    = that side's quoted ask
+ours   = calibration_curve(YES mid) <span class="c"># your existing curve</span>
+edge   = ours − ask − fee                 <span class="c"># in points</span>
+
+<span class="k">IF</span>   one side unquoted <span class="k">OR</span> spread &gt; MAX_SPREAD  <span class="k">THEN</span> ILLIQUID
+<span class="k">IF</span>   edge ≥ STRONG_EDGE  (5)                 <span class="k">THEN</span> STRONG
+<span class="k">IF</span>   edge ≥ GOOD_EDGE    (3)                 <span class="k">THEN</span> GOOD
+<span class="k">IF</span>   edge ≥ WATCH_EDGE   (1)                 <span class="k">THEN</span> WATCH
+<span class="k">ELSE</span>                                         PASS
+
+<span class="k">FLASH IF</span> line becomes STRONG this pull <span class="k">AND</span> not held</pre>
+        <p class="note">"Odds we like" means edge, so an 85¢ favourite and a 20¢ long shot are ranked on the same scale. Lines sort by edge, best first; PASS lines fold behind a count.</p>
+      </div>
+    </article>
+
+    <article class="layer">
+      <header><b>3 · Held rules</b><span>per owned line · every quote pull</span></header>
+      <div class="body">
+<pre class="rules"><span class="k">IF</span>   gate now points against held side      <span class="k">THEN</span> CONTRADICTS  <span class="c">red</span>
+<span class="k">IF</span>   price is through the line (held side
+     currently losing)                       <span class="k">THEN</span> THROUGH LINE <span class="c">yellow</span>
+<span class="k">IF</span>   exit edge &lt; 0  (ours &lt; held-side bid)  <span class="k">THEN</span> EDGE GONE    <span class="c">yellow</span>
+<span class="k">IF</span>   gate is NONE (setup lapsed, not flipped) <span class="k">THEN</span> SETUP LAPSED <span class="c">yellow</span>
+<span class="k">IF</span>   closes within CLOSING_WINDOW (2h)      <span class="k">THEN</span> CLOSING      <span class="c">blue</span>
+<span class="k">ELSE</span>                                         HOLD
+
+<span class="k">FLASH IF</span> state turns CONTRADICTS</pre>
+        <p class="note">Every state carries a one-line reason ("Tick flipped Bullish 10:42"). Distance from the line is shown in the ladder's own σ, so a 3¢ move in copper and a $400 move in Bitcoin read the same way.</p>
+      </div>
+    </article>
+
+    <article class="layer">
+      <header><b>4 · Book rules</b><span>whole account · every pull</span></header>
+      <div class="body">
+<pre class="rules">at_risk  = Σ cost of open lines           <span class="c"># bought contracts: max loss = cost</span>
+account  = cash + position value
+
+<span class="k">IF</span>   at_risk / account &gt; BOOK_CAP          <span class="k">THEN</span> flag OVER BOOK CAP
+<span class="k">IF</span>   section at_risk &gt; SECTION_CAP         <span class="k">THEN</span> flag that section
+<span class="k">IF</span>   one expiry holds &gt; EXPIRY_SHARE of risk <span class="k">THEN</span> flag EXPIRY CLUSTER
+<span class="k">IF</span>   ≥2 held markets in a section, same direction,
+     and their correlation &gt; STACK_CORR     <span class="k">THEN</span> flag STACKED
+<span class="k">IF</span>   any line is CONTRADICTS                <span class="k">THEN</span> book header turns red</pre>
+        <p class="note">The caps are placeholders for your sizing work. Until they're set, the summary shows the numbers with no flags.</p>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<section>
+  <h2>Colors and flashing</h2>
+  <div class="prose">
+    <p>These follow the Inbox rules you already use. <span class="chip red">Red</span> only when something contradicts a position you hold. <span class="chip yel">Yellow</span> for a signal: a new STRONG line, or a held line that has gone wrong. <span class="chip blu">Blue</span> for something to act on that isn't a problem, such as a line closing soon. Two things flash: a line that just became STRONG and isn't held, and a held line that just turned CONTRADICTS. A flash stops once you open the row, and the color stays. Each of these also lands in the Inbox as a card, with Source pointing at the Kalshi market and the publication that moved the gate.</p>
+  </div>
+</section>
+
+<!-- MOCKUP A -->
+<section class="mock" id="shot-lines">
+  <div class="mock-cap"><b>Mockup A · Lines under each market</b><span>Metals section of the setup board, with the line block added under the market table</span></div>
+  <div class="sec-title"><b>Metals</b><span class="mut">quotes 11:58:40 PT · next pull in 42s</span></div>
+
+  <div class="mkt-head">
+    <div><small>Market</small><b>Silver</b> <span class="mut">SI=F</span></div>
+    <div><small>Tick</small><span class="neg">Bearish</span></div>
+    <div><small>Trade</small><span class="neg">Bearish</span></div>
+    <div><small>Trend</small><span class="neg">Bearish</span></div>
+    <div><small>Range</small>81% <span class="mut">top third</span></div>
+    <div><small>Gate</small><span class="chip short">Short · A</span></div>
+  </div>
+  <div class="lines-wrap">
+    <div class="lines-label"><span>KXSILVERW · closes Fri Nov 13 2:00 PM PT</span><span>Buy NO</span><span>3 lines with edge · 1 illiquid · 4 pass</span></div>
+    <div class="scroll"><table class="g">
+      <thead><tr><th>Line</th><th class="n">From price</th><th class="n">NO ask</th><th class="n">Kalshi odds</th><th class="n">Our odds</th><th class="n">Edge</th><th>Strength</th><th>Held</th></tr></thead>
+      <tbody>
+        <tr><td>Above $51.99</td><td class="n">+0.9σ</td><td class="n">71¢</td><td class="n">71%</td><td class="n">78%</td><td class="n pos">+6.0</td><td><span class="chip strong">Strong</span></td><td><span class="held">NO 318</span></td></tr>
+        <tr><td>Above $52.49</td><td class="n">+1.3σ</td><td class="n">80¢</td><td class="n">80%</td><td class="n">86%</td><td class="n pos">+5.1</td><td><span class="chip strong flash">Strong · new</span></td><td class="mut">—</td></tr>
+        <tr><td>Above $50.99</td><td class="n">−0.1σ</td><td class="n">35¢</td><td class="n">35%</td><td class="n">39%</td><td class="n pos">+3.2</td><td><span class="chip good">Good</span></td><td><span class="held">NO 779</span></td></tr>
+        <tr><td>Above $52.99</td><td class="n">+1.7σ</td><td class="n">90¢</td><td class="n">90%</td><td class="n">92%</td><td class="n">+1.4</td><td><span class="chip watch">Watch</span></td><td class="mut">—</td></tr>
+        <tr class="dim"><td>Above $53.99</td><td class="n">+2.5σ</td><td class="n">96¢</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td><span class="chip pass">Illiquid · 7¢ spread</span></td><td>—</td></tr>
+        <tr class="dim"><td colspan="8">4 lines below 1 point of edge · show</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="mkt-head">
+    <div><small>Market</small><b>Copper</b> <span class="mut">HG=F</span></div>
+    <div><small>Tick</small><span class="neg">Bearish</span></div>
+    <div><small>Trade</small><span class="mut">N/A</span></div>
+    <div><small>Trend</small><span class="neg">Bearish</span></div>
+    <div><small>Range</small>71% <span class="mut">top third</span></div>
+    <div><small>Gate</small><span class="chip short">Short · C</span></div>
+  </div>
+  <div class="collapsed"><span>KXCOPPERW · 6 lines with edge · best <b>+3.4</b> on Above $6.40</span><span class="chip good">Good</span><span class="held">2 held</span><span class="mut">expand</span></div>
+
+  <div class="mkt-head">
+    <div><small>Market</small><b>Gold</b> <span class="mut">GC=F</span></div>
+    <div><small>Tick</small><span class="mut">Neutral</span></div>
+    <div><small>Trade</small><span class="pos">Bullish</span></div>
+    <div><small>Trend</small><span class="pos">Bullish</span></div>
+    <div><small>Range</small>44% <span class="mut">middle</span></div>
+    <div><small>Gate</small><span class="chip pass">None</span></div>
+  </div>
+  <div class="collapsed mut">No setup: Tick Neutral and price in the middle third. Lines not shown.</div>
+</section>
+
+<!-- MOCKUP B -->
+<section class="mock" id="shot-held">
+  <div class="mock-cap"><b>Mockup B · Held lines</b><span>Every open Kalshi line, worst state first. Held side and cost are from today's read.</span></div>
+  <div class="scroll"><table class="g">
+    <thead><tr><th>Market</th><th>Line</th><th>Held</th><th class="n">Cost</th><th class="n">Bid now</th><th class="n">Edge now</th><th class="n">From line</th><th>State</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr class="hl-red"><td>Bitcoin</td><td>Above $72,999.99</td><td>NO 318</td><td class="n">$95.32</td><td class="n">22¢</td><td class="n neg">−4.1</td><td class="n">−0.4σ</td><td><span class="chip red flash">Contradicts</span></td><td>Tick flipped Bullish 10:42 PT; gate now Long</td></tr>
+      <tr class="hl-red"><td>Bitcoin</td><td>Above $73,499.99</td><td>NO 308</td><td class="n">$95.39</td><td class="n">27¢</td><td class="n neg">−3.6</td><td class="n">−0.1σ</td><td><span class="chip red">Contradicts</span></td><td>Same event</td></tr>
+      <tr class="hl-yel"><td>Silver</td><td>Above $50.99</td><td>NO 779</td><td class="n">$214.38</td><td class="n">32¢</td><td class="n pos">+3.2</td><td class="n">−0.1σ</td><td><span class="chip yel">Through line</span></td><td>Price $51.06, above the line</td></tr>
+      <tr class="hl-yel"><td>Ethereum</td><td>Above $2,079.99</td><td>NO 266</td><td class="n">$95.71</td><td class="n">31¢</td><td class="n neg">−0.8</td><td class="n">+0.3σ</td><td><span class="chip yel">Edge gone</span></td><td>Our odds 30% vs 31¢ bid</td></tr>
+      <tr class="hl-yel"><td>Copper</td><td>Above $6.32</td><td>NO 264</td><td class="n">$71.35</td><td class="n">25¢</td><td class="n">+0.6</td><td class="n">+0.2σ</td><td><span class="chip yel">Setup lapsed</span></td><td>Price fell to 64% of range</td></tr>
+      <tr><td>UST 10Y</td><td>Above 4.92%</td><td>NO 810</td><td class="n">$263.30</td><td class="n">36¢</td><td class="n pos">+2.4</td><td class="n">+0.6σ</td><td><span class="chip hold">Hold</span></td><td class="sub">Gate Short · B</td></tr>
+      <tr><td>UST 30Y</td><td>Above 5.28%</td><td>NO 800</td><td class="n">$228.00</td><td class="n">31¢</td><td class="n pos">+1.9</td><td class="n">+0.5σ</td><td><span class="chip hold">Hold</span></td><td class="sub">Gate Short · B</td></tr>
+      <tr><td>CPI YoY</td><td>Above 3.6%</td><td>YES 1,000</td><td class="n">$719.58</td><td class="n">74¢</td><td class="n pos">+3.0</td><td class="n">+0.8σ</td><td><span class="chip hold">Hold</span></td><td class="sub">Nowcast base 3.8%</td></tr>
+      <tr class="dim"><td colspan="9">6 more lines on Hold · show</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- MOCKUP C -->
+<section class="mock" id="shot-book">
+  <div class="mock-cap"><b>Mockup C · Book summary</b><span>End of the report. Account, risk and exposure from today's live read; flags illustrative.</span></div>
+  <div class="tiles">
+    <div class="tile"><small>Account</small><div class="v">$5,784</div><div class="s">$2,922 cash</div></div>
+    <div class="tile"><small>At risk</small><div class="v">$2,852</div><div class="s">49.3% of account</div></div>
+    <div class="tile"><small>Max payout</small><div class="v">$7,023</div><div class="s">if every line pays</div></div>
+    <div class="tile"><small>Open</small><div class="v">14 lines</div><div class="s">7 events</div></div>
+    <div class="tile"><small>Held lines flagged</small><div class="v"><span class="neg">2</span> · <span style="color:var(--warn)">3</span></div><div class="s">red · yellow</div></div>
+  </div>
+  <div class="book-grid">
+    <section>
+      <h3>At risk by section · % of account</h3>
+      <div class="bar-row"><span>CPI</span><div class="bar"><i class="cpi" style="width:65.7%"></i><span class="cap" style="left:83.3%"></span></div><span class="n">19.7%</span></div>
+      <div class="bar-row"><span>Rates</span><div class="bar"><i style="width:49%"></i><span class="cap" style="left:83.3%"></span></div><span class="n">14.7%</span></div>
+      <div class="bar-row"><span>Metals</span><div class="bar"><i style="width:27.3%"></i><span class="cap" style="left:83.3%"></span></div><span class="n">8.2%</span></div>
+      <div class="bar-row"><span>Crypto</span><div class="bar"><i style="width:22%"></i><span class="cap" style="left:83.3%"></span></div><span class="n">6.6%</span></div>
+      <div class="bar-row"><span>Oil</span><div class="bar"></div><span class="n mut">0%</span></div>
+      <div class="bar-row"><span>Indices</span><div class="bar"></div><span class="n mut">0%</span></div>
+      <p class="note">Scale 0–30%. Dashed mark = SECTION_CAP (placeholder 25%). Green = YES (long the outcome), blue = NO.</p>
+    </section>
+    <section>
+      <h3>Direction</h3>
+      <div class="scroll"><table class="g">
+        <thead><tr><th>Section</th><th>Bet</th><th class="n">At risk</th><th>Gate</th></tr></thead>
+        <tbody>
+          <tr><td>CPI</td><td>Nov CPI above 3.6–3.7%</td><td class="n">$1,141</td><td><span class="chip long">Long</span></td></tr>
+          <tr><td>Rates</td><td>10Y and 30Y yields stay below</td><td class="n">$853</td><td><span class="chip short">Short</span></td></tr>
+          <tr><td>Metals</td><td>Silver, copper stay below</td><td class="n">$477</td><td><span class="chip short">Short</span></td></tr>
+          <tr><td>Crypto</td><td>BTC, ETH stay below</td><td class="n">$382</td><td><span class="chip red">Contradicts</span></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+    <section>
+      <h3>Book flags</h3>
+      <ul class="flags">
+        <li><span class="chip red">Red</span><span>Bitcoin gate flipped Long while 2 lines are held NO ($191).</span></li>
+        <li><span class="chip yel">Yellow</span><span>Expiry cluster: Fri Nov 13 holds 60% of risk ($1,711).</span></li>
+        <li><span class="chip yel">Yellow</span><span>Stacked: BTC and ETH both short, 30D correlation 0.86.</span></li>
+        <li><span class="chip yel">Yellow</span><span>Silver Above $50.99 is through the line.</span></li>
+        <li><span class="chip yel">Yellow</span><span>Silver Above $52.49 is a new Strong line, not held.</span></li>
+      </ul>
+      <p class="note" style="margin-top:10px">Realized on open events: <span class="pos">+$52.44</span> (gold +$147.53, CPI −$95.09).</p>
+    </section>
+  </div>
+</section>
+
+<section>
+  <h2>Open decisions</h2>
+  <div class="open">
+    <div><b>Edge tiers.</b> 1 / 3 / 5 points is a starting guess. The paper ledger can tell us which tier actually paid once it has a few weeks of tickets.</div>
+    <div><b>EDGE_BAND for grade A.</b> Outer 10% of the Risk Range, or the outer half of the third?</div>
+    <div><b>Pull cadence.</b> Every 60 s while any held event is open, every 5 min otherwise. The gate only re-runs when a Hedgeye input publishes.</div>
+    <div><b>Where it lives.</b> Lines inside each section of the Predictive Markets report, with the book summary as the last block. Held rules also run in the background so the Inbox gets a card without the report open.</div>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var h=(location.hash||'').slice(1);
+  if(h.indexOf('shot-')===0){var el=document.getElementById(h);
+    if(el){document.body.classList.add('shot');el.classList.add('shot-on');
+      document.querySelectorAll('.flash').forEach(function(f){f.style.animation='none';f.style.boxShadow='0 0 0 3px currentColor';});}}
+})();
+</script>

@@ -15,6 +15,9 @@ const hasProvenance = event => Boolean(event.sourceMessageId || event.sourceEven
 const isUnread = finding => finding.unread === true || finding.unread === 1;
 // Contrary instructions on held positions; separate from ordinary unread alerts.
 const isActionRequired = finding => payloadOf(finding).severity === 'action-required';
+// Operational findings (a service down, evidence that could not be verified,
+// a source-data discrepancy) belong in Systems, never the Analyst Inbox.
+const isSystemsIssue = finding => payloadOf(finding).kind === 'operational' && !isActionRequired(finding);
 const SUPPRESSED_OPERATIONAL_IDS = new Set([
   'attention:operations:gmail.ingestion',
   'attention:operations:research-verification',
@@ -350,11 +353,15 @@ function activeAttentionFinding(finding, now = Date.now()) {
 
 function buildAnalystInbox(rawResult = {}, now = new Date()) {
   const rows = Array.isArray(rawResult?.findings) ? rawResult.findings : [];
-  const attention = rows.filter(finding => activeAttentionFinding(finding, now));
+  const active = rows.filter(finding => activeAttentionFinding(finding, now));
+  // The Analyst monitors the portfolio. Service and evidence problems are
+  // Systems issues: they leave the Inbox and its counts and are returned apart.
+  const attention = active.filter(finding => !isSystemsIssue(finding));
+  const systemIssues = active.filter(isSystemsIssue).sort(compareAttention);
   if (rawResult?.attentionVersion === 1) {
     const findings = attention.sort(compareAttention).map(finding => isActionRequired(finding) && payloadOf(finding).kind === 'portfolio'
       && !attentionEvidenceFreshness(finding, now).holdings ? { ...finding, holdingsStale: true } : finding);
-    return { ...rawResult, findings, unread: findings.filter(isUnread).length, actionRequired: findings.filter(urgent).length };
+    return { ...rawResult, findings, systemIssues, unread: findings.filter(isUnread).length, actionRequired: findings.filter(urgent).length };
   }
   const groups = new Map();
   const actionPositions = new Map();
@@ -379,7 +386,7 @@ function buildAnalystInbox(rawResult = {}, now = new Date()) {
   findings.sort((a, b) => publicationTime(eventOf(b)) - publicationTime(eventOf(a))
     || String(a.id || '').localeCompare(String(b.id || '')));
   const projected = [...attention.sort(compareAttention), ...findings];
-  return { ...rawResult, findings: projected, unread: projected.filter(isUnread).length };
+  return { ...rawResult, findings: projected, systemIssues, unread: projected.filter(isUnread).length };
 }
 
-module.exports = { buildAnalystInbox, isActionRequired, isAttentionFinding, activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, suppressedAnalystInboxFinding };
+module.exports = { buildAnalystInbox, isSystemsIssue, isActionRequired, isAttentionFinding, activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, suppressedAnalystInboxFinding };

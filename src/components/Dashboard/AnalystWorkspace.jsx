@@ -6,6 +6,7 @@ import { Message, SourceLibrary } from './AnalystConversationPanel';
 import { useSurfaceActivity } from '../common/PersistentSurface';
 import { PortfolioResearchUpdates, PortfolioReviewPlaceholder } from './AnalystPortfolioBrief';
 import AnalystInbox from './AnalystInbox';
+import { MarketDataService } from '../../services/api/marketDataService';
 import { safeResearchUrl } from '../../utils/researchSourceUrl';
 import useAnalystInbox from '../../hooks/useAnalystInbox';
 import { balanceReviewMessages } from './balanceReviewPresentation';
@@ -22,6 +23,12 @@ import { hydrateAnalystCapturedCitations } from '../../services/analyst/analystC
 import useAnalystCapturedHistory from '../../hooks/useAnalystCapturedHistory';
 import useAnalystReportContainment from '../../hooks/useAnalystReportContainment';
 
+// The display name from the central security record, per ticker; null when it has none.
+const loadSecurityNames = symbols => MarketDataService.getSecurityRecords(symbols, { fields: 'identity' }).then(result => Object.fromEntries(symbols.map(symbol => {
+  const identity = result?.rows?.[symbol]?.identity || {};
+  const field = [identity.displayName, identity.name].find(item => item?.status === 'available' && typeof item.value === 'string' && item.value.trim());
+  return [symbol, field ? field.value.trim() : null];
+})));
 const loadHorizonStats = symbols => api.request(`/horizon-stats?symbols=${encodeURIComponent(symbols.join(','))}`).then(result => result.rows || {});
 
 const reviews = [['portfolio-review', 'Portfolio Review'], ['prediction-markets-review', 'Predictive Markets Review']];
@@ -1497,7 +1504,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
               <button className={`analyst-conversation-item${row.id === selected ? ' is-active' : ''}`} aria-label={`Open conversation: ${row.title}`} disabled={rowDeleting} onClick={() => choose(row.id)}><span className="analyst-conversation-copy"><strong>{row.title}</strong><SidebarStatus row={row} conversation={entities[row.id]} starting={rowStarting} deleting={rowDeleting} /></span></button>
               <button className="analyst-conversation-delete" title="Delete conversation" aria-label={`Delete conversation: ${row.title}`} disabled={rowDeleting || rowStarting} onClick={() => deleteConversation(row.id)}><Trash2 size={12} /></button>
             </div>; })}</section>)}{historyReadFailed ? <p className="analyst-conversation-empty">History unavailable. <button type="button" onClick={() => list().catch(e => setHistoryError(e.message))}>Retry history</button></p> : !visibleRows.length && <p className="analyst-conversation-empty">{query ? 'No matching conversations.' : 'No saved conversations.'}</p>}</div>
-                : landingTab === 'inbox' ? <AnalystInbox findings={inbox.findings} error={inboxError} onCitation={openCitation} onAcknowledge={acknowledge} loadHorizonStats={loadHorizonStats} MessageComponent={Message} />
+                : landingTab === 'inbox' ? <AnalystInbox findings={inbox.findings} error={inboxError} onCitation={openCitation} onAcknowledge={acknowledge} loadHorizonStats={loadHorizonStats} loadSecurityNames={loadSecurityNames} MessageComponent={Message} />
                   : <SourceLibrary embedded />}
             </div>
           </section>

@@ -1590,7 +1590,7 @@ test('Stop durably interrupts a queued review before awaiting absent or slow wor
 // findings table: a row-level state column plus the stored payload.
 const inboxNow=new Date('2026-09-22T16:00:00Z');
 const attentionRow=(id,state,overrides={})=>({id,source_id:id,symbol:'AMZN',action:'verification issue',state,unread:1,
- updated_at:'2026-09-22T15:59:00Z',fingerprint:`${id}-fingerprint`,payload:{attentionVersion:1,id,state:'open',kind:'operational',priority:1,
+ updated_at:'2026-09-22T15:59:00Z',fingerprint:`${id}-fingerprint`,payload:{attentionVersion:1,id,state:'open',kind:'account',priority:1,
   publicationTime:'2026-09-22T15:30:00Z',presentation:{subject:'IB Gateway',date:'2026-09-22',rows:[{label:'Issue',text:'Portfolio cannot refresh.'}]},...overrides}});
 const signalRow=(id,date,value,state)=>({id,source_id:id,symbol:'AMZN',action:'signal change',state,unread:1,updated_at:`${date}T01:00:00Z`,
  fingerprint:`${id}-fingerprint`,payload:{quantity:15,holdingsVerified:true,holdingsVerifiedAt:'2026-09-14T19:00:00Z',
@@ -1598,7 +1598,7 @@ const signalRow=(id,date,value,state)=>({id,source_id:id,symbol:'AMZN',action:'s
   event:{entityId:'AMZN',entityType:'ticker',productKey:'risk-ranges',productLabel:'Risk Ranges',eventType:'risk_range',fieldPath:'data.AMZN',
    signalValue:value,qualityStatus:'validated',publishedAt:`${date}T00:00:00Z`,marketDate:date,sourceMessageId:id,sourceUrl:`https://app.hedgeye.com/feed_items/${id}`}}});
 const inboxHistory=()=>[
- attentionRow('open-operational','open'),
+ attentionRow('open-operational','open',{kind:'operational'}),
  attentionRow('open-portfolio','open',{kind:'portfolio',priority:0,quantity:5,holdingsVerified:true,holdingsVerifiedAt:'2026-09-22T15:59:30Z'}),
  attentionRow('stale-portfolio','open',{kind:'portfolio',quantity:5,holdingsVerified:true,holdingsVerifiedAt:'2026-09-22T15:00:00Z'}),
  attentionRow('acknowledged','open',{priority:2}),
@@ -1623,8 +1623,10 @@ test('the attention Inbox is identical with and without superseded, resolved and
  assert.ok(projected.length<rows.length);
  const filtered=buildAnalystInbox({attentionVersion:1,unread:projected.filter(row=>row.unread).length,findings:projected},inboxNow);
  assert.deepEqual(filtered,full);
- assert.deepEqual(full.findings.map(row=>row.id),['open-portfolio','payload-state-only','open-operational','acknowledged']);
- assert.equal(full.unread,3);
+ // Operational issues belong in Systems, apart from the Inbox and its count.
+ assert.deepEqual(full.findings.map(row=>row.id),['open-portfolio','payload-state-only','acknowledged']);
+ assert.deepEqual(full.systemIssues.map(row=>row.id),['open-operational']);
+ assert.equal(full.unread,2);
  // The legacy projection still derives a transition from superseded history,
  // which is why the route never filters it.
  const legacy=buildAnalystInbox({findings:rows},inboxNow);

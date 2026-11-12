@@ -323,6 +323,20 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-drivers__regime-col { width: 18%; }
 .analyst-drivers__implied-col { width: 15%; }
 /* vs USD heat: matches USDCorrelationMatrix (red negative, green positive, outline when |r| >= 0.75). */
+/* Sized setups: one block per market under its section's table. */
+.analyst-sizing { display: grid; gap: 6px; margin: 4px 0 8px; }
+.analyst-sizing__market { min-width: 0; }
+.analyst-sizing__head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 3px 6px;
+  border: 1px solid var(--analyst-border, #dbe1e8); border-bottom: 0; background: #f3f4f6; font-variant-numeric: tabular-nums;
+}
+.analyst-sizing__name, .analyst-sizing__size { font-weight: 500; }
+.analyst-sizing__lost { color: var(--dashboard-muted-text, #667085); white-space: nowrap; }
+.analyst-sizing__reason { padding: 3px 6px; border: 1px solid var(--analyst-border, #dbe1e8); background: #fff; color: var(--dashboard-muted-text, #667085); }
+.analyst-sizing__foot { display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 2px 6px; color: var(--dashboard-muted-text, #667085); font-variant-numeric: tabular-nums; }
+.analyst-sizing .is-positive { color: var(--dashboard-positive, #059669); }
+.analyst-sizing .is-negative { color: var(--dashboard-negative, #dc2626); }
+.analyst-sizing .is-muted { color: var(--dashboard-muted-text, #667085); font-weight: 400; }
 .analyst-drivers .analyst-corr--neg-light, .analyst-drivers .analyst-corr--neg-strong { color: var(--dashboard-negative, #dc2626); }
 .analyst-drivers .analyst-corr--pos-light, .analyst-drivers .analyst-corr--pos-strong { color: var(--dashboard-positive, #059669); }
 .analyst-drivers :is(.analyst-corr--neg-strong, .analyst-corr--pos-strong) { padding: 0 3px; outline: 1px solid currentColor; outline-offset: -1px; }

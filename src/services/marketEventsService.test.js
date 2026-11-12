@@ -515,3 +515,27 @@ describe('marketEventsService', () => {
     expect(httpClient.get).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('market closures', () => {
+  const service = jest.requireActual('./marketEventsService.cjs');
+  test('the US bond market closes on Veterans Day while stocks trade, and early closes carry their time', () => {
+    const week = service.usClosureEvents({ from: '2026-11-08', to: '2026-11-14' });
+    expect(week.map(event => [event.name, event.allDay, event.countryCode])).toEqual([['Bond market closed — Veterans Day', true, 'US']]);
+    expect(week[0]).toMatchObject({ kind: 'closure', provider: 'Exchange calendar', verification: 'exchange-calendar', forecast: null });
+    const thanksgiving = service.usClosureEvents({ from: '2026-11-22', to: '2026-11-28' }).map(event => [event.name, event.startAt]);
+    expect(thanksgiving).toEqual([
+      ['Stock and bond markets closed — Thanksgiving Day', '2026-11-26T05:00:00.000Z'],
+      ['Stocks close early 13:00 ET; bonds 14:00 ET', '2026-11-27T18:00:00.000Z'],
+    ]);
+  });
+
+  test('provider holiday rows become closures for other markets; its US bank holiday is left to the exchange calendar', () => {
+    const rows = [
+      { title: 'French Bank Holiday', country: 'EUR', date: '2026-11-11T02:01:00-05:00', impact: 'Holiday' },
+      { title: 'Bank Holiday', country: 'CAD', date: '2026-11-11T08:00:00-05:00', impact: 'Holiday' },
+      { title: 'Bank Holiday', country: 'USD', date: '2026-11-11T08:00:00-05:00', impact: 'Holiday' },
+    ];
+    expect(service.normalizeEvents(rows).map(event => [event.kind, event.countryCode, event.name, event.allDay]).sort())
+      .toEqual([['closure', 'CA', 'Canada bank holiday', true], ['closure', 'FR', 'France bank holiday', true]]);
+  });
+});

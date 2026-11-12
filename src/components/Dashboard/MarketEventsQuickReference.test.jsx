@@ -153,6 +153,60 @@ describe('MarketEventsQuickReference', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
+  test('a market closure today turns its row and the dock button blue; releases stay plain', () => {
+    const closure = event({ id: 'mc-0123456789abcdef01234567', kind: 'closure', name: 'Bond market closed — Veterans Day',
+      detail: 'US Treasuries and bonds do not trade; stocks are open.', category: 'closure', startAt: '2026-08-10T04:00:00.000Z',
+      allDay: true, forecast: null, previous: null, lastUpdatedAt: null, provider: 'Exchange calendar', source: 'Exchange calendar',
+      verification: 'exchange-calendar', sourceUrl: 'https://www.nyse.com/markets/hours-calendars' });
+    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([closure, event()]) }));
+    render(<MarketEventsQuickReference compact now={now} />);
+    const trigger = screen.getByRole('button', { name: 'Market Events', exact: true });
+    expect(trigger).toHaveClass('has-closure');
+    expect(trigger).toHaveAttribute('title', expect.stringContaining('US Bond market closed — Veterans Day'));
+    fireEvent.click(trigger);
+    const calendar = screen.getByRole('dialog', { name: 'Market Events', exact: true });
+    const row = within(calendar).getByText('Bond market closed — Veterans Day').closest('li');
+    expect(row).toHaveClass('is-closure');
+    expect(within(row).getByText('Closed')).toBeInTheDocument();
+    expect(within(calendar).getByText('CPI y/y').closest('li')).not.toHaveClass('is-closure');
+  });
+
+  test('the dock button stops being blue once today\'s closure has been looked at, and stays plain after a reload', () => {
+    const closure = event({ id: 'mc-0123456789abcdef01234567', kind: 'closure', name: 'Bond market closed — Veterans Day',
+      startAt: '2026-08-10T04:00:00.000Z', allDay: true, forecast: null, previous: null, lastUpdatedAt: null,
+      provider: 'Exchange calendar', source: 'Exchange calendar', verification: 'exchange-calendar' });
+    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([closure, event()]) }));
+    const { unmount } = render(<MarketEventsQuickReference compact now={now} />);
+    const trigger = screen.getByRole('button', { name: 'Market Events', exact: true });
+    expect(trigger).toHaveClass('has-closure');
+    fireEvent.click(trigger);
+    expect(trigger).not.toHaveClass('has-closure');
+    fireEvent.click(trigger);
+    expect(trigger).not.toHaveClass('has-closure');
+    unmount();
+    render(<MarketEventsQuickReference compact now={now} />);
+    expect(screen.getByRole('button', { name: 'Market Events', exact: true })).not.toHaveClass('has-closure');
+  });
+
+  test('a new closure today turns the button blue again after an earlier one was seen', () => {
+    localStorage.setItem('marketEvents.seenClosures.v1', JSON.stringify(['mc-aaaaaaaaaaaaaaaaaaaaaaaa']));
+    const closure = event({ id: 'mc-0123456789abcdef01234567', kind: 'closure', name: 'Bond market closed — Veterans Day',
+      startAt: '2026-08-10T04:00:00.000Z', allDay: true, forecast: null, previous: null, lastUpdatedAt: null,
+      provider: 'Exchange calendar', source: 'Exchange calendar', verification: 'exchange-calendar' });
+    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([closure, event()]) }));
+    render(<MarketEventsQuickReference compact now={now} />);
+    expect(screen.getByRole('button', { name: 'Market Events', exact: true })).toHaveClass('has-closure');
+  });
+
+  test('a week with no closure today keeps the dock button plain', () => {
+    const closure = event({ id: 'mc-0123456789abcdef01234567', kind: 'closure', name: 'Bond market closed — Veterans Day',
+      startAt: '2026-08-11T04:00:00.000Z', allDay: true, forecast: null, previous: null, lastUpdatedAt: null,
+      provider: 'Exchange calendar', source: 'Exchange calendar', verification: 'exchange-calendar' });
+    useMarketEvents.mockReturnValue(resource({ data: verifiedSnapshot([closure, event()]) }));
+    render(<MarketEventsQuickReference compact now={now} />);
+    expect(screen.getByRole('button', { name: 'Market Events', exact: true })).not.toHaveClass('has-closure');
+  });
+
   test('keeps every compact agenda event under its ET day without capacity clipping', () => {
     listHeight = 1;
     const todayNames = [

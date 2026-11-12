@@ -150,6 +150,57 @@ def _implied_move(gauge: dict[str, Any], row: dict[str, Any] | None) -> str | No
     return f"±{daily:.1f}% · ±{move:,.0f}" if move >= 10 else f"±{daily:.1f}% · ±{move:.2f}"
 
 
+def _sizing_block(members: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Each sized setup: its share of the Kalshi account, what cost it points, and the split across the event's lines."""
+    isnum = lambda value: isinstance(value, (int, float)) and not isinstance(value, bool)
+    share = lambda value: f"{value:.2f}%" if isnum(value) else NA
+    odds = lambda value: f"{value * 100:.0f}%" if isnum(value) else NA
+    markets = []
+    for row in members:
+        sizing = row.get("sizing")
+        if not isinstance(sizing, dict) or not isnum(sizing.get("pct")):
+            continue
+        components = [item for item in sizing.get("components") or [] if isinstance(item, dict)]
+        ladder = sizing.get("ladder") or {}
+        centre, sigma = ladder.get("centre"), ladder.get("sigma")
+        lines = []
+        for line in sizing.get("lines") or []:
+            distance = ([f"{line['fromCentrePct']:+.1f}%", f"{line['sigmas']:+.1f}σ"]
+                        if isnum(line.get("fromCentrePct")) and isnum(line.get("sigmas")) else [])
+            stake = ([f"${line['dollars']:,.0f}", f"{line['contracts']:,}"]
+                     if isnum(line.get("dollars")) and isnum(line.get("contracts")) else [])
+            lines.append({"line": f"Above {_number(line.get('strike'))}", "from": " · ".join(distance) or NA,
+                          "buy": "Yes" if line.get("buy") == "YES" else "No",
+                          "ask": f"{line['ask'] * 100:.0f}¢" if isnum(line.get("ask")) else NA,
+                          "kalshi": odds(line.get("kalshiOdds")), "ours": odds(line.get("ourOdds")),
+                          "edge": f"{line['edge'] * 100:+.1f}" if isnum(line.get("edge")) else NA,
+                          "pct": share(line.get("pct")), **({"stake": " · ".join(stake)} if stake else {}),
+                          **({"capped": True} if line.get("capped") else {})})
+        market = {
+            "market": row.get("label"), "side": "Long" if sizing.get("side") == "LONG" else "Short",
+            "pct": f"{sizing['pct']:.1f}%", "maxPct": f"{sizing.get('maxPct', 10):g}%",
+            "lost": [{"label": item.get("label"), "points": f"−{item['lost']:.1f}",
+                      **({"note": "no reading" if item.get("missing") else item["detail"]} if item.get("missing") or item.get("detail") else {})}
+                     for item in components if isnum(item.get("lost")) and item["lost"] >= 0.05],
+            "event": sizing.get("event"), "lines": lines,
+        }
+        if not lines:
+            market["reason"] = sizing.get("reason") or "Kalshi lines not read"
+        elif isnum(sizing.get("unspentPct")) and sizing["unspentPct"] >= 0.05:
+            market["unspent"] = share(sizing["unspentPct"])
+        if isnum(centre) and isnum(sigma) and centre:
+            market["sigma"] = f"±{sigma / centre * 100:.1f}% · ±{_number(sigma)}"
+        implied = _implied_move(row.get("volatility") or {}, row)
+        if implied:
+            market["implied"] = f"{(row.get('volatility') or {}).get('symbol')} {implied}"
+        if sizing.get("quotedAt"):
+            market["quoted"] = _pacific(sizing["quotedAt"])
+        if lines and not sizing.get("account"):
+            market["note"] = "Kalshi balance unavailable; shares of the account only."
+        markets.append({key: value for key, value in market.items() if value not in (None, "")})
+    return {"markets": markets} if markets else None
+
+
 def _driver_block(board: dict[str, Any], members: list[dict[str, Any]], section_label: str) -> dict[str, Any]:
     """Section-wide tables above the market table: volatility, then correlation with the US Dollar."""
     as_of = board.get("asOf")
@@ -670,10 +721,21 @@ def render_setup_board(board: dict[str, Any]) -> str:
             notes.append("Kalshi yield contracts pay if the daily Treasury yield reaches the line on any business day this month.")
         if notes:
             lines += [" ".join(notes), ""]
+        # Boards captured with sizing show each setup's position and line split under its section's table.
+        sizing = _sizing_block(members)
+        if sizing:
+            lines += ["```analyst-sizing", json.dumps(sizing, ensure_ascii=False, separators=(",", ":")), "```", ""]
         block = research_blocks.get(section_id)
         if block:
             lines += ["```analyst-research", json.dumps(block, ensure_ascii=False, separators=(",", ":")), "```", ""]
 
+    # Boards captured with the paper ledger say how the sized tickets have done so far.
+    paper = board.get("paper")
+    if isinstance(paper, dict) and paper.get("tickets"):
+        settled, opened = paper.get("settled") or 0, paper.get("open") or 0
+        result = (f"{settled} settled, {paper.get('wonTickets') or 0} won, {paper['returnOnStake'] * 100:+.1f}% on stake after fees"
+                  if settled and isinstance(paper.get("returnOnStake"), (int, float)) else "none settled yet")
+        lines += [f"Paper tickets: {result}" + (f"; {opened} open." if opened else "."), ""]
     # Hedgeye products as the body cites them, then the CPI publications and the market data feeds.
     dated = [(label, _pacific_zoned(sources.get(key))) for key, label in (
         ("inflationNowcast", "Inflation Nowcast"), ("cpiConsensus", "Trading Economics CPI consensus"))]

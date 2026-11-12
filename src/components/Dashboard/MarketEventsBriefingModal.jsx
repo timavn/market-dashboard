@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import usePageScrollLock from '../../hooks/usePageScrollLock';
 import {
-  isMarketDateCovered, marketEventEtDateKey, MARKET_EVENTS_SOURCE_URL, MARKET_EVENTS_PROVIDER,
+  isMarketClosure, isMarketDateCovered, marketEventEtDateKey, MARKET_EVENTS_SOURCE_URL, MARKET_EVENTS_PROVIDER,
   MARKET_EVENTS_NEXT_PROVIDER,
 } from '../../hooks/useMarketEvents';
 import { getMarketEventBriefing } from '../../constants/marketEventBriefings';
@@ -13,7 +13,22 @@ import LoadingIndicator from '../common/LoadingIndicator';
 
 const valueText = (value) => value == null || String(value).trim() === '' ? 'Unavailable' : String(value);
 
+function ClosureBriefing({ event }) {
+  return (
+    <article className="market-event-briefing is-closure" aria-label={`${event.countryCode} ${event.name}`}>
+      <header>
+        <span className="market-event-briefing__country">{event.countryCode} · {event.currency}</span>
+        <h3>{event.name}</h3>
+        {event.allDay ? <span>All day</span> : <time dateTime={event.startAt}>{marketEventDateTime(event.startAt)}</time>}
+      </header>
+      {event.detail && <p className="market-event-briefing__summary">{event.detail}</p>}
+      <a href={event.sourceUrl} target="_blank" rel="noreferrer">{event.provider} ↗</a>
+    </article>
+  );
+}
+
 function EventBriefing({ event }) {
+  if (isMarketClosure(event)) return <ClosureBriefing event={event} />;
   const info = getMarketEventBriefing(event);
   const sourceLabel = event.provider === MARKET_EVENTS_NEXT_PROVIDER ? 'TE' : 'FF';
   return (

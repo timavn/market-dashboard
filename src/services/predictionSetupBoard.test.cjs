@@ -594,3 +594,59 @@ test('a published Trade or Trend whose Alpha Code line the price crossed since r
   assert.equal(wti.trend, 'NEUTRAL');
   assert.deepEqual(wti.alphaBreaks.trend.published, { value: 'BULLISH', date: '2026-11-03', source: 'Risk Ranges' });
 });
+
+const goldShort = {
+  riskRanges: { ranges: { GLD: { lrr: 3900, hrr: 4000, trend: 'BEARISH', date: '2026-11-10' },
+    DXY: { lrr: 99, hrr: 101, trend: 'BULLISH', date: '2026-11-10' } } },
+  quotes: { 'GC=F': { price: 3995 }, 'DX-Y.NYB': { price: 100 } },
+  hedgai: { book: { rows: [{ ticker: 'GLD', position: 'Short', publicationDate: '2026-11-10' }] } },
+  usdCorrelations: { calculationDate: '2026-11-09', correlations: { GOLD: { '30D': -0.8 } } },
+  volatility: { GVZ: { availability: 'available', lastPx: 28, weekChangePct: 2 } },
+};
+
+test('a setup in a ladder market is sized; other rows are not', () => {
+  const board = buildSetupBoard(goldShort);
+  const gold = board.rows.find((row) => row.id === 'gold');
+  assert.equal(gold.setup.side, 'SHORT');
+  // Base 4 + range 1.7 + dollar 1 + volatility 0.5, with Z-score and volume missing (half) and no Trade.
+  assert.equal(gold.sizing.pct, 8);
+  assert.deepEqual(gold.sizing.components.filter((item) => item.missing).map((item) => item.key), ['zScore', 'volume']);
+  assert.equal(board.rows.find((row) => row.id === 'silver').sizing, undefined);
+  assert.equal(board.sizing.maxPct, 10);
+});
+
+test('the loader splits a sized setup across its Kalshi lines and the account', async () => {
+  const empty = () => Promise.resolve(null);
+  const asked = [];
+  const quote = (strike, yes) => ({ ticker: `KXGOLDD-26NOV1117-T${strike}`, floor_strike: strike, strike_type: 'greater',
+    yes_bid_dollars: String(yes - 0.01), yes_ask_dollars: String(yes + 0.01), no_bid_dollars: String(1 - yes - 0.01),
+    no_ask_dollars: String(1 - yes + 0.01), yes_ask_size_fp: '500.00', yes_bid_size_fp: '500.00' });
+  const options = {
+    loadRiskRanges: () => Promise.resolve(goldShort.riskRanges), loadCryptoQuant: empty, loadHedgai: () => Promise.resolve(goldShort.hedgai),
+    loadSecurityIntelligence: empty, loadNowcast: empty, loadQuotes: () => Promise.resolve(goldShort.quotes),
+    loadVolatility: () => Promise.resolve(goldShort.volatility), loadUsdCorrelations: () => Promise.resolve(goldShort.usdCorrelations),
+    loadKalshiEvents: (series) => Promise.resolve(series === 'KXGOLDD' ? [{ event_ticker: 'KXGOLDD-26NOV1117' }] : []),
+    loadKalshiMarkets: (event) => { asked.push(event); return Promise.resolve([quote(3960, 0.84), quote(3980, 0.69), quote(4000, 0.5),
+      quote(4020, 0.31), quote(4040, 0.16)]); },
+    loadKalshiBalance: () => Promise.resolve({ balance_dollars: '5000.00', portfolio_value: 100000 }),
+    marketDateFor: () => '2026-11-11',
+  };
+  const board = await createSetupBoardLoader(options)({ now: new Date('2026-11-11T16:00:00Z') });
+  const { sizing } = board.rows.find((row) => row.id === 'gold');
+  // Only the setup's event is read.
+  assert.deepEqual(asked, ['KXGOLDD-26NOV1117']);
+  assert.equal(sizing.event, 'KXGOLDD-26NOV1117');
+  assert.equal(sizing.account.value, 6000);
+  assert.ok(sizing.lines.length > 0 && sizing.lines.every((line) => line.buy === 'NO' && line.contracts > 0));
+  assert.ok(sizing.spentPct <= sizing.pct);
+  assert.ok(Math.abs(sizing.ladder.centre - 4000) < 2);
+  assert.equal(board.sourceStatus.kalshiLines, 'ready');
+  // A failed line read keeps the size and says so; no balance leaves shares of the account only.
+  const failed = await createSetupBoardLoader({ ...options, loadKalshiMarkets: () => Promise.reject(new Error('down')) })({ now: new Date('2026-11-11T16:00:00Z') });
+  assert.equal(failed.rows.find((row) => row.id === 'gold').sizing.reason, 'Kalshi lines unavailable');
+  assert.equal(failed.sourceStatus.kalshiLines, 'failed');
+  const noAccount = await createSetupBoardLoader({ ...options, loadKalshiBalance: () => Promise.reject(new Error('no keys')) })({ now: new Date('2026-11-11T16:00:00Z') });
+  const lines = noAccount.rows.find((row) => row.id === 'gold').sizing;
+  assert.equal(lines.account, null);
+  assert.ok(lines.lines.every((line) => line.contracts === undefined && line.pct > 0));
+});

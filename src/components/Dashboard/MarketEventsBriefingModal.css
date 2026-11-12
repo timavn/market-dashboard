@@ -94,3 +94,5 @@
   .market-event-briefing__facts { grid-template-columns: 1fr 1fr; }
   .market-event-briefing__context { grid-template-columns: 1fr; gap: 0; }
 }
+
+.market-event-briefing.is-closure h3 { color: var(--portfolio-review-blue, #2563eb); }

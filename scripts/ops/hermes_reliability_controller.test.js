@@ -241,7 +241,6 @@ test('controller policy manifest is complete, low risk, and exact-code allowlist
   ]);
   assert.deepEqual(sidecarRestart.triggeringErrorCodes.sort(), [
     'IBKR_BALANCE_REQUEST_TIMEOUT',
-    'IBKR_GATEWAY_API_UNRESPONSIVE',
     'IBKR_LIVE_SESSION_STALE',
     'IBKR_LIVE_SESSION_UNAVAILABLE',
     'IBKR_LIVE_SESSION_UNVERIFIED',
@@ -1029,6 +1028,73 @@ test('confirmed unreachable and duplicate sidecars retain bounded automatic reco
       policies, now: BASE_TIME + 60_000, mode: ACTIVE_MODE,
     }).map(({ policy }) => policy.id), ['restart-ibkr-sidecar']);
   }
+});
+
+test('a Gateway that has stopped answering never restarts the sidecar and names the real remedy', () => {
+  const policies = compilePolicies(manifest);
+  const errorCode = 'IBKR_GATEWAY_API_UNRESPONSIVE';
+  // Both checks that have carried this code: 181 sidecar restarts between
+  // 29 Oct and 11 Nov 2026 were for it, and none of them restored the session.
+  for (const checkId of ['ibkr.gateway', 'ibkr.portfolio']) {
+    const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME, enabledActionIds: ALL_ACTION_IDS });
+    const notified = [];
+    const notifier = (event) => { notified.push(event); return { delivered: true }; };
+    const escalations = () => notified.filter((event) => event.kind === 'escalation');
+    const observe = (now) => {
+      const observation = observeReport(state, report({ now, checks: [
+        check('ibkr.sidecar', 'pass', now),
+        check(checkId, 'fail', now, { errorCode }),
+        check('dashboard.supervisor', 'pass', now),
+      ], rootCauses: [cause(errorCode, checkId)] }), { policies, now, notifier });
+      assert.deepEqual(eligibleActions(state, observation.checksById, {
+        policies, now, mode: ACTIVE_MODE, enabledActionIds: ALL_ACTION_IDS, notifier,
+      }), []);
+    };
+    // A slow heartbeat can stand in a cached report for several minutes. That
+    // alone never tells the user to relaunch a Gateway that is working.
+    for (let minute = 0; minute < 10; minute += 1) observe(BASE_TIME + minute * 60_000);
+    assert.equal(state.incidents[0].actionId, null);
+    assert.equal(state.incidents[0].status, 'manual');
+    assert.equal(state.incidents[0].suppressionReason, 'NO_AUTOMATIC_POLICY');
+    assert.deepEqual(state.actions, []);
+    assert.deepEqual(notified.map((event) => event.kind), ['opening']);
+
+    // Still failing after ten minutes: one notice, saying what does fix it.
+    for (let minute = 10; minute < 14; minute += 1) observe(BASE_TIME + minute * 60_000);
+    assert.equal(escalations().length, 1);
+    assert.match(escalations()[0].body, /has not answered for 10 minutes/);
+    assert.match(escalations()[0].body, /Quit IB Gateway, open it again and log in/);
+    assert.match(escalations()[0].body, /does not fix this/);
+    assert.deepEqual(state.actions, []);
+  }
+
+  // Any other incident with no automatic policy is still escalated at once.
+  {
+    const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME, enabledActionIds: ALL_ACTION_IDS });
+    const notified = [];
+    observeReport(state, report({ now: BASE_TIME, checks: [
+      check('ibkr.sidecar', 'fail', BASE_TIME, { errorCode: 'IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED' }),
+    ], rootCauses: [cause('IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED', 'ibkr.sidecar')] }), {
+      policies, now: BASE_TIME, notifier: (event) => { notified.push(event); return { delivered: true }; },
+    });
+    assert.deepEqual(notified.map((event) => event.kind), ['opening', 'escalation']);
+  }
+
+  // An incident saved while the old policy still restarted the sidecar for it.
+  const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME, enabledActionIds: ALL_ACTION_IDS });
+  state.incidents = [{
+    id: `ibkr.gateway:${errorCode}`, checkId: 'ibkr.gateway', errorCode,
+    actionId: 'restart-ibkr-sidecar', status: 'open', observationCount: 9, notifications: {},
+  }];
+  const checks = new Map([
+    ['ibkr.gateway', check('ibkr.gateway', 'fail', BASE_TIME, { errorCode })],
+    ['dashboard.supervisor', check('dashboard.supervisor', 'pass', BASE_TIME)],
+  ]);
+  assert.deepEqual(eligibleActions(state, checks, {
+    policies, now: BASE_TIME, mode: ACTIVE_MODE, enabledActionIds: ALL_ACTION_IDS,
+  }), []);
+  assert.equal(state.incidents[0].status, 'manual');
+  assert.equal(state.incidents[0].suppressionReason, 'NO_AUTOMATIC_POLICY');
 });
 
 test('a persisted broker incident cannot restart a recovered process or a differently classified current failure', () => {

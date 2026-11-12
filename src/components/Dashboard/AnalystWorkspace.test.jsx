@@ -619,7 +619,7 @@ test.each(['draft', 'activeTurn', 'running', 'accepted'])('empty Miscellaneous w
   await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue(activity === 'draft' ? 'An unsent question' : ''));
 });
 
-test('a Systems health card has no Source, since it cites no published product', async () => {
+test('a Systems health card never reaches the Inbox; it belongs in Systems', async () => {
   const request = api.request.getMockImplementation();
   const citation = { title: 'Systems', product: 'dashboard-health', publicationDate: '2026-09-22',
     sourceUri: '/api/system-readiness', excerpt: 'IB Gateway is disconnected. Portfolio holdings and balances cannot refresh.' };
@@ -629,8 +629,8 @@ test('a Systems health card has no Source, since it cites no published product',
   api.request.mockImplementation((path, body, method) => path === '/inbox' ? Promise.resolve({ attentionVersion: 1, findings: [alert], unread: 1 }) : request(path, body, method));
   render(<AnalystPanel />);
   fireEvent.click(screen.getByRole('tab', { name: /^Inbox/ }));
-  expect(await screen.findByText('IB Gateway is disconnected.')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Source', exact: true })).not.toBeInTheDocument();
+  expect(await screen.findByText('No new items requiring attention.')).toBeInTheDocument();
+  expect(screen.queryByText('IB Gateway is disconnected.')).not.toBeInTheDocument();
 });
 
 // Opens an Inbox Source whose citation names a stored email; `stored` says whether the server has it.
@@ -638,7 +638,7 @@ async function openEmailedSource(stored) {
   const request = api.request.getMockImplementation();
   const citation = { id: 'cite_vlo', title: 'Signal Strength: VLO Removed', product: 'signal-strength', publicationDate: '2026-10-29',
     sourceUri: 'https://app.hedgeye.com/feed_items/189162', excerpt: 'VLO Removed', sourceMessageId: '1a1882c17cfb415f', clipTicker: 'VLO' };
-  const alert = { id: 'vlo', unread: 1, payload: { attentionVersion: 1, kind: 'operational', state: 'open',
+  const alert = { id: 'vlo', unread: 1, payload: { attentionVersion: 1, kind: 'opportunity', state: 'open',
     presentation: { subject: 'VLO', date: '2026-10-29', rows: [{ label: 'Action', text: 'Removed' }], sourceLinks: [{ label: 'Signal Strength', citation }] } } };
   const email = '<html><head></head><body><b>REMOVING:</b> MPC, NOW, <mark id="analyst-source-hit">VLO</mark></body></html>';
   api.request.mockImplementation((path, body, method) => {
@@ -749,7 +749,7 @@ test('with room left of the Analyst window, an inbox Source docks there centered
 test('an inbox Source with several publications shows one at a time, paged by its arrows or its squares', async () => {
   const request = api.request.getMockImplementation();
   const citation = (title, excerpt) => ({ title, excerpt, publicationDate: '2026-10-30' });
-  const alert = { id: 'alert', unread: 1, payload: { attentionVersion: 1, state: 'open', kind: 'operational', priority: 0, fingerprint: 'alert-revision',
+  const alert = { id: 'alert', unread: 1, payload: { attentionVersion: 1, state: 'open', kind: 'opportunity', priority: 0, fingerprint: 'alert-revision',
     publicationTime: '2026-10-30T15:30:00Z', presentation: { subject: 'UNH', date: '2026-10-30', rows: [{ label: 'Issue', text: 'UNH changed.' }],
       sourceLinks: [{ label: 'Alert', citation: citation('Real-Time Alert: UNH Sell', 'SELL SIGNAL UNH') },
         { label: 'Signal', citation: citation('Signal Strength: UNH Removed', 'REMOVING: UNH') }] } } };

@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -6,7 +7,8 @@ from types import SimpleNamespace
 import sys
 from unittest.mock import patch
 
-from ib_insync import Contract
+from ib_insync import IB, Contract
+from ib_insync.client import Client
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -423,3 +425,308 @@ class EndpointTickerReleaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_broker_without_that_bookkeeping_is_unaffected(self):
         manager = make_manager(FakeBroker())
         manager._forget_endpoint_ticker(make_contract(instrument("IWM", 501)))
+
+
+class FakeGateway:
+    """Answers a real ib_insync client the way IB Gateway answers a snapshot.
+
+    The IB object, its wrapper and its client are the real library; only the
+    socket is replaced. ``end_after`` is when the Gateway sends its
+    end-of-snapshot message, or None for a snapshot it leaves open.
+    """
+
+    def __init__(self, *, ready_after=0.01, end_after=0.01, make_ready=True):
+        self.ready_after = ready_after
+        self.end_after = end_after
+        self.make_ready = make_ready
+        self.requests = []
+        self.cancels = []
+        self.ended = []
+        self.sent = []
+        self.ib = IB()
+        client = self.ib.client
+        client.connState = Client.CONNECTED
+        client._apiReady = True
+        client._serverVersion = 176
+        # A real session starts from the Gateway's next valid id, never zero.
+        client.updateReqId(1000)
+        # The library's own limit of 45 a second is not what is under test.
+        client.MaxRequests = 0
+        client.conn.sendMsg = self._on_message
+
+    def _on_message(self, message):
+        loop = asyncio.get_running_loop()
+        fields = message[4:].decode().split("\0")
+        self.sent.append((loop.time(), fields[0]))
+        if fields[0] == "1":
+            req_id = int(fields[2])
+            self.requests.append(req_id)
+            if self.make_ready:
+                loop.call_later(self.ready_after, self._publish, req_id)
+            if self.end_after is not None:
+                loop.call_later(self.end_after, self._end, req_id)
+        elif fields[0] == "2":
+            self.cancels.append(int(fields[2]))
+
+    def _publish(self, req_id):
+        wrapper = self.ib.wrapper
+        wrapper.tcpDataArrived()
+        wrapper.marketDataType(req_id, 1)
+        wrapper.priceSizeTick(req_id, 4, 101.25, 100.0)
+        wrapper.tcpDataProcessed()
+
+    def _end(self, req_id):
+        if req_id in self.cancels:
+            return
+        self.ended.append(req_id)
+        self.ib.wrapper.tickSnapshotEnd(req_id)
+
+    def nothing_left_behind(self):
+        wrapper = self.ib.wrapper
+        return not (
+            wrapper.tickers
+            or wrapper.reqId2Ticker
+            or wrapper._futures
+            or wrapper._results
+            or any(wrapper.ticker2ReqId.values())
+        )
+
+
+def forced_manager(gateway, con_id=901, *, concurrency=6):
+    manager = make_manager(gateway.ib, concurrency=concurrency, persistent_ids=[con_id])
+    manager._contracts[con_id] = make_contract(instrument("SPY", con_id))
+    return manager
+
+
+async def closed(manager):
+    """Wait for the snapshots still waiting on the Gateway to be closed."""
+    closers = manager.__dict__.get("_broker_snapshot_closers") or set()
+    if closers:
+        await asyncio.gather(*list(closers))
+
+
+class BrokerSnapshotEndTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Pacing has its own tests below.
+        unpaced = patch("stream_manager.SNAPSHOT_MESSAGE_INTERVAL_SEC", 0.0)
+        unpaced.start()
+        self.addCleanup(unpaced.stop)
+
+    async def forced(self, manager, con_id=901, timeout_sec=0.5):
+        return await manager.get_quote_for_instrument(
+            instrument("SPY", con_id), timeout_sec=timeout_sec, force_refresh=True,
+        )
+
+    async def test_a_snapshot_the_gateway_has_ended_is_not_cancelled(self):
+        gateway = FakeGateway(ready_after=0.01, end_after=0.01)
+        manager = forced_manager(gateway)
+
+        result = await self.forced(manager)
+        await closed(manager)
+
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["quote"]["observationMode"], "broker_snapshot")
+        self.assertEqual(result["quote"]["last"], 101.25)
+        self.assertEqual(len(gateway.requests), 1)
+        self.assertEqual(gateway.cancels, [])
+        self.assertTrue(gateway.nothing_left_behind())
+        self.assertEqual(
+            manager._broker_snapshot_counts,
+            {"requested": 1, "endedByGateway": 1, "cancelled": 0},
+        )
+
+    async def test_a_snapshot_that_ends_after_its_quote_is_read_is_not_cancelled(self):
+        gateway = FakeGateway(ready_after=0.01, end_after=0.15)
+        manager = forced_manager(gateway)
+
+        result = await self.forced(manager)
+
+        # The caller has its quote before the Gateway has ended the request.
+        self.assertIsNone(result["error"])
+        self.assertEqual(gateway.ended, [])
+        await closed(manager)
+        self.assertEqual(gateway.ended, gateway.requests)
+        self.assertEqual(gateway.cancels, [])
+        self.assertTrue(gateway.nothing_left_behind())
+
+    async def test_a_snapshot_the_gateway_leaves_open_is_cancelled_once(self):
+        gateway = FakeGateway(ready_after=0.01, end_after=None)
+        manager = forced_manager(gateway)
+
+        with patch("stream_manager.SNAPSHOT_END_GRACE_SEC", 0.05):
+            result = await self.forced(manager)
+            self.assertIsNone(result["error"])
+            self.assertEqual(gateway.cancels, [])
+            await closed(manager)
+
+        self.assertEqual(gateway.cancels, gateway.requests)
+        self.assertTrue(gateway.nothing_left_behind())
+        self.assertEqual(
+            manager._broker_snapshot_counts,
+            {"requested": 1, "endedByGateway": 0, "cancelled": 1},
+        )
+
+    async def test_a_quote_that_never_arrives_is_reported_the_same_way(self):
+        gateway = FakeGateway(make_ready=False, end_after=0.02)
+        manager = forced_manager(gateway)
+
+        result = await self.forced(manager, timeout_sec=0.08)
+        await closed(manager)
+
+        self.assertEqual(result["error"], "quote_timeout")
+        self.assertIsNone(result["quote"]["timestamp"])
+        self.assertEqual(gateway.cancels, [])
+        self.assertTrue(gateway.nothing_left_behind())
+
+    async def test_the_snapshot_slot_is_free_while_the_gateway_is_awaited(self):
+        gateway = FakeGateway(ready_after=0.01, end_after=None)
+        manager = forced_manager(gateway, concurrency=1)
+        manager._contracts[902] = make_contract(instrument("QQQ", 902))
+        manager._ref_counts[902] = 1
+
+        with patch("stream_manager.SNAPSHOT_END_GRACE_SEC", 5.0):
+            first = await self.forced(manager, 901)
+            second = await asyncio.wait_for(self.forced(manager, 902), timeout=1.0)
+            self.assertIsNone(first["error"])
+            self.assertIsNone(second["error"])
+            self.assertEqual(len(gateway.requests), 2)
+            self.assertEqual(gateway.cancels, [])
+            # Stopping the sidecar does not leave them waiting.
+            for closer in list(manager._broker_snapshot_closers):
+                closer.cancel()
+            await asyncio.gather(*list(manager._broker_snapshot_closers), return_exceptions=True)
+
+        self.assertEqual(sorted(gateway.cancels), sorted(gateway.requests))
+        self.assertTrue(gateway.nothing_left_behind())
+
+    async def test_a_dropped_socket_needs_no_cancel(self):
+        unhandled = []
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+        gateway = FakeGateway(ready_after=0.01, end_after=None)
+        manager = forced_manager(gateway)
+
+        with patch("stream_manager.SNAPSHOT_END_GRACE_SEC", 5.0):
+            result = await self.forced(manager)
+            self.assertIsNone(result["error"])
+            # ib_insync fails every open request and clears its records.
+            gateway.ib.wrapper.connectionClosed()
+            await closed(manager)
+
+        gc.collect()
+        await asyncio.sleep(0)
+        self.assertEqual(gateway.cancels, [])
+        self.assertTrue(gateway.nothing_left_behind())
+        self.assertEqual(unhandled, [])
+        self.assertIsNone(manager.last_error)
+
+    async def test_a_request_that_cannot_be_sent_leaves_nothing_behind(self):
+        gateway = FakeGateway()
+        manager = forced_manager(gateway)
+        gateway.ib.client.connState = Client.DISCONNECTED
+
+        result = await self.forced(manager)
+
+        self.assertIsNone(result["quote"])
+        self.assertEqual(result["error"], "Not connected")
+        self.assertEqual(gateway.requests, [])
+        self.assertTrue(gateway.nothing_left_behind())
+
+    async def test_a_whole_book_of_snapshots_sends_no_cancels(self):
+        gateway = FakeGateway(ready_after=0.01, end_after=0.03)
+        manager = forced_manager(gateway, concurrency=12)
+        con_ids = list(range(1001, 1072))
+        for con_id in con_ids:
+            manager._contracts[con_id] = make_contract(instrument(f"S{con_id}", con_id))
+            manager._ref_counts[con_id] = 1
+
+        results = await asyncio.gather(*(self.forced(manager, con_id) for con_id in con_ids))
+        await closed(manager)
+
+        self.assertTrue(all(result["error"] is None for result in results))
+        self.assertEqual(len(gateway.requests), 71)
+        self.assertEqual(gateway.cancels, [])
+        self.assertTrue(gateway.nothing_left_behind())
+
+
+class BrokerSnapshotPacingTests(unittest.IsolatedAsyncioTestCase):
+    INTERVAL = 0.02
+
+    def book(self, gateway, count, *, concurrency=12):
+        # As in production: the library's own limit stays on beneath the pacing.
+        gateway.ib.client.MaxRequests = 45
+        manager = forced_manager(gateway, concurrency=concurrency)
+        con_ids = list(range(2001, 2001 + count))
+        for con_id in con_ids:
+            manager._contracts[con_id] = make_contract(instrument(f"S{con_id}", con_id))
+            manager._ref_counts[con_id] = 1
+        return manager, con_ids
+
+    def gaps(self, gateway, message_id):
+        times = [at for at, kind in gateway.sent if kind == message_id]
+        return [later - earlier for earlier, later in zip(times, times[1:])]
+
+    async def refresh(self, manager, con_ids, timeout_sec=1.0):
+        return await asyncio.gather(*(
+            manager.get_quote_for_instrument(
+                instrument(f"S{con_id}", con_id), timeout_sec=timeout_sec, force_refresh=True,
+            )
+            for con_id in con_ids
+        ))
+
+    async def test_a_whole_book_refresh_leaves_one_snapshot_request_at_a_time(self):
+        gateway = FakeGateway(ready_after=0.005, end_after=0.006)
+        manager, con_ids = self.book(gateway, 12)
+
+        with patch("stream_manager.SNAPSHOT_MESSAGE_INTERVAL_SEC", self.INTERVAL):
+            results = await self.refresh(manager, con_ids)
+            await closed(manager)
+
+        self.assertTrue(all(result["error"] is None for result in results))
+        self.assertEqual(len(gateway.requests), 12)
+        # Twelve slots were free at once; the requests still left evenly.
+        self.assertGreaterEqual(min(self.gaps(gateway, "1")), self.INTERVAL * 0.95)
+        self.assertEqual(gateway.cancels, [])
+
+    async def test_other_requests_never_wait_behind_the_snapshots(self):
+        gateway = FakeGateway(ready_after=0.005, end_after=0.006)
+        manager, con_ids = self.book(gateway, 12)
+
+        with patch("stream_manager.SNAPSHOT_MESSAGE_INTERVAL_SEC", self.INTERVAL):
+            refresh = asyncio.create_task(self.refresh(manager, con_ids))
+            await asyncio.sleep(self.INTERVAL * 1.5)
+            snapshots_so_far = len(gateway.requests)
+            asked = asyncio.get_running_loop().time()
+            # The heartbeat the connection governor sends.
+            gateway.ib.client.reqCurrentTime()
+            heartbeat = next(at for at, kind in gateway.sent if kind == "49")
+            await refresh
+            await closed(manager)
+
+        self.assertLess(snapshots_so_far, 12)
+        self.assertLess(heartbeat - asked, self.INTERVAL / 2)
+
+    async def test_cancels_take_their_turn_as_well(self):
+        gateway = FakeGateway(ready_after=0.005, end_after=None)
+        manager, con_ids = self.book(gateway, 6)
+
+        with patch("stream_manager.SNAPSHOT_MESSAGE_INTERVAL_SEC", self.INTERVAL), \
+                patch("stream_manager.SNAPSHOT_END_GRACE_SEC", 0.01):
+            await self.refresh(manager, con_ids)
+            await closed(manager)
+
+        self.assertEqual(sorted(gateway.cancels), sorted(gateway.requests))
+        times = sorted(at for at, _kind in gateway.sent)
+        gaps = [later - earlier for earlier, later in zip(times, times[1:])]
+        self.assertGreaterEqual(min(gaps), self.INTERVAL * 0.95)
+        self.assertTrue(gateway.nothing_left_behind())
+
+    async def test_pacing_can_be_switched_off(self):
+        gateway = FakeGateway(ready_after=0.005, end_after=0.006)
+        manager, con_ids = self.book(gateway, 12)
+
+        with patch("stream_manager.SNAPSHOT_MESSAGE_INTERVAL_SEC", 0.0):
+            await self.refresh(manager, con_ids)
+            await closed(manager)
+
+        self.assertLess(max(self.gaps(gateway, "1")), self.INTERVAL / 2)

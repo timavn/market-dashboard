@@ -59,6 +59,11 @@ const CONTROLLER_SERVICE_ID = 'dashboard-readiness-controller';
 const CONTROLLER_STATE_VERSION = 1;
 const ACTIVE_MODE = 'active';
 const SHADOW_MODE = 'shadow';
+const GATEWAY_API_UNRESPONSIVE = 'IBKR_GATEWAY_API_UNRESPONSIVE';
+// One slow heartbeat reads as an unresponsive Gateway, and a readiness report
+// may be served from cache for five minutes. The instruction to relaunch the
+// Gateway waits until the failure has outlasted both.
+const GATEWAY_UNRESPONSIVE_ESCALATION_DELAY_MS = 10 * 60_000;
 const CONTROLLER_BUILD_FINGERPRINT = crypto
   .createHash('sha256')
   .update(fs.readFileSync(__filename))
@@ -641,6 +646,11 @@ function notificationBody(kind, incident) {
     return `${code} reached the two-attempt limit; automatic repair is paused until ${incident.circuitOpenUntil}.`;
   }
   if (kind === 'escalation') {
+    if (code === GATEWAY_API_UNRESPONSIVE) {
+      // The Gateway is running but no longer answers any API client, so a new
+      // sidecar process meets the same silence. Only a Gateway relaunch helps.
+      return `${code}: IB Gateway has not answered for 10 minutes. Quit IB Gateway, open it again and log in. Restarting the dashboard's IBKR service does not fix this.`;
+    }
     if (incident.actionId === 'restart-ibkr-sidecar') {
       return `${code}: sidecar-only recovery is unavailable. Relaunch and log in to IB Gateway manually.`;
     }
@@ -688,6 +698,16 @@ function sendMacNotification(event, {
       reason: error?.code || boundedText(error?.message || error),
     };
   }
+}
+
+// Every other manual incident is escalated when it is first seen. A Gateway
+// that has stopped answering is escalated only once it has stayed that way,
+// so a blip never asks the user to relaunch a Gateway that is working.
+function escalationIsDue(incident, now) {
+  if (incident.errorCode !== GATEWAY_API_UNRESPONSIVE) return true;
+  const openedAt = timestamp(incident.openedAt);
+  return openedAt !== null
+    && now - openedAt >= GATEWAY_UNRESPONSIVE_ESCALATION_DELAY_MS;
 }
 
 function notifyIncident(incident, kind, observedAt, notifier) {
@@ -889,7 +909,9 @@ function observeReport(state, report, {
     if (!policy) {
       incident.status = 'manual';
       incident.suppressionReason = 'NO_AUTOMATIC_POLICY';
-      notifyIncident(incident, 'escalation', observedAt, notifier);
+      if (escalationIsDue(incident, now)) {
+        notifyIncident(incident, 'escalation', observedAt, notifier);
+      }
     }
   }
 

@@ -386,3 +386,17 @@
     column-gap: 3px;
   }
 }
+
+/* Closures and early closes are the one thing Market Events colors: they change
+   what can trade that day. Scheduled releases stay plain. */
+.market-events-day li.is-closure,
+.market-events-day li.is-closure span,
+.market-events-day li.is-closure time,
+.dark .market-events-day li.is-closure,
+.dark .market-events-day li.is-closure span,
+.dark .market-events-day li.is-closure time {
+  color: var(--portfolio-review-blue, #2563eb);
+}
+.dark .market-events-day li.is-closure,
+.dark .market-events-day li.is-closure span,
+.dark .market-events-day li.is-closure time { color: #60a5fa; }

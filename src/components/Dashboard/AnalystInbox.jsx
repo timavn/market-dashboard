@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { analystWorkspaceApi as api } from '../../services/analyst/analystClient';
 import AnalystAlertThread from './AnalystAlertThread';
 import { describeAnalystFinding } from '../../utils/analystFindingPresentation.cjs';
-import { activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, isActionRequired, isAttentionFinding } from '../../utils/analystInboxAlerts.cjs';
+import { activeAttentionFinding, attentionEvidenceFreshness, attentionPriority, isActionRequired, isAttentionFinding, isSystemsIssue } from '../../utils/analystInboxAlerts.cjs';
 import AnalystPredictionRangeBar from './AnalystPredictionRangeBar';
 import './AnalystPredictionReport.css';
 import './AnalystInbox.css';
@@ -24,6 +24,27 @@ function DirectionalText({ children }) {
       ? <span key={index} className={`analyst-inbox-signal--${tone}`}>{part}</span>
       : part;
   });
+}
+
+// A company name reads in the site's security blue wherever the card's text names it.
+// Sources often shorten it ("Boot Barn" for "Boot Barn Holdings, Inc."), so the
+// legal suffixes come off for a second, shorter match.
+const SUFFIX = /(?:,?\s+(?:inc\.?|incorporated|corp\.?|corporation|co\.?|company|ltd\.?|limited|plc|holdings?|group|n\.?v\.?|s\.?a\.?|l\.?p\.?|& co\.?))+$/i;
+function companyPatterns(name) {
+  const full = String(name || '').trim();
+  if (!full) return [];
+  const short = full.replace(SUFFIX, '').trim();
+  return [...new Set([full, short])].filter(value => value.length >= 3);
+}
+const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function CompanyText({ name, children }) {
+  const patterns = companyPatterns(name);
+  const text = String(children || '');
+  if (!patterns.length) return <DirectionalText>{text}</DirectionalText>;
+  const parts = text.split(new RegExp(`(${patterns.map(escapeRegExp).join('|')})`, 'gi'));
+  return parts.map((part, index) => index % 2
+    ? <span key={index} className="analyst-inbox-company-name">{part}</span>
+    : <React.Fragment key={index}><DirectionalText>{part}</DirectionalText></React.Fragment>);
 }
 
 // "Oct 23 09:41" in the viewer's local time. A midnight-UTC stamp stands in for a
@@ -122,6 +143,21 @@ function attentionContent(finding, now) {
 }
 
 const signed = (value, digits = 1) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value).toFixed(digits)}%`;
+// Three Inbox categories. Alerts (red): an instruction that contradicts a held
+// position. Actions (blue): the card tells you to do something. Signals (yellow):
+// a condition to know about, led by its Signal line. Service and evidence
+// problems are Systems issues and never reach the Inbox.
+const INBOX_CATEGORIES = [
+  { key: 'alert', label: 'Alerts' },
+  { key: 'signal', label: 'Signals' },
+  { key: 'action', label: 'Actions' },
+];
+function inboxCategory({ finding, content, modern }) {
+  if (isActionRequired(finding)) return 'alert';
+  if (!modern) return 'action';
+  return content.rows.some(row => (row.lead && row.label === 'Action') || row.label === 'Order') ? 'action' : 'signal';
+}
+
 const toneClass = tone => tone ? `analyst-inbox-signal--${tone}` : undefined;
 
 // Price windows are colored by their own sign, whichever side is held: down is
@@ -216,7 +252,7 @@ function alertSummary(finding, content, modern, date) {
   return [title, ...lines.filter(Boolean)].join('\n').slice(0, 8_000);
 }
 
-export default function AnalystInbox({ findings = [], error = '', onCitation, onAcknowledge, loadHorizonStats, MessageComponent }) {
+export default function AnalystInbox({ findings = [], error = '', onCitation, onAcknowledge, loadHorizonStats, loadSecurityNames, MessageComponent }) {
   // Alert id → its Analyst conversation; the server drops the link on dismiss.
   const [threads, setThreads] = useState({});
   const findingIds = findings.map(finding => finding.id).join(',');
@@ -234,7 +270,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
     const timer = setInterval(() => setNow(Date.now()), 5_000);
     return () => clearInterval(timer);
   }, []);
-  const describe = list => list
+  const describe = list => list.filter(finding => !isSystemsIssue(finding))
     .map(finding => ({ finding, modern: isAttentionFinding(finding),
       content: isAttentionFinding(finding) ? attentionContent(finding, now) : describeAnalystFinding(finding, findings, now) }))
     .filter(({ finding, content }) => content && content.positionAction !== 'Neutral — no change'
@@ -255,14 +291,27 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
     loadHorizonStats(securities.split(',')).then(rows => current && setHorizonStats(previous => ({ ...previous, ...rows })), () => {});
     return () => { current = false; };
   }, [loadHorizonStats, securities]);
-  const urgent = alerts.filter(({ finding }) => isActionRequired(finding));
-  const ordinary = alerts.filter(({ finding }) => !isActionRequired(finding));
+  // Action cards name the company under the Ticker, from the central security record.
+  const [companyNames, setCompanyNames] = useState({});
+  const actionTickers = [...new Set(alerts.filter(item => item.modern && inboxCategory(item) === 'action' && TICKER_KINDS.has((item.finding.payload || item.finding).kind))
+    .map(({ content }) => content.subject).filter(subject => typeof subject === 'string' && /^[A-Z0-9.^-]{1,12}$/.test(subject)))].sort().join(',');
+  useEffect(() => {
+    const missing = actionTickers ? actionTickers.split(',').filter(symbol => !(symbol in companyNames)) : [];
+    if (!loadSecurityNames || !missing.length) return undefined;
+    let current = true;
+    loadSecurityNames(missing).then(names => current && setCompanyNames(previous => ({ ...Object.fromEntries(missing.map(symbol => [symbol, null])), ...previous, ...names })), () => {});
+    return () => { current = false; };
+  }, [loadSecurityNames, actionTickers]); // eslint-disable-line react-hooks/exhaustive-deps
+  const groups = INBOX_CATEGORIES.map(category => ({ ...category, items: alerts.filter(item => inboxCategory(item) === category.key) }))
+    .filter(group => group.items.length);
 
   return <section className="analyst-inbox" aria-label="Portfolio inbox">
     {error && <p className="analyst-inbox-error" role="alert">{error}</p>}
     {!alerts.length && <p className="analyst-inbox-empty">No new items requiring attention.</p>}
-    {urgent.length > 0 && <h2 className="analyst-inbox-urgent-heading">Alerts</h2>}
-    {[...urgent, ...ordinary].map((item, index) => card(item, index))}
+    {groups.map(group => <React.Fragment key={group.key}>
+      <h2 className={`analyst-inbox-heading analyst-inbox-heading--${group.key}`}>{group.label}</h2>
+      {group.items.map((item, index) => card(item, index))}
+    </React.Fragment>)}
     {showDismissed && dismissedList.length > 0 && <>
       <h2 className="analyst-inbox-dismissed-heading">Dismissed · last 24 hours</h2>
       {dismissedList.map((item, index) => card(item, index, dismissedAt(item.finding)))}
@@ -284,6 +333,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       const updateParts = content.updateParts || [{ text: content.headline, tone: content.tone }];
       const contextLines = [content.detail, ...(content.sourceContext || [])].filter(Boolean);
       const required = isActionRequired(finding);
+      const company = ticker && inboxCategory({ finding, content, modern }) === 'action' ? companyNames[ticker] || null : null;
       const stance = modern && content.stance?.calls?.length ? content.stance : null;
       // Every linked publication opens from one Source popover beside the button.
       const durations = modern ? DURATIONS.map(label => content.rows.find(row => row.label === label)).filter(Boolean) : [];
@@ -297,8 +347,8 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       const citations = content.sourceLinks?.length ? content.sourceLinks.filter(link => publishedSource(link) && link.label).map(link => link.citation)
         : payload.citation ? [payload.citation] : [];
       return <React.Fragment key={finding.id}>
-      {!dismissed && !required && index === urgent.length && urgent.length > 0 && <h2 className="analyst-inbox-ordinary-heading">Notifications</h2>}
-      <article className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}${dismissed ? ' is-dismissed' : ''}`}>
+      <article data-category={inboxCategory({ finding, content, modern })}
+        className={`analyst-inbox-finding${finding.unread ? ' is-unread' : ''}${required ? ' is-action-required' : ''}${dismissed ? ' is-dismissed' : ''}`}>
         <h3 className="sr-only">{subject}</h3>
         <div className={durations.length ? 'analyst-inbox-body has-horizons' : 'analyst-inbox-body'}>
         {stance ? <StanceCopy ticker={subject} stance={stance} freshHoldings={attentionEvidenceFreshness(finding, now).holdings} /> : <dl className="analyst-inbox-copy">
@@ -311,13 +361,16 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
           {ticker && <div className="analyst-inbox-ticker">
             <dt>Ticker: </dt><dd>{ticker}</dd>
           </div>}
+          {company && <div className="analyst-inbox-company">
+            <dt>Company: </dt><dd className="analyst-inbox-company-name">{company}</dd>
+          </div>}
           {modern ? rows.map((row, index) => row.text.includes('\n') ? <div key={`${row.label}-${index}`} className="analyst-inbox-stack">
             {/* A history row (line crosses) stacks one entry per line, newest on top, aligned under each other. */}
             <dt>{row.label}: </dt><dd>{row.text.split('\n').map((entry, line) => <span key={line} className={line ? 'analyst-inbox-stack__older' : undefined}>
               <DirectionalText>{entry}</DirectionalText></span>)}</dd>
           </div> : <div key={`${row.label}-${index}`}>
             <dt>{row.label}: </dt><dd className={row.side ? toneClass(STANCE_TONES[row.side.toUpperCase()]) : ['Unavailable', 'N/A'].includes(row.text) ? 'analyst-inbox-signal--neutral' : undefined}>
-              {row.side && `${row.side.toUpperCase()} `}{row.label === 'Order' ? <OrderText>{row.text}</OrderText> : row.label === 'Source' ? row.text : <DirectionalText>{row.text}</DirectionalText>}</dd>
+              {row.side && `${row.side.toUpperCase()} `}{row.label === 'Order' ? <OrderText>{row.text}</OrderText> : row.label === 'Source' ? row.text : <CompanyText name={company}>{row.text}</CompanyText>}</dd>
           </div>) : <>
           <div className="analyst-inbox-position">
             <dt>Current position: </dt><dd><DirectionalText>{content.currentPosition.label}</DirectionalText>

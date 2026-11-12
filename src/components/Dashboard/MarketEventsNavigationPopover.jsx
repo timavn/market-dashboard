@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState
 import { createPortal } from 'react-dom';
 import './MarketEventsNavigationPopover.css';
 
-export default function MarketEventsNavigationPopover({ detail, briefingOpen, onOpen, children }) {
+export default function MarketEventsNavigationPopover({ detail, closure = false, briefingOpen, onOpen, children }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({});
   const triggerRef = useRef(null);
@@ -63,7 +63,7 @@ export default function MarketEventsNavigationPopover({ detail, briefingOpen, on
 
   return <>
     <button ref={triggerRef} type="button"
-      className={`dashboard-top-navigation__item market-events-navigation-trigger${open ? ' is-active' : ''}`}
+      className={`dashboard-top-navigation__item market-events-navigation-trigger${open ? ' is-active' : ''}${closure ? ' has-closure' : ''}`}
       aria-label="Market Events" aria-haspopup="dialog"
       aria-expanded={open} aria-controls={open ? panelId : undefined} title={detail}
       onClick={() => {

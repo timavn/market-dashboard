@@ -11,6 +11,7 @@ import {
   MARKET_EVENTS_SOURCE_URL,
   addMarketDateKeyDays,
   currentMarketEventWeek,
+  isMarketClosure,
   isMarketDateCovered,
   marketEventEtDateKey,
   useMarketEvents,
@@ -84,6 +85,9 @@ export function marketEventDetails(event) {
   const sourceTime = !Number.isNaN(sourceDate.getTime())
     ? marketEventDateTime(sourceDate)
     : 'unavailable';
+  if (isMarketClosure(event)) {
+    return [`${event.countryCode} ${event.name}`, event.detail, `Source: ${event.provider}`].filter(Boolean).join(' · ');
+  }
   return [
     `${event.countryCode} ${event.name}`,
     marketEventDateTime(event.startAt),
@@ -191,11 +195,13 @@ function EventRows({ events, onOpen, currentTime, rowHeight = EVENT_ROW_HEIGHT, 
         {visibleEvents.map((event) => {
           const released = isMarketEventReleased(event, currentTime);
           return (
-          <li key={event.id} title={marketEventDetails(event)}>
-            <time dateTime={event.startAt} title={marketEventDateTime(event.startAt)} aria-label={marketEventDateTime(event.startAt)}>
+          <li key={event.id} title={marketEventDetails(event)} className={isMarketClosure(event) ? 'is-closure' : undefined}>
+            {isMarketClosure(event) && event.allDay
+              ? <time dateTime={marketEventEtDateKey(event.startAt)} aria-label="All day">Closed</time>
+              : <time dateTime={event.startAt} title={marketEventDateTime(event.startAt)} aria-label={marketEventDateTime(event.startAt)}>
               {marketEventTime(event.startAt)}
               {marketEventPacificPreviousDay(event.startAt) && <sup title="Pacific time is on the previous calendar day">−1d</sup>}
-            </time>
+            </time>}
             <b>{event.countryCode}</b>
             <span>{event.name}</span>
             {fitContent && <EventFigures event={event} released={released} />}
@@ -301,6 +307,25 @@ function calendarState(resource, currentTime, week) {
   return { status: 'verified', data: resource.data, reason: null };
 }
 
+// Closures already looked at in the dock popover; the button stops being blue
+// once each of today's closures has been seen. Stored per browser only.
+const SEEN_CLOSURES_KEY = 'marketEvents.seenClosures.v1';
+function readSeenClosures() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(SEEN_CLOSURES_KEY) || '[]');
+    return Array.isArray(value) ? value.filter(id => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function writeSeenClosures(ids) {
+  try {
+    window.localStorage.setItem(SEEN_CLOSURES_KEY, JSON.stringify(ids));
+  } catch {
+    // Without storage the button simply stays blue for today's closures.
+  }
+}
+
 const MarketEventsQuickReference = ({ now = systemNow, compact = false }) => {
   const [todayKey, setTodayKey] = useState(() => (
     marketEventEtDateKey(now()) || marketEventEtDateKey(new Date())
@@ -314,7 +339,20 @@ const MarketEventsQuickReference = ({ now = systemNow, compact = false }) => {
   const currentResource = useMarketEvents({ week: 'this' });
   const nextResource = useMarketEvents({ week: 'next', active: view === 'next' });
   const resource = view === 'next' ? nextResource : currentResource;
-  const openCalendar = useCallback(() => { setView('this'); setSelectedDay(null); }, []);
+  const [seenClosures, setSeenClosures] = useState(readSeenClosures);
+  const todayClosureIdsRef = useRef([]);
+  const openCalendar = useCallback(() => {
+    setView('this');
+    setSelectedDay(null);
+    const ids = todayClosureIdsRef.current;
+    if (!ids.length) return;
+    setSeenClosures(previous => {
+      if (ids.every(id => previous.includes(id))) return previous;
+      // Keep only today's ids so the list never grows.
+      writeSeenClosures(ids);
+      return ids;
+    });
+  }, []);
 
   useEffect(() => { setSelectedDay(null); }, [active, todayKey, view]);
 
@@ -405,11 +443,15 @@ const MarketEventsQuickReference = ({ now = systemNow, compact = false }) => {
   );
 
   if (!compact) return calendar;
-  const count = todayEvents.length;
+  // A closure or early close today turns the dock button blue; releases never do.
+  const todayClosures = todayEvents.filter(isMarketClosure);
+  todayClosureIdsRef.current = todayClosures.map(event => event.id);
+  const unseenClosure = todayClosures.some(event => !seenClosures.includes(event.id));
+  const count = todayEvents.length - todayClosures.length;
   const detail = todayCovered
-    ? `${count} high-impact event${count === 1 ? '' : 's'} today · PT (ET) · Forex Factory · Source updated ${marketEventDateTime(currentState.data.sourceUpdatedAt)}`
+    ? `${todayClosures.length ? `${todayClosures.map(event => `${event.countryCode} ${event.name}`).join('; ')} · ` : ''}${count} high-impact event${count === 1 ? '' : 's'} today · PT (ET) · Forex Factory · Source updated ${marketEventDateTime(currentState.data.sourceUpdatedAt)}`
     : currentState.status === 'loading' ? 'Loading verified calendar' : 'Calendar unavailable';
-  return <MarketEventsNavigationPopover detail={detail} briefingOpen={Boolean(selectedDay)} onOpen={openCalendar}>
+  return <MarketEventsNavigationPopover detail={detail} closure={unseenClosure} briefingOpen={Boolean(selectedDay)} onOpen={openCalendar}>
     {calendar}
   </MarketEventsNavigationPopover>;
 };

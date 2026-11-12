@@ -4,10 +4,11 @@ const { selectLatestPublishedTrade } = require('../utils/publishedResearchSignal
 const { PRODUCTS: MORNING_PRODUCTS, PROXY_TICKERS, buildMorningResearch } = require('./predictionMorningResearch.cjs');
 const { emailPublishedAt } = require('../utils/researchPublicationTime.cjs');
 const { brokenAlphaCodeLine } = require('./analyst/alphaCodeWatch.cjs');
+const { allocateLines, kalshiAccountValue, kalshiLine, scoreConviction, sizedMarket } = require('./predictionSizing.cjs');
 
 // One row per tracked Kalshi market: Hedgeye Tick/Trade/Trend, the verified
-// underlying price, its Risk Range position, and the rule-based setup. Line
-// selection and sizing are intentionally not computed here yet.
+// underlying price, its Risk Range position, and the rule-based setup. A setup
+// is sized here; the loader then splits it across the event's Kalshi lines.
 
 const TICK_DIRECTION = { Buy: 'BULLISH', Short: 'BEARISH', Wait: 'NEUTRAL' };
 const OPPOSITE = { BULLISH: 'BEARISH', BEARISH: 'BULLISH', NEUTRAL: 'NEUTRAL' };
@@ -95,6 +96,7 @@ function volatilityReading(market, { volatility, quotes, riskRanges }) {
   let changePct = null;
   let d15 = null;
   let m1 = null;
+  let w1 = null;
   let asOf = null;
   // A configured gauge without a usable reading still holds its row, shown as unavailable.
   const unavailable = { symbol: spec.symbol, label: spec.label, value: null, regimeKey: spec.regimeKey || null, unavailable: true };
@@ -107,6 +109,7 @@ function volatilityReading(market, { volatility, quotes, riskRanges }) {
     changePct = finite(row.dayChangePct);
     d15 = finite(row.fifteenDayChangePct);
     m1 = finite(row.monthChangePct);
+    w1 = finite(row.weekChangePct);
     asOf = row.asOf || null;
   } else {
     const quote = quotes?.[spec.key];
@@ -116,7 +119,7 @@ function volatilityReading(market, { volatility, quotes, riskRanges }) {
   }
   if (value === null) return unavailable;
   const range = spec.riskRangeTicker ? riskRanges?.ranges?.[spec.riskRangeTicker] : null;
-  return { symbol: spec.symbol, label: spec.label, value, changePct, d15, m1, asOf, regimeKey: spec.regimeKey || null,
+  return { symbol: spec.symbol, label: spec.label, value, changePct, d15, m1, ...(w1 === null ? {} : { w1 }), asOf, regimeKey: spec.regimeKey || null,
     ...(range && finite(range.lrr) !== null && finite(range.hrr) !== null
       ? { low: finite(range.lrr), high: finite(range.hrr), trend: direction(range.trend), rangeDate: range.date || null } : {}) };
 }
@@ -485,6 +488,12 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
         { low: usd.low, high: usd.high, date: usd.rangeDate || riskRanges?.manifest?.publicationDate || null })
       : null;
   }
+  // A setup's size in % of the Kalshi account, scored against the finished dollar reading.
+  for (const row of rows) {
+    if (!row.setup?.side || !sizedMarket(row.id)) continue;
+    row.sizing = scoreConviction({ side: row.setup.side, position: row.position, trade: row.trade, zScore: row.zScore,
+      usdCorrelation: row.usdCorrelation, usd, volatility: row.volatility, volume: row.volume });
+  }
   const research = morningResearch({ morningSnapshots, latestEditions, cryptoQuant, rows, usd, quotes, marketDate });
   if (research) {
     for (const row of rows) row.research = research.markets[row.id] || { findings: [] };
@@ -526,7 +535,7 @@ const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.h
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
   loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts, loadLatestEditions,
   loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
-  loadPublishedStatements, loadAlphaCodeWatch, marketDateFor }) {
+  loadPublishedStatements, loadAlphaCodeWatch, loadKalshiMarkets, loadKalshiBalance, marketDateFor }) {
   return async function loadSetupBoard({ now = new Date(), researchDate = null } = {}) {
     const marketDate = researchDate || marketDateFor(now);
     const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
@@ -591,6 +600,25 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       ...(priceHistory ? { priceHistory } : {}), ...(cpiConsensus ? { cpiConsensus } : {}),
       ...(publishedStatements ? { publishedStatements } : {}) })
       .map(([key, result]) => [key, result.error ? 'failed' : 'ready']));
+    const sized = board.rows.filter((row) => row.sizing && row.events?.[0]?.eventTicker);
+    if (loadKalshiMarkets && !researchDate && sized.length) {
+      // The account is read once; without it tickets carry shares of the account only.
+      const account = loadKalshiBalance
+        ? kalshiAccountValue(await Promise.resolve().then(loadKalshiBalance).catch(() => null)) : null;
+      const read = await Promise.all(sized.map((row) => settle(Promise.resolve().then(() => loadKalshiMarkets(row.events[0].eventTicker)))));
+      sized.forEach((row, index) => {
+        const event = row.events[0].eventTicker;
+        const markets = read[index].value;
+        if (!Array.isArray(markets)) {
+          row.sizing = { ...row.sizing, event, lines: [], reason: 'Kalshi lines unavailable' };
+          return;
+        }
+        const split = allocateLines({ side: row.sizing.side, pct: row.sizing.pct, expanding: row.sizing.expanding,
+          lines: markets.map(kalshiLine), bankroll: account });
+        row.sizing = { ...row.sizing, ...split, event, quotedAt: now.toISOString(), account: account === null ? null : { value: account } };
+      });
+      board.sourceStatus.kalshiLines = read.some((result) => result.error) ? 'failed' : 'ready';
+    }
     return board;
   };
 }

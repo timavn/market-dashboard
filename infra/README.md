@@ -921,12 +921,16 @@ topic has exactly one Lambda subscriber and no email endpoint. Forecast alerts
 are not configured.
 
 `market-dashboard-cost-guardian-v1` accepts only the exact named ACTUAL $50
-notification. It records the pre-pause state, disables the five owned Scheduler
-jobs (Gmail, the three legacy Hermes workers, and official CFTC ingestion) and
+notification. It records the pre-pause state, disables the six owned Scheduler
+jobs (Gmail's two, the three legacy Hermes workers, and official CFTC ingestion) and
 the watchdog rule, disables operational alarm actions, and sets the
 dashboard-owned Lambda reserved concurrency to zero. It leaves DynamoDB, S3,
 Secrets Manager, and monitoring data intact. Any stop error records
-`pause-partial`; resume is explicit and restores only the recorded state:
+`pause-partial`; resume is explicit and restores only the recorded state.
+Switching a schedule off needs `iam:PassRole` on the role that schedule hands
+to EventBridge Scheduler. `--configure` reads those roles from the live
+schedules, so run it again after a release that adds a schedule or replaces
+one of those roles:
 
 ```bash
 AWS_REGION=us-west-1 \

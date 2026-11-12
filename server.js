@@ -1321,6 +1321,10 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
   loadPeriodReturns: (symbol) => getPeriodReturnsCached(symbol),
   loadKalshiEvents: (series) => require('./src/services/kalshiClient')
     .kalshiFetch('/events', { series_ticker: series, status: 'open', limit: 200 }).then((body) => body?.events || []),
+  // A setup's lines with their quotes and resting size, and the account they are sized against. Read-only.
+  loadKalshiMarkets: (eventTicker) => require('./src/services/kalshiClient')
+    .paginateKalshi('/markets', { event_ticker: eventTicker, status: 'open', limit: 1000 }, 'markets'),
+  loadKalshiBalance: () => require('./src/services/kalshiClient').kalshiFetch('/portfolio/balance'),
   // The market date's Hedgeye products, read for Alpha Codes, levels, signals and positions.
   // A product not yet published that morning is simply absent.
   // Crypto Quant is stored as the Bitcoin Trend Tracker; it is only asked for when reading an earlier day.
@@ -1521,12 +1525,34 @@ app.get('/api/analyst/risk-range-history', async (req, res) => {
   }
 });
 
+// The board's sized tickets, kept on paper and scored at settlement. Nothing here places an order.
+const predictionPaperLedger = require('./src/services/predictionPaperLedger.cjs').createPaperLedger({ dynamodb,
+  loadKalshiMarkets: (eventTicker) => require('./src/services/kalshiClient')
+    .paginateKalshi('/markets', { event_ticker: eventTicker, limit: 1000 }, 'markets') });
+app.get('/api/prediction-markets/paper-ledger', async (req, res) => {
+  try {
+    await predictionPaperLedger.settle({ force: req.query.settle === '1' });
+    res.json(await predictionPaperLedger.summary({ tickets: req.query.tickets === '1' }));
+  } catch (error) {
+    console.error('[prediction-paper-ledger]', error.message);
+    res.status(503).json({ error: 'Paper ledger unavailable' });
+  }
+});
+
 // ?date=YYYY-MM-DD reads an earlier market day's morning research for the report's date picker.
 const predictionResearchBoards = new Map();
 app.get('/api/prediction-markets/setup-board', async (req, res) => {
   try {
     const researchDate = String(req.query.date || '');
-    if (!researchDate) return res.json(await loadPredictionSetupBoard({ now: new Date() }));
+    if (!researchDate) {
+      const board = await loadPredictionSetupBoard({ now: new Date() });
+      // Paper record of the sized tickets; a ledger fault never costs the board.
+      board.paper = await predictionPaperLedger.record(board).then(() => predictionPaperLedger.settle())
+        .then(() => predictionPaperLedger.summary()).then(({ tickets, open, settled, wonTickets, stakedPct, pnlPct, returnOnStake }) =>
+          ({ tickets, open, settled, wonTickets, stakedPct, pnlPct, returnOnStake }))
+        .catch((error) => { console.error('[prediction-paper-ledger]', error.message); return null; });
+      return res.json(board);
+    }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(researchDate)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
     const cached = predictionResearchBoards.get(researchDate);
     if (cached && Date.now() - cached.at < 10 * 60_000) return res.json(cached.board);

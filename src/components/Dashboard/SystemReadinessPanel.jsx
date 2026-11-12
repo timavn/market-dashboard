@@ -1,6 +1,7 @@
 import { startVisibilityAwarePolling } from '../../utils/visibilityAwarePolling';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MarketDataService } from '../../services/api/marketDataService';
+import { analystWorkspaceApi } from '../../services/analyst/analystClient';
 import { useTheme } from '../../context/ThemeContext';
 import RefreshButton from '../common/RefreshButton';
 import DataStatusChip from './DataStatusChip';
@@ -514,6 +515,27 @@ export function normalizeSystemStatus(payload, now = Date.now()) {
   };
 }
 
+// Problems the Analyst found with its own inputs (a service down, research or
+// holdings evidence that could not be verified, a source-data discrepancy).
+// They are Systems issues, not Inbox items; the Inbox returns them apart.
+export function normalizeAnalystIssues(payload) {
+  const list = Array.isArray(payload?.systemIssues) ? payload.systemIssues : [];
+  return list.map((finding) => {
+    const item = finding?.payload || finding || {};
+    const presentation = item.presentation || finding?.presentation || {};
+    const rows = (Array.isArray(presentation.rows) ? presentation.rows : [])
+      .filter((row) => row?.label && row?.text)
+      .map((row) => ({ label: String(row.label), text: String(row.text) }));
+    return {
+      id: String(finding?.id || item.id || presentation.subject || ''),
+      label: String(presentation.subject || item.symbol || 'Analyst'),
+      date: item.publicationTime || presentation.date || null,
+      summary: rows[0]?.text || '',
+      rows,
+    };
+  }).filter((issue) => issue.id && issue.summary);
+}
+
 function formatStatusDate(value) {
   if (!value) return '—';
   const normalized = String(value).trim();
@@ -625,6 +647,9 @@ const SystemReadinessPanel = ({
   const [expandedServiceId, setExpandedServiceId] = useState(null);
   const [expandedDetailKeys, setExpandedDetailKeys] = useState(() => new Set());
   const [productsExpanded, setProductsExpanded] = useState(false);
+  const [analyst, setAnalyst] = useState({ checking: true, issues: [], reason: '', checkedAt: null });
+  const [analystExpanded, setAnalystExpanded] = useState(false);
+  const analystIssueCountRef = useRef(0);
   const requestIdRef = useRef(0);
   const loginRequestIdRef = useRef(0);
   const loginInFlightRef = useRef(null);
@@ -652,9 +677,10 @@ const SystemReadinessPanel = ({
 
   const publishRailStatus = useCallback((nextStatus) => {
     const checkedMs = Date.parse(coreCheckedAtRef.current || '');
-    const status = Number.isFinite(checkedMs) && Date.now() - checkedMs > MAX_STATUS_AGE_MS
-      ? 'unknown'
-      : nextStatus;
+    const stale = Number.isFinite(checkedMs) && Date.now() - checkedMs > MAX_STATUS_AGE_MS;
+    // Analyst issues moved here from the Inbox, so they raise Systems too.
+    const status = stale ? 'unknown'
+      : nextStatus === 'online' && analystIssueCountRef.current > 0 ? 'attention' : nextStatus;
     if (lastRailStatusRef.current === status) return;
     lastRailStatusRef.current = status;
     onStatusChangeRef.current?.(status);
@@ -760,8 +786,21 @@ const SystemReadinessPanel = ({
         publishRailStatus(derivePanelRailStatus(servicesRef.current, unavailable));
       });
 
+    const analystRequest = analystWorkspaceApi.request('/inbox')
+      .then((payload) => {
+        if (requestId !== requestIdRef.current) return;
+        const issues = normalizeAnalystIssues(payload);
+        analystIssueCountRef.current = issues.length;
+        setAnalyst({ checking: false, issues, reason: '', checkedAt: new Date().toISOString() });
+        publishRailStatus(derivePanelRailStatus(servicesRef.current, productsRef.current));
+      })
+      .catch((loadError) => {
+        if (requestId !== requestIdRef.current) return;
+        setAnalyst({ checking: false, issues: [], reason: statusCheckFailureReason(loadError), checkedAt: null });
+      });
+
     const loginRequest = loadLoginStatus({ force: forceLogins });
-    await Promise.allSettled([loginRequest, systemRequest, productsRequest]);
+    await Promise.allSettled([loginRequest, systemRequest, productsRequest, analystRequest]);
 
     if (requestId === requestIdRef.current) {
       initialLoadCompletedRef.current = Boolean(coreCheckedAtRef.current)
@@ -880,11 +919,13 @@ const SystemReadinessPanel = ({
   }, []);
 
   useLayoutEffect(() => {
-    if (!open || (!expandedServiceId && !productsExpanded)) return undefined;
+    if (!open || (!expandedServiceId && !productsExpanded && !analystExpanded)) return undefined;
     positionFlyout();
     window.addEventListener('resize', positionFlyout);
     return () => window.removeEventListener('resize', positionFlyout);
-  }, [expandedDetailKeys, expandedServiceId, open, positionFlyout, products, productsExpanded, services]);
+  }, [analyst, analystExpanded, expandedDetailKeys, expandedServiceId, open, positionFlyout, products, productsExpanded, services]);
+
+  const analystStatus = analyst.checking ? 'unknown' : analyst.reason ? 'unknown' : analyst.issues.length ? 'attention' : 'online';
 
   return (
     <section
@@ -940,6 +981,7 @@ const SystemReadinessPanel = ({
                   setExpandedServiceId(expanded ? null : service.id);
                   setExpandedDetailKeys(new Set());
                   setProductsExpanded(false);
+                  setAnalystExpanded(false);
                 }}
               >
                 <button
@@ -1145,6 +1187,7 @@ const SystemReadinessPanel = ({
             data-testid="system-service-summary-products"
             onClick={() => {
               setProductsExpanded(!productsExpanded);
+              setAnalystExpanded(false);
               setExpandedServiceId(null);
               setExpandedDetailKeys(new Set());
             }}
@@ -1226,6 +1269,103 @@ const SystemReadinessPanel = ({
                         <ul className="sr-service__detail-reasons">
                           {reasonBullets(product.reason).map((bullet) => (
                             <li key={bullet}>{bullet}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+            </div>
+          ) : null}
+        </li>
+        <li className="sr-products-row" data-status={analystStatus}>
+          <div
+            className={`sr-service__summary${analystExpanded ? ' sr-service__summary--expanded' : ''}`}
+            data-testid="system-service-summary-analyst"
+            onClick={() => {
+              setAnalystExpanded(!analystExpanded);
+              setProductsExpanded(false);
+              setExpandedServiceId(null);
+              setExpandedDetailKeys(new Set());
+            }}
+          >
+            <button
+              type="button"
+              className="sr-service__toggle sr-service__trigger"
+              aria-expanded={analystExpanded}
+              aria-controls="sr-analyst-list"
+              aria-label={`${analystExpanded ? 'Collapse' : 'Expand'} Analyst`}
+            >
+              <strong>Analyst</strong>
+            </button>
+            <span className="sr-service__date">{formatStatusDate(analyst.checkedAt)}</span>
+            <span className="sr-service__scope" title={analyst.reason || undefined}>
+              {analystStatus === 'unknown' ? analyst.reason
+                : analyst.issues.length ? `${analyst.issues.length} issue${analyst.issues.length === 1 ? '' : 's'}` : 'Research + holdings evidence'}
+            </span>
+            <span className="sr-service__result">
+              <span className="sr-service__status">
+                <i aria-hidden="true">{STATUS_META[analyst.checking ? 'checking' : analystStatus].glyph}</i>
+                {STATUS_META[analyst.checking ? 'checking' : analystStatus].label}
+              </span>
+            </span>
+          </div>
+          {analystExpanded ? (
+            <div className="sr-flyout">
+            <ul className="sr-product__details" id="sr-analyst-list" aria-label="Analyst issues">
+              <li className="sr-section__column-headings" aria-hidden="true">
+                <span>Issue</span>
+                <span>Date</span>
+                <span>Description</span>
+                <span>Status</span>
+              </li>
+              {analyst.issues.length === 0 ? (
+                <li data-status={analystStatus}>
+                  <strong className="sr-product__label">None</strong>
+                  <span className="sr-product__date">—</span>
+                  <span className="sr-product__description">{analystStatus === 'unknown' ? analyst.reason : 'No open Analyst issues.'}</span>
+                  <span className="sr-product__status">
+                    <i aria-hidden="true">{STATUS_META[analystStatus].glyph}</i>
+                    {STATUS_META[analystStatus].label}
+                  </span>
+                </li>
+              ) : analyst.issues.map((issue) => {
+                const issueKey = `analyst:${issue.id}`;
+                const issueExpanded = expandedDetailKeys.has(issueKey);
+                const reasonId = `sr-analyst-reason-${issue.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+                return (
+                  <li data-status="attention" key={issue.id}>
+                    <button
+                      type="button"
+                      className="sr-service__toggle sr-product__toggle"
+                      aria-expanded={issueExpanded}
+                      aria-controls={reasonId}
+                      aria-label={`${issueExpanded ? 'Collapse' : 'Expand'} ${issue.label} issue`}
+                      onClick={() => {
+                        setExpandedDetailKeys((currentKeys) => {
+                          const nextKeys = new Set(currentKeys);
+                          if (nextKeys.has(issueKey)) nextKeys.delete(issueKey);
+                          else nextKeys.add(issueKey);
+                          return nextKeys;
+                        });
+                      }}
+                    >
+                      <span className="sr-chevron" aria-hidden="true" />
+                      <strong className="sr-product__label">{issue.label}</strong>
+                    </button>
+                    <span className="sr-product__date">{formatStatusDate(issue.date)}</span>
+                    <span className="sr-product__description" title={issue.summary}>{issue.summary}</span>
+                    <span className="sr-product__status">
+                      <i aria-hidden="true">{STATUS_META.attention.glyph}</i>
+                      {STATUS_META.attention.label}
+                    </span>
+                    {issueExpanded ? (
+                      <div className="sr-service__detail-explanation" id={reasonId}>
+                        <ul className="sr-service__detail-reasons">
+                          {issue.rows.map((row) => (
+                            <li key={`${row.label}-${row.text}`}><strong>{row.label}:</strong> {row.text}</li>
                           ))}
                         </ul>
                       </div>

@@ -118,7 +118,34 @@ function validActual(event, currentTime) {
     && startMs <= Number(currentTime) + MARKET_EVENTS_FUTURE_TOLERANCE_MS;
 }
 
+// A market closure or early close: from the exchange calendars (US) or the
+// provider's holiday rows (other markets). It carries no figures.
+export const isMarketClosure = event => event?.kind === 'closure';
+const CLOSURE_SOURCES = {
+  'exchange-calendar': { provider: 'Exchange calendar', idPattern: /^mc-[a-f0-9]{24}$/ },
+  'provider-export': { provider: MARKET_EVENTS_PROVIDER, idPattern: /^ff-[a-f0-9]{24}$/ },
+};
+
+function validClosure(event, snapshot, ids) {
+  const source = CLOSURE_SOURCES[event.verification];
+  const eventDateKey = marketEventEtDateKey(event.startAt);
+  return Boolean(source)
+    && event.provider === source.provider
+    && (event.verification === 'exchange-calendar' || snapshot.provider === MARKET_EVENTS_PROVIDER)
+    && typeof event.id === 'string' && source.idPattern.test(event.id) && !ids.has(event.id)
+    && typeof event.name === 'string' && event.name.trim().length > 0 && event.name.length <= 160
+    && COUNTRY_CODES.has(event.countryCode) && CURRENCIES.has(event.currency)
+    && typeof event.allDay === 'boolean'
+    && event.actual === null && event.forecast === null && event.previous === null && event.unit === null
+    && Boolean(eventDateKey) && isMarketDateCovered(eventDateKey, snapshot.coverage);
+}
+
 function validateEvent(event, snapshot, contract, ids, currentTime) {
+  if (isMarketClosure(event)) {
+    if (!validClosure(event, snapshot, ids)) throw invalidSnapshot('The market-event feed contained an unverified closure row.');
+    ids.add(event.id);
+    return event;
+  }
   const eventDateKey = marketEventEtDateKey(event?.startAt);
   if (
     !event

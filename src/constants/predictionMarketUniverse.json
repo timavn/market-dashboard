@@ -892,15 +892,42 @@
     "outsideRange": "no setup"
   },
   "sizing": {
-    "status": "pending-line-bracketing",
-    "perMarketPct": 4,
-    "ladderPct": [
-      2,
-      1,
-      0.5
+    "status": "active",
+    "accountBasis": "kalshi",
+    "basePct": 4,
+    "maxPct": 10,
+    "roundPct": 0.5,
+    "weights": {
+      "range": 2,
+      "trade": 1,
+      "zScore": 1,
+      "usd": 1,
+      "volatility": 0.5,
+      "volume": 0.5
+    },
+    "zScoreFull": 2,
+    "usdCorrelationWindow": "d30",
+    "usdCorrelationFloor": 0.5,
+    "usdCorrelationFull": 0.75,
+    "volExpansionPct": 10,
+    "tiltSigma": 0.25,
+    "widenOnExpansion": 1.1,
+    "maxSpread": 0.05,
+    "feeRate": 0.07,
+    "minEdge": 0.01,
+    "minLinePct": 0.25,
+    "markets": [
+      "gold",
+      "silver",
+      "copper",
+      "wti",
+      "brent",
+      "bitcoin",
+      "ethereum",
+      "sp500",
+      "nasdaq100"
     ],
-    "totalCapPct": null,
-    "note": "Each successive line gets half the previous allocation. Line selection is not implemented yet."
+    "note": "A setup starts at basePct and earns up to the weights' total. The position is split across Kalshi lines by edge against our own odds: the ladder's calibrated odds shifted toward the setup by tiltSigma at a maxPct position. tiltSigma is a starting assumption the paper ledger tests."
   },
   "sections": [
     {

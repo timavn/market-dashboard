@@ -92,6 +92,46 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertNotIn("front-month futures", report)
         self.assertIn("Nasdaq-100 30,883; its bar shows the COMPQ range and Nasdaq Composite price.", report)
 
+    def test_a_sized_setup_shows_its_position_and_line_split_under_its_section(self):
+        data = board()
+        gold = data["rows"][0]
+        gold["sizing"] = {
+            "side": "SHORT", "pct": 8.0, "maxPct": 10, "event": "KXGOLDD-26OCT1217", "quotedAt": AT, "account": {"value": 6000},
+            "components": [{"key": "range", "label": "Range", "lost": 0.0, "detail": "100% of range"},
+                           {"key": "usd", "label": "Dollar", "lost": 1.0, "detail": "0.10 corr, dollar bullish"},
+                           {"key": "zScore", "label": "Z-score", "lost": 0.5, "missing": True}],
+            "ladder": {"centre": 4200.0, "sigma": 42.0}, "unspentPct": 0.4, "spentPct": 7.6,
+            "lines": [{"strike": 4200, "buy": "NO", "ask": 0.51, "kalshiOdds": 0.52, "ourOdds": 0.586, "edge": 0.059,
+                       "fromCentrePct": 0.0, "sigmas": 0.0, "pct": 2.5, "dollars": 150.0, "contracts": 284},
+                      {"strike": 4240, "buy": "NO", "ask": 0.85, "kalshiOdds": 0.879, "ourOdds": 0.91, "edge": 0.021,
+                       "fromCentrePct": 0.952, "sigmas": 0.952, "pct": 5.1, "dollars": 306.0, "contracts": 355, "capped": True}]}
+        report = render_setup_board(data)
+        block = json.loads(report.split("```analyst-sizing\n", 1)[1].split("\n```", 1)[0])
+        # The block sits in the setup's own section, after its market table.
+        self.assertLess(report.index("## Metals"), report.index("```analyst-sizing"))
+        self.assertLess(report.index("```analyst-sizing"), report.index("## Oil"))
+        self.assertEqual(report.count("```analyst-sizing"), 1)
+        market = block["markets"][0]
+        self.assertEqual((market["market"], market["side"], market["pct"], market["maxPct"]), ("Gold", "Short", "8.0%", "10%"))
+        self.assertEqual(market["lost"], [{"label": "Dollar", "points": "−1.0", "note": "0.10 corr, dollar bullish"},
+                                          {"label": "Z-score", "points": "−0.5", "note": "no reading"}])
+        self.assertEqual(market["lines"][0], {"line": "Above 4,200", "from": "+0.0% · +0.0σ", "buy": "No", "ask": "51¢",
+                                              "kalshi": "52%", "ours": "59%", "edge": "+5.9", "pct": "2.50%", "stake": "$150 · 284"})
+        self.assertTrue(market["lines"][1]["capped"])
+        self.assertEqual((market["unspent"], market["sigma"], market["implied"]), ("0.40%", "±1.0% · ±42", "GVZ ±1.4% · ±61"))
+        # No readable lines: the size still shows, with the reason.
+        gold["sizing"] = {**gold["sizing"], "lines": [], "reason": "No line with edge", "account": None}
+        empty = json.loads(render_setup_board(data).split("```analyst-sizing\n", 1)[1].split("\n```", 1)[0])["markets"][0]
+        self.assertEqual((empty["pct"], empty["reason"], empty["lines"]), ("8.0%", "No line with edge", []))
+        # The paper ledger's running result sits above Sources.
+        data["paper"] = {"tickets": 14, "open": 2, "settled": 12, "wonTickets": 7, "returnOnStake": -0.031}
+        self.assertIn("Paper tickets: 12 settled, 7 won, -3.1% on stake after fees; 2 open.\n\nSources:", render_setup_board(data))
+        data["paper"] = {"tickets": 1, "open": 1, "settled": 0, "wonTickets": 0, "returnOnStake": None}
+        self.assertIn("Paper tickets: none settled yet; 1 open.", render_setup_board(data))
+        self.assertNotIn("Paper tickets", render_setup_board(board()))
+        # A board without sizing keeps its layout.
+        self.assertNotIn("analyst-sizing", render_setup_board(board()))
+
     def test_a_broken_alpha_code_line_reads_neutral_and_says_why(self):
         data = board()
         wti = data["rows"][1]

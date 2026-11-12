@@ -23,7 +23,7 @@ const currentHolding = (asOf, weightPct = 1.25) => ({
 });
 
 const attention = (id, overrides = {}) => ({ id, unread: 1, payload: {
-  attentionVersion: 1, state: 'open', kind: 'operational', priority: 0, fingerprint: `${id}-revision`,
+  attentionVersion: 1, state: 'open', kind: 'account', priority: 0, fingerprint: `${id}-revision`,
   publicationTime: '2026-09-22T15:30:00Z', presentation: {
     subject: 'IB Gateway', date: '2026-09-22', rows: [
       { label: 'Issue', text: 'IB Gateway is disconnected.' },
@@ -33,18 +33,17 @@ const attention = (id, overrides = {}) => ({ id, unread: 1, payload: {
   }, ...overrides,
 } });
 
-test('existing source exclusion warnings disappear while evidenced publication discrepancies remain', () => {
+test('source warnings and publication discrepancies are Systems issues, never Inbox items', () => {
   const warnings = ['Monthly Inflation Nowcast', 'Bitcoin Tracker', 'IBKR account exposure', 'Risk Ranges', 'Portfolio research archive']
-    .map((label, index) => attention(`excluded-${index}`, { managedBy: 'review-sources',
+    .map((label, index) => attention(`excluded-${index}`, { kind: 'operational', managedBy: 'review-sources',
       presentation: { subject: label, rows: [{ label: 'Problem', text: `${label} was excluded from this saved review.` }] } }));
-  const discrepancy = attention('source-discrepancy', { managedBy: 'review-sources', sourceDiscrepancy: true,
+  const discrepancy = attention('source-discrepancy', { kind: 'operational', managedBy: 'review-sources', sourceDiscrepancy: true,
     sourceQuality: { issues: [{ code: 'REVERSED_RISK_RANGE' }] },
     presentation: { subject: 'Early Look', rows: [{ label: 'Issue', text: 'The published lower bound exceeds the upper bound.' }] } });
-  const { rerender } = render(<AnalystInbox findings={[...warnings, discrepancy]} />);
-  expect(screen.getAllByRole('heading', { level: 3 }).map(item => item.textContent)).toEqual(['Early Look']);
-  expect(screen.queryByText(/excluded from this saved review/)).not.toBeInTheDocument();
-  rerender(<AnalystInbox findings={warnings} />);
+  render(<AnalystInbox findings={[...warnings, discrepancy]} />);
   expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  expect(screen.queryByText(/excluded from this saved review/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/lower bound exceeds/)).not.toBeInTheDocument();
   expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
 });
 
@@ -68,21 +67,29 @@ test('a date-only alert shows when it reached the Inbox, and the date alone only
   expect(screen.getByText('Oct 27')).toBeInTheDocument();
 });
 
-test('operational attention describes the issue and consequence without position filler and acknowledges its revision', () => {
-  const item = attention('gateway', { materialRevision: 2 });
-  const onCitation = jest.fn();
-  const onAcknowledge = jest.fn();
-  render(<AnalystInbox findings={[item]} onCitation={onCitation} onAcknowledge={onAcknowledge} />);
-  expect(screen.getByRole('heading', { name: 'IB Gateway' })).toBeInTheDocument();
-  expect(screen.queryByText('Ticker:')).not.toBeInTheDocument();
-  expect(screen.getByText('Issue:').parentElement).toHaveTextContent(/^Issue: IB Gateway is disconnected\.$/);
-  expect(screen.getByRole('group', { name: 'Alert actions' })).toHaveTextContent('Sep 22 08:30');
-  expect(screen.getAllByRole('term').map(term => term.textContent.trim())).toEqual(['Issue:', 'Impact:', 'Next step:']);
-  expect(screen.queryByText('Current position:')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Source' }));
-  expect(onCitation).toHaveBeenCalledWith(item.payload.presentation.sourceLinks[0].citation, expect.objectContaining({ anchor: screen.getByRole('button', { name: 'Source' }) }));
-  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-  expect(onAcknowledge).toHaveBeenCalledWith('gateway', 'gateway-revision', 2);
+test('an operational issue (a service down, evidence that could not be verified) stays out of the Inbox', () => {
+  const research = attention('attention:assessment:research', { kind: 'operational', presentation: { subject: 'Research assessment', date: '2026-11-11',
+    rows: [{ label: 'Issue', text: 'Current research and portfolio evidence could not be verified.' }] } });
+  render(<AnalystInbox findings={[attention('gateway', { kind: 'operational' }), research]} />);
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  expect(screen.queryByText('Issue:')).not.toBeInTheDocument();
+  expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
+});
+
+test('the Inbox groups cards as red Alerts, yellow Signals and blue Actions', () => {
+  const red = attention('snow', { kind: 'portfolio', severity: 'action-required', presentation: { subject: 'SNOW', date: '2026-11-11',
+    rows: [{ label: 'Action', text: 'Investing Ideas removed SNOW → exit Long' }] } });
+  const vix = attention('vix', { kind: 'market', priority: 1, presentation: { subject: 'VIX', date: '2026-11-11',
+    rows: [{ label: 'Signal', text: 'VIX below 19 → Investable: buy dips, normal risk.' }] } });
+  const idea = attention('be', { kind: 'opportunity', priority: 1, presentation: { subject: 'BE', date: '2026-11-11',
+    rows: [{ label: 'Action', text: 'New Short idea → review' }] } });
+  render(<AnalystInbox findings={[vix, idea, red, attention('gateway', { kind: 'operational' })]} />);
+  expect(screen.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Alerts', 'SNOW', 'Signals', 'VIX', 'Actions', 'BE']);
+  const category = name => screen.getByRole('heading', { name }).closest('article').dataset.category;
+  expect([category('SNOW'), category('VIX'), category('BE')]).toEqual(['alert', 'signal', 'action']);
+  expect(screen.getByRole('heading', { name: 'Signals' })).toHaveClass('analyst-inbox-heading--signal');
+  expect(screen.getByRole('heading', { name: 'Actions' })).toHaveClass('analyst-inbox-heading--action');
+  expect(screen.queryByRole('heading', { name: 'IB Gateway' })).not.toBeInTheDocument();
 });
 
 test('orders urgent concerns before newer ideas and colors directional words and Quad labels', () => {
@@ -133,9 +140,10 @@ test('a security card names its source products right under the position', () =>
   const wti = attention('wti', { kind: 'market', presentation: { subject: 'WTI', date: '2026-11-02', rows: [{ label: 'Trade line', text: 'Broke 97 at 96.85 (08:14 PST) → Trade neutral\nReclaimed 97 at 97.17 (08:09 PST)' }],
     sourceLinks: [{ label: 'Top 3 Things Alpha Code', citation: citation('Top 3 Things: WTI Alpha Code', 'top-3-things') }] } });
   render(<AnalystInbox findings={[idea, wti, attention('gateway')]} />);
-  const labels = [...document.querySelectorAll('.analyst-inbox-copy dt')].map(term => term.textContent.trim());
+  const labels = [...screen.getByRole('heading', { name: 'KDP' }).closest('article').querySelectorAll('.analyst-inbox-copy dt')].map(term => term.textContent.trim());
   expect(labels.slice(0, 4)).toEqual(['Action:', 'Ticker:', 'Current position:', 'Source:']);
-  expect(screen.getAllByText('Source:').map(term => term.nextSibling.textContent)).toEqual(['The Call, Signal Strength Shorts', 'Top 3 Things']);
+  // Signals (WTI) come before Actions (the KDP idea).
+  expect(screen.getAllByText('Source:').map(term => term.nextSibling.textContent)).toEqual(['Top 3 Things', 'The Call, Signal Strength Shorts']);
   // A product name is not a directional call.
   expect(screen.getByText('The Call, Signal Strength Shorts')).not.toHaveClass('analyst-inbox-signal--negative');
   // Operational cards are not about a security.
@@ -548,12 +556,12 @@ test('shows a restored alert with a retryable acknowledgment after a save error'
 
 test('action-required items are pinned first and dismiss with one click', () => {
   const onAcknowledge = jest.fn();
-  const urgent = attention('snow', { kind: 'operational', severity: 'action-required', fingerprint: 'snow-fp', materialRevision: 2,
+  const urgent = attention('snow', { kind: 'portfolio', severity: 'action-required', fingerprint: 'snow-fp', materialRevision: 2,
     publicationTime: '2026-09-21T15:30:00Z',
     presentation: { subject: 'SNOW', date: '2026-09-21', rows: [{ label: 'Action', text: 'Investing Ideas removed SNOW from its Long list — exit the Long position' }], sourceLinks: [] } });
   render(<AnalystInbox findings={[attention('gateway'), urgent]} onCitation={jest.fn()} onAcknowledge={onAcknowledge} />);
   const headings = screen.getAllByRole('heading').map(heading => heading.textContent);
-  expect(headings.slice(0, 3)).toEqual(['Alerts', 'SNOW', 'Notifications']);
+  expect(headings.slice(0, 3)).toEqual(['Alerts', 'SNOW', 'Signals']);
   const card = screen.getByRole('heading', { name: 'SNOW' }).closest('article');
   expect(within(card).queryByRole('button', { name: /Keep/ })).not.toBeInTheDocument();
   fireEvent.click(within(card).getByRole('button', { name: 'Dismiss' }));
@@ -724,4 +732,24 @@ test.each(['process-sizing', 'portfolio-balance', 'dashboard-health'])('an inter
   const { container } = render(<AnalystInbox findings={[card]} />);
   expect(screen.queryByRole('button', { name: 'Source' })).not.toBeInTheDocument();
   expect(container).not.toHaveTextContent('Source:');
+});
+
+test('an Action card names the company in blue under the Ticker and in its Context', async () => {
+  const idea = attention('boot', { kind: 'opportunity', priority: 1, presentation: { subject: 'BOOT', date: '2026-11-11', rows: [
+    { label: 'Action', text: 'New Short idea → review' },
+    { label: 'Context', text: 'Boot Barn (BOOT): another buy-one-get-one promotion was announced.' },
+  ] } });
+  const vix = attention('vix', { kind: 'market', priority: 1, presentation: { subject: 'VIX', date: '2026-11-11',
+    rows: [{ label: 'Signal', text: 'VIX below 19 → Investable.' }] } });
+  const loadSecurityNames = jest.fn(async symbols => Object.fromEntries(symbols.map(symbol => [symbol, 'Boot Barn Holdings, Inc.'])));
+  render(<AnalystInbox findings={[idea, vix]} loadSecurityNames={loadSecurityNames} />);
+  const card = screen.getByRole('heading', { name: 'BOOT' }).closest('article');
+  const company = await within(card).findByText('Boot Barn Holdings, Inc.');
+  expect(loadSecurityNames).toHaveBeenCalledWith(['BOOT']);
+  expect(company).toHaveClass('analyst-inbox-company-name');
+  const labels = [...card.querySelectorAll('.analyst-inbox-copy dt')].map(term => term.textContent.trim());
+  expect(labels.slice(0, 3)).toEqual(['Action:', 'Ticker:', 'Company:']);
+  expect(within(card).getByText('Boot Barn')).toHaveClass('analyst-inbox-company-name');
+  // Signals carry no Company row.
+  expect(within(screen.getByRole('heading', { name: 'VIX' }).closest('article')).queryByText('Company:')).not.toBeInTheDocument();
 });

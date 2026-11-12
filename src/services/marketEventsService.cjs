@@ -1,3 +1,4 @@
+const { etInstant, usMarketClosures } = require('../utils/usMarketClosures.cjs');
 const crypto = require('crypto');
 const {
   PROVIDER: ACTUALS_PROVIDER,
@@ -167,7 +168,56 @@ function eventIdentifier(startAt, currency, title) {
   return `ff-${digest}`;
 }
 
+// A market holiday the provider publishes for a covered currency. US closures
+// come from the exchange calendars instead (usMarketClosures), which say which
+// market is shut: the provider's "Bank Holiday" does not.
+function isHolidayRow(row = {}) {
+  const impact = cleanText(row.impact ?? row.Impact, 20)?.toLowerCase();
+  const currency = cleanText(row.country ?? row.currency ?? row.Country ?? row.Currency, 8)?.toUpperCase();
+  return impact === 'holiday' && ['EUR', 'GBP', 'JPY', 'CAD'].includes(currency);
+}
+
+function normalizeHoliday(row = {}, context = {}) {
+  const title = cleanText(row.title ?? row.Title);
+  const currency = cleanText(row.country ?? row.currency ?? row.Country ?? row.Currency, 8)?.toUpperCase();
+  const region = currencyRegion(currency, title);
+  const startAt = parseEventTimestamp(row.date ?? row.Date);
+  const dateKey = startAt && etDateKey(startAt);
+  if (!title || !region || !dateKey) return null;
+  const allDayAt = etInstant(dateKey, 0);
+  const name = /bank holiday/i.test(title) ? `${region.country} bank holiday` : `${region.country}: ${title}`;
+  return closureEvent({ id: eventIdentifier(allDayAt, currency, title), name, detail: `${region.country}: banks closed; local markets may be shut or thin.`,
+    region, currency, startAt: allDayAt, allDay: true, provider: PROVIDER, verification: 'provider-export', sourceUrl: PROVIDER_SOURCE_URL,
+    lastUpdatedAt: context.sourceUpdatedAt || null });
+}
+
+function closureEvent({ id, name, detail, region, currency, startAt, allDay, provider, verification, sourceUrl, lastUpdatedAt = null }) {
+  return {
+    id, kind: 'closure', name, detail, category: 'closure', country: region.country, countryCode: region.countryCode, currency,
+    startAt, allDay, importance: 3, forecast: null, previous: null, actual: null, unit: null,
+    source: provider, sourceUrl, lastUpdatedAt, provider, verification,
+  };
+}
+
+const EXCHANGE_CALENDAR = 'Exchange calendar';
+// US stock and bond closures and early closes in a week's coverage.
+function usClosureEvents(coverage) {
+  if (!coverage?.from || !coverage?.to) return [];
+  return usMarketClosures(coverage.from, coverage.to).map((item) => closureEvent({
+    id: `mc-${crypto.createHash('sha256').update([item.dateKey, item.name].join('\u0000')).digest('hex').slice(0, 24)}`,
+    name: item.name, detail: item.detail, region: CURRENCY_REGIONS.USD, currency: 'USD', startAt: item.startAt, allDay: item.allDay,
+    provider: EXCHANGE_CALENDAR, verification: 'exchange-calendar', sourceUrl: 'https://www.nyse.com/markets/hours-calendars',
+  }));
+}
+
+function withClosures(events, coverage) {
+  return [...events, ...usClosureEvents(coverage)].sort((left, right) => (
+    left.startAt.localeCompare(right.startAt) || left.id.localeCompare(right.id)
+  ));
+}
+
 function normalizeEvent(row = {}, context = {}) {
+  if (isHolidayRow(row)) return normalizeHoliday(row, context);
   if (!isTierOneEvent(row)) return null;
   const title = cleanText(row.title ?? row.Title);
   const currency = cleanText(row.country ?? row.currency ?? row.Country ?? row.Currency, 8)?.toUpperCase();
@@ -482,7 +532,7 @@ function createMarketEventsService(options = {}) {
       const snapshot = Object.freeze({
         ...payload,
         fetchedAt,
-        events: Object.freeze(payload.events),
+        events: Object.freeze(withClosures(payload.events, payload.coverage)),
       });
       state.successCache = { snapshot, expiresAt: fetchedAtMs + SUCCESS_CACHE_TTL_MS };
       state.failureCache = null;
@@ -556,6 +606,7 @@ module.exports = {
   ACTUALS_SETTLED_TTL_MS,
   attachActuals,
   createMarketEventsService,
+  usClosureEvents,
   currentEtWeek,
   currencyRegion,
   etDateKey,

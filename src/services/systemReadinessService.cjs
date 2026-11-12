@@ -1360,12 +1360,14 @@ function buildSidecarChecks({
           ? (gatewayErrorCode || 'IBKR_GATEWAY_NOT_AUTHENTICATED')
           : 'IBKR_GATEWAY_UNAVAILABLE',
         impact: 'No live brokerage data or trading capability is available.',
-        recovery: gatewayApiUnresponsive
-          ? restartSidecar
-          : {
-            kind: 'manual',
-            label: 'Open IB Gateway, sign in, confirm API socket access on port 4001, then refresh.',
-          },
+        // A Gateway that accepts the connection but never answers gives a new
+        // sidecar process the same silence, so a sidecar restart is not offered.
+        recovery: {
+          kind: 'manual',
+          label: gatewayApiUnresponsive
+            ? 'A slow heartbeat clears by itself within minutes. If this lasts, quit IB Gateway, open it again and sign in, then refresh. Restarting the dashboard\'s IBKR service does not fix a Gateway that has stopped answering.'
+            : 'Open IB Gateway, sign in, confirm API socket access on port 4001, then refresh.',
+        },
       });
 
   const accounts = gateway?.accounts || readyz?.accounts || [];

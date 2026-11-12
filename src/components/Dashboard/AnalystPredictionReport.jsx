@@ -4,6 +4,7 @@ import AnalystReportLink from './AnalystReportLink';
 import AnalystPredictionRangeBar, { parsePredictionRange, predictionRangeLabel } from './AnalystPredictionRangeBar';
 import AnalystPredictionDrivers, { parsePredictionDrivers } from './AnalystPredictionDrivers';
 import AnalystPredictionResearch, { parsePredictionResearch } from './AnalystPredictionResearch';
+import AnalystPredictionSizing, { parsePredictionSizing } from './AnalystPredictionSizing';
 import remarkGfm from 'remark-gfm';
 import { remarkAnalystProcessColors } from './analystProcessColors';
 import { predictionReportSources } from './analystPredictionSources';
@@ -311,13 +312,15 @@ function PinnedFrame({ className, children }) {
     <div ref={frame} className={`${className}${stuck ? ' is-stuck' : ''}`}>{children}</div>
   </>;
 }
-// ```analyst-drivers blocks carry a section's shared variables and ```analyst-research its
-// markets' morning research; other code blocks render normally.
+// ```analyst-drivers blocks carry a section's shared variables, ```analyst-sizing its setups'
+// positions and line splits, and ```analyst-research its markets' morning research; other code blocks render normally.
 const MarkdownPre = ({ node, children }) => {
   const code = node?.children?.find(child => child.tagName === 'code');
   const classes = [].concat(code?.properties?.className || []);
   const drivers = classes.includes('language-analyst-drivers') ? parsePredictionDrivers(nodeText(code)) : null;
   if (drivers) return <AnalystPredictionDrivers drivers={drivers} />;
+  const sizing = classes.includes('language-analyst-sizing') ? parsePredictionSizing(nodeText(code)) : null;
+  if (sizing) return <AnalystPredictionSizing sizing={sizing} />;
   const research = classes.includes('language-analyst-research') ? parsePredictionResearch(nodeText(code)) : null;
   return research ? <AnalystPredictionResearch research={research} /> : <pre>{children}</pre>;
 };

@@ -26,7 +26,7 @@ const flip = (overrides = {}) => finding('flip', '2026-09-09', 'BEARISH', overri
 const confirmation = (overrides = {}) => finding('confirmation', '2026-09-14', 'BEARISH', overrides);
 
 const attentionFinding = (id, overrides = {}) => ({
-  id, unread: 1, payload: { attentionVersion: 1, state: 'open', kind: 'operational', priority: 0,
+  id, unread: 1, payload: { attentionVersion: 1, state: 'open', kind: 'account', priority: 0,
     publicationTime: '2026-09-22T15:30:00Z', fingerprint: `${id}-revision`,
     presentation: { subject: 'IB Gateway', date: '2026-09-22', rows: [{ label: 'Issue', text: 'Portfolio cannot refresh.' }] },
     ...overrides },
@@ -102,6 +102,20 @@ test('publication discrepancies survive source-warning suppression with original
   assert.equal(result.findings[1].payload.sourceQuality.issues[0], issue);
 });
 
+test('operational issues leave the Inbox and its counts and are returned apart for Systems', () => {
+  const research = attentionFinding('attention:assessment:research', { kind: 'operational',
+    presentation: { subject: 'Research assessment', date: '2026-09-22', rows: [{ label: 'Issue', text: 'Current research and portfolio evidence could not be verified.' }] } });
+  const gateway = attentionFinding('gateway', { kind: 'operational', publicationTime: '2026-09-21T15:30:00Z' });
+  const signal = attentionFinding('vix', { kind: 'market', priority: 1 });
+  const red = attentionFinding('snow', { kind: 'operational', severity: 'action-required' });
+  for (const attentionVersion of [undefined, 1]) {
+    const output = buildAnalystInbox({ attentionVersion, findings: [research, gateway, signal, red] });
+    assert.deepEqual(output.findings.map(row => row.id).sort(), ['snow', 'vix']);
+    assert.deepEqual(output.systemIssues.map(row => row.id), [research.id, 'gateway']);
+    assert.equal(output.unread, 2);
+  }
+});
+
 test('legacy actions on the opposite held side and resolved concerns are not PM attention', () => {
   const sellIntoShort = flip({ action: 'exit', payload: { quantity: -15 } });
   const coverIntoLong = flip({ action: 'cover', payload: { quantity: 15 } });
@@ -150,10 +164,10 @@ test('same-report Sell-SOME instruction projects a trim while preserving source 
 });
 
 test('baselines and unchanged daily signals do not create alerts or unread counts', () => {
-  assert.deepEqual(buildAnalystInbox({ findings: [prior()], unread: 27 }), { findings: [], unread: 0 });
+  assert.deepEqual(buildAnalystInbox({ findings: [prior()], unread: 27 }), { findings: [], systemIssues: [], unread: 0 });
   assert.deepEqual(buildAnalystInbox({ findings: [prior(), flip({ event: { signalValue: 'BULLISH' } })] }).findings, []);
   assert.deepEqual(buildAnalystInbox({ findings: [prior(), prior()] }).findings, []);
-  assert.deepEqual(buildAnalystInbox(null), { findings: [], unread: 0 });
+  assert.deepEqual(buildAnalystInbox(null), { findings: [], systemIssues: [], unread: 0 });
 });
 
 test('an actual change carries dated comparable provenance and latest confirmation separately', () => {
