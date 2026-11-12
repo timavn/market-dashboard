@@ -240,6 +240,20 @@ test('Gateway failure groups holdings, account and dependent failures', async ()
   assert.match(result.findings[0].presentation.rows[1].text, /Holdings and balances frozen/);
 });
 
+test('an unresponsive Gateway names the Gateway restart, not a dashboard repair', async () => {
+  const data = fixture();
+  for (const id of ['ibkr.gateway', 'ibkr.accounts', 'ibkr.portfolio']) Object.assign(data.check(id), {
+    status: 'fail', errorCode: id === 'ibkr.gateway' ? 'IBKR_GATEWAY_API_UNRESPONSIVE' : 'IBKR_PORTFOLIO_UNAVAILABLE', impact: 'No portfolio data.',
+  });
+  const result = await run(data);
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].symbol, 'IB Gateway');
+  const rows = result.findings[0].presentation.rows.map(row => row.text);
+  assert.ok(rows.some(text => /IB Gateway unresponsive/.test(text)));
+  assert.ok(rows.some(text => /Still unresponsive after 10 min → quit and reopen IB Gateway, sign in\./.test(text)));
+  assert.ok(!rows.some(text => /in Systems/.test(text)));
+});
+
 test('connection recovery alone and partial accounts do not establish portfolio recovery', async () => {
   const data = fixture();
   Object.assign(data.check('ibkr.accounts'), { status: 'warn', errorCode: 'IBKR_PARTIAL_ACCOUNT_COVERAGE', impact: 'Incomplete portfolio' });

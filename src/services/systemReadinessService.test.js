@@ -604,12 +604,12 @@ describe('IBKR sidecar process readiness', () => {
     expect(gateway).toMatchObject({
       status: 'fail',
       errorCode: 'IBKR_GATEWAY_API_UNRESPONSIVE',
-      recovery: {
-        automatic: true,
-        actionId: 'restart-ibkr-sidecar',
-        command: 'npm run dev:sidecar:restart',
-      },
+      recovery: { kind: 'manual', automatic: false },
     });
+    // A new sidecar process meets the same silent Gateway, so the guidance is
+    // to relaunch the Gateway and no sidecar restart is offered.
+    expect(gateway.recovery.label).toMatch(/If this lasts, quit IB Gateway, open it again and sign in/);
+    expect(gateway.recovery).not.toHaveProperty('actionId');
   });
 
   test('fails closed with an exact duplicate-process error', () => {

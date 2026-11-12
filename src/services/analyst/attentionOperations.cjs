@@ -125,7 +125,7 @@ function serviceCopy(check, affected = []) {
       ? 'IB Gateway unresponsive.' : 'IB Gateway disconnected.',
     impact: 'Holdings and balances frozen; no portfolio alerts.',
     next: check.errorCode === 'IBKR_GATEWAY_API_UNRESPONSIVE'
-      ? 'Restore the brokerage connection in Systems.'
+      ? 'Still unresponsive after 10 min → quit and reopen IB Gateway, sign in.'
       : 'Sign in to IB Gateway → confirm the portfolio refreshes.',
   };
   if (check.id === 'ibkr.sidecar' || check.id === 'ibkr.runtime') return {

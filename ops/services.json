@@ -58,7 +58,7 @@
     {
       "id": "ibkr-connectivity",
       "label": "IBKR connectivity",
-      "text": "Rebuild or restart the repo-owned sidecar automatically. IB Gateway login and API socket authorization remain manual security actions."
+      "text": "Rebuild or restart the repo-owned sidecar automatically. IB Gateway login and API socket authorization remain manual security actions. A Gateway that is running but has stopped answering is quit and reopened by hand; restarting the sidecar does not fix it."
     },
     {
       "id": "automation-schedules",
@@ -583,7 +583,6 @@
       "controllerExecutor": "loopback-readiness-api",
       "authority": "automatic",
       "triggeringErrorCodes": [
-        "IBKR_GATEWAY_API_UNRESPONSIVE",
         "IBKR_POSITIONS_CLIENT_UNAVAILABLE",
         "IBKR_POSITIONS_REQUEST_TIMEOUT",
         "IBKR_SOCKET_VERIFICATION_TIMEOUT",

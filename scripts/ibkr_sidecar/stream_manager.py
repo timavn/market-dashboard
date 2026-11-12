@@ -28,6 +28,18 @@ FORCED_QUOTE_MAX_CONCURRENCY = max(
     int(os.environ.get("IBKR_FORCED_QUOTE_MAX_CONCURRENCY", "12")),
 )
 QUOTE_POLL_SEC = 0.05
+# How long a snapshot whose quote has been read may wait for IBKR to end it
+# before the sidecar cancels it instead.
+SNAPSHOT_END_GRACE_SEC = max(
+    0.0,
+    float(os.environ.get("IBKR_SNAPSHOT_END_GRACE_SEC", "1.5")),
+)
+# The gap between any two snapshot messages. IBKR takes 50 API messages a
+# second from a client and holds back the rest; 25 ms is 40 a second, evenly.
+SNAPSHOT_MESSAGE_INTERVAL_SEC = max(
+    0.0,
+    float(os.environ.get("IBKR_SNAPSHOT_MESSAGE_INTERVAL_MS", "25")) / 1000.0,
+)
 ACCOUNT_SUMMARY_REFRESH_SEC = float(os.environ.get("IBKR_ACCOUNT_SUMMARY_REFRESH_SEC", "30"))
 PORTFOLIO_SYNC_TIMEOUT_SEC = float(os.environ.get("IBKR_PORTFOLIO_SYNC_TIMEOUT_SEC", "8"))
 
@@ -182,6 +194,10 @@ def ticker_to_raw_quote(ticker: Any, contract: Contract) -> Dict[str, Any]:
     }
 
 
+def _new_broker_snapshot_counts() -> Dict[str, int]:
+    return {"requested": 0, "endedByGateway": 0, "cancelled": 0}
+
+
 class StreamManager:
     def __init__(
         self,
@@ -230,6 +246,8 @@ class StreamManager:
         self._quote_snapshot_semaphore = asyncio.Semaphore(QUOTE_MAX_CONCURRENCY)
         self._forced_quote_snapshot_semaphore = asyncio.Semaphore(FORCED_QUOTE_MAX_CONCURRENCY)
         self._quote_snapshot_tasks: Dict[int, asyncio.Task] = {}
+        self._broker_snapshot_closers: Set[asyncio.Task] = set()
+        self._broker_snapshot_counts = _new_broker_snapshot_counts()
 
         self._portfolio_positions: Dict[str, Dict[int, Dict[str, Any]]] = {}
         self._account_summary: Dict[str, Dict[str, Any]] = {}
@@ -257,6 +275,7 @@ class StreamManager:
             "active_subscriptions": len(self._ref_counts),
             "max_stream_subs": MAX_STREAM_SUBS,
             "forced_quote_max_concurrency": FORCED_QUOTE_MAX_CONCURRENCY,
+            "broker_snapshots": dict(self._broker_snapshot_counts),
             "portfolio_account": self._portfolio_account,
             "gateway": self.connection_governor.diagnostics(),
         }
@@ -294,6 +313,7 @@ class StreamManager:
             self._summary_task,
             self._debounce_task,
             *self._quote_snapshot_tasks.values(),
+            *self._broker_snapshot_closers,
         ):
             if task and not task.done():
                 task.cancel()
@@ -791,8 +811,9 @@ class StreamManager:
         """
         async with self._forced_quote_snapshot_semaphore:
             snapshot_contract = Contract.create(**contract.dict())
+            await self._broker_snapshot_turn()
             requested_at = now_iso()
-            ticker = self.ib.reqMktData(snapshot_contract, "", True, False)
+            ticker, req_id, ended = self._open_broker_snapshot(snapshot_contract)
             try:
                 deadline = asyncio.get_running_loop().time() + timeout_sec
                 last_raw = ticker_to_raw_quote(ticker, snapshot_contract)
@@ -808,11 +829,149 @@ class StreamManager:
                     "from_cache": False,
                 }
             finally:
+                self._release_broker_snapshot(snapshot_contract, req_id, ended)
+
+    async def _broker_snapshot_turn(self) -> None:
+        """Wait until this snapshot message may be sent.
+
+        A whole-book refresh asks for some seventy snapshots at once, and it
+        runs every thirty seconds. IBKR takes 50 API messages a second from a
+        client and holds back the rest, so these leave at an even pace under
+        that limit whatever else is being sent. Only snapshot messages wait
+        here: a heartbeat or any other request is never queued behind them.
+        """
+        if SNAPSHOT_MESSAGE_INTERVAL_SEC <= 0:
+            return
+        lock = self.__dict__.get("_broker_snapshot_turn_lock")
+        if lock is None:
+            lock = self.__dict__.setdefault("_broker_snapshot_turn_lock", asyncio.Lock())
+        loop = asyncio.get_running_loop()
+        # Callers take turns in order, and each gap is measured from when the
+        # previous message was actually released, so a late wake-up can only
+        # widen a gap and never narrow the next one.
+        async with lock:
+            wait = (
+                self.__dict__.get("_broker_snapshot_last_turn", 0.0)
+                + SNAPSHOT_MESSAGE_INTERVAL_SEC
+                - loop.time()
+            )
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._broker_snapshot_last_turn = loop.time()
+
+    def _open_broker_snapshot(
+        self,
+        contract: Contract,
+    ) -> tuple[Any, Optional[int], Optional[asyncio.Future]]:
+        """Request one snapshot and learn when IBKR has ended it.
+
+        IBKR ends a snapshot by itself once it has sent the quote, and answers
+        a cancel for an ended request with error 300. The returned future is
+        resolved by IBKR's end-of-snapshot message (or by an error for the
+        request), which is how ib_insync's own ``reqTickersAsync`` tracks a
+        snapshot. It is None when the client does not expose that bookkeeping;
+        the request is then cancelled as soon as its quote has been read.
+        """
+        counts = self.__dict__.setdefault(
+            "_broker_snapshot_counts", _new_broker_snapshot_counts()
+        )
+        counts["requested"] += 1
+        client = getattr(self.ib, "client", None)
+        wrapper = getattr(self.ib, "wrapper", None)
+        tracked = all(
+            callable(getattr(owner, name, None))
+            for owner, name in (
+                (client, "getReqId"),
+                (client, "reqMktData"),
+                (wrapper, "startReq"),
+                (wrapper, "startTicker"),
+                (wrapper, "endTicker"),
+                (wrapper, "tickSnapshotEnd"),
+            )
+        )
+        if not tracked:
+            return self.ib.reqMktData(contract, "", True, False), None, None
+        req_id = client.getReqId()
+        ended = wrapper.startReq(req_id, contract)
+        # A dropped socket fails every open request. Read that outcome here so
+        # it is never reported as an error nobody collected.
+        ended.add_done_callback(
+            lambda future: None if future.cancelled() else future.exception()
+        )
+        ticker = wrapper.startTicker(req_id, contract, "mktData")
+        try:
+            client.reqMktData(req_id, contract, "", True, False, [])
+        except Exception:
+            # Never sent, so there is nothing for IBKR to end or to cancel.
+            wrapper.endTicker(ticker, "mktData")
+            wrapper.tickSnapshotEnd(req_id)
+            self._forget_endpoint_ticker(contract)
+            raise
+        return ticker, req_id, ended
+
+    def _release_broker_snapshot(
+        self,
+        contract: Contract,
+        req_id: Optional[int],
+        ended: Optional[asyncio.Future],
+    ) -> None:
+        """Let IBKR end the snapshot; cancel only one it has left open."""
+        if ended is None or ended.done() or SNAPSHOT_END_GRACE_SEC <= 0:
+            self._close_broker_snapshot(contract, req_id, ended)
+            return
+        # The quote is already with the caller and its snapshot slot is free.
+        # The end-of-snapshot message usually follows within moments.
+        closers = self.__dict__.setdefault("_broker_snapshot_closers", set())
+        closer = asyncio.create_task(
+            self._close_broker_snapshot_after_grace(contract, req_id, ended)
+        )
+        closers.add(closer)
+        closer.add_done_callback(closers.discard)
+
+    async def _close_broker_snapshot_after_grace(
+        self,
+        contract: Contract,
+        req_id: Optional[int],
+        ended: asyncio.Future,
+    ) -> None:
+        try:
+            await asyncio.wait({ended}, timeout=SNAPSHOT_END_GRACE_SEC)
+            if not ended.done():
+                # A cancel is a snapshot message too and takes its turn.
+                await self._broker_snapshot_turn()
+        finally:
+            self._close_broker_snapshot(contract, req_id, ended)
+
+    def _close_broker_snapshot(
+        self,
+        contract: Contract,
+        req_id: Optional[int],
+        ended: Optional[asyncio.Future],
+    ) -> None:
+        counts = self.__dict__.setdefault(
+            "_broker_snapshot_counts", _new_broker_snapshot_counts()
+        )
+        try:
+            if ended is not None and ended.done():
+                # Over at the Gateway (or the socket is gone): nothing to
+                # cancel, only this client's own record of the request.
+                wrapper = self.ib.wrapper
+                ticker = wrapper.tickers.get(id(contract))
+                if ticker is not None:
+                    wrapper.endTicker(ticker, "mktData")
+                if not ended.cancelled() and ended.exception() is None:
+                    counts["endedByGateway"] += 1
+            else:
+                counts["cancelled"] += 1
                 try:
-                    self.ib.cancelMktData(snapshot_contract)
-                except Exception as exc:
-                    self.last_error = f"forced_quote_cancel: {exc}"
-                self._forget_endpoint_ticker(snapshot_contract)
+                    self.ib.cancelMktData(contract)
+                finally:
+                    if ended is not None:
+                        # A cancelled request gets no end-of-snapshot message.
+                        self.ib.wrapper.tickSnapshotEnd(req_id)
+        except Exception as exc:
+            self.last_error = f"forced_quote_cancel: {exc}"
+        self._forget_endpoint_ticker(contract)
 
     async def get_quote_for_instrument(
         self,
