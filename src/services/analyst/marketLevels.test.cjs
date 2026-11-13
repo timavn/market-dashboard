@@ -84,6 +84,7 @@ test('the VIX lines are the bucket boundaries with the postures on each side', (
   const nineteen = line(build({}), '^VIX|19');
   assert.deepEqual([nineteen.band, nineteen.above.name, nineteen.below.name], [0.01, 'Chop', 'Investable']);
   assert.equal(line(build({}), '^VIX|29').above.name, 'F Bucket');
+  assert.deepEqual([nineteen.below.regime, nineteen.above.regime, line(build({}), '^VIX|29').above.regime], ['Low', 'Mid', 'High']);
 });
 
 test('the regime reports each tile that moved from the last edition printing it, and when Risk Off began', () => {

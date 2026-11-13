@@ -306,6 +306,9 @@ function spxLevelFindings(context) {
   }
   return output;
 }
+// Low / Mid / High, the same regime names as the VIX bucket table.
+const VOL_REGIME_BY_NAME = { Investable: 'Low', Chop: 'Mid', 'F Bucket': 'High' };
+const volRegime = bucket => bucket.regime || VOL_REGIME_BY_NAME[bucket.name] || bucket.name;
 // The VIX bucket lines, from the same bucket table the rest of the site reads.
 function vixFindings(context) {
   const lines = Object.values(context.alphaCodeWatch?.lines || {}).filter(line => line.duration === 'vix' && line.breaks?.length);
@@ -314,7 +317,7 @@ function vixFindings(context) {
   const last = crosses.at(-1);
   const bucket = last.to === 'above' ? last.line.above : last.line.below;
   return [finding({ key: ['VIX', 'bucket-cross'], material: ['VIX', 'bucket-cross', last.line.level, last.to, last.at], symbol: 'VIX', kind: 'market', priority: 1, action: 'vix bucket cross', publishedAt: last.at,
-    rows: [row('Signal', `VIX ${last.to} ${level(last.line.level)} → ${bucket.name}: ${bucket.posture.replace(' / ', ', ')}.`)], sourceLinks: [] })];
+    rows: [row('Signal', `VIX ${last.to === 'above' ? '≥' : '<'} ${level(last.line.level)} → ${volRegime(bucket)} vol regime.`)], sourceLinks: [] })];
 }
 // The book's direction by weight, or by position count while weights are unavailable. Holdings
 // need not be current for this: a Risk Off call should not wait for a broker reconnect.

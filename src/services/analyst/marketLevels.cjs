@@ -137,10 +137,12 @@ function pvBandLines({ editions, marketDate }) {
     publishedAt: edition.snapshot.publishedAt || null, messageId: null, excerpt: `PV band ${level}`, marketDate, reading: null, printedDate: map.chartDate, scope: 'market', retain: false }));
 }
 const BUCKET_NAMES = { investable: 'Investable', chop: 'Chop', fBucket: 'F Bucket' };
+const VOL_REGIMES = { investable: 'Low', chop: 'Mid', fBucket: 'High' };
 function vixLines({ marketDate, buckets = hermesRules.volatility.vixBuckets }) {
   return buckets.slice(1).map((bucket, index) => ({ id: `^VIX|${bucket.min}`, symbol: '^VIX', label: 'VIX', market: 'vix', duration: 'vix', level: bucket.min, band: VIX_BAND, marketDate, reading: null,
     product: 'process-rules', productLabel: 'VIX buckets', publishedAt: null, messageId: null, excerpt: null, scope: 'market', retain: false, printedDate: marketDate,
-    above: { name: BUCKET_NAMES[bucket.key] || bucket.label, posture: bucket.posture }, below: { name: BUCKET_NAMES[buckets[index].key] || buckets[index].label, posture: buckets[index].posture } }));
+    above: { name: BUCKET_NAMES[bucket.key] || bucket.label, regime: VOL_REGIMES[bucket.key] || bucket.label, posture: bucket.posture },
+    below: { name: BUCKET_NAMES[buckets[index].key] || buckets[index].label, regime: VOL_REGIMES[buckets[index].key] || buckets[index].label, posture: buckets[index].posture } }));
 }
 /** What the newest Market Structure edition changed from the last edition printing each tile. */
 function marketRegime(editions, spxPrice = null) {

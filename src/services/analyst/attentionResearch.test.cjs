@@ -639,12 +639,12 @@ test('a VIX bucket cross names the bucket it entered, in either direction', () =
   const vix = (level, breaks) => ({ id: `^VIX|${level}`, symbol: '^VIX', label: 'VIX', duration: 'vix', level, marketDate: '2026-09-22', side: breaks.at(-1).to, breaks,
     above: { name: level === 19 ? 'Chop' : 'F Bucket', posture: level === 19 ? 'trade ranges / reduce conviction' : 'defensive / preserve capital' }, below: { name: level === 19 ? 'Investable' : 'Chop', posture: level === 19 ? 'buy dips / normal risk' : 'trade ranges / reduce conviction' } });
   ctx.alphaCodeWatch = alphaWatch(vix(19, [cross('below', 'above', 19.4)]));
-  assert.deepEqual(signals(ctx), ['VIX above 19 → Chop: trade ranges, reduce conviction.']);
+  assert.deepEqual(signals(ctx), ['VIX ≥ 19 → Mid vol regime.']);
   ctx.alphaCodeWatch = alphaWatch(vix(29, [cross('above', 'below', 28.5)]));
-  assert.deepEqual(signals(ctx), ['VIX below 29 → Chop: trade ranges, reduce conviction.']);
+  assert.deepEqual(signals(ctx), ['VIX < 29 → Mid vol regime.']);
   // The latest cross across both lines is the card.
   ctx.alphaCodeWatch = alphaWatch(vix(19, [{ ...cross('below', 'above', 19.4), at: '2026-09-22T13:00:00Z' }]), vix(29, [cross('below', 'above', 29.5)]));
-  assert.deepEqual(signals(ctx), ['VIX above 29 → F Bucket: defensive, preserve capital.']);
+  assert.deepEqual(signals(ctx), ['VIX ≥ 29 → High vol regime.']);
 });
 
 const regimeWatch = (regime) => ({ ...alphaWatch(), marketDate: '2026-09-22', regime: { date: '2026-09-22', tiles: {}, changes: [], ...regime } });
