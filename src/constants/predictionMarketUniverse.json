@@ -35,7 +35,10 @@
         "strikeType": "greater",
         "eventSelection": "next 5:00 PM ET event",
         "underlying": "Gold spot USD/t.oz (Pyth 1-minute close at 5:00 PM ET)",
-        "comparator": ">"
+        "comparator": ">",
+        "heldSeries": [
+          "KXGOLDW"
+        ]
       },
       "hedgeye": {
         "riskRange": {
@@ -98,7 +101,10 @@
         "strikeType": "greater",
         "eventSelection": "next 5:00 PM ET event",
         "underlying": "Silver spot USD/t.oz (Pyth 1-minute close at 5:00 PM ET)",
-        "comparator": ">"
+        "comparator": ">",
+        "heldSeries": [
+          "KXSILVERW"
+        ]
       },
       "hedgeye": {
         "riskRange": {
@@ -161,7 +167,10 @@
         "strikeType": "greater",
         "eventSelection": "next 5:00 PM ET event",
         "underlying": "Copper spot USD/lb (Pyth 1-minute close at 5:00 PM ET)",
-        "comparator": ">"
+        "comparator": ">",
+        "heldSeries": [
+          "KXCOPPERW"
+        ]
       },
       "hedgeye": {
         "riskRange": {
@@ -750,7 +759,10 @@
         },
         "eventSelection": "current calendar-month event of each series",
         "underlying": "Treasury daily par yield curve, 10Y tenor (end-of-day, intraday ignored)",
-        "comparator": "one-touch: > on any business day (high) / < on any business day (low)"
+        "comparator": "one-touch: > on any business day (high) / < on any business day (low)",
+        "heldSeries": [
+          "KXUST10A"
+        ]
       },
       "hedgeye": {
         "riskRange": {
@@ -838,7 +850,10 @@
         },
         "eventSelection": "current calendar-month event of each series",
         "underlying": "Treasury daily par yield curve, 30Y tenor (end-of-day, intraday ignored)",
-        "comparator": "one-touch: > on any business day (high) / < on any business day (low)"
+        "comparator": "one-touch: > on any business day (high) / < on any business day (low)",
+        "heldSeries": [
+          "KXUST30A"
+        ]
       },
       "hedgeye": {
         "riskRange": {
@@ -928,6 +943,20 @@
       "nasdaq100"
     ],
     "note": "A setup starts at basePct and earns up to the weights' total. The position is split across Kalshi lines by edge against our own odds: the ladder's calibrated odds shifted toward the setup by tiltSigma at a maxPct position. tiltSigma is a starting assumption the paper ledger tests."
+  },
+  "lineMonitor": {
+    "edgeTiers": {
+      "strong": 5,
+      "good": 3,
+      "watch": 1
+    },
+    "closingHours": 2,
+    "minDepthDollars": 50,
+    "newStrongMinutes": 30,
+    "expirySharePct": 50,
+    "sectionCapPct": null,
+    "bookCapPct": null,
+    "note": "Edge tiers are points of edge (our odds − ask − fee). Rows shade short (red) when Trade and Trend are both Bearish and price is in the top third of the Risk Range, long (green) when both are Bullish in the bottom third; shading, not the board's setup rule, decides which side lines are graded on. A side is illiquid with less than minDepthDollars resting at its ask (contracts × ask). sectionCapPct and bookCapPct are % of the Kalshi account and stay null until sizing sets them; null raises no flag. heldSeries on a market maps positions in other Kalshi series (weeklies) to that market."
   },
   "sections": [
     {

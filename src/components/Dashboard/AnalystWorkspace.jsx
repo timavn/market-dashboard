@@ -1432,8 +1432,8 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
                 {refreshable && <div className="analyst-review-refresh">
                   {snapshotAt && <span>As of <time dateTime={snapshotAt}>{formatAnalystReportDate(snapshotAt, { year: false })}</time></span>}
                   <button type="button" className="analyst-review-refresh-button" aria-label={`Refresh ${selectedTitle}`}
-                    disabled={running || refreshingIds.includes(selected)} onClick={() => refreshReview(conversation)}>
-                    <RefreshCw size={11} aria-hidden="true" /><span>Refresh</span>
+                    title="Refresh" disabled={running || refreshingIds.includes(selected)} onClick={() => refreshReview(conversation)}>
+                    <RefreshCw size={12} aria-hidden="true" />
                   </button>
                 </div>}
                 {isReview && <AnalystReviewSources reviewKind={selectedKind} sources={reviewSources.sources} loading={reviewSources.loading}

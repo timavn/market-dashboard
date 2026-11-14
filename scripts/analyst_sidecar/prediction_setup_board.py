@@ -645,6 +645,16 @@ def cited_products(board: dict[str, Any]) -> list[dict[str, Any]]:
     return _cited(board).items() if isinstance(board, dict) else []
 
 
+def _lines_block(members: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Each market's Kalshi line monitor (gate, graded lines, held lines), passed through for the report to fold."""
+    markets = [row["kalshiLines"] for row in members if isinstance(row.get("kalshiLines"), dict)]
+    return {"markets": markets} if markets else None
+
+
+def _fenced(kind: str, value: dict[str, Any]) -> list[str]:
+    return [f"```{kind}", json.dumps(value, ensure_ascii=False, separators=(",", ":")), "```", ""]
+
+
 def render_setup_board(board: dict[str, Any]) -> str:
     rows = [row for row in board.get("rows") or [] if isinstance(row, dict)]
     cited = _cited(board)
@@ -684,6 +694,8 @@ def render_setup_board(board: dict[str, Any]) -> str:
                                    for key in ("lower", "base", "upper")),
                                  published if published != DASH else NA])
                 lines += _table(["Market", "Consensus" if with_consensus else "Kalshi", "Low", "Base", "High", "Published"], rows)
+            if held := _lines_block(members):
+                lines += _fenced("analyst-lines", held)
             continue
         drivers = _driver_block(board, members, label)
         if drivers["volatility"] or drivers.get("correlations"):
@@ -721,6 +733,9 @@ def render_setup_board(board: dict[str, Any]) -> str:
             notes.append("Kalshi yield contracts pay if the daily Treasury yield reaches the line on any business day this month.")
         if notes:
             lines += [" ".join(notes), ""]
+        # Boards captured with the line monitor fold each market's Kalshi lines under its section's table.
+        if monitor := _lines_block(members):
+            lines += _fenced("analyst-lines", monitor)
         # Boards captured with sizing show each setup's position and line split under its section's table.
         sizing = _sizing_block(members)
         if sizing:
@@ -729,6 +744,9 @@ def render_setup_board(board: dict[str, Any]) -> str:
         if block:
             lines += ["```analyst-research", json.dumps(block, ensure_ascii=False, separators=(",", ":")), "```", ""]
 
+    # Boards captured with the Kalshi positions end with the whole book.
+    if isinstance(board.get("kalshiBook"), dict):
+        lines += ["## Kalshi book", "", *_fenced("analyst-kalshi-book", board["kalshiBook"])]
     # Boards captured with the paper ledger say how the sized tickets have done so far.
     paper = board.get("paper")
     if isinstance(paper, dict) and paper.get("tickets"):

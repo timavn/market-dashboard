@@ -523,6 +523,67 @@ function buildUnifiedCorrelation({
   };
 }
 
+// Hedgeye's eleven equity sectors, each by its SPDR ETF.
+const SECTOR_ETFS = Object.freeze(['XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY']);
+// A stock is flagged for review when another sector ETF tracks it this much better than its own.
+const SECTOR_FIT_REVIEW_MARGIN = 0.1;
+
+// How closely each stock's daily returns follow its assigned sector ETF, on the same
+// return basis and observation gate as the unified correlation, plus the sector ETF
+// it follows best. Nothing is reassigned here: a better fit is only reported.
+function buildSectorFit({
+  assignments = [],
+  histories = {},
+  sectorEtfs = SECTOR_ETFS,
+  windows = DEFAULT_CORRELATION_WINDOWS,
+  defaultWindow = DEFAULT_CORRELATION_WINDOW,
+} = {}) {
+  const selectedWindows = [...new Set((windows || DEFAULT_CORRELATION_WINDOWS)
+    .map(Number).filter((window) => Number.isInteger(window) && window > 0))].sort((a, b) => a - b);
+  const seriesWindow = maximumRequestedWindow(selectedWindows);
+  const cache = new Map();
+  const series = (symbol) => {
+    if (!cache.has(symbol)) cache.set(symbol, seriesFromBars(histories[symbol] || []).slice(-seriesWindow));
+    return cache.get(symbol);
+  };
+  const cell = (symbol, etf, window) => {
+    const result = correlationCell(series(symbol), series(etf), window);
+    return { value: result.rawValue == null ? null : round(result.rawValue, 4), observations: result.observations, reason: result.reason || null };
+  };
+  const rows = (Array.isArray(assignments) ? assignments : []).map((assignment) => {
+    const symbol = normalizeSymbol(assignment?.symbol);
+    const etf = normalizeSymbol(assignment?.etf);
+    if (!symbol || !sectorEtfs.includes(etf)) return null;
+    const correlations = Object.fromEntries(selectedWindows.map((window) => [String(window), cell(symbol, etf, window)]));
+    const assigned = correlations[String(defaultWindow)]?.value ?? null;
+    const ranked = sectorEtfs
+      .map((candidate) => ({ etf: candidate, value: cell(symbol, candidate, defaultWindow).value }))
+      .filter((candidate) => candidate.value != null)
+      .sort((left, right) => right.value - left.value);
+    const best = ranked[0] || null;
+    return {
+      symbol,
+      etf,
+      correlations,
+      best,
+      // Another sector ETF follows the stock clearly better than the one it is filed under.
+      review: Boolean(best && assigned != null && best.etf !== etf && best.value - assigned >= SECTOR_FIT_REVIEW_MARGIN),
+    };
+  }).filter(Boolean);
+  return {
+    modelVersion: 'exposure-lab-sector-fit-v1',
+    defaultWindow,
+    windows: selectedWindows,
+    rows,
+    methodology: {
+      returnBasis: 'completed-session adjusted-close simple returns',
+      observationGate: 'max(20, ceil(80% × window)) aligned observations',
+      measure: 'raw return correlation of the stock with the sector ETF itself, not the sector-minus-market factor',
+      reviewRule: `another sector ETF leads the assigned one by ${SECTOR_FIT_REVIEW_MARGIN} or more on the default window`,
+    },
+  };
+}
+
 function reviewMapBySymbol(reviews = []) {
   const map = new Map();
   (Array.isArray(reviews) ? reviews : []).forEach((review) => {
@@ -989,11 +1050,13 @@ module.exports = {
   DEFAULT_CORRELATION_WINDOW,
   MINIMUM_CORRELATION_COVERAGE,
   MINIMUM_CORRELATION_OBSERVATIONS,
+  SECTOR_ETFS,
   buildEmptyCorrelation,
   buildEmptyGeography,
   buildExposureLabDiagnostics,
   buildGeographyAllocation,
   buildGeographySensitivity,
+  buildSectorFit,
   buildUnifiedCorrelation,
   classifyExposureLabPortfolioInput,
   correlationCell,

@@ -101,6 +101,7 @@ class GatewayConnectionGovernor:
         self.circuit_state = "closed"
         self.failure_count = 0
         self.consecutive_failure_count = 0
+        self._unresponsive_streak = 0
         self.connection_attempt_count = 0
         self.heartbeat_request_count = 0
         self.managed_account_request_count = 0
@@ -164,6 +165,7 @@ class GatewayConnectionGovernor:
         self.circuit_state = "closed"
         self.failure_count = 0
         self.consecutive_failure_count = 0
+        self._unresponsive_streak = 0
         self.connection_attempt_count = 0
         self.heartbeat_request_count = 0
         self.managed_account_request_count = 0
@@ -240,6 +242,7 @@ class GatewayConnectionGovernor:
     def _record_success(self, payload: Dict[str, Any]) -> None:
         self.circuit_state = "closed"
         self.consecutive_failure_count = 0
+        self._unresponsive_streak = 0
         self._next_probe_monotonic = None
         self.next_probe_at = None
         self.last_error_code = None
@@ -249,9 +252,18 @@ class GatewayConnectionGovernor:
     def _record_failure(self, error: GatewayConnectionError) -> None:
         self.failure_count += 1
         self.consecutive_failure_count += 1
-        delay = self.backoff_seconds[
-            min(self.consecutive_failure_count - 1, len(self.backoff_seconds) - 1)
-        ]
+        if error.code == GATEWAY_NOT_AUTHENTICATED:
+            # A refused connect means nothing is listening on the API port
+            # (Gateway closed or logged out). Probing costs the Gateway
+            # nothing, so keep the shortest interval: a relaunched Gateway is
+            # then picked up within seconds instead of after a 60 s backoff.
+            self._unresponsive_streak = 0
+            delay = self.backoff_seconds[0]
+        else:
+            self._unresponsive_streak += 1
+            delay = self.backoff_seconds[
+                min(self._unresponsive_streak - 1, len(self.backoff_seconds) - 1)
+            ]
         now = self._monotonic()
         self._next_probe_monotonic = now + delay
         wall_now = self._wall_clock()

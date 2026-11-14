@@ -26,6 +26,8 @@ LOGGER = logging.getLogger("market_dashboard.analyst.gateway")
 
 
 IBKR_BASE_URL = os.environ.get("IBKR_SIDECAR_URL", "http://127.0.0.1:8765").rstrip("/")
+# Longest Gateway re-probe wait a holdings read absorbs before reporting unavailable.
+IBKR_HOLDINGS_GATEWAY_RETRY_MAX_MS = 6000
 MARKET_DASHBOARD_API_BASE = os.environ.get(
     "MARKET_DASHBOARD_API_BASE", "http://127.0.0.1:3001"
 ).rstrip("/")
@@ -1232,9 +1234,36 @@ class IbkrReader:
         try:
             payload = await self._request("/portfolio/live-positions")
         except Exception as error:
-            code = self._holdings_failure_code(error)
-            return self._holdings_unavailable(HOLDINGS_FAILURE_MESSAGES[code], code)
+            # The IBKR sidecar answers 503 at once while its Gateway circuit
+            # waits for the next probe. When that probe is due within a few
+            # seconds (a just-relaunched Gateway), wait for it once instead of
+            # reporting holdings unavailable.
+            wait_ms = self._short_gateway_retry_ms(error)
+            if wait_ms is None:
+                code = self._holdings_failure_code(error)
+                return self._holdings_unavailable(HOLDINGS_FAILURE_MESSAGES[code], code)
+            await asyncio.sleep(wait_ms / 1000 + 0.25)
+            try:
+                payload = await self._request("/portfolio/live-positions")
+            except Exception as retry_error:
+                code = self._holdings_failure_code(retry_error)
+                return self._holdings_unavailable(HOLDINGS_FAILURE_MESSAGES[code], code)
         return self._holdings_context_from_payload(payload)
+
+    @staticmethod
+    def _short_gateway_retry_ms(error: Exception) -> Optional[float]:
+        if not isinstance(error, httpx.HTTPStatusError) or error.response.status_code != 503:
+            return None
+        try:
+            payload = error.response.json()
+        except ValueError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        retry_ms = _finite_number_or_none(payload.get("retry_after_ms"))
+        if retry_ms is None or not 0 < retry_ms <= IBKR_HOLDINGS_GATEWAY_RETRY_MAX_MS:
+            return None
+        return retry_ms
 
     @staticmethod
     def _holdings_failure_code(error: Exception) -> str:
@@ -2017,6 +2046,18 @@ class OpenBBReader:
                 "priceAdjustment": adjustment,
             }
         return response
+
+    async def company_profiles(self, symbols: list[str], *, provider: str = "yfinance") -> list[dict[str, Any]]:
+        """Company profile rows (sector, industry, issue type) for many symbols in one read."""
+        response = await self._call(
+            operation="company_profiles",
+            provider=provider,
+            invoke=lambda obb: obb.equity.profile(symbol=",".join(symbols), provider=provider),
+        )
+        results = response["data"].get("results")
+        if response.get("status") != "available" or not isinstance(results, list):
+            raise RuntimeError("company profiles unavailable")
+        return [row for row in results if isinstance(row, dict)]
 
     async def company_fundamentals(self, symbol: str, *, provider: str = "yfinance") -> dict[str, Any]:
         return await self._call(

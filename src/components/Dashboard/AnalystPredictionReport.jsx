@@ -5,6 +5,8 @@ import AnalystPredictionRangeBar, { parsePredictionRange, predictionRangeLabel }
 import AnalystPredictionDrivers, { parsePredictionDrivers } from './AnalystPredictionDrivers';
 import AnalystPredictionResearch, { parsePredictionResearch } from './AnalystPredictionResearch';
 import AnalystPredictionSizing, { parsePredictionSizing } from './AnalystPredictionSizing';
+import AnalystPredictionLines, { parsePredictionLines } from './AnalystPredictionLines';
+import AnalystKalshiBook, { parseKalshiBook } from './AnalystKalshiBook';
 import remarkGfm from 'remark-gfm';
 import { remarkAnalystProcessColors } from './analystProcessColors';
 import { predictionReportSources } from './analystPredictionSources';
@@ -313,7 +315,8 @@ function PinnedFrame({ className, children }) {
   </>;
 }
 // ```analyst-drivers blocks carry a section's shared variables, ```analyst-sizing its setups'
-// positions and line splits, and ```analyst-research its markets' morning research; other code blocks render normally.
+// positions and line splits, ```analyst-lines its markets' foldable Kalshi lines, ```analyst-kalshi-book the whole Kalshi
+// account, and ```analyst-research its markets' morning research; other code blocks render normally.
 const MarkdownPre = ({ node, children }) => {
   const code = node?.children?.find(child => child.tagName === 'code');
   const classes = [].concat(code?.properties?.className || []);
@@ -321,6 +324,10 @@ const MarkdownPre = ({ node, children }) => {
   if (drivers) return <AnalystPredictionDrivers drivers={drivers} />;
   const sizing = classes.includes('language-analyst-sizing') ? parsePredictionSizing(nodeText(code)) : null;
   if (sizing) return <AnalystPredictionSizing sizing={sizing} />;
+  const lines = classes.includes('language-analyst-lines') ? parsePredictionLines(nodeText(code)) : null;
+  if (lines) return <AnalystPredictionLines lines={lines} />;
+  const book = classes.includes('language-analyst-kalshi-book') ? parseKalshiBook(nodeText(code)) : null;
+  if (book) return <AnalystKalshiBook book={book} />;
   const research = classes.includes('language-analyst-research') ? parsePredictionResearch(nodeText(code)) : null;
   return research ? <AnalystPredictionResearch research={research} /> : <pre>{children}</pre>;
 };
@@ -328,6 +335,7 @@ const SourceButton = ({ group, onCitation, children }) => <button type="button" 
   aria-label={`Source: ${group.label}`} title={group.source.title || group.label}
   onClick={() => onCitation?.(group.source, group.context)}>{children || group.label}</button>;
 
+const FOOTER_LINE = /^(Sources?:\s|Paper tickets:|Research read for\b)/i;
 const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageId, markdown, citations, onCitation, error }) {
   const report = useMemo(() => {
     const sourced = predictionReportSources(markdown, citations);
@@ -354,7 +362,9 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
     a: ({ href, children }) => report.links.has(href)
       ? <SourceButton group={report.links.get(href)} onCitation={onCitation}>{children}</SourceButton>
       : <AnalystReportLink href={href}>{children}</AnalystReportLink>,
-    p: ({ node, children }) => <p className={/^Sources?:\s/i.test(node.children?.[0]?.value || '') ? 'analyst-prediction-sources' : undefined}>{children}</p>,
+    // The closing Paper tickets, Research read and Sources lines are not shown (user-specified 2026-11-13); the report
+    // ends with the Kalshi book. Saved reports that carry them drop them too.
+    p: ({ node, children }) => (FOOTER_LINE.test(node.children?.[0]?.value || '') ? null : <p>{children}</p>),
   }), [report.links, onCitation]);
   return <article data-message-id={messageId} className={`analyst-message analyst-message--assistant analyst-prediction-report${error ? ' is-error' : ''}`} aria-label="Predictive Markets Review">
     <div className="analyst-markdown">
@@ -367,8 +377,6 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
         <ReactMarkdown remarkPlugins={reportPlugins} components={components}
           urlTransform={url => report.links.has(url) ? url : defaultUrlTransform(url)}>{parts.detail}</ReactMarkdown>
       </details>}
-      {report.remaining.length > 0 && <p className="analyst-prediction-sources"><span>Sources: </span>{report.remaining.map((group, index) =>
-        <React.Fragment key={group.source.id}>{index > 0 && ', '}<SourceButton group={group} onCitation={onCitation} /></React.Fragment>)}</p>}
     </div>
   </article>;
 });

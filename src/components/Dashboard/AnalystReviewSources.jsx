@@ -168,12 +168,15 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
     : statuses[item.status] ? item.status : 'unavailable';
   // Model work continues after its sources settle; a failed read replaces the
   // acquisition phase with its own short notice while rows keep their state.
-  const showPhase = Boolean(phase) && (settled ? modelPhase : !reconnecting && !readFailed);
+  // While sources are still being read their own row rings are the progress,
+  // so the header shows a phase ring and clock only for model work after them.
+  const showPhase = Boolean(phase) && settled && modelPhase;
+  // The acquisition phase is still announced, for screen readers only.
+  const quietPhase = Boolean(phase) && !settled && !reconnecting && !readFailed;
   // Reviews count from their run's creation, through any model phase that
   // follows settled sources. The clock is decorative; the polite region must
   // not announce it.
-  const elapsed = useElapsedSince(sources?.capturedAt,
-    (checking && activeStates.has(sources?.state)) || (settled && showPhase));
+  const elapsed = useElapsedSince(sources?.capturedAt, showPhase);
   const notice = !settled && (reconnecting ? 'Reconnecting…' : readFailed ? 'Unavailable' : '');
   const openItem = surfaceActive && openSource?.captureKey === captureKey && items.find(item => item.id === openSource.id
     && sourceStatus(item) === openSource.status);
@@ -186,11 +189,13 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
     <section className="analyst-review-sources" aria-label="Review sources" aria-busy={checking} title={presentAnalystReportDates(sources?.detail) || undefined}>
       <header className="analyst-review-sources-heading">
         <span className="analyst-review-sources-progress">
-          {showPhase ? <span role="status" aria-label="Response running"><AnalystSpinner size={12} text={phase} /></span> : notice && <span>{notice}</span>}
+          {showPhase ? <span role="status" aria-label="Response running"><AnalystSpinner size={12} text={phase} /></span>
+            : quietPhase ? <span role="status" aria-label="Response running" className="sr-only">{phase}</span>
+              : notice && <span>{notice}</span>}
           {elapsed && <span className="analyst-review-sources-elapsed" aria-hidden="true">{elapsed}</span>}
         </span>
         <h3>Sources</h3>
-        {items.length > 0 && <span aria-live="polite">{indexed ? `${captured}/${items.length} indexed` : `${ready}/${counted.length} ready`}</span>}
+        {items.length > 0 && !checking && <span aria-live="polite">{indexed ? `${captured}/${items.length} indexed` : `${ready}/${counted.length} ready`}</span>}
       </header>
       {items.length > 0 ? (
         <ul className="analyst-review-sources-list">
@@ -217,7 +222,7 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
                   {observed ? (observed.value
                     ? <time className="analyst-process--key" dateTime={observed.value}>{observed.label}</time>
                     : <span className="analyst-process--key">{observed.label}</span>)
-                    : <span aria-label="Source time unavailable">—</span>}
+                    : status !== 'checking' && <span aria-label="Source time unavailable">—</span>}
                 </span>
                 <SourceStatus item={item} status={status} Icon={Icon} label={label} indexed={indexed}
                   open={Boolean(openItem && openSource.id === item.id)} onClose={closeExplanation}

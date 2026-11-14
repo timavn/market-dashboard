@@ -1,0 +1,236 @@
+<!doctype html><meta charset="utf-8"><title>Kalshi Lines Report</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column for the framework, full-width mockup boards in the dashboard's own grid style */
+:root{
+  --bg:#f6f8fa; --surface:#ffffff; --ink:#172033; --muted:#667085; --line:#dbe1e8; --head:#eef0f3;
+  --pos:#059669; --neg:#dc2626; --warn:#b7791f; --blue:#2563eb;
+  --neg-soft:#fde8e8; --warn-soft:#fdf3dc; --blue-soft:#e6eefc; --pos-soft:#e3f5ee;
+  --code-bg:#f0f3f6;
+  --f-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f141b; --surface:#161d27; --ink:#e4e9f0; --muted:#9facbb; --line:#2a3442; --head:#1d2633;
+  --pos:#4fd1a1; --neg:#ff8f99; --warn:#f2c46d; --blue:#7aa7ff;
+  --neg-soft:#3a1f24; --warn-soft:#3a3020; --blue-soft:#1d2a44; --pos-soft:#17332b; --code-bg:#1b2330; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141b; --surface:#161d27; --ink:#e4e9f0; --muted:#9facbb; --line:#2a3442; --head:#1d2633;
+  --pos:#4fd1a1; --neg:#ff8f99; --warn:#f2c46d; --blue:#7aa7ff;
+  --neg-soft:#3a1f24; --warn-soft:#3a3020; --blue-soft:#1d2a44; --pos-soft:#17332b; --code-bg:#1b2330; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-ui);font-size:14px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:40px}
+.prose{max-width:760px}
+h1{font-size:28px;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:19px;margin:0 0 10px;text-wrap:balance}
+h3{font-size:14px;margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+p{margin:0 0 10px}
+.lede{color:var(--muted);font-size:15px}
+.num,td.n{font-variant-numeric:tabular-nums}
+code,.mono{font-family:var(--f-mono);font-size:12.5px}
+
+/* flow */
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
+.flow .step{flex:1 1 150px;min-width:0;background:var(--surface);border:1px solid var(--line);padding:10px 12px}
+.flow .step b{display:block;font-size:13px}
+.flow .step span{color:var(--muted);font-size:12px}
+.flow .step.exists{background:var(--head)}
+.flow .arrow{align-self:center;color:var(--muted)}
+
+/* rules */
+.layers{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,540px),1fr));gap:16px}
+.layer{background:var(--surface);border:1px solid var(--line);min-width:0}
+.layer header{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--head);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.layer header b{font-size:14px}
+.layer header span{color:var(--muted);font-size:12px}
+.layer .body{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+pre.rules{margin:0;background:var(--code-bg);padding:10px 12px;overflow-x:auto;font-family:var(--f-mono);font-size:12px;line-height:1.6;color:var(--ink)}
+pre.rules .k{color:var(--blue);font-weight:600}
+pre.rules .c{color:var(--muted)}
+.note{color:var(--muted);font-size:12.5px}
+
+/* chips */
+.chip{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border:1px solid transparent;white-space:nowrap}
+.chip.strong{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.chip.good{background:var(--pos-soft);color:var(--pos);border-color:var(--pos)}
+.chip.watch{background:var(--blue-soft);color:var(--blue);border-color:var(--blue)}
+.chip.pass{color:var(--muted);border-color:var(--line)}
+.chip.red{background:var(--neg-soft);color:var(--neg);border-color:var(--neg)}
+.chip.yel{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.chip.blu{background:var(--blue-soft);color:var(--blue);border-color:var(--blue)}
+.chip.hold{color:var(--pos);border-color:var(--line)}
+.chip.long{color:var(--pos);border-color:var(--pos)}
+.chip.short{color:var(--neg);border-color:var(--neg)}
+@keyframes flash{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 3px currentColor}}
+.flash{animation:flash 1.4s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.flash{animation:none;outline:2px solid currentColor;outline-offset:1px}}
+
+/* mockup boards */
+.mock{background:var(--surface);border:1px solid var(--line)}
+.mock-cap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}
+.mock-cap b{font-size:15px}
+.mock-cap span{font-size:12px;color:var(--muted)}
+.scroll{overflow-x:auto}
+table.g{border-collapse:collapse;width:100%;font-size:13px}
+table.g th,table.g td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:middle}
+table.g th{background:var(--head);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;white-space:nowrap}
+table.g td.n,table.g th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.g td.sub{color:var(--muted);font-size:12px}
+tr.dim td{color:var(--muted)}
+tr.hl-red td{background:var(--neg-soft)}
+tr.hl-yel td{background:var(--warn-soft)}
+.held{font-family:var(--f-mono);font-size:11px;color:var(--blue);font-weight:600}
+.pos{color:var(--pos)} .neg{color:var(--neg)} .mut{color:var(--muted)}
+.sec-title{display:flex;align-items:baseline;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.sec-title b{font-size:16px}
+.mkt-head{display:grid;grid-template-columns:minmax(120px,1.2fr) repeat(5,minmax(80px,1fr));border-bottom:1px solid var(--line)}
+.mkt-head>div{padding:7px 10px;border-right:1px solid var(--line);font-size:13px;min-width:0}
+.mkt-head>div:last-child{border-right:0}
+.mkt-head small{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.lines-wrap{padding:0 14px 14px 30px}
+.lines-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:10px 0 6px;display:flex;gap:10px;flex-wrap:wrap}
+.collapsed{padding:9px 14px 9px 30px;font-size:13px;border-bottom:1px solid var(--line);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.collapsed .mut{font-size:12px}
+
+/* book summary */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border-bottom:1px solid var(--line)}
+.tile{padding:12px 14px;border-right:1px solid var(--line);min-width:0}
+.tile:last-child{border-right:0}
+.tile small{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.tile .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.tile .s{font-size:12px;color:var(--muted)}
+.book-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+.book-grid>section{padding:12px 14px;border-right:1px solid var(--line);min-width:0}
+.book-grid>section:last-child{border-right:0}
+.bar-row{display:grid;grid-template-columns:70px 1fr 56px;gap:8px;align-items:center;font-size:12.5px;padding:3px 0}
+.bar{height:12px;background:var(--head);position:relative}
+.bar i{position:absolute;inset:0 auto 0 0;background:var(--blue)}
+.bar i.cpi{background:var(--pos)}
+.bar .cap{position:absolute;top:-3px;bottom:-3px;width:0;border-left:2px dashed var(--muted)}
+.flags{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.flags li{display:flex;gap:8px;align-items:baseline}
+
+.open{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+.open div{background:var(--surface);border:1px solid var(--line);padding:10px 12px;font-size:13px}
+
+/* screenshot mode: #shot-<id> shows one board alone */
+body.shot{padding:16px;background:var(--bg)}
+body.shot .wrap>*{display:none}
+body.shot .wrap>.shot-on{display:block}
+</style><style>
+body{padding-block:24px}
+.wrap{gap:22px}
+.board{background:var(--surface);border:1px solid var(--line)}
+table.mk{border-collapse:collapse;width:100%;font-size:13px}
+table.mk th,table.mk td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:middle}
+table.mk th:last-child,table.mk td:last-child{border-right:0}
+table.mk th{background:var(--head);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+.tog{display:inline-flex;align-items:center;gap:6px;font-weight:600;white-space:nowrap}
+.tog .chev{display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;border:1px solid var(--line);font-size:10px;color:var(--ink);background:var(--surface)}
+.tog.off{color:var(--muted);font-weight:500}
+.tog.off .chev{color:var(--muted)}
+tr.open-row td{background:var(--blue-soft)}
+tr.lines-row>td{padding:0 12px 12px 34px;background:var(--surface)}
+.lsum{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px}
+.rule-note{font-size:12px;color:var(--muted);padding:8px 14px;border-top:1px solid var(--line)}
+table.mk td:first-child{white-space:nowrap}
+.book-grid{grid-template-columns:1fr 1.25fr 1fr}
+.callout{font-size:12px;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap;padding:0 2px}
+.callout b{color:var(--ink);font-weight:600}
+</style>
+
+<div class="wrap">
+
+<div class="callout"><span><b>Predictive Markets · Kalshi lines</b></span><span>Fri Nov 13 · quotes 11:58:40 PT · next pull 42s</span><span>Lines open by default only when the market has a setup and at least one Good or Strong line. Everything else stays folded with a one-line reason.</span></div>
+
+<!-- METALS -->
+<section class="board">
+  <div class="sec-title"><b>Metals</b><span class="mut">3 markets · 1 open · 2 folded</span></div>
+  <div class="scroll"><table class="mk">
+    <thead><tr><th style="width:175px">Market</th><th>Tick</th><th>Trade</th><th>Trend</th><th>Range</th><th>Gate</th><th>Lines</th><th>Held</th></tr></thead>
+    <tbody>
+      <tr class="open-row"><td><span class="tog"><span class="chev">▼</span>Silver</span> <span class="mut">SI=F</span></td><td class="neg">Bearish</td><td class="neg">Bearish</td><td class="neg">Bearish</td><td>81% <span class="mut">top third</span></td><td><span class="chip short">Short · A</span></td><td><div class="lsum"><span class="chip strong flash">2 Strong</span><span class="chip good">1 Good</span><span class="mut">best +6.0</span></div></td><td><span class="held">2 lines</span> <span class="chip yel">Through line</span></td></tr>
+      <tr class="lines-row"><td colspan="8">
+        <div class="lines-label"><span>KXSILVERW · closes today 2:00 PM PT</span><span>Buy NO</span><span>4 lines with edge · 1 illiquid · 4 pass hidden</span></div>
+        <table class="g">
+          <thead><tr><th>Line</th><th class="n">From price</th><th class="n">NO ask</th><th class="n">Kalshi odds</th><th class="n">Our odds</th><th class="n">Edge</th><th>Strength</th><th>Held</th></tr></thead>
+          <tbody>
+            <tr><td>Above $51.99</td><td class="n">+0.9σ</td><td class="n">71¢</td><td class="n">71%</td><td class="n">78%</td><td class="n pos">+6.0</td><td><span class="chip strong">Strong</span></td><td><span class="held">NO 318</span></td></tr>
+            <tr><td>Above $52.49</td><td class="n">+1.3σ</td><td class="n">80¢</td><td class="n">80%</td><td class="n">86%</td><td class="n pos">+5.1</td><td><span class="chip strong flash">Strong · new</span></td><td class="mut">—</td></tr>
+            <tr class="hl-yel"><td>Above $50.99</td><td class="n">−0.1σ</td><td class="n">35¢</td><td class="n">35%</td><td class="n">39%</td><td class="n pos">+3.2</td><td><span class="chip good">Good</span></td><td><span class="held">NO 779</span> <span class="chip yel">Through line</span></td></tr>
+            <tr><td>Above $52.99</td><td class="n">+1.7σ</td><td class="n">90¢</td><td class="n">90%</td><td class="n">92%</td><td class="n">+1.4</td><td><span class="chip watch">Watch</span></td><td class="mut">—</td></tr>
+            <tr class="dim"><td colspan="8">1 illiquid (7¢ spread) · 4 below 1 point · show</td></tr>
+          </tbody>
+        </table>
+      </td></tr>
+      <tr><td><span class="tog"><span class="chev">▶</span>Copper</span> <span class="mut">HG=F</span></td><td class="neg">Bearish</td><td class="mut">N/A</td><td class="neg">Bearish</td><td>64% <span class="mut">middle</span></td><td><span class="chip pass">None</span></td><td class="mut">No setup: price left the top third</td><td><span class="held">2 lines</span> <span class="chip yel">Setup lapsed</span></td></tr>
+      <tr><td><span class="tog off"><span class="chev">▶</span>Gold</span> <span class="mut">GC=F</span></td><td class="mut">Neutral</td><td class="pos">Bullish</td><td class="pos">Bullish</td><td>44% <span class="mut">middle</span></td><td><span class="chip pass">None</span></td><td class="mut">No setup: Tick Neutral</td><td class="mut">—</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- CRYPTO -->
+<section class="board">
+  <div class="sec-title"><b>Crypto</b><span class="mut">2 markets · 0 open · 2 folded</span></div>
+  <div class="scroll"><table class="mk">
+    <thead><tr><th style="width:175px">Market</th><th>Tick</th><th>Trade</th><th>Trend</th><th>Range</th><th>Gate</th><th>Lines</th><th>Held</th></tr></thead>
+    <tbody>
+      <tr class="hl-red"><td><span class="tog"><span class="chev">▶</span>Bitcoin</span> <span class="mut">BTC-USD</span></td><td class="pos">Bullish</td><td class="mut">N/A</td><td class="pos">Bullish</td><td>29% <span class="mut">bottom third</span></td><td><span class="chip long">Long · C</span></td><td><div class="lsum"><span class="chip watch">3 Watch</span><span class="mut">best +2.1</span></div></td><td><span class="held">2 lines</span> <span class="chip red flash">Contradicts</span></td></tr>
+      <tr><td><span class="tog"><span class="chev">▶</span>Ethereum</span> <span class="mut">ETH-USD</span></td><td class="mut">N/A</td><td class="neg">Bearish</td><td class="neg">Bearish</td><td>58% <span class="mut">middle</span></td><td><span class="chip pass">None</span></td><td class="mut">No setup: no Tick for ETH</td><td><span class="held">2 lines</span> <span class="chip yel">Edge gone</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="rule-note">Folded rows still show held lines and their worst state, so a problem never hides behind a closed section.</div>
+</section>
+
+<div class="callout"><span>Oil, Indices, Rates and CPI sections follow in the same form ·  · ·</span></div>
+
+<!-- BOOK SUMMARY -->
+<section class="mock">
+  <div class="mock-cap"><b>Kalshi book</b><span>End of report · account and exposure from the live Kalshi read</span></div>
+  <div class="tiles">
+    <div class="tile"><small>Account</small><div class="v">$5,784</div><div class="s">$2,922 cash</div></div>
+    <div class="tile"><small>At risk</small><div class="v">$2,852</div><div class="s">49.3% of account</div></div>
+    <div class="tile"><small>Max payout</small><div class="v">$7,023</div><div class="s">if every line pays</div></div>
+    <div class="tile"><small>Open</small><div class="v">14 lines</div><div class="s">7 events</div></div>
+    <div class="tile"><small>Held lines flagged</small><div class="v"><span class="neg">2</span> · <span style="color:var(--warn)">5</span></div><div class="s">red · yellow</div></div>
+    <div class="tile"><small>Bettable today</small><div class="v">4 lines</div><div class="s">Good or Strong, not held</div></div>
+  </div>
+  <div class="book-grid">
+    <section>
+      <h3>At risk by section · % of account</h3>
+      <div class="bar-row"><span>CPI</span><div class="bar"><i class="cpi" style="width:65.7%"></i><span class="cap" style="left:83.3%"></span></div><span class="n">19.7%</span></div>
+      <div class="bar-row"><span>Rates</span><div class="bar"><i style="width:49%"></i><span class="cap" style="left:83.3%"></span></div><span class="n">14.7%</span></div>
+      <div class="bar-row"><span>Metals</span><div class="bar"><i style="width:27.3%"></i><span class="cap" style="left:83.3%"></span></div><span class="n">8.2%</span></div>
+      <div class="bar-row"><span>Crypto</span><div class="bar"><i style="width:22%"></i><span class="cap" style="left:83.3%"></span></div><span class="n">6.6%</span></div>
+      <div class="bar-row"><span>Oil</span><div class="bar"></div><span class="n mut">0%</span></div>
+      <div class="bar-row"><span>Indices</span><div class="bar"></div><span class="n mut">0%</span></div>
+      <p class="note">Scale 0–30%. Dashed mark = section cap (placeholder). Green = YES, blue = NO.</p>
+    </section>
+    <section>
+      <h3>Direction</h3>
+      <table class="g">
+        <thead><tr><th>Section</th><th>Bet</th><th class="n">At risk</th><th>State</th></tr></thead>
+        <tbody>
+          <tr><td>CPI</td><td>CPI above 3.6%</td><td class="n">$1,141</td><td><span class="chip hold">Hold</span></td></tr>
+          <tr><td>Rates</td><td>Yields below</td><td class="n">$853</td><td><span class="chip hold">Hold</span></td></tr>
+          <tr><td>Metals</td><td>Ag, Cu below</td><td class="n">$477</td><td><span class="chip yel">2 flags</span></td></tr>
+          <tr><td>Crypto</td><td>BTC, ETH below</td><td class="n">$382</td><td><span class="chip red">Contradicts</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section>
+      <h3>Book flags</h3>
+      <ul class="flags">
+        <li><span class="chip red">Red</span><span>Bitcoin gate is Long; 2 lines held NO ($191).</span></li>
+        <li><span class="chip yel">Yellow</span><span>Today's close holds 60% of risk ($1,711).</span></li>
+        <li><span class="chip yel">Yellow</span><span>BTC and ETH both short, 30D corr 0.86.</span></li>
+        <li><span class="chip yel">Yellow</span><span>Silver Above $52.49 is a new Strong line.</span></li>
+      </ul>
+    </section>
+  </div>
+</section>
+
+</div>
+<script>document.documentElement.setAttribute('data-theme','light');document.querySelectorAll('.flash').forEach(function(f){f.style.animation='none';f.style.boxShadow='0 0 0 3px currentColor';});</script>

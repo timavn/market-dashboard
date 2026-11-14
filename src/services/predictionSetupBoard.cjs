@@ -5,6 +5,7 @@ const { PRODUCTS: MORNING_PRODUCTS, PROXY_TICKERS, buildMorningResearch } = requ
 const { emailPublishedAt } = require('../utils/researchPublicationTime.cjs');
 const { brokenAlphaCodeLine } = require('./analyst/alphaCodeWatch.cjs');
 const { allocateLines, kalshiAccountValue, kalshiLine, scoreConviction, sizedMarket } = require('./predictionSizing.cjs');
+const { applyLineMonitor, eventOf } = require('./predictionLineMonitor.cjs');
 
 // One row per tracked Kalshi market: Hedgeye Tick/Trade/Trend, the verified
 // underlying price, its Risk Range position, and the rule-based setup. A setup
@@ -535,7 +536,9 @@ const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.h
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
   loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts, loadLatestEditions,
   loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
-  loadPublishedStatements, loadAlphaCodeWatch, loadKalshiMarkets, loadKalshiBalance, marketDateFor }) {
+  loadPublishedStatements, loadAlphaCodeWatch, loadKalshiMarkets, loadKalshiBalance, loadKalshiPositions, marketDateFor }) {
+  // When each line first read Strong, so the monitor can mark lines that just turned Strong.
+  const strongSince = new Map();
   return async function loadSetupBoard({ now = new Date(), researchDate = null } = {}) {
     const marketDate = researchDate || marketDateFor(now);
     const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
@@ -600,24 +603,33 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       ...(priceHistory ? { priceHistory } : {}), ...(cpiConsensus ? { cpiConsensus } : {}),
       ...(publishedStatements ? { publishedStatements } : {}) })
       .map(([key, result]) => [key, result.error ? 'failed' : 'ready']));
-    const sized = board.rows.filter((row) => row.sizing && row.events?.[0]?.eventTicker);
-    if (loadKalshiMarkets && !researchDate && sized.length) {
-      // The account is read once; without it tickets carry shares of the account only.
-      const account = loadKalshiBalance
-        ? kalshiAccountValue(await Promise.resolve().then(loadKalshiBalance).catch(() => null)) : null;
-      const read = await Promise.all(sized.map((row) => settle(Promise.resolve().then(() => loadKalshiMarkets(row.events[0].eventTicker)))));
-      sized.forEach((row, index) => {
+    if (loadKalshiMarkets && !researchDate) {
+      // Account and positions are read once; every event is read once and shared by the sizing tickets,
+      // the graded lines and the held lines. Without a balance, tickets carry shares of the account only.
+      const [balance, positions] = await Promise.all([loadKalshiBalance, loadKalshiPositions]
+        .map((load) => (load ? Promise.resolve().then(load).catch(() => null) : null)));
+      const account = kalshiAccountValue(balance);
+      const heldEvents = (positions?.market_positions || []).filter((item) => Number(item.position_fp ?? item.position))
+        .map((item) => eventOf(item.ticker));
+      // Every market's selected event, so each one can show its ladder, plus the events of held lines.
+      const boardEvents = board.rows.map((row) => row.events?.[0]?.eventTicker);
+      const tickers = [...new Set([...boardEvents, ...heldEvents].filter(Boolean))];
+      const read = await Promise.all(tickers.map((ticker) => settle(Promise.resolve().then(() => loadKalshiMarkets(ticker)))));
+      const marketsByEvent = new Map(tickers.map((ticker, index) => [ticker, Array.isArray(read[index].value) ? read[index].value : null]));
+      for (const row of board.rows.filter((item) => item.sizing && item.events?.[0]?.eventTicker)) {
         const event = row.events[0].eventTicker;
-        const markets = read[index].value;
-        if (!Array.isArray(markets)) {
+        const markets = marketsByEvent.get(event);
+        if (!markets) {
           row.sizing = { ...row.sizing, event, lines: [], reason: 'Kalshi lines unavailable' };
-          return;
+          continue;
         }
         const split = allocateLines({ side: row.sizing.side, pct: row.sizing.pct, expanding: row.sizing.expanding,
           lines: markets.map(kalshiLine), bankroll: account });
         row.sizing = { ...row.sizing, ...split, event, quotedAt: now.toISOString(), account: account === null ? null : { value: account } };
-      });
-      board.sourceStatus.kalshiLines = read.some((result) => result.error) ? 'failed' : 'ready';
+      }
+      if (tickers.length) board.sourceStatus.kalshiLines = read.some((result) => result.error) ? 'failed' : 'ready';
+      if (loadKalshiPositions) board.sourceStatus.kalshiPositions = positions ? 'ready' : 'failed';
+      applyLineMonitor(board, { balance, positions, marketsByEvent, seen: strongSince, now });
     }
     return board;
   };

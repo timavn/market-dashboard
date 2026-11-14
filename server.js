@@ -1325,6 +1325,9 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
   loadKalshiMarkets: (eventTicker) => require('./src/services/kalshiClient')
     .paginateKalshi('/markets', { event_ticker: eventTicker, status: 'open', limit: 1000 }, 'markets'),
   loadKalshiBalance: () => require('./src/services/kalshiClient').kalshiFetch('/portfolio/balance'),
+  // Open positions for the line monitor's held lines and Kalshi book. Read-only.
+  loadKalshiPositions: () => require('./src/services/kalshiClient')
+    .kalshiFetch('/portfolio/positions', { count_filter: 'position', limit: 1000 }),
   // The market date's Hedgeye products, read for Alpha Codes, levels, signals and positions.
   // A product not yet published that morning is simply absent.
   // Crypto Quant is stored as the Bitcoin Trend Tracker; it is only asked for when reading an earlier day.
@@ -1522,6 +1525,27 @@ app.get('/api/analyst/risk-range-history', async (req, res) => {
   } catch (error) {
     console.error('[risk-range-history]', error.message);
     res.status(503).json({ error: 'Risk range history unavailable' });
+  }
+});
+
+// How closely each stock follows the sector ETF it is filed under (?pairs=JACK:XLY,SAIA:XLI),
+// on the shared two-year daily bars, and which sector ETF it follows best.
+const SECTOR_FIT_MAX_PAIRS = 100;
+app.get('/api/analyst/sector-fit', async (req, res) => {
+  try {
+    const { SECTOR_ETFS, buildSectorFit } = require('./src/utils/exposureLabDiagnostics.cjs');
+    const assignments = [...new Map(String(req.query.pairs || '').split(',').map(pair => pair.trim().toUpperCase().split(':'))
+      .filter(([symbol, etf]) => /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol || '') && SECTOR_ETFS.includes(etf))
+      .map(([symbol, etf]) => [symbol, { symbol, etf }])).values()].slice(0, SECTOR_FIT_MAX_PAIRS);
+    if (assignments.length === 0) return res.status(400).json({ error: 'pairs must list SYMBOL:SECTOR_ETF' });
+    const symbols = [...new Set([...assignments.map(item => item.symbol), ...SECTOR_ETFS])];
+    const loaded = await mapWithConcurrency(symbols, 6, async symbol => [symbol, (await fetchYahooSizingHistory(symbol).catch(() => null))?.bars || []]);
+    res.set('Cache-Control', 'no-store');
+    res.json({ historicalOnly: true, executable: false, generatedAt: new Date().toISOString(),
+      ...buildSectorFit({ assignments, histories: Object.fromEntries(loaded) }) });
+  } catch (error) {
+    console.error('[sector-fit]', error.message);
+    res.status(503).json({ error: 'Sector fit unavailable' });
   }
 });
 

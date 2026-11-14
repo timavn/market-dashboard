@@ -92,6 +92,29 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertNotIn("front-month futures", report)
         self.assertIn("Nasdaq-100 30,883; its bar shows the COMPQ range and Nasdaq Composite price.", report)
 
+    def test_line_monitor_folds_under_each_section_and_the_book_closes_the_report(self):
+        data = board()
+        gold = data["rows"][0]
+        gold["kalshiLines"] = {"id": "gold", "market": "Gold", "gate": {"side": "SHORT", "grade": "B"}, "held": [], "open": True,
+                               "lines": {"side": "SHORT", "buy": "NO", "lines": [{"ticker": "T1", "strike": 4200, "edge": 0.06,
+                                                                                    "strength": "STRONG"}],
+                                         "illiquid": 0, "counts": {"STRONG": 1, "GOOD": 0, "WATCH": 0, "PASS": 0}, "best": 0.06}}
+        report = render_setup_board(data)
+        self.assertNotIn("analyst-kalshi-book", report)
+        block = json.loads(report.split("```analyst-lines\n", 1)[1].split("\n```", 1)[0])
+        self.assertEqual(block["markets"], [gold["kalshiLines"]])
+        # Under its own section's market table, ahead of the next section.
+        self.assertLess(report.index("## Metals"), report.index("```analyst-lines"))
+        self.assertLess(report.index("```analyst-lines"), report.index("## Oil"))
+        data["kalshiBook"] = {"account": 5784.0, "atRisk": 2852.0, "sections": [], "flags": []}
+        data["paper"] = {"tickets": 1, "open": 1, "settled": 0, "wonTickets": 0, "returnOnStake": None}
+        report = render_setup_board(data)
+        book = json.loads(report.split("```analyst-kalshi-book\n", 1)[1].split("\n```", 1)[0])
+        self.assertEqual(book["atRisk"], 2852.0)
+        # The book is the last section, ahead of the paper line and Sources.
+        self.assertLess(report.index("## Kalshi book"), report.index("Paper tickets:"))
+        self.assertGreater(report.index("## Kalshi book"), report.index("```analyst-lines"))
+
     def test_a_sized_setup_shows_its_position_and_line_split_under_its_section(self):
         data = board()
         gold = data["rows"][0]

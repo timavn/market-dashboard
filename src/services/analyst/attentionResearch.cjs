@@ -262,7 +262,8 @@ function alphaCodePrintFindings(context, now, verified) {
     const moved = lines.filter(line => line.change);
     const copy = moved.length
       ? `${lines[0].label} Alpha Code changed.`
-      : `${lines[0].label} Alpha Code${code(line => lineLevel(line))} → watching ${lines.map(line => `${named(line)} ${lineLevel(line)}`).join(', ')}.`;
+      // A lone printed level keeps its Trade/Trend name, since there is no pair to read.
+      : `${lines[0].label} Alpha Code${all.length === 2 ? code(line => lineLevel(line)) : ` ${lines.map(line => `${named(line)} ${lineLevel(line)}`).join(', ')}`}.`;
     const codeAt = pick => (all.length === 2 ? code(pick).trim() : moved.map(line => `${named(line)} ${pick(line)}`).join(', '));
     const change = moved.length ? [row('Previous', codeAt(line => lineLevel(line, line.change?.from ?? line.level))), row('New', codeAt(line => lineLevel(line)))] : [];
     const printed = lines[0].printedDate;
@@ -306,8 +307,8 @@ function spxLevelFindings(context) {
   }
   return output;
 }
-// Low / Mid / High, the same regime names as the VIX bucket table.
-const VOL_REGIME_BY_NAME = { Investable: 'Low', Chop: 'Mid', 'F Bucket': 'High' };
+// Low / Moderate / High, the same regime names as the VIX bucket table.
+const VOL_REGIME_BY_NAME = { Investable: 'Low', Chop: 'Moderate', 'F Bucket': 'High' };
 const volRegime = bucket => bucket.regime || VOL_REGIME_BY_NAME[bucket.name] || bucket.name;
 // The VIX bucket lines, from the same bucket table the rest of the site reads.
 function vixFindings(context) {
@@ -317,7 +318,7 @@ function vixFindings(context) {
   const last = crosses.at(-1);
   const bucket = last.to === 'above' ? last.line.above : last.line.below;
   return [finding({ key: ['VIX', 'bucket-cross'], material: ['VIX', 'bucket-cross', last.line.level, last.to, last.at], symbol: 'VIX', kind: 'market', priority: 1, action: 'vix bucket cross', publishedAt: last.at,
-    rows: [row('Signal', `VIX ${last.to === 'above' ? '≥' : '<'} ${level(last.line.level)} → ${volRegime(bucket)} vol regime.`)], sourceLinks: [] })];
+    rows: [row('Signal', `VIX ${last.to === 'above' ? '≥' : '<'} ${level(last.line.level)} → ${volRegime(bucket)} Volatility Regime.`)], sourceLinks: [] })];
 }
 // The book's direction by weight, or by position count while weights are unavailable. Holdings
 // need not be current for this: a Risk Off call should not wait for a broker reconnect.

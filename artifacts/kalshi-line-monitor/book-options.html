@@ -1,0 +1,155 @@
+<!doctype html><meta charset="utf-8"><title>Kalshi Book Options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root{--ink:#172033;--muted:#667085;--line:#dbe1e8;--head:#f3f4f6;--pos:#059669;--neg:#dc2626;--blue:#2563eb;--warn:#925b0a;
+  --metals:#64748b;--crypto:#7c3aed;--rates:#0e7490;--cpi:#b45309;--cash:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;padding:22px;background:#fff;font:13px Inter,-apple-system,sans-serif;color:var(--ink);width:1180px;display:grid;gap:26px}
+.opt{border:1px solid var(--line)}
+.opt>header{display:flex;justify-content:space-between;align-items:baseline;padding:9px 14px;border-bottom:1px solid var(--line);background:#fafbfc}
+.opt>header b{font-size:14px}
+.opt>header span{font-size:12px;color:var(--muted)}
+.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mut{color:var(--muted)} .pos{color:var(--pos)} .neg{color:var(--neg)}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:middle}
+th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--head)}
+.chip{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;padding:0 6px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.red{border-color:#fca5a5;background:#fef2f2;color:var(--neg)} .yel{border-color:#d6a548;background:#fdf3dc;color:var(--warn)} .ok{color:var(--pos)}
+.no{color:var(--neg);font-weight:600} .yes{color:var(--pos);font-weight:600}
+.sw{display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:0}
+
+/* A: positions ledger */
+.strip{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--line)}
+.strip div{padding:10px 14px;border-right:1px solid var(--line)}
+.strip div:last-child{border-right:0}
+.strip small{display:block;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.strip b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.strip i{font-style:normal;font-size:12px;color:var(--muted);margin-left:6px}
+tr.sec td{background:#fafbfc;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:4px 10px}
+tr.tot td{font-weight:600;border-top:2px solid var(--ink);border-bottom:0}
+tr.redrow td{background:#fef2f2}
+
+/* B: exposure map */
+.map{padding:14px}
+.acct{display:flex;height:38px;border:1px solid var(--line)}
+.acct div{display:flex;align-items:center;padding:0 8px;color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden}
+.acct .cash{background:var(--cash);color:var(--muted)}
+.scale{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}
+.card{padding:10px 14px;border-right:1px solid var(--line);display:grid;gap:4px;align-content:start}
+.card:last-child{border-right:0}
+.card h4{margin:0;font-size:12px;letter-spacing:.05em;text-transform:uppercase;display:flex;justify-content:space-between}
+.card .big{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.card .row{display:flex;justify-content:space-between;font-size:12px;border-top:1px dashed var(--line);padding-top:4px}
+.card .bet{font-size:12px}
+
+/* C: by close */
+.totals{display:flex;gap:26px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+.totals b{font-variant-numeric:tabular-nums}
+.lanes{display:grid;grid-template-columns:2.2fr 1fr;}
+.lane{border-right:1px solid var(--line);padding:10px 14px;display:grid;gap:6px;align-content:start}
+.lane:last-child{border-right:0}
+.lane h4{margin:0;display:flex;justify-content:space-between;font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+.lane h4 span{color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0}
+.pos-row{display:grid;grid-template-columns:150px 1fr 70px 70px 120px;gap:10px;align-items:center;font-size:12.5px}
+.bar{height:12px;background:var(--head);position:relative}
+.bar i{position:absolute;inset:0 auto 0 0}
+.laneTotal{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:6px;display:flex;justify-content:space-between}
+.note{font-size:12px;color:var(--muted)}
+</style>
+
+<div class="note">Kalshi book · three layouts. Positions are your real Nov 11 book (14 lines, $2,852 at risk); "Value now" and P&amp;L are illustrative.</div>
+
+<!-- A -->
+<section class="opt" id="opt-a">
+  <header><b>A · Positions ledger</b><span>Reads like the portfolio: one row per market, totals at the bottom</span></header>
+  <div class="strip">
+    <div><small>Account</small><b>$5,784</b><i>$2,922 cash</i></div>
+    <div><small>At risk</small><b>$2,852</b><i>49.3%</i></div>
+    <div><small>Value now</small><b>$2,896</b><i class="pos">+$44 · +1.5%</i></div>
+    <div><small>Max payout</small><b>$7,024</b><i>+$4,172 if all pay</i></div>
+    <div><small>Needs a look</small><b><span class="neg">1</span> · <span style="color:var(--warn)">2</span></b><i>red · yellow</i></div>
+  </div>
+  <table>
+    <thead><tr><th>Market</th><th>Bet</th><th class="n">Lines</th><th class="n">Cost</th><th class="n">% acct</th><th class="n">Value now</th><th class="n">P&amp;L</th><th class="n">Max payout</th><th>Closes</th><th>State</th></tr></thead>
+    <tbody>
+      <tr class="sec"><td colspan="10">CPI</td></tr>
+      <tr><td>CPI YoY</td><td><span class="yes">Yes</span> Nov CPI ≥ 3.6%, 3.7%</td><td class="n">2</td><td class="n">$1,141</td><td class="n">19.7%</td><td class="n">$1,190</td><td class="n pos">+$49</td><td class="n">$1,647</td><td>Dec 10</td><td><span class="chip ok">Hold</span></td></tr>
+      <tr class="sec"><td colspan="10">Rates</td></tr>
+      <tr><td>UST 10Y</td><td><span class="no">No</span> above 4.92%, 4.94%</td><td class="n">2</td><td class="n">$481</td><td class="n">8.3%</td><td class="n">$552</td><td class="n pos">+$71</td><td class="n">$1,375</td><td>Fri 12:30</td><td><span class="chip ok">Hold</span></td></tr>
+      <tr><td>UST 30Y</td><td><span class="no">No</span> above 5.28%, 5.30%</td><td class="n">2</td><td class="n">$372</td><td class="n">6.4%</td><td class="n">$410</td><td class="n pos">+$38</td><td class="n">$1,189</td><td>Fri 12:30</td><td><span class="chip ok">Hold</span></td></tr>
+      <tr class="sec"><td colspan="10">Metals</td></tr>
+      <tr><td>Silver</td><td><span class="no">No</span> above $50.99, $51.99</td><td class="n">2</td><td class="n">$310</td><td class="n">5.4%</td><td class="n">$262</td><td class="n neg">−$48</td><td class="n">$1,097</td><td>Fri 2 PM</td><td><span class="chip yel">Through line</span></td></tr>
+      <tr><td>Copper</td><td><span class="no">No</span> above $6.32, $6.35</td><td class="n">2</td><td class="n">$167</td><td class="n">2.9%</td><td class="n">$150</td><td class="n neg">−$17</td><td class="n">$526</td><td>Fri 2 PM</td><td><span class="chip yel">Unshaded</span></td></tr>
+      <tr class="sec"><td colspan="10">Crypto</td></tr>
+      <tr class="redrow"><td>Bitcoin</td><td><span class="no">No</span> above $73,000, $73,500</td><td class="n">2</td><td class="n">$191</td><td class="n">3.3%</td><td class="n">$120</td><td class="n neg">−$71</td><td class="n">$626</td><td>Fri 2 PM</td><td><span class="chip red">Contradicts</span></td></tr>
+      <tr><td>Ethereum</td><td><span class="no">No</span> above $2,040, $2,080</td><td class="n">2</td><td class="n">$191</td><td class="n">3.3%</td><td class="n">$212</td><td class="n pos">+$21</td><td class="n">$564</td><td>Fri 2 PM</td><td><span class="chip ok">Hold</span></td></tr>
+      <tr class="tot"><td>Total</td><td class="mut">7 markets</td><td class="n">14</td><td class="n">$2,852</td><td class="n">49.3%</td><td class="n">$2,896</td><td class="n pos">+$44</td><td class="n">$7,024</td><td class="mut">60% closes Fri</td><td></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- B -->
+<section class="opt" id="opt-b">
+  <header><b>B · Exposure map</b><span>Where the account sits at a glance, then one card per section</span></header>
+  <div class="map">
+    <div class="acct">
+      <div style="width:19.7%;background:var(--cpi)">CPI $1,141</div>
+      <div style="width:14.7%;background:var(--rates)">Rates $853</div>
+      <div style="width:8.2%;background:var(--metals)">Metals $477</div>
+      <div style="width:6.6%;background:var(--crypto)" title="Crypto $382">Crypto</div>
+      <div class="cash" style="width:50.7%">Cash $2,922 · 50.7%</div>
+    </div>
+    <div class="scale"><span>Account $5,784</span><span>At risk $2,852 · 49.3% · value now $2,896 <span class="pos">+$44</span> · max payout $7,024</span></div>
+  </div>
+  <div class="cards">
+    <div class="card"><h4><span><span class="sw" style="background:var(--cpi)"></span>CPI</span><span class="chip ok">Hold</span></h4>
+      <div class="big">$1,141 <span class="pos" style="font-size:13px">+$49</span></div>
+      <div class="bet"><span class="yes">Yes</span> Nov CPI ≥ 3.6%, 3.7%</div>
+      <div class="row"><span>19.7% of account</span><span>Dec 10</span></div>
+      <div class="row"><span>Max payout</span><span>$1,647</span></div></div>
+    <div class="card"><h4><span><span class="sw" style="background:var(--rates)"></span>Rates</span><span class="chip ok">Hold</span></h4>
+      <div class="big">$853 <span class="pos" style="font-size:13px">+$109</span></div>
+      <div class="bet"><span class="no">No</span> 10Y above 4.92% · 30Y above 5.28%</div>
+      <div class="row"><span>14.7% of account</span><span>Fri 12:30</span></div>
+      <div class="row"><span>Max payout</span><span>$2,564</span></div></div>
+    <div class="card"><h4><span><span class="sw" style="background:var(--metals)"></span>Metals</span><span class="chip yel">2 flags</span></h4>
+      <div class="big">$477 <span class="neg" style="font-size:13px">−$65</span></div>
+      <div class="bet"><span class="no">No</span> Silver $50.99+ · Copper $6.32+</div>
+      <div class="row"><span>8.2% of account</span><span>Fri 2 PM</span></div>
+      <div class="row"><span>Silver through line</span><span>$1,623 max</span></div></div>
+    <div class="card" style="background:#fef2f2"><h4><span><span class="sw" style="background:var(--crypto)"></span>Crypto</span><span class="chip red">Contradicts</span></h4>
+      <div class="big">$382 <span class="neg" style="font-size:13px">−$50</span></div>
+      <div class="bet"><span class="no">No</span> BTC $73,000+ · ETH $2,040+</div>
+      <div class="row"><span>6.6% of account</span><span>Fri 2 PM</span></div>
+      <div class="row"><span>Bitcoin shaded long</span><span>$1,190 max</span></div></div>
+  </div>
+</section>
+
+<!-- C -->
+<section class="opt" id="opt-c">
+  <header><b>C · By close</b><span>Grouped by when the money comes back, sized to scale</span></header>
+  <div class="totals"><span>Account <b>$5,784</b></span><span>At risk <b>$2,852</b> · 49.3%</span><span>Value now <b>$2,896</b> <span class="pos">+$44</span></span><span>Max payout <b>$7,024</b></span><span><span class="neg">1 red</span> · <span style="color:var(--warn)">2 yellow</span></span></div>
+  <div class="lanes">
+    <div class="lane"><h4>Closes Fri Nov 13 <span>$1,711 · 60% of risk · 12 lines</span></h4>
+      <div class="pos-row"><span><b>UST 10Y</b> <span class="no">No</span></span><span class="bar"><i style="width:43%;background:var(--rates)"></i></span><span class="n">$481</span><span class="n pos">+$71</span><span><span class="chip ok">Hold</span></span></div>
+      <div class="pos-row"><span><b>UST 30Y</b> <span class="no">No</span></span><span class="bar"><i style="width:33%;background:var(--rates)"></i></span><span class="n">$372</span><span class="n pos">+$38</span><span><span class="chip ok">Hold</span></span></div>
+      <div class="pos-row"><span><b>Silver</b> <span class="no">No</span></span><span class="bar"><i style="width:28%;background:var(--metals)"></i></span><span class="n">$310</span><span class="n neg">−$48</span><span><span class="chip yel">Through line</span></span></div>
+      <div class="pos-row" style="background:#fef2f2"><span><b>Bitcoin</b> <span class="no">No</span></span><span class="bar"><i style="width:17%;background:var(--crypto)"></i></span><span class="n">$191</span><span class="n neg">−$71</span><span><span class="chip red">Contradicts</span></span></div>
+      <div class="pos-row"><span><b>Ethereum</b> <span class="no">No</span></span><span class="bar"><i style="width:17%;background:var(--crypto)"></i></span><span class="n">$191</span><span class="n pos">+$21</span><span><span class="chip ok">Hold</span></span></div>
+      <div class="pos-row"><span><b>Copper</b> <span class="no">No</span></span><span class="bar"><i style="width:15%;background:var(--metals)"></i></span><span class="n">$167</span><span class="n neg">−$17</span><span><span class="chip yel">Unshaded</span></span></div>
+      <div class="laneTotal"><span>Value now $1,706 · <span class="neg">−$5</span></span><span>Pays up to $5,377</span></div>
+    </div>
+    <div class="lane"><h4>Closes Dec 10 <span>$1,141 · 40%</span></h4>
+      <div class="pos-row" style="grid-template-columns:90px 1fr 60px"><span><b>CPI</b> <span class="yes">Yes</span></span><span class="bar"><i style="width:100%;background:var(--cpi)"></i></span><span class="n">$1,141</span></div>
+      <div style="font-size:12px" class="mut">Nov CPI ≥ 3.6%, 3.7% · value now $1,190 <span class="pos">+$49</span> · <span class="chip ok">Hold</span></div>
+      <div class="laneTotal"><span>2 lines</span><span>Pays up to $1,647</span></div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){var h=(location.hash||'').slice(1);if(!h)return;var el=document.getElementById(h);if(!el)return;
+for(const c of document.body.children){if(c!==el&&c.tagName!=='STYLE'&&c.tagName!=='SCRIPT')c.style.display='none'}})();
+</script>

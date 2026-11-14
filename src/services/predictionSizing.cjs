@@ -121,17 +121,14 @@ function fitLadder(lines, config = SIZING) {
 const fee = (price, config) => config.feeRate * price * (1 - price);
 
 /**
- * Split a position of `pct` across the event's lines. A Short buys NO and a Long buys YES, each at its own
- * quoted ask. Lines share the position by Kelly weight on a positive edge; a share under minLinePct is
- * dropped and a stake above the size showing at the ask is cut to it, the remainder staying unspent.
+ * Every liquid line priced for one side: a Short buys NO and a Long buys YES at that side's own ask. Our odds are the
+ * ladder's calibrated odds, shifted toward the side by `tilt` sigma and widened by `widen`; edge is ours − ask − fee.
  */
-function allocateLines({ side, pct, lines, expanding = false, bankroll = null } = {}, config = SIZING) {
+function priceLines({ side, lines, tilt = 0, widen = 1, ladder } = {}, config = SIZING) {
   const sign = SIGN[side];
-  if (!sign || !(pct > 0)) return null;
-  const ladder = fitLadder(lines, config);
-  const tilt = config.tiltSigma * clamp((pct - config.basePct) / (config.maxPct - config.basePct));
-  const widen = expanding ? config.widenOnExpansion : 1;
-  const priced = (lines || []).filter((line) => liquid(line, config.maxSpread) && strikeOf(line) !== null).map((line) => {
+  if (!sign) return [];
+  if (ladder === undefined) ladder = fitLadder(lines, config);
+  return (lines || []).filter((line) => liquid(line, config.maxSpread) && strikeOf(line) !== null).map((line) => {
     const ask = finite(sign > 0 ? line.yesAsk : line.noAsk);
     if (ask === null || !(ask > 0 && ask < 1)) return null;
     const market = calibrate((line.yesBid + line.yesAsk) / 2);
@@ -145,6 +142,20 @@ function allocateLines({ side, pct, lines, expanding = false, bankroll = null } 
       askSize: finite(line.askSize ?? (sign > 0 ? line.yesAskSize : line.noAskSize)),
       ...(ladder ? { fromCentrePct: ((strike - ladder.centre) / ladder.centre) * 100, sigmas: (strike - ladder.centre) / ladder.sigma } : {}) };
   }).filter(Boolean).sort((left, right) => left.strike - right.strike);
+}
+
+/**
+ * Split a position of `pct` across the event's lines. A Short buys NO and a Long buys YES, each at its own
+ * quoted ask. Lines share the position by Kelly weight on a positive edge; a share under minLinePct is
+ * dropped and a stake above the size showing at the ask is cut to it, the remainder staying unspent.
+ */
+function allocateLines({ side, pct, lines, expanding = false, bankroll = null } = {}, config = SIZING) {
+  const sign = SIGN[side];
+  if (!sign || !(pct > 0)) return null;
+  const ladder = fitLadder(lines, config);
+  const tilt = config.tiltSigma * clamp((pct - config.basePct) / (config.maxPct - config.basePct));
+  const widen = expanding ? config.widenOnExpansion : 1;
+  const priced = priceLines({ side, lines, tilt, widen, ladder }, config);
   // An edge smaller than the quote's own noise is not one: without this the largest Kelly stakes land on 99¢ lines.
   let funded = priced.filter((line) => line.edge >= config.minEdge);
   // Drop the smallest share until every funded line is worth placing.
@@ -200,4 +211,4 @@ function kalshiAccountValue(balance) {
 
 const sizedMarket = (id, config = SIZING) => config.status === 'active' && config.markets.includes(id);
 
-module.exports = { allocateLines, calibrate, fitLadder, invPhi, kalshiAccountValue, kalshiLine, phi, scoreConviction, sizedMarket, SIZING };
+module.exports = { allocateLines, fee, liquid, priceLines, calibrate, fitLadder, invPhi, kalshiAccountValue, kalshiLine, phi, scoreConviction, sizedMarket, SIZING };

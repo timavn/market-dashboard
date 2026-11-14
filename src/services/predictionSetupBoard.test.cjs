@@ -650,3 +650,48 @@ test('the loader splits a sized setup across its Kalshi lines and the account', 
   assert.equal(lines.account, null);
   assert.ok(lines.lines.every((line) => line.contracts === undefined && line.pct > 0));
 });
+
+test('the loader adds every market\'s Kalshi lines, checks held lines and adds the Kalshi book, reading each event once', async () => {
+  const empty = () => Promise.resolve(null);
+  const asked = [];
+  const quote = (event, strike, yes) => ({ ticker: `${event}-T${strike}`, floor_strike: strike, strike_type: 'greater',
+    close_time: '2026-11-11T22:00:00Z', yes_bid_dollars: String(yes - 0.01), yes_ask_dollars: String(yes + 0.01),
+    no_bid_dollars: String(1 - yes - 0.01), no_ask_dollars: String(1 - yes + 0.01) });
+  const ladderFor = (event) => [quote(event, 3960, 0.84), quote(event, 3980, 0.69), quote(event, 4000, 0.5), quote(event, 4020, 0.31),
+    quote(event, 4040, 0.16)];
+  const options = {
+    loadRiskRanges: () => Promise.resolve(goldShort.riskRanges), loadCryptoQuant: empty, loadHedgai: () => Promise.resolve(goldShort.hedgai),
+    loadSecurityIntelligence: empty, loadNowcast: empty, loadQuotes: () => Promise.resolve(goldShort.quotes),
+    loadVolatility: () => Promise.resolve(goldShort.volatility), loadUsdCorrelations: () => Promise.resolve(goldShort.usdCorrelations),
+    loadKalshiEvents: (series) => Promise.resolve(series === 'KXGOLDD' ? [{ event_ticker: 'KXGOLDD-26NOV1117' }] : []),
+    loadKalshiMarkets: (event) => { asked.push(event); return Promise.resolve(ladderFor(event)); },
+    loadKalshiBalance: () => Promise.resolve({ balance_dollars: '5000.00', portfolio_value: 100000 }),
+    loadKalshiPositions: () => Promise.resolve({ market_positions: [
+      { ticker: 'KXGOLDD-26NOV1117-T4020', position_fp: '-100', market_exposure_dollars: '70' },
+      { ticker: 'KXGOLDW-26NOV1317-T4000', position_fp: '50', market_exposure_dollars: '25' }], event_positions: [] }),
+    marketDateFor: () => '2026-11-11',
+  };
+  const board = await createSetupBoardLoader(options)({ now: new Date('2026-11-11T16:00:00Z') });
+  assert.deepEqual(asked.sort(), ['KXGOLDD-26NOV1117', 'KXGOLDW-26NOV1317']);
+  const gold = board.rows.find((row) => row.id === 'gold').kalshiLines;
+  // The board sizes a Short (Tick and Trend), but no Trade is published, so the row is unshaded and shows its ladder.
+  assert.equal(board.rows.find((row) => row.id === 'gold').setup.side, 'SHORT');
+  assert.equal(gold.shade, null);
+  assert.equal(gold.shadeReason, 'No Trade');
+  assert.equal(gold.lines.side, null);
+  assert.equal(gold.lines.lines.length, 5);
+  assert.ok(Math.abs(gold.summary.centre - 4000) < 1);
+  // Held lines from the daily and the weekly event both land on Gold.
+  assert.deepEqual(gold.held.map((line) => line.ticker).sort(), ['KXGOLDD-26NOV1117-T4020', 'KXGOLDW-26NOV1317-T4000']);
+  // Its 49¢ bid is above our 48% odds, which outranks the row being unshaded.
+  assert.equal(gold.held.find((line) => line.ticker === 'KXGOLDW-26NOV1317-T4000').state, 'EDGE_GONE');
+  assert.equal(board.kalshiBook.atRisk, 95);
+  assert.equal(board.kalshiBook.account, 6000);
+  assert.equal(board.sourceStatus.kalshiPositions, 'ready');
+  // Without positions the board keeps its graded lines but carries no book.
+  const noPositions = await createSetupBoardLoader({ ...options, loadKalshiPositions: () => Promise.reject(new Error('down')) })(
+    { now: new Date('2026-11-11T16:00:00Z') });
+  assert.equal(noPositions.kalshiBook, undefined);
+  assert.ok(noPositions.rows.find((row) => row.id === 'gold').kalshiLines.lines.lines.length > 0);
+  assert.equal(noPositions.sourceStatus.kalshiPositions, 'failed');
+});

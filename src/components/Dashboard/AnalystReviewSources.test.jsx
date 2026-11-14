@@ -58,7 +58,12 @@ test('source rows and header keep the same structure through pending, ready and 
   const rows = screen.getAllByRole('listitem');
   expect(rows).toHaveLength(items.length);
   const labels = rows.map(row => row.querySelector('.analyst-review-source-label'));
-  expect(within(heading).getByRole('status', { name: 'Response running' })).toHaveTextContent('Gathering sources…');
+  // While sources are read, the row rings are the only progress: no header ring, clock or count.
+  const announced = within(heading).getByRole('status', { name: 'Response running' });
+  expect(announced).toHaveClass('sr-only');
+  expect(announced).toHaveTextContent('Gathering sources…');
+  expect(heading.querySelector('.analyst-spinner')).toBeNull();
+  expect(heading).not.toHaveTextContent(/ready|\d+s/);
   expect(screen.queryByText('Checking sources…')).not.toBeInTheDocument();
   view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={{ state: 'complete', items: items.map(item => ({
     ...item, status: 'ready', observedAt: '2026-09-18T17:05:00Z',
@@ -218,7 +223,8 @@ test('a transient read failure keeps unfinished rows checking and shows Reconnec
     expect(screen.queryByText(/Unavailable|Gathering sources…/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Show explanation/ })).not.toBeInTheDocument();
     view.rerender(<AnalystReviewSources sources={sources} loading phase="Gathering sources…" />);
-    expect(within(section.querySelector('header')).getByRole('status', { name: 'Response running' })).toHaveTextContent('Gathering sources…');
+    expect(within(section.querySelector('header')).getByRole('status', { name: 'Response running' })).toHaveClass('sr-only');
+    expect(section.querySelector('header .analyst-spinner')).toBeNull();
     view.rerender(<AnalystReviewSources sources={{ ...sources, state: 'failed' }} reconnecting phase="Gathering sources…" />);
     expect(row).toHaveTextContent('Unavailable');
     expect(section).toHaveAttribute('aria-busy', 'false');
@@ -255,9 +261,13 @@ test('shows every source with its readiness and original source timestamp', () =
     ],
   }} />);
   expect(screen.getByRole('heading', { name: 'Sources' })).toBeInTheDocument();
-  expect(screen.getByText('1/4 ready')).toBeInTheDocument();
+  // A row still checking hides the ready count until the read finishes.
+  expect(screen.queryByText(/ready$/)).not.toBeInTheDocument();
   const rows = screen.getAllByRole('listitem');
   expect(rows).toHaveLength(4);
+  // A checking row shows only its ring, no dash for the missing time.
+  expect(within(rows[2]).queryByLabelText('Source time unavailable')).not.toBeInTheDocument();
+  expect(within(rows[3]).getByLabelText('Source time unavailable')).toBeInTheDocument();
   expect(within(rows[0]).getByText('Ready')).toBeInTheDocument();
   expect(within(rows[0]).getByText('Sep 18 10:05 PDT')).toHaveAttribute('datetime', '2026-09-18T17:05:00Z');
   expect(within(rows[1]).getByText('Missing')).toBeInTheDocument();
@@ -817,45 +827,15 @@ describe('Sources header clock', () => {
   beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(new Date('2026-10-09T15:00:21.300Z')); });
   afterEach(() => { jest.useRealTimers(); });
 
-  test('one hidden gray clock counts from the run start while acquiring and stops when the capture settles', () => {
-    const interval = jest.spyOn(global, 'setInterval');
-    try {
-      const sources = { basis: 'review', runId: 'run', state: 'running', capturedAt: '2026-10-09T15:00:00Z', items: [
-        { id: 'risk-ranges', label: 'Risk Ranges', status: 'checking' },
-        { id: 'early-look', label: 'Early Look', status: 'checking' },
-      ] };
-      const view = render(<AnalystReviewSources reviewKind="portfolio-review" sources={sources} phase="Gathering sources…" />);
-      const header = screen.getByRole('region', { name: 'Review sources' }).querySelector('header');
-      const clock = () => header.querySelector('.analyst-review-sources-elapsed');
-      expect(clock()).toHaveTextContent('21s');
-      expect(clock()).toHaveAttribute('aria-hidden', 'true');
-      expect(clock()).not.toHaveClass('analyst-process--key');
-      expect(within(header).getByRole('status', { name: 'Response running' })).not.toHaveTextContent('21s');
-      expect(screen.getAllByRole('listitem').every(row => !row.textContent.includes('21s'))).toBe(true);
-      act(() => { jest.advanceTimersByTime(699); });
-      expect(clock()).toHaveTextContent('21s');
-      act(() => { jest.advanceTimersByTime(1); });
-      expect(clock()).toHaveTextContent('22s');
-      act(() => { jest.advanceTimersByTime(42_000); });
-      expect(clock()).toHaveTextContent('1m 04s');
-      expect(interval.mock.calls.filter(([, delay]) => delay === 1000)).toHaveLength(1);
-      view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={{ ...sources, state: 'complete',
-        items: sources.items.map(item => ({ ...item, status: 'ready', publishedAt: '2026-10-09' })) }} />);
-      expect(clock()).toBeNull();
-      act(() => { jest.advanceTimersByTime(5000); });
-      expect(clock()).toBeNull();
-    } finally { interval.mockRestore(); }
-  });
-
-  test('a running capture counts from its capture start and failed or loading reads show no clock', () => {
+  test('no header clock while sources are still being read', () => {
     const running = { basis: 'review', runId: 'run', state: 'acquiring', capturedAt: '2026-10-09T14:59:00Z',
       items: [{ id: 'risk-ranges', label: 'Risk Ranges', status: 'checking' }] };
-    const view = render(<AnalystReviewSources reviewKind="portfolio-review" sources={running} />);
+    const view = render(<AnalystReviewSources reviewKind="portfolio-review" sources={running} phase="Gathering sources…" />);
     const header = screen.getByRole('region', { name: 'Review sources' }).querySelector('header');
-    expect(header.querySelector('.analyst-review-sources-elapsed')).toHaveTextContent('1m 21s');
-    view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={running} readFailed />);
     expect(header.querySelector('.analyst-review-sources-elapsed')).toBeNull();
-    view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={{ basis: 'review', state: 'running', items: [] }} loading />);
+    act(() => { jest.advanceTimersByTime(5000); });
+    expect(header.querySelector('.analyst-review-sources-elapsed')).toBeNull();
+    view.rerender(<AnalystReviewSources reviewKind="portfolio-review" sources={running} readFailed />);
     expect(header.querySelector('.analyst-review-sources-elapsed')).toBeNull();
   });
 });

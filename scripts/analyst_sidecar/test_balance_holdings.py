@@ -80,6 +80,41 @@ class BalanceHoldingsTests(unittest.IsolatedAsyncioTestCase):
                 # Holdings never report the shared Gateway connection state.
                 self.assertEqual(result["errorCode"], expected)
 
+    async def test_gateway_probe_due_within_seconds_is_waited_for_once(self):
+        # A just-relaunched Gateway: the sidecar's circuit re-probes in a few
+        # seconds, so the read waits once instead of reporting unavailable.
+        closed = {"ok": False, "status": "gateway_not_authenticated",
+                  "error_code": "IBKR_GATEWAY_NOT_AUTHENTICATED", "retry_after_ms": 3000}
+        calls, sleeps = [], []
+        responses = [positions_failure(503, closed), live_positions()]
+
+        async def request(path, **_kwargs):
+            calls.append(path)
+            item = responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        with patch.object(market.asyncio, "sleep", fake_sleep):
+            result = await IbkrReader(request=request, now=lambda: NOW).holdings_context()
+        self.assertTrue(result["liveVerified"])
+        self.assertEqual(calls, ["/portfolio/live-positions"] * 2)
+        self.assertEqual(len(sleeps), 1)
+        self.assertLessEqual(sleeps[0], 6.5)
+
+    async def test_long_or_missing_gateway_retry_is_not_waited_for(self):
+        for retry in (None, 0, 60000):
+            body = {"error_code": "IBKR_GATEWAY_API_UNRESPONSIVE"}
+            if retry is not None:
+                body["retry_after_ms"] = retry
+            with self.subTest(retry=retry):
+                result, calls = await self.read(error=positions_failure(503, body))
+                self.assertEqual(calls, ["/portfolio/live-positions"])
+                self.assertEqual(result["errorCode"], "IBKR_HOLDINGS_SERVICE_UNAVAILABLE")
+
     async def test_service_failure_and_gateway_disconnection_have_distinct_diagnostics(self):
         for error, expected in (
             (ConnectionError("Private connection details"), "IBKR_HOLDINGS_SERVICE_UNAVAILABLE"),

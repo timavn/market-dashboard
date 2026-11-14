@@ -1,6 +1,7 @@
 const {
   buildExposureLabDiagnostics,
   buildGeographyAllocation,
+  buildSectorFit,
   buildUnifiedCorrelation,
   classifyExposureLabPortfolioInput,
   correlationCell,
@@ -361,5 +362,48 @@ describe('Exposure Lab geography', () => {
       modeledGrossCoveragePct: 100,
     }));
     expect(sensitivity.methodology.interpretation).toContain('non-additive');
+  });
+});
+
+describe('Exposure Lab sector fit', () => {
+  const noise = (length, seed) => Array.from({ length }, (_, index) => Math.sin((index * seed) % 7.3) * 0.004);
+  const mix = (left, right, share) => left.map((value, index) => value * share + right[index] * (1 - share));
+  const industrials = wave(200, 0);
+  const discretionary = wave(200, 40).map((value, index) => value + noise(200, 3.1)[index]);
+  const histories = {
+    XLI: barsFromReturns(industrials),
+    XLY: barsFromReturns(discretionary),
+    SAIA: barsFromReturns(mix(industrials, noise(200, 1.7), 0.8)),
+    // Filed under industrials but moving with discretionary.
+    ODD: barsFromReturns(mix(discretionary, noise(200, 2.3), 0.9)),
+    NEW: barsFromReturns(wave(10)),
+  };
+
+  it('measures each stock against its assigned sector ETF on every window', () => {
+    const fit = buildSectorFit({ assignments: [{ symbol: 'saia', etf: 'XLI' }], histories, sectorEtfs: ['XLI', 'XLY'] });
+    const [row] = fit.rows;
+    expect(row.symbol).toBe('SAIA');
+    expect(Object.keys(row.correlations)).toEqual(['30', '90', '180']);
+    expect(row.correlations['90'].value).toBeGreaterThan(0.7);
+    expect(row.correlations['90'].observations).toBe(90);
+    expect(row.best.etf).toBe('XLI');
+    expect(row.review).toBe(false);
+  });
+
+  it('reports a better-fitting sector for review without reassigning', () => {
+    const [row] = buildSectorFit({ assignments: [{ symbol: 'ODD', etf: 'XLI' }], histories, sectorEtfs: ['XLI', 'XLY'] }).rows;
+    expect(row.etf).toBe('XLI');
+    expect(row.best.etf).toBe('XLY');
+    expect(row.review).toBe(true);
+  });
+
+  it('leaves short histories and unknown sector ETFs unmeasured', () => {
+    const fit = buildSectorFit({
+      assignments: [{ symbol: 'NEW', etf: 'XLI' }, { symbol: 'SAIA', etf: 'SPY' }], histories, sectorEtfs: ['XLI', 'XLY'],
+    });
+    expect(fit.rows.map((row) => row.symbol)).toEqual(['NEW']);
+    expect(fit.rows[0].correlations['90'].value).toBeNull();
+    expect(fit.rows[0].best).toBeNull();
+    expect(fit.rows[0].review).toBe(false);
   });
 });

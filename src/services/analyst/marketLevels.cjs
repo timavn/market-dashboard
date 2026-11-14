@@ -137,7 +137,7 @@ function pvBandLines({ editions, marketDate }) {
     publishedAt: edition.snapshot.publishedAt || null, messageId: null, excerpt: `PV band ${level}`, marketDate, reading: null, printedDate: map.chartDate, scope: 'market', retain: false }));
 }
 const BUCKET_NAMES = { investable: 'Investable', chop: 'Chop', fBucket: 'F Bucket' };
-const VOL_REGIMES = { investable: 'Low', chop: 'Mid', fBucket: 'High' };
+const VOL_REGIMES = { investable: 'Low', chop: 'Moderate', fBucket: 'High' };
 function vixLines({ marketDate, buckets = hermesRules.volatility.vixBuckets }) {
   return buckets.slice(1).map((bucket, index) => ({ id: `^VIX|${bucket.min}`, symbol: '^VIX', label: 'VIX', market: 'vix', duration: 'vix', level: bucket.min, band: VIX_BAND, marketDate, reading: null,
     product: 'process-rules', productLabel: 'VIX buckets', publishedAt: null, messageId: null, excerpt: null, scope: 'market', retain: false, printedDate: marketDate,

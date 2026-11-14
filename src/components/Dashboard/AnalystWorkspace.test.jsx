@@ -302,7 +302,7 @@ test.each(['detail hydration', 'event recovery'])('%s restores review Sources th
     // AGENTS.md: transient metadata-read failures keep unfinished rows Checking
     // and keep reading; they never settle the capture as Unavailable.
     const retrying = screen.getByRole('region', { name: 'Review sources' });
-    expect(retrying).toHaveTextContent('0/3 ready');
+    expect(retrying).not.toHaveTextContent(/ready/);
     expect(retrying).toHaveAttribute('aria-busy', 'true');
     expect(retrying.querySelector('header')).toHaveTextContent('Reconnecting…');
     expect(retrying).not.toHaveTextContent('Unavailable');

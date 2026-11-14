@@ -175,6 +175,45 @@ class GatewayConnectionGovernorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "gateway_not_authenticated")
         self.assertEqual(session.connect_calls, 1)
 
+    async def test_refused_gateway_is_reprobed_at_the_shortest_interval(self):
+        # A closed or logged-out Gateway refuses the connect. However long
+        # that lasts, a relaunched Gateway must be picked up within the first
+        # backoff interval, not after the escalated 60 s cap.
+        clock = FakeClock()
+        governor = self.make_governor(clock)
+        session = FakeSession(connect_error=ConnectionRefusedError("refused"))
+
+        for attempt in range(1, 8):
+            result = await governor.ensure_session(
+                "primary", session, client_id=18, primary=True
+            )
+            self.assertFalse(result["ok"])
+            self.assertEqual(session.connect_calls, attempt)
+            self.assertEqual(governor.diagnostics()["retry_after_ms"], 5000)
+            clock.advance(5)
+
+        session.connect_error = None
+        recovered = await governor.ensure_session(
+            "primary", session, client_id=18, primary=True
+        )
+        self.assertTrue(recovered["ok"])
+        self.assertEqual(governor.diagnostics()["circuit_state"], "closed")
+
+    async def test_unresponsive_backoff_escalates_from_its_own_streak(self):
+        clock = FakeClock()
+        governor = self.make_governor(clock)
+        session = FakeSession(connect_error=ConnectionRefusedError("refused"))
+        for _attempt in range(5):
+            await governor.ensure_session("primary", session, client_id=18, primary=True)
+            clock.advance(5)
+
+        session.connect_error = ConnectionError("handshake failed")
+        expected = [5000, 15000, 30000, 60000, 60000]
+        for index, retry_ms in enumerate(expected):
+            await governor.ensure_session("primary", session, client_id=18, primary=True)
+            self.assertEqual(governor.diagnostics()["retry_after_ms"], retry_ms, index)
+            clock.advance(retry_ms / 1000)
+
     async def test_explicit_326_has_client_id_in_use_classification(self):
         governor = self.make_governor()
         session = FakeSession(

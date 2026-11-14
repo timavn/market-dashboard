@@ -43,6 +43,8 @@ from balance_brief import attach_balance_primary
 from portfolio_refresh import build_portfolio_refresh
 from portfolio_capture import PORTFOLIO_POSITION_COLUMNS, VALUED_PORTFOLIO_MARK_STATES, portfolio_mark_state, project_portfolio_context
 from inbox_holdings import current_holding_weights
+from position_session import PositionSessionReader
+from security_sectors import SecuritySectorReader
 from portfolio_sizing import PortfolioSizingReader
 from daily_research_reader import read_daily_research
 from hedgai_review import read_hedgai_research, accepted_hedgai
@@ -238,6 +240,8 @@ openbb = OpenBBReader()
 portfolio_sizing_reader = PortfolioSizingReader(API_BASE_URL)
 momo_roster_context = MomoRosterContextReader(API_BASE_URL)
 daily_market_context = DailyMarketContextReader(API_BASE_URL)
+security_sector_reader = SecuritySectorReader(openbb.company_profiles)
+position_session_reader = PositionSessionReader(API_BASE_URL, ibkr.session_closes, sectors=security_sector_reader.sectors)
 market_situation_context = MarketSituationContextReader()
 sync_lock = asyncio.Lock()
 # Keep queued MCP searches as coroutines so a large parallel batch does not
@@ -3778,8 +3782,9 @@ async def get_dashboard_context(include_live_channels: bool = True) -> dict[str,
 
 @mcp.tool(annotations=NETWORK_READ_ONLY)
 async def get_portfolio_context() -> dict[str, Any]:
-    """Refresh IBKR book/quote coverage."""
+    """Refresh the IBKR book with live marks. data.sessionTable lists every held stock/ETF with side, live price, today's % change versus the prior close, and its same-day Risk Range low/high/location, so position screens (up or down today, top or bottom of range) need no per-symbol history, fundamentals, or research search."""
     projected = checked(project_portfolio_context(checked(await ibkr.portfolio_context())))
+    projected = await position_session_reader.attach(projected)
     return compact_json_tool_result(checked(projected))
 
 
