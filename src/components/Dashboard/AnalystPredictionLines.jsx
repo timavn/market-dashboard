@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import AnalystPredictionCurves, { settlementCurve } from './AnalystPredictionCurve';
 
 // Each section's Kalshi line monitor, emitted by the setup board renderer as an ```analyst-lines JSON block:
 // one foldable row per market, shaded red (short) or green (long) by Trade, Trend and the Risk Range third, with its
@@ -82,7 +83,7 @@ function BestCell({ best, flash }) {
 }
 
 // Within the week: weekday and time; later: the date.
-const closes = value => {
+export const closes = value => {
   if (!value || !Number.isFinite(Date.parse(value))) return 'N/A';
   const date = new Date(value);
   return date.getTime() - Date.now() < 6 * 86_400_000
@@ -218,6 +219,21 @@ function MarketRows({ market }) {
   </>;
 }
 
+// The section's settlement curves, folded into one solid row under its markets; closed until clicked.
+function CurvesRows({ markets }) {
+  const [open, setOpen] = useState(false);
+  const curves = useMemo(() => markets.map(settlementCurve).filter(Boolean), [markets]);
+  if (!curves.length) return null;
+  return <>
+    <tr className={`analyst-lines__curves-row${open ? ' is-open' : ''}`}><td colSpan={6}>
+      <button type="button" className="analyst-lines__toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+        <span aria-hidden="true" className="analyst-lines__chev">{open ? '▼' : '▶'}</span>Settlement curves
+        <span className="analyst-lines__curves-names">{curves.map(curve => curve.market).join(' · ')}</span></button>
+    </td></tr>
+    {open && <tr className="analyst-lines__detail analyst-lines__curves"><td colSpan={6}><AnalystPredictionCurves curves={curves} /></td></tr>}
+  </>;
+}
+
 export default function AnalystPredictionLines({ lines }) {
   return <div className="analyst-lines">
     <table className="analyst-drivers__table analyst-lines__markets" aria-label="Kalshi lines">
@@ -228,7 +244,8 @@ export default function AnalystPredictionLines({ lines }) {
         <th title="The line with the best edge with at least $50 at its ask: on the shaded side when the row is shaded, on either side otherwise.">Best line</th>
         <th title="Lines with at least $50 at the ask of their better side, of all the event's lines.">Fillable</th>
         <th>Closes</th><th>Held</th></tr></thead>
-      <tbody>{lines.markets.map(market => <MarketRows key={market.id || market.market} market={market} />)}</tbody>
+      <tbody>{lines.markets.map(market => <MarketRows key={market.id || market.market} market={market} />)}
+        <CurvesRows markets={lines.markets} /></tbody>
     </table>
   </div>;
 }

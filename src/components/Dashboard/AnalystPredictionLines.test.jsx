@@ -124,43 +124,64 @@ test('opening a row stops its flash; the color stays', () => {
 });
 
 const book = {
-  account: 5783.87, cash: 2922.45, atRisk: 2852.16, atRiskPct: 49.3, maxPayout: 7023.18, openLines: 14, events: 7,
-  flagged: { red: 2, yellow: 5 }, bettable: 4, realized: 52.44, caps: { sectionPct: null, bookPct: null },
-  sections: [
-    { id: 'metals', label: 'Metals', atRisk: 476.78, pct: 8.2, yes: 0, no: 476.78, lines: 4, markets: ['Silver', 'Copper'], direction: 'SHORT',
-      state: 'THROUGH_LINE', flagged: 3 },
-    { id: 'crypto', label: 'Crypto', atRisk: 381.86, pct: 6.6, yes: 0, no: 381.86, lines: 4, markets: ['Bitcoin', 'Ethereum'], direction: 'SHORT',
-      state: 'CONTRADICTS', flagged: 4 },
-    { id: 'oil', label: 'Oil', atRisk: 0, pct: 0, yes: 0, no: 0, lines: 0, markets: [], direction: null, state: null, flagged: 0 },
+  account: 5783.87, cash: 2922.45, atRisk: 668.2, atRiskPct: 11.6, maxPayout: 1720, openLines: 3, events: 2,
+  flagged: { red: 1, yellow: 1 }, value: 700.4, pnl: 52.2, unvalued: 1, topClose: { day: '2026-11-13', pct: 60.2 },
+  positions: [
+    { market: 'UST 10Y', sectionLabel: 'Rates', side: 'NO', cost: 481, pct: 8.3, value: 552.2, pnl: 71.2, maxPayout: 1375,
+      closeTime: '2026-11-13T17:30:00Z', state: 'HOLD', tone: 'none', why: null,
+      lines: [{ subtitle: '4.92% or above', strikeType: 'greater', contracts: 700, cost: 250 },
+        { subtitle: '4.94% or above', strikeType: 'greater', contracts: 675, cost: 231 }] },
+    { market: 'Bitcoin', sectionLabel: 'Crypto', side: 'NO', cost: 167.2, pct: 2.9, value: 148.2, pnl: -19, maxPayout: 300,
+      closeTime: '2026-11-13T22:00:00Z', state: 'CONTRADICTS', tone: 'red', why: 'Shaded long; line is held No',
+      lines: [{ subtitle: 'Above $73000', strikeType: 'greater', contracts: 300, cost: 167.2 }] },
+    { market: 'KXOTHER', sectionLabel: 'Other', side: 'YES', cost: 20, pct: 0.3, value: null, pnl: null, maxPayout: 45,
+      closeTime: null, state: 'CLOSED', tone: 'blue', why: 'Closed; awaiting settlement',
+      lines: [{ strike: 1, contracts: 45, cost: 20 }] },
   ],
-  flags: [{ tone: 'red', text: 'Bitcoin: Setup is Long; line is held NO; 2 lines ($191).' },
-    { tone: 'yellow', text: 'Fri, Nov 13 closes hold 60% of risk ($1,711).' }],
-  unmapped: [{ ticker: 'KXOTHER-26NOV13-T1', strike: 1 }],
 };
 
 test('parses only a book with an at-risk figure', () => {
   expect(parseKalshiBook('{}')).toBeNull();
-  expect(parseKalshiBook(JSON.stringify({ atRisk: 0 }))).toMatchObject({ sections: [], flags: [], unmapped: [] });
+  expect(parseKalshiBook(JSON.stringify({ atRisk: 0 }))).toMatchObject({ positions: [], flagged: {} });
 });
 
-test('the book shows tiles, section bars, direction and flags', () => {
+test('the book is a strip of totals over a positions ledger grouped by section', () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-13T12:00:00Z'));
   render(<AnalystKalshiBook book={parseKalshiBook(JSON.stringify(book))} />);
+  jest.useRealTimers();
   const region = screen.getByRole('region', { name: 'Kalshi book' });
-  expect(region).toHaveTextContent('Account$5,784$2,922 cash');
-  expect(region).toHaveTextContent('At risk$2,85249.3% of account');
-  expect(region).toHaveTextContent('Max payout$7,023if every line pays');
-  expect(region).toHaveTextContent('Held lines flagged2 · 5red · yellow');
-  expect(region).toHaveTextContent('Bettable today4 lines');
-  expect(screen.getByRole('img', { name: 'Metals 8.2% of account' })).toBeInTheDocument();
-  expect(region).toHaveTextContent('No section cap set.');
-  const direction = screen.getByRole('table', { name: 'Kalshi book by section' });
-  const [metals, crypto] = within(direction).getAllByRole('row').slice(1);
-  expect(within(direction).getAllByRole('row')).toHaveLength(3);
-  expect(metals).toHaveTextContent('MetalsSilver, Copper$477Short3 flags');
-  expect(crypto).toHaveTextContent('CryptoBitcoin, Ethereum$382ShortContradicts');
-  expect(region).toHaveTextContent('RedBitcoin: Setup is Long; line is held NO; 2 lines ($191).');
-  expect(region).toHaveTextContent('Realized on open events: +$52');
-  expect(region).toHaveTextContent('Not on the board: KXOTHER Above 1.');
+  expect(region).toHaveTextContent('Account$5,784 $2,922 cash');
+  expect(region).toHaveTextContent('At risk$668 11.6%');
+  expect(region).toHaveTextContent('Value now$700 +$52 · +8.1%');
+  expect(region).toHaveTextContent('Max payout$1,720 +$1,052 if all pay');
+  expect(region).toHaveTextContent('Needs a look1 · 1 red · yellow');
+  const ledger = screen.getByRole('table', { name: 'Kalshi positions' });
+  expect(within(ledger).getAllByRole('columnheader').map(cell => cell.textContent))
+    .toEqual(['Market', 'Bet', 'Lines', 'Cost', '% acct', 'Value now', 'P&L', 'Max payout', 'Closes', 'State']);
+  const rows = within(ledger).getAllByRole('row').slice(1).map(row => row.textContent);
+  expect(rows).toEqual([
+    'Rates',
+    'UST 10YNo above 4.92%, 4.94%2$4818.3%$552+$71$1,375Fri 9:30 AMHold',
+    'Crypto',
+    'BitcoinNo above $730001$1672.9%$148−$19$300Fri 2 PMContradicts',
+    'Other',
+    'KXOTHERYes 11$200.3%N/AN/A$45N/AClosed',
+    'Total3 markets4$66811.6%$700*+$52$1,72060% closes Fri',
+  ]);
+  const bitcoin = within(ledger).getByText('Bitcoin').closest('tr');
+  expect(bitcoin).toHaveClass('analyst-lines__tone-red');
+  expect(within(bitcoin).getByText('Contradicts')).toHaveClass('is-red', 'is-flash');
+  expect(within(bitcoin).getByText('Contradicts')).toHaveAttribute('title', 'Shaded long; line is held No');
+  expect(within(ledger).getByText('UST 10Y').closest('tr').querySelector('[title]'))
+    .toHaveAttribute('title', 'No 4.92% or above: 700 contracts, $250\nNo 4.94% or above: 675 contracts, $231');
+});
+
+test('a book with no positions says so under its totals', () => {
+  render(<AnalystKalshiBook book={parseKalshiBook(JSON.stringify({ account: 6196, cash: 6196, atRisk: 0, atRiskPct: 0, maxPayout: 0,
+    value: null, pnl: null, positions: [], flagged: { red: 0, yellow: 0 } }))} />);
+  expect(screen.getByRole('region', { name: 'Kalshi book' })).toHaveTextContent('Account$6,196 $6,196 cash');
+  expect(screen.queryByRole('table', { name: 'Kalshi positions' })).toBeNull();
+  expect(screen.getByText('No open lines.')).toBeInTheDocument();
 });
 
 test('a market without a setup opens to its ungraded ladder, nearest liquid lines first', () => {

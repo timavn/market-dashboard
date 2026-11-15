@@ -4,7 +4,7 @@ import re
 import unittest
 
 from analyst_review_sources import review_sources
-from prediction_setup_board import _product_key, render_setup_board, research_by_section
+from prediction_setup_board import _curve_levels, _product_key, render_setup_board, research_by_section
 from review_runs_v2 import ReviewRunError, render_prediction_review
 
 AT = "2026-10-10T17:00:00Z"
@@ -92,6 +92,19 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertNotIn("front-month futures", report)
         self.assertIn("Nasdaq-100 30,883; its bar shows the COMPQ range and Nasdaq Composite price.", report)
 
+    def test_curve_levels_mark_the_alpha_code_and_only_an_own_price_range(self):
+        wti = {"range": {"low": 82.96, "high": 93.11, "fit": "exact"},
+               "research": {"alphaCode": {"trade": 92, "trend": 91, "approximate": False}}}
+        self.assertEqual(_curve_levels(wti), {"rangeLow": 82.96, "rangeHigh": 93.11, "trade": 92, "trend": 91,
+                                              "approximate": False})
+        # A range topping the all-time high draws its high blue.
+        gold = {"range": {"low": 3823, "high": 4056, "fit": "exact"}, "structure": {"allTimeHigh": {"rangeTopAbove": True}}}
+        self.assertEqual(_curve_levels(gold), {"rangeLow": 3823, "rangeHigh": 4056, "rangeHighAth": True})
+        # The Nasdaq-100 settles on its own price; the COMPQ range it is read against is left off.
+        nasdaq = {"range": {"low": 22000, "high": 23000, "fit": "related-only", "ticker": "COMPQ"},
+                  "rangePrice": {"value": 22500}}
+        self.assertIsNone(_curve_levels(nasdaq))
+
     def test_line_monitor_folds_under_each_section_and_the_book_closes_the_report(self):
         data = board()
         gold = data["rows"][0]
@@ -102,7 +115,8 @@ class SetupBoardRenderTests(unittest.TestCase):
         report = render_setup_board(data)
         self.assertNotIn("analyst-kalshi-book", report)
         block = json.loads(report.split("```analyst-lines\n", 1)[1].split("\n```", 1)[0])
-        self.assertEqual(block["markets"], [gold["kalshiLines"]])
+        # Each market carries the levels its settlement curve marks: here the Risk Range on its own price.
+        self.assertEqual(block["markets"], [{**gold["kalshiLines"], "levels": {"rangeLow": 4100, "rangeHigh": 4224}}])
         # Under its own section's market table, ahead of the next section.
         self.assertLess(report.index("## Metals"), report.index("```analyst-lines"))
         self.assertLess(report.index("```analyst-lines"), report.index("## Oil"))

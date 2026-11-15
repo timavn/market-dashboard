@@ -647,8 +647,35 @@ def cited_products(board: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _lines_block(members: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Each market's Kalshi line monitor (gate, graded lines, held lines), passed through for the report to fold."""
-    markets = [row["kalshiLines"] for row in members if isinstance(row.get("kalshiLines"), dict)]
+    markets = []
+    for row in members:
+        if not isinstance(row.get("kalshiLines"), dict):
+            continue
+        levels = _curve_levels(row)
+        markets.append({**row["kalshiLines"], "levels": levels} if levels else row["kalshiLines"])
     return {"markets": markets} if markets else None
+
+
+def _curve_levels(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The levels the settlement curve marks: the Alpha Code, and the Risk Range when it is on the price Kalshi settles on
+    (not a related instrument's range, such as COMPQ for the Nasdaq-100)."""
+    number = lambda value: value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    levels: dict[str, Any] = {}
+    risk_range = row.get("range") or {}
+    low, high = number(risk_range.get("low")), number(risk_range.get("high"))
+    if low is not None and high is not None and high > low and not row.get("rangePrice") \
+            and risk_range.get("fit") != "related-only":
+        levels.update({"rangeLow": low, "rangeHigh": high})
+        # A range whose top is above the all-time high draws that line blue.
+        if ((row.get("structure") or {}).get("allTimeHigh") or {}).get("rangeTopAbove"):
+            levels["rangeHighAth"] = True
+    code = _alpha_code(row) or {}
+    for key in ("trade", "trend"):
+        if number(code.get(key)) is not None:
+            levels[key] = code[key]
+    if "trade" in levels or "trend" in levels:
+        levels["approximate"] = bool(code.get("approximate"))
+    return levels or None
 
 
 def _fenced(kind: str, value: dict[str, Any]) -> list[str]:

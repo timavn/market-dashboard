@@ -303,6 +303,10 @@ function kalshiBook({ balance, positions, held, monitors, config = MONITOR, now 
   }
   const bettable = monitors.flatMap((monitor) => (monitor.lines?.lines || [])
     .filter((line) => (line.strength === 'STRONG' || line.strength === 'GOOD') && !line.held));
+  const ledger = bookLedger(held, { sections, groupOf, share });
+  const valued = ledger.filter((position) => position.value !== null);
+  const closeDays = [...groupBy(held.filter((line) => line.closeTime), (line) => line.closeTime.slice(0, 10))]
+    .map(([day, lines]) => ({ day, cost: sum(lines, 'cost') })).sort((left, right) => right.cost - left.cost);
   return {
     asOf: now.toISOString(), account, cash, atRisk, atRiskPct: share(atRisk),
     maxPayout: held.reduce((total, line) => total + line.contracts, 0),
@@ -310,10 +314,39 @@ function kalshiBook({ balance, positions, held, monitors, config = MONITOR, now 
     flagged: { red: held.filter((line) => line.tone === 'red').length, yellow: held.filter((line) => line.tone === 'yellow').length },
     bettable: bettable.length,
     realized: (positions?.event_positions || []).reduce((total, item) => total + (finite(item.realized_pnl_dollars) || 0), 0),
-    sections: bySection, flags,
+    sections: bySection, flags, positions: ledger,
+    // Value now: each held line's contracts at its current bid. Lines with no bid (closed, awaiting settlement) are left out.
+    value: valued.length ? sum(valued, 'value') : null, pnl: valued.length ? valued.reduce((total, position) => total + position.pnl, 0) : null,
+    unvalued: ledger.length - valued.length,
+    topClose: atRisk > 0 && closeDays.length ? { day: closeDays[0].day, pct: (closeDays[0].cost / atRisk) * 100 } : null,
     caps: { sectionPct: config.sectionCapPct, bookPct: config.bookCapPct },
     unmapped: held.filter((line) => !line.marketId),
   };
+}
+
+/**
+ * The positions ledger: one row per market and side, in section order. Value now is contracts × the held side's bid;
+ * a row with any line lacking a bid has no value or P&L. State is the row's worst held state.
+ */
+function bookLedger(held, { sections, groupOf, share }) {
+  const order = new Map(sections.map((section, index) => [section.id, index]));
+  const label = new Map(sections.map((section) => [section.id, section.label]));
+  return [...groupBy(held, (line) => `${line.marketId || seriesOf(line.ticker)}|${line.side}`).values()].map((lines) => {
+    const first = lines[0];
+    const section = groupOf(first);
+    const values = lines.map((line) => (line.bid === null || line.bid === undefined ? null : line.bid * line.contracts));
+    const value = values.includes(null) ? null : values.reduce((total, item) => total + item, 0);
+    const cost = sum(lines, 'cost');
+    const top = worst(lines);
+    const closes = lines.map((line) => line.closeTime).filter(Boolean).sort();
+    return { marketId: first.marketId, market: first.market || seriesOf(first.ticker), section, sectionLabel: label.get(section) || 'Other',
+      side: first.side, direction: first.direction,
+      lines: [...lines].sort((left, right) => (left.strike ?? 0) - (right.strike ?? 0)).map((line) => ({ ticker: line.ticker,
+        strike: line.strike, strikeType: line.strikeType, subtitle: line.subtitle, contracts: line.contracts, cost: line.cost, bid: line.bid,
+        value: values[lines.indexOf(line)], state: line.state })),
+      cost, pct: share(cost), value, pnl: value === null ? null : value - cost, maxPayout: sum(lines, 'contracts'),
+      closeTime: closes[0] || null, state: top.state, tone: top.tone, why: top.why };
+  }).sort((left, right) => (order.get(left.section) ?? 99) - (order.get(right.section) ?? 99) || right.cost - left.cost);
 }
 
 const sum = (items, key) => items.reduce((total, item) => total + (item[key] || 0), 0);

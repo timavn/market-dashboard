@@ -6,6 +6,7 @@ import AnalystPredictionDrivers, { parsePredictionDrivers } from './AnalystPredi
 import AnalystPredictionResearch, { parsePredictionResearch } from './AnalystPredictionResearch';
 import AnalystPredictionSizing, { parsePredictionSizing } from './AnalystPredictionSizing';
 import AnalystPredictionLines, { parsePredictionLines } from './AnalystPredictionLines';
+import { attachCurveLevels } from './AnalystPredictionCurve';
 import AnalystKalshiBook, { parseKalshiBook } from './AnalystKalshiBook';
 import remarkGfm from 'remark-gfm';
 import { remarkAnalystProcessColors } from './analystProcessColors';
@@ -339,8 +340,9 @@ const FOOTER_LINE = /^(Sources?:\s|Paper tickets:|Research read for\b)/i;
 const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageId, markdown, citations, onCitation, error }) {
   const report = useMemo(() => {
     const sourced = predictionReportSources(markdown, citations);
+    // Settlement curves read each market's Risk Range and Alpha Code from its section's table.
     // Saved reports titled the CPI nowcast's first column "Nowcast low".
-    return { ...sourced, markdown: onceAcrossPredictionResearch(pinPredictionDollar(splitPredictionZScore(foldPredictionAlphaCode(predictionReportTables(sourced.markdown)))))
+    return { ...sourced, markdown: attachCurveLevels(onceAcrossPredictionResearch(pinPredictionDollar(splitPredictionZScore(foldPredictionAlphaCode(predictionReportTables(sourced.markdown))))))
       .replace(/^(\| Market \| Kalshi \| )Nowcast low( \| Base \| High \|)/gm, '$1Low$2')
       // Setup boards saved before Status was named for their publication times.
       .replace(/^(\| Market \| (?:Z \| )?Tick \|.*\| )As of \(PT\)( \|)$/gm, '$1Status$2')

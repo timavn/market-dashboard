@@ -472,28 +472,81 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-lines__chip.is-flash { animation: analyst-lines-flash 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .analyst-lines__chip.is-flash { animation: none; outline: 2px solid currentColor; outline-offset: 1px; } }
 
-/* Kalshi book: the whole account at the end of the report. */
+/* Settlement curves: one solid row closing the section's lines table; opened, a bell per market. */
+.analyst-panel-v2 .analyst-prediction-report table.analyst-lines__markets > tbody > tr.analyst-lines__curves-row > td { padding: 5px 6px;
+  background: #eef2f6; border-top: 1px solid var(--analyst-border, #dbe1e8); }
+.analyst-lines__curves-row.is-open > td { background: #e4eaf1 !important; }
+.analyst-lines__curves-names { margin-left: 8px; font-weight: 400; color: var(--dashboard-muted-text, #667085); }
+.analyst-panel-v2 .analyst-prediction-report table.analyst-drivers__table tr.analyst-lines__curves > td { padding: 8px 6px 10px; }
+.analyst-curves { position: sticky; left: 6px; display: grid; gap: 14px; }
+.analyst-curve { margin: 0; min-width: 0; font-variant-numeric: tabular-nums; }
+.analyst-curve__chart { display: block; width: 100%; height: auto; cursor: crosshair; }
+.analyst-curve__zone.is-down { fill: #dc2626; fill-opacity: .14; }
+.analyst-curve__zone.is-mid { fill: #94a3b8; fill-opacity: .2; }
+.analyst-curve__zone.is-up { fill: #059669; fill-opacity: .16; }
+.analyst-curve__bell { fill: none; stroke: var(--portfolio-review-blue, #2563eb); stroke-width: 2; stroke-linejoin: round; }
+.analyst-curve__axis { stroke: #94a3b8; }
+.analyst-curve__strike { stroke: #cbd5e1; stroke-width: 1; }
+.analyst-curve__tick line { stroke: #64748b; }
+.analyst-curve__tick text { font-size: 11.5px; fill: var(--analyst-ink, #172033); }
+.analyst-curve__tick text.analyst-curve__tick-odds { font-size: 11px; fill: var(--dashboard-muted-text, #667085); }
+.analyst-curve__row-title { font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; fill: var(--dashboard-muted-text, #667085); }
+.analyst-curve__hover line { stroke: #64748b; stroke-dasharray: 2 2; }
+.analyst-curve__hover circle { fill: var(--portfolio-review-blue, #2563eb); stroke: #fff; stroke-width: 2; }
+.analyst-curve__hover rect { fill: var(--analyst-ink, #172033); }
+.analyst-curve__hover text { font-size: 11.5px; font-weight: 500; fill: #fff; }
+.analyst-curve__range-band.is-bottom { fill: #dc2626; fill-opacity: .05; }
+.analyst-curve__range-band.is-middle { fill: #94a3b8; fill-opacity: .05; }
+.analyst-curve__range-band.is-top { fill: #059669; fill-opacity: .06; }
+.analyst-curve__range rect.is-bottom { fill: #dc2626; fill-opacity: .5; }
+.analyst-curve__range rect.is-middle { fill: #94a3b8; fill-opacity: .5; }
+.analyst-curve__range rect.is-top { fill: #059669; fill-opacity: .55; }
+.analyst-curve__range-off { font-size: 11px; fill: var(--dashboard-muted-text, #667085); }
+/* One color per kind of level, shared by its line, tie, tag and odds chip. */
+.analyst-curve__level, .analyst-curve__tag, .analyst-curve__chip { --level: var(--analyst-ink, #172033); --level-text: var(--analyst-ink, #172033); }
+:is(.analyst-curve__level, .analyst-curve__tag, .analyst-curve__chip).is-low { --level: #dc2626; --level-text: #b91c1c; }
+:is(.analyst-curve__level, .analyst-curve__tag, .analyst-curve__chip).is-high { --level: #059669; --level-text: #047857; }
+:is(.analyst-curve__level, .analyst-curve__tag, .analyst-curve__chip).is-ath { --level: #2563eb; --level-text: #1d4ed8; }
+:is(.analyst-curve__level, .analyst-curve__tag, .analyst-curve__chip).is-third-low { --level: #f87171; --level-text: #b91c1c; }
+:is(.analyst-curve__level, .analyst-curve__tag, .analyst-curve__chip).is-third-high { --level: #34d399; --level-text: #047857; }
+:is(.analyst-curve__level, .analyst-curve__tag, .analyst-curve__chip).is-alpha { --level: #b45309; --level-text: #92400e; }
+.analyst-curve__level line { stroke: var(--level); stroke-width: 1.5; }
+.analyst-curve__level.is-price line { stroke-width: 2; }
+.analyst-curve__level.is-alpha line:not(.analyst-curve__tie) { stroke-dasharray: 4 3; }
+.analyst-curve__level:is(.is-third-low, .is-third-high) line:not(.analyst-curve__tie) { stroke-width: 1.2; stroke-dasharray: 2 3; }
+line.analyst-curve__tie { stroke: var(--level); stroke-width: 1; stroke-dasharray: none; opacity: .55; }
+.analyst-curve__tag text { fill: var(--level-text); paint-order: stroke; stroke: #fff; stroke-width: 4px; stroke-linejoin: round; }
+.analyst-curve__tag-title { font-size: 11px; font-weight: 500; }
+.analyst-curve__tag-value { font-size: 12px; font-weight: 600; }
+.analyst-curve__chip rect { fill: #fff; stroke: var(--level); stroke-width: 1.2; }
+.analyst-curve__chip text { font-size: 11.5px; font-weight: 600; fill: var(--level-text); }
+.analyst-curve__cells { display: grid; border-top: 1px solid var(--analyst-border, #dbe1e8); border-left: 1px solid var(--analyst-border, #dbe1e8); font-size: 12px; }
+.analyst-curve__cell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; min-width: 0; padding: 5px 8px; border-right: 1px solid var(--analyst-border, #dbe1e8);
+  border-bottom: 1px solid var(--analyst-border, #dbe1e8); color: var(--dashboard-muted-text, #667085); }
+.analyst-curve__cell strong { font-weight: 600; color: var(--analyst-ink, #172033); }
+.analyst-curve__cell.is-down strong { color: var(--dashboard-negative, #dc2626); }
+.analyst-curve__cell.is-up strong { color: var(--dashboard-positive, #059669); }
+.analyst-curve__name { align-items: center; }
+.analyst-curve__name strong { font-size: 13px; }
+.analyst-curve__swatch { align-self: center; flex: none; width: 9px; height: 9px; }
+.analyst-curve__cell.is-down .analyst-curve__swatch { background: rgba(220, 38, 38, .35); }
+.analyst-curve__cell.is-mid .analyst-curve__swatch { background: rgba(148, 163, 184, .5); }
+.analyst-curve__cell.is-up .analyst-curve__swatch { background: rgba(5, 150, 105, .35); }
+
+/* Kalshi book: a strip of totals over a positions ledger at the end of the report. */
 .analyst-book { margin: 4px 0 10px; border: 1px solid var(--analyst-border, #dbe1e8); background: #fff; font-variant-numeric: tabular-nums; }
-.analyst-book__tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); border-bottom: 1px solid var(--analyst-border, #dbe1e8); }
-.analyst-book__tile { display: grid; gap: 1px; padding: 8px 10px; border-right: 1px solid var(--analyst-border, #dbe1e8); min-width: 0; }
+.analyst-book__tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border-bottom: 1px solid var(--analyst-border, #dbe1e8); }
+.analyst-book__tile { display: grid; gap: 1px; padding: 8px 12px; border-right: 1px solid var(--analyst-border, #dbe1e8); min-width: 0; }
 .analyst-book__tile:last-child { border-right: 0; }
-.analyst-book__label, .analyst-book h4 { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--dashboard-muted-text, #667085); font-weight: 600; margin: 0; }
+.analyst-book__label { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--dashboard-muted-text, #667085); font-weight: 600; }
 .analyst-book__value { font-size: 20px; font-weight: 600; color: var(--analyst-ink, #172033); }
 .analyst-book__note, .analyst-book__foot { font-size: 12px; color: var(--dashboard-muted-text, #667085); margin: 0; }
-.analyst-book__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-.analyst-book__block { display: grid; align-content: start; gap: 6px; padding: 8px 10px; border-right: 1px solid var(--analyst-border, #dbe1e8); min-width: 0; }
-.analyst-book__block:last-child { border-right: 0; }
-.analyst-book__bar-row { display: grid; grid-template-columns: 64px 1fr 48px; gap: 8px; align-items: center; font-size: 12.5px; }
-.analyst-book__bar-row > span:last-child { text-align: right; }
-.analyst-book__bar { position: relative; height: 11px; background: #f3f4f6; }
-.analyst-book__bar i { position: absolute; top: 0; bottom: 0; left: 0; }
-.analyst-book__bar i.is-yes { background: var(--dashboard-positive, #059669); }
-.analyst-book__bar i.is-no { background: var(--portfolio-review-blue, #2563eb); }
-.analyst-book__bar b { position: absolute; top: -3px; bottom: -3px; width: 0; border-left: 2px dashed var(--dashboard-muted-text, #667085); }
-.analyst-panel-v2 .analyst-prediction-report table.analyst-book__table { table-layout: auto; }
-.analyst-panel-v2 .analyst-prediction-report table.analyst-book__table :is(th, td) { white-space: normal; overflow: visible; }
-.analyst-panel-v2 .analyst-prediction-report table.analyst-book__table :is(th, td):nth-child(2) { text-align: left; }
-.analyst-panel-v2 .analyst-prediction-report .analyst-book h4 { margin: 0; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--dashboard-muted-text, #667085); font-weight: 600; }
-.analyst-book__flags { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; font-size: 12.5px; }
-.analyst-book__flags li { display: flex; gap: 8px; align-items: baseline; }
+.analyst-book__empty { padding: 8px 12px; }
+.analyst-book__scroll { overflow-x: auto; }
+.analyst-book__side { font-weight: 600; }
+.analyst-panel-v2 .analyst-prediction-report table.analyst-book__ledger { table-layout: auto; min-width: 760px; margin: 0; border: 0; }
+.analyst-panel-v2 .analyst-prediction-report table.analyst-book__ledger :is(th, td) { white-space: nowrap; overflow: visible; text-align: right; }
+.analyst-panel-v2 .analyst-prediction-report table.analyst-book__ledger :is(th, td):is(:nth-child(1), :nth-child(2), :nth-child(9), :nth-child(10)) { text-align: left; }
+.analyst-panel-v2 .analyst-prediction-report table.analyst-book__ledger tr.analyst-book__section td { text-align: left; background: #fafbfc; padding-top: 3px;
+  padding-bottom: 3px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--dashboard-muted-text, #667085); }
+.analyst-panel-v2 .analyst-prediction-report table.analyst-book__ledger tr.analyst-book__total td { font-weight: 600; border-top: 2px solid var(--analyst-ink, #172033); }

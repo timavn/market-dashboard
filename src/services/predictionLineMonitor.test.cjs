@@ -207,6 +207,23 @@ test('book: at risk, sections, flags, and the board blocks', () => {
   assert.match(book.flags[0].text, /^Bitcoin: Shaded long; line is held No; 1 line \(\$100\)\.$/);
   assert.equal(book.flags[0].tone, 'red');
   assert.ok(book.flags.some((flag) => /^Fri, Nov 13 closes hold 97% of risk \(\$190\)\.$/.test(flag.text)));
+  // Ledger: one row per market and side in section order, valued at the held side's bid.
+  assert.deepEqual(book.positions.map((position) => [position.sectionLabel, position.market, position.side, position.state]),
+    [['Metals', 'Silver', 'NO', 'HOLD'], ['Crypto', 'Bitcoin', 'NO', 'CONTRADICTS'], ['Other', 'KXOTHER', 'YES', 'HOLD']]);
+  const silverPosition = book.positions[0];
+  const silverBid = Number(silver[6].no_bid_dollars);
+  assert.ok(Math.abs(silverPosition.value - 300 * silverBid) < 1e-9);
+  assert.ok(Math.abs(silverPosition.pnl - (300 * silverBid - 90)) < 1e-9);
+  assert.equal(silverPosition.maxPayout, 300);
+  assert.equal(silverPosition.lines.length, 1);
+  assert.equal(silverPosition.pct, 6);
+  // The unmapped line's event was not read: no bid, so no value, and the totals leave it out.
+  assert.equal(book.positions[2].value, null);
+  assert.equal(book.positions[2].pnl, null);
+  assert.equal(book.unvalued, 1);
+  assert.ok(Math.abs(book.value - (silverPosition.value + book.positions[1].value)) < 1e-9);
+  assert.ok(Math.abs(book.pnl - (book.value - 190)) < 1e-9);
+  assert.deepEqual(book.topClose, { day: '2026-11-13', pct: (190 / 195) * 100 });
 });
 
 test('caps flag only once set', () => {
