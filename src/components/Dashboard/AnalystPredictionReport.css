@@ -413,13 +413,7 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-lines { margin: 4px 0 8px; overflow-x: auto; }
 /* A narrow panel scrolls the table sideways rather than breaking names and times mid-word. */
 .analyst-panel-v2 .analyst-prediction-report table.analyst-lines__markets { min-width: 640px; }
-.analyst-panel-v2 .analyst-prediction-report table.analyst-lines__markets > tbody > tr.analyst-lines__row > td:is(:first-child, :nth-child(4), :nth-child(5)) { white-space: nowrap; }
-.analyst-panel-v2 .analyst-prediction-report table.analyst-lines__markets :is(th, td):not(:first-child) { text-align: left; }
-.analyst-lines__market-col { width: 15%; }
-.analyst-lines__price-col { width: 21%; }
-.analyst-lines__fill-col { width: 9%; }
-.analyst-lines__close-col { width: 12%; }
-.analyst-lines__held-col { width: 15%; }
+.analyst-panel-v2 .analyst-prediction-report table.analyst-lines__markets > tbody > tr.analyst-lines__row > td { white-space: nowrap; text-align: left; }
 .analyst-lines__sub { display: block; font-size: 11.5px; line-height: 1.3; color: var(--dashboard-muted-text, #667085); }
 .analyst-lines__yes { font-weight: 600; color: var(--dashboard-positive, #059669); }
 .analyst-lines__no { font-weight: 600; color: var(--dashboard-negative, #dc2626); }
@@ -437,7 +431,7 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-lines__toggle:hover .analyst-lines__chev { background: #dbeafe; }
 .analyst-lines__toggle.is-off .analyst-lines__chev { border-color: var(--analyst-border, #dbe1e8); background: #fff; color: var(--dashboard-muted-text, #667085); }
 .analyst-panel-v2 .analyst-prediction-report table.analyst-drivers__table tr.analyst-lines__detail > td { padding: 4px 6px 8px 26px; white-space: normal; background: #fff; }
-.analyst-lines__label { display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 2px 0 4px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+.analyst-lines__label { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 12px; padding: 2px 0 4px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
   color: var(--dashboard-muted-text, #667085); }
 .analyst-lines__table + .analyst-lines__table, .analyst-lines__more + .analyst-lines__table { margin-top: 6px !important; }
 .analyst-panel-v2 .analyst-prediction-report table.analyst-lines__table { table-layout: auto; }
@@ -452,6 +446,12 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-lines__illiquid > td.analyst-lines__side.is-take { background: #fde2e2; }
 .analyst-lines__side.is-thin { text-decoration: underline dotted #dc2626; text-underline-offset: 3px; }
 .analyst-lines__tone-yellow > td { background: #fffbeb; }
+/* Spot, between the strikes it sits between. */
+.analyst-panel-v2 .analyst-prediction-report table.analyst-lines__table tr.analyst-lines__spot > td { padding-top: 2px; padding-bottom: 2px; text-align: left;
+  background: #eff6ff; color: var(--portfolio-review-blue, #2563eb); font-weight: 600; }
+.analyst-lines__word { display: inline-block; min-width: 3.6em; }
+.analyst-lines__bet { color: var(--portfolio-review-blue, #2563eb); font-weight: 600; }
+.analyst-lines__more + .analyst-lines__more { margin-left: 14px; }
 .analyst-lines__more { margin-top: 2px; padding: 2px 0; border: 0; background: none; font: inherit; color: var(--portfolio-review-blue, #2563eb); cursor: pointer; }
 .analyst-lines__summary { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .analyst-lines__held { font-weight: 500; color: var(--portfolio-review-blue, #2563eb); }
@@ -472,11 +472,38 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-lines__chip.is-flash { animation: analyst-lines-flash 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .analyst-lines__chip.is-flash { animation: none; outline: 2px solid currentColor; outline-offset: 1px; } }
 
-/* Settlement curves: one solid row closing the section's lines table; opened, a bell per market. */
-.analyst-panel-v2 .analyst-prediction-report table.analyst-lines__markets > tbody > tr.analyst-lines__curves-row > td { padding: 5px 6px;
-  background: #eef2f6; border-top: 1px solid var(--analyst-border, #dbe1e8); }
-.analyst-lines__curves-row.is-open > td { background: #e4eaf1 !important; }
-.analyst-lines__curves-names { margin-left: 8px; font-weight: 400; color: var(--dashboard-muted-text, #667085); }
+/* Book and curve buttons. On a setup board they sit stacked in the market cell, left of the name; a market the boards
+   don't list keeps its own row in the lines table, buttons then name. */
+.analyst-lines__toggles { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.analyst-lines__head { display: inline-flex; align-items: center; gap: 8px; min-height: 22px; }
+.analyst-lines__name { line-height: 22px; font-weight: 600; color: var(--analyst-ink, #172033); }
+.analyst-lines__icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border-radius: 4px;
+  border: 1px solid #93c5fd; background: #eff6ff; color: var(--portfolio-review-blue, #2563eb); }
+.analyst-lines__icon:hover { background: #dbeafe; }
+.analyst-lines__icon.is-active { background: var(--portfolio-review-blue, #2563eb); border-color: var(--portfolio-review-blue, #2563eb); color: #fff; }
+.analyst-lines__icon.is-off { opacity: .45; background: #fff; border-color: var(--analyst-border, #dbe1e8); color: var(--dashboard-muted-text, #667085); }
+.analyst-board-market__body { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.analyst-board-market .analyst-lines__toggles { flex-direction: column; gap: 3px; }
+.analyst-board-market .analyst-lines__icon { width: 18px; height: 18px; }
+.analyst-board-market .analyst-lines__icon svg { width: 12px; height: 12px; }
+.analyst-board-market__body { gap: 5px; }
+.analyst-board-market__name { min-width: 0; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame td.analyst-board-market.is-shade-short { background: #fde8e8; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame td.analyst-board-market.is-shade-long { background: #e3f5ec; }
+/* The market column widens for the buttons; the range bar, Structure and Status give up the room. */
+.analyst-prediction-report .is-range-board.has-lines col:nth-child(1) { width: 15%; }
+.analyst-prediction-report .is-range-board.has-structure.has-z.has-lines col:nth-child(1) { width: 21%; }
+.analyst-prediction-report .is-range-board.has-structure.has-z.has-lines col:nth-child(6) { width: 27%; }
+.analyst-prediction-report .is-range-board.has-structure.has-z.has-lines col:nth-child(7) { width: 13.5%; }
+.analyst-prediction-report .is-range-board.has-structure.has-z.has-lines col:nth-child(8) { width: 12.5%; }
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame td.analyst-board-market { padding-left: 4px; padding-right: 4px; }
+.analyst-board-market__name { overflow-wrap: normal; word-break: normal; hyphens: none; }
+/* Opened under its board row, full width; the book scrolls sideways inside it when the panel is narrow. */
+.analyst-panel-v2 .analyst-prediction-report .analyst-table-frame tr.analyst-board-detail > td { padding: 6px 6px 8px; text-align: left;
+  vertical-align: top; white-space: normal; background: #f8fafc; }
+.analyst-lines--board { margin: 0; }
+.analyst-lines--board > table.analyst-lines__table { min-width: 560px; }
+/* Settlement curve: opened under its market, a bell per market. */
 .analyst-panel-v2 .analyst-prediction-report table.analyst-drivers__table tr.analyst-lines__curves > td { padding: 8px 6px 10px; }
 .analyst-curves { position: sticky; left: 6px; display: grid; gap: 14px; }
 .analyst-curve { margin: 0; min-width: 0; font-variant-numeric: tabular-nums; }

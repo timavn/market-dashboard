@@ -1328,6 +1328,9 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
   // Open positions for the line monitor's held lines and Kalshi book. Read-only.
   loadKalshiPositions: () => require('./src/services/kalshiClient')
     .kalshiFetch('/portfolio/positions', { count_filter: 'position', limit: 1000 }),
+  // One line's full order book, so the line monitor can price a bet at what it would actually fill at. Read-only.
+  loadKalshiOrderbook: (ticker) => require('./src/services/kalshiClient')
+    .kalshiFetch(`/markets/${encodeURIComponent(ticker)}/orderbook`).then((body) => body?.orderbook_fp || body?.orderbook || null),
   // The market date's Hedgeye products, read for Alpha Codes, levels, signals and positions.
   // A product not yet published that morning is simply absent.
   // Crypto Quant is stored as the Bitcoin Trend Tracker; it is only asked for when reading an earlier day.

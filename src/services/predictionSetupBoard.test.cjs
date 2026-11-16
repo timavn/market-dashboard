@@ -695,3 +695,43 @@ test('the loader adds every market\'s Kalshi lines, checks held lines and adds t
   assert.ok(noPositions.rows.find((row) => row.id === 'gold').kalshiLines.lines.lines.length > 0);
   assert.equal(noPositions.sourceStatus.kalshiPositions, 'failed');
 });
+
+test('the loader reads order books for lines near even odds and prices each market\'s bet through them', async () => {
+  const empty = () => Promise.resolve(null);
+  const quote = (event, strike, yes) => ({ ticker: `${event}-T${strike}`, floor_strike: strike, strike_type: 'greater',
+    close_time: '2026-11-11T22:00:00Z', yes_bid_dollars: String(yes - 0.01), yes_ask_dollars: String(yes + 0.01),
+    no_bid_dollars: String(1 - yes - 0.01), no_ask_dollars: String(1 - yes + 0.01) });
+  const read = [];
+  const options = {
+    loadRiskRanges: () => Promise.resolve(goldShort.riskRanges), loadCryptoQuant: empty, loadHedgai: () => Promise.resolve(goldShort.hedgai),
+    loadSecurityIntelligence: empty, loadNowcast: empty, loadQuotes: () => Promise.resolve(goldShort.quotes),
+    loadVolatility: () => Promise.resolve(goldShort.volatility), loadUsdCorrelations: () => Promise.resolve(goldShort.usdCorrelations),
+    loadKalshiEvents: (series) => Promise.resolve(series === 'KXGOLDD' ? [{ event_ticker: 'KXGOLDD-26NOV1117' }] : []),
+    loadKalshiMarkets: (event) => Promise.resolve([quote(event, 3960, 0.84), quote(event, 3980, 0.69), quote(event, 4000, 0.5),
+      quote(event, 4020, 0.31), quote(event, 4040, 0.16), quote(event, 4300, 0.01)]),
+    loadKalshiBalance: () => Promise.resolve({ balance_dollars: '6000.00', portfolio_value: 0 }),
+    loadKalshiPositions: () => Promise.resolve({ market_positions: [], event_positions: [] }),
+    loadKalshiOrderbook: (ticker) => { read.push(ticker); return Promise.resolve({ yes_dollars: [['0.30', '10000']], no_dollars: [['0.30', '10000']] }); },
+    marketDateFor: () => '2026-11-11',
+  };
+  const load = createSetupBoardLoader(options);
+  const board = await load({ now: new Date('2026-11-11T16:00:00Z') });
+  // The 1¢ line is outside 3–97% and is never read.
+  assert.deepEqual(read.map((ticker) => ticker.split('-T')[1]).sort(), ['3960', '3980', '4000', '4020', '4040']);
+  const row = board.rows.find((item) => item.id === 'gold');
+  const lines = row.kalshiLines.lines;
+  // Gold is sized by the board, so its bet is its sized % of the $6,000 account.
+  assert.equal(lines.bet, Math.round(6000 * row.sizing.pct) / 100);
+  assert.ok(lines.lines.filter((line) => line.checked).length === 5);
+  assert.equal(board.sourceStatus.kalshiOrderbooks, 'ready');
+  // Within the cache window nothing is read again.
+  await load({ now: new Date('2026-11-11T16:00:20Z') });
+  assert.equal(read.length, 5);
+  await load({ now: new Date('2026-11-11T16:01:00Z') });
+  assert.equal(read.length, 10);
+  // Books that cannot be read leave the lines on their top-of-book quotes.
+  const failed = await createSetupBoardLoader({ ...options, loadKalshiOrderbook: () => Promise.reject(new Error('429')) })(
+    { now: new Date('2026-11-11T16:00:00Z') });
+  assert.equal(failed.sourceStatus.kalshiOrderbooks, 'failed');
+  assert.equal(failed.rows.find((item) => item.id === 'gold').kalshiLines.lines.bet, null);
+});

@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import ReactMarkdown from 'react-markdown';
-import AnalystPredictionReport from './AnalystPredictionReport';
+import AnalystPredictionReport, { BoardLinesContext, boardLines } from './AnalystPredictionReport';
 import { remarkAnalystProcessColors } from './analystProcessColors';
 import { analystWorkspaceApi } from '../../services/analyst/analystClient';
 import { findQuote } from './AnalystSourceEmail';
@@ -658,4 +658,62 @@ test('a market whose only mention reads under another market is Not mentioned, i
   render(<Pre node={node}><code>ignored</code></Pre>);
   const rows = within(screen.getByRole('region', { name: 'Morning research' })).getAllByRole('row').map(row => [...row.cells].map(cell => cell.textContent));
   expect(rows.slice(1)).toEqual([['Palladium', 'Not mentioned'], ['Copper', 'Not mentioned']]);
+});
+
+describe('Kalshi lines open from the board rows', () => {
+  const ladder = [[84, 0.97], [86, 0.86], [88, 0.6], [90, 0.3], [92, 0.1], [94, 0.03]];
+  const wti = { id: 'wti', market: 'WTI', event: 'KXWTI-26NOV1614', held: [], open: false, shade: 'SHORT',
+    summary: { price: 88.5, centre: 88.6, unit: null, closeTime: '2026-11-16T19:30:00Z' },
+    lines: { side: null, lines: ladder.map(([strike, odds]) => ({ ticker: `T${strike}`, strike, subtitle: `Above $${strike}`, kalshiOdds: odds })) } };
+  const brent = { ...wti, id: 'brent', market: 'Brent', shade: null };
+  const fence = '```';
+  const block = `${fence}analyst-lines\n${JSON.stringify({ markets: [wti, brent] })}\n${fence}`;
+
+  it('claims only the markets a setup board or the CPI nowcast lists, not the research table', () => {
+    const markdown = ['## Oil', '| Market | Z | Tick | Price and Risk Range |', '| --- | --- | --- | --- |', '| WTI | Z(-1) | BIAS(Neutral;;) | RR(82;93;88;2;) |',
+      '', '| Market | Product | Context |', '| --- | --- | --- |', '| Brent | The Call | Oil weak |', '', block,
+      '## Rates', '| Market | Consensus | Low | Base | High | Published |', '| --- | --- | --- | --- | --- | --- |', '| CPI YoY · Nov 2026 | N/A | 3.6% | 3.7% | 3.8% | Nov 10 |'].join('\n');
+    expect([...boardLines(markdown).markets.keys()]).toEqual(['WTI']);
+    const cpi = { ...wti, id: 'cpi', market: 'CPI YoY' };
+    expect([...boardLines(`${markdown}\n\n${fence}analyst-lines\n${JSON.stringify({ markets: [cpi] })}\n${fence}`).markets.keys()]).toEqual(['WTI', 'CPI YoY']);
+  });
+
+  it('stacks book over curve in the market cell and opens each under the row; the lines block keeps only unlisted markets', () => {
+    ReactMarkdown.renderSpy.mockClear();
+    render(<AnalystPredictionReport markdown="## Oil" />);
+    const { td: Cell, tr: Row, table: Table, pre: Pre } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+    const text = value => ({ type: 'text', value });
+    const headers = ['Market', 'Z', 'Tick', 'Price and Risk Range'];
+    const values = ['WTI', 'Z(-1)', 'BIAS(Neutral;;)', 'RR(82;93;88;2;)'];
+    const headNode = { tagName: 'tr', children: headers.map(value => ({ tagName: 'th', children: [text(value)] })) };
+    const rowNode = { tagName: 'tr', children: values.map(value => ({ tagName: 'td', children: [text(value)] })) };
+    const table = { children: [{ tagName: 'thead', children: [headNode] }, { tagName: 'tbody', children: [rowNode] }] };
+    const board = { markets: new Map([['WTI', wti]]) };
+    const { container } = render(<BoardLinesContext.Provider value={board}><Table node={table}>
+      <thead><Row node={headNode}>{headers.map(value => <th key={value}>{value}</th>)}</Row></thead>
+      <tbody><Row node={rowNode}>{rowNode.children.map((node, index) => <Cell key={index} node={node}>{values[index]}</Cell>)}</Row></tbody>
+    </Table></BoardLinesContext.Provider>);
+    expect(container.querySelector('.analyst-table-frame')).toHaveClass('has-lines');
+    const cell = container.querySelector('td.analyst-board-market');
+    expect(cell).toHaveClass('is-shade-short');
+    expect(cell).toHaveTextContent(/^WTI$/);
+    expect([...cell.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['WTI order book', 'WTI settlement curve']);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+    fireEvent.click(within(cell).getByRole('button', { name: 'WTI settlement curve' }));
+    const detail = container.querySelector('tr.analyst-board-detail--curve > td');
+    expect(detail.colSpan).toBe(4);
+    expect(within(detail).getByRole('figure', { name: 'WTI settlement curve' })).toBeInTheDocument();
+    fireEvent.click(within(cell).getByRole('button', { name: 'WTI order book' }));
+    expect(screen.getByRole('table', { name: 'WTI Kalshi lines' })).toBeInTheDocument();
+    // Book first, then the curve.
+    expect([...container.querySelector('.analyst-table-frame > table > tbody').children].map(row => row.className))
+      .toEqual(['', 'analyst-board-detail', 'analyst-board-detail analyst-board-detail--curve']);
+
+    const code = { tagName: 'code', properties: { className: ['language-analyst-lines'] }, children: [text(JSON.stringify({ markets: [wti, brent] }))] };
+    const { container: lines } = render(<BoardLinesContext.Provider value={board}><Pre node={{ children: [code] }} /></BoardLinesContext.Provider>);
+    expect([...lines.querySelectorAll('.analyst-lines__name')].map(name => name.textContent)).toEqual(['Brent']);
+    const { container: none } = render(<BoardLinesContext.Provider value={{ markets: new Map([['WTI', wti], ['Brent', brent]]) }}>
+      <Pre node={{ children: [code] }} /></BoardLinesContext.Provider>);
+    expect(none).toBeEmptyDOMElement();
+  });
 });

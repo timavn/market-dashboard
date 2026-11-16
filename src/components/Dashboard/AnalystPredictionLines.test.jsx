@@ -56,14 +56,14 @@ test('parses only well-formed line blocks', () => {
   expect(parsePredictionLines(JSON.stringify({ markets: [{ market: 'Gold' }] })).markets[0]).toMatchObject({ summary: {}, held: [], lines: null });
 });
 
-test('one row per market, shaded by Trade, Trend and the range third, with price, best line, fillable, close and held', () => {
-  jest.useFakeTimers().setSystemTime(new Date('2026-11-13T20:00:00Z'));
+test('one row per market: book icon, centred name, curve icon, shaded by Trade, Trend and the range third; nothing to open, no row', () => {
   renderLines();
-  jest.useRealTimers();
   const table = screen.getByRole('table', { name: 'Kalshi lines' });
-  expect([...table.querySelector('thead').querySelectorAll('th')].map(cell => cell.textContent))
-    .toEqual(['Market', 'Price → Kalshi', 'Best line', 'Fillable', 'Closes', 'Held']);
-  const row = name => (within(table).queryByRole('button', { name }) || within(table).getByText(name)).closest('tr');
+  expect(table.querySelector(':scope > thead')).toBeNull();
+  const row = name => within(table).getByRole('button', { name: `${name} order book` }).closest('tr');
+  expect([...table.querySelectorAll(':scope > tbody > tr.analyst-lines__row')].map(item => item.textContent)).toEqual(['Silver', 'Gold', 'Bitcoin']);
+  expect(row('Gold').cells).toHaveLength(1);
+  expect(row('Gold')).toHaveTextContent(/^Gold$/);
   // Shading: Silver short (red), Bitcoin long (green), the rest plain, each with a reason on hover.
   expect(row('Silver')).toHaveClass('is-shade-short');
   expect(row('Silver')).toHaveAttribute('title', 'Shaded short: Trade and Trend Bearish, price in the top third of the Risk Range');
@@ -72,55 +72,54 @@ test('one row per market, shaded by Trade, Trend and the range third, with price
   expect(row('Gold')).not.toHaveClass('is-shade-long');
   expect(row('Gold')).toHaveAttribute('title', 'Unshaded: Trade Bullish, Trend Bearish');
   // Only a shaded market with a Good or Strong line opens by default.
-  expect(within(table).getByRole('button', { name: 'Silver' })).toHaveAttribute('aria-expanded', 'true');
-  expect(within(table).getByRole('button', { name: 'Bitcoin' })).toHaveAttribute('aria-expanded', 'false');
-  expect(within(table).getByRole('button', { name: 'Gold' })).toHaveAttribute('aria-expanded', 'false');
-  expect(row('Gold')).toHaveTextContent('Gold3,887.6 → 3,883.5−0.1% · 28% of rangeNo Above $3957 · 89¢ · +1.3$445 at the ask28 / 40Mon 2 PM—');
-  expect(row('Silver')).toHaveTextContent('52.80 → 52.65−0.3% · 92% of rangeNo $53.50 or above · 80¢ · +5.1 Strong$400 at the ask24 / 40Mon 2 PMNo 779 · $214Through line');
-  expect(within(row('Silver')).getByText('Strong')).toHaveClass('is-flash');
-  // Yields read in % with the gap in bp; later closes read as a date.
-  expect(row('UST 30Y')).toHaveTextContent('5.47% → 5.55%+8 bp · 100% of rangeNo 5.65% or above · 90¢ · +0.3$108 at the ask16 / 20Nov 30—');
-  // Copper has no open event: nothing to open.
-  expect(within(table).queryByRole('button', { name: 'Copper' })).toBeNull();
-  expect(row('Copper')).toHaveTextContent('6.06 → N/Abelow rangeNo line with $50 at the askN/ANo open event—');
-  // Folded Bitcoin still shows its held line's worst state.
-  expect(row('Bitcoin')).toHaveTextContent('No 318 · $95Contradicts');
-  expect(within(row('Bitcoin')).getByText('Contradicts')).toHaveClass('is-red', 'is-flash');
+  expect(within(table).getByRole('button', { name: 'Silver order book' })).toHaveAttribute('aria-expanded', 'true');
+  expect(within(table).getByRole('button', { name: 'Bitcoin order book' })).toHaveAttribute('aria-expanded', 'false');
+  expect(within(table).getByRole('button', { name: 'Gold order book' })).toHaveAttribute('aria-expanded', 'false');
+  // Copper (no open event) and UST 30Y (no lines, nothing held) have nothing to open, so no row.
+  expect(within(table).queryByText('Copper')).toBeNull();
+  expect(within(table).queryByText('UST 30Y')).toBeNull();
   expect(screen.queryByRole('table', { name: 'Bitcoin Kalshi lines' })).toBeNull();
 });
 
-test('an open market lists graded lines best first, hides Pass lines behind a count, and its held lines', () => {
+test('an open market lists graded lines in strike order with spot between them; Pass and illiquid lines fold', () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-13T20:00:00Z'));
   renderLines();
+  jest.useRealTimers();
+  // The label carries only the event and its close.
+  expect(screen.getByText('KXSILVERD-26NOV1317').parentElement).toHaveTextContent(/^KXSILVERD-26NOV1317closes Fri 2:00 PM PT$/);
   const lines = screen.getByRole('table', { name: 'Silver Kalshi lines' });
-  const rows = within(lines).getAllByRole('row').slice(1);
-  expect(rows).toHaveLength(3);
-  expect(rows[0]).toHaveTextContent('$51.99 or above+0.9σ30¢ −8.071¢ +6.029% / 22%StrongNo 318');
-  expect(rows[1]).toHaveTextContent('Above 52.49+1.3σ21¢ −7.080¢ +5.120% / 14%Strong · new—');
-  // The setup's side (No) is the one highlighted; Yes sits beside it.
-  expect(rows[0].cells[3]).toHaveClass('is-take');
-  expect(rows[0].cells[2]).not.toHaveClass('is-take');
-  expect(rows[0].cells[3]).toHaveAttribute('title', '$400 at 71¢');
-  // Under $50 at the No ask: red row, Illiquid, thin side marked.
-  expect(rows[2]).toHaveClass('analyst-lines__illiquid');
-  expect(rows[2]).toHaveTextContent('Illiquid');
-  expect(rows[2].cells[3]).toHaveClass('is-thin');
-  expect(screen.getByText('1 illiquid (under $50 at the ask)')).toBeInTheDocument();
-  expect(within(rows[1]).getByText('Strong · new')).toHaveClass('is-flash');
+  const rows = () => within(lines).getAllByRole('row').slice(1);
+  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Above51.99', 'Above52.49', 'Spot52.80']);
+  expect(rows()[0]).toHaveTextContent('Above51.99+0.9σ30¢ −8.071¢ +6.029% / 22%StrongNo 318');
+  expect(rows()[1]).toHaveTextContent('Above52.49+1.3σ21¢ −7.080¢ +5.120% / 14%Strong · new—');
+  expect(rows()[2]).toHaveClass('analyst-lines__spot');
+  // Every number in the Line column starts after the same fixed-width word slot.
+  expect([...lines.querySelectorAll('tbody td:first-child .analyst-lines__word')].map(word => word.textContent)).toEqual(['Above', 'Above', 'Spot']);
+  // The shaded side (No) is the one highlighted; Yes sits beside it.
+  expect(rows()[0].cells[3]).toHaveClass('is-take');
+  expect(rows()[0].cells[2]).not.toHaveClass('is-take');
+  expect(rows()[0].cells[3]).toHaveAttribute('title', '$400 at 71¢');
+  expect(within(rows()[1]).getByText('Strong · new')).toHaveClass('is-flash');
   fireEvent.click(screen.getByRole('button', { name: '1 below 1 point of edge · show' }));
-  expect(within(lines).getAllByRole('row')).toHaveLength(5);
+  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Above51.99', 'Above52.49', 'Spot52.80', 'Above53.99']);
+  // Under $50 at the No ask: folded behind its own button, then a red Illiquid row with the thin side marked.
+  fireEvent.click(screen.getByRole('button', { name: 'Show 1 illiquid line' }));
+  expect(screen.queryByRole('button', { name: 'Show 1 illiquid line' })).toBeNull();
+  const illiquid = rows()[0];
+  expect(illiquid).toHaveTextContent(/^Above51\.49/);
+  expect(illiquid).toHaveClass('analyst-lines__illiquid');
+  expect(illiquid).toHaveTextContent('Illiquid');
+  expect(illiquid.cells[3]).toHaveClass('is-thin');
   const held = screen.getByRole('table', { name: 'Silver held lines' });
-  expect(within(held).getAllByRole('row')[1]).toHaveTextContent('$50.99 or aboveNo 779$214.3832¢34% / 34%Through lineKalshi has the held side at 34%');
+  expect(within(held).getAllByRole('row')[1]).toHaveTextContent('Above50.99No 779$214.3832¢34% / 34%Through lineKalshi has the held side at 34%');
 });
 
-test('opening a row stops its flash; the color stays', () => {
+test('a held line shows in the opened market with its state and reason', () => {
   renderLines();
-  const toggle = screen.getByRole('button', { name: 'Bitcoin' });
-  fireEvent.click(toggle);
-  expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  const chip = within(toggle.closest('tr')).getByText('Contradicts');
-  expect(chip).toHaveClass('is-red');
-  expect(chip).not.toHaveClass('is-flash');
-  expect(screen.getByRole('table', { name: 'Bitcoin held lines' })).toHaveTextContent('Shaded long; line is held No');
+  fireEvent.click(screen.getByRole('button', { name: 'Bitcoin order book' }));
+  const held = screen.getByRole('table', { name: 'Bitcoin held lines' });
+  expect(within(held).getByText('Contradicts')).toHaveClass('is-red');
+  expect(held).toHaveTextContent('Shaded long; line is held No');
 });
 
 const book = {
@@ -184,42 +183,82 @@ test('a book with no positions says so under its totals', () => {
   expect(screen.getByText('No open lines.')).toBeInTheDocument();
 });
 
-test('a market without a setup opens to its ungraded ladder, nearest liquid lines first', () => {
+test('an unshaded market opens to its fillable lines with spot between them; illiquid ones fold behind a button', () => {
   renderLines();
-  fireEvent.click(screen.getByRole('button', { name: 'Gold' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Gold order book' }));
   const ladder = screen.getByRole('table', { name: 'Gold Kalshi lines' });
   expect(within(ladder).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Line', 'From centre', 'Yes', 'No', 'Yes odds K / ours']);
-  // Quoted lines show, the thin one tinted red; the unquoted one folds.
-  expect(within(ladder).getAllByRole('row')).toHaveLength(3);
-  expect(within(ladder).getAllByRole('row')[2]).toHaveClass('analyst-lines__illiquid');
-  const first = within(ladder).getAllByRole('row')[1];
-  expect(first).toHaveTextContent('$4,000 or above−0.3σ62¢ −2.040¢ −0.461% / 60%');
+  expect(screen.queryByText(/not graded|illiquid \(/i)).toBeNull();
+  // Only the fillable line shows, with spot (3,887.6) above it; no other fillable lines to show.
+  const rows = () => within(ladder).getAllByRole('row').slice(1);
+  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Spot3,887.6', 'Above4,000']);
+  expect(rows()[0]).toHaveClass('analyst-lines__spot');
+  expect(rows()[1]).toHaveTextContent('Above4,000−0.3σ62¢ −2.040¢ −0.461% / 60%');
   // No has the better edge here, so No is highlighted.
-  expect(first.cells[3]).toHaveClass('is-take');
-  expect(first.cells[2]).not.toHaveClass('is-take');
-  expect(screen.getByText(/Unshaded · not graded/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Show all 3 lines' }));
-  const all = within(ladder).getAllByRole('row');
-  expect(all).toHaveLength(4);
-  expect(all[2]).toHaveClass('analyst-lines__illiquid');
-  expect(all[2].cells[2]).toHaveClass('is-take', 'is-thin');
+  expect(rows()[1].cells[3]).toHaveClass('is-take');
+  expect(rows()[1].cells[2]).not.toHaveClass('is-take');
+  expect(screen.queryByRole('button', { name: /fillable lines/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Show 2 illiquid lines' }));
+  expect(rows()).toHaveLength(4);
+  expect(rows()[2]).toHaveClass('analyst-lines__illiquid');
+  expect(rows()[2].cells[2]).toHaveClass('is-take', 'is-thin');
+  expect(rows()[3]).toHaveClass('analyst-lines__illiquid');
 });
 
-test('a long ladder opens to the 15 lines nearest even odds, in strike order, illiquid ones tinted', () => {
+test('a long ladder opens to the 15 fillable lines nearest even odds, in strike order, with spot among them', () => {
   const lines = Array.from({ length: 40 }, (_, index) => {
     const odds = 1 - index / 39;
     return { ticker: `L${index}`, strike: 100 + index, yesBid: odds, yesAsk: odds, kalshiOdds: odds, ourOdds: odds, sigmas: (index - 20) / 5,
       ...(index === 20 ? { illiquid: true } : {}) };
   });
-  const market = { id: 'x', market: 'Nasdaq-100', event: 'E', gate: { side: null, reason: 'Tick Neutral' }, held: [], open: false,
+  const market = { id: 'x', market: 'Nasdaq-100', event: 'E', held: [], open: false, summary: { price: 117.5 },
     lines: { side: null, illiquid: 1, lines } };
   render(<AnalystPredictionLines lines={parsePredictionLines(JSON.stringify({ markets: [market] }))} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Nasdaq-100' }));
-  const rows = within(screen.getByRole('table', { name: 'Nasdaq-100 Kalshi lines' })).getAllByRole('row').slice(1);
-  expect(rows).toHaveLength(15);
-  const strikes = rows.map(row => Number(row.cells[0].textContent.replace('Above ', '')));
+  fireEvent.click(screen.getByRole('button', { name: 'Nasdaq-100 order book' }));
+  const rows = () => within(screen.getByRole('table', { name: 'Nasdaq-100 Kalshi lines' })).getAllByRole('row').slice(1);
+  const lineRows = () => rows().filter(row => !row.classList.contains('analyst-lines__spot'));
+  expect(lineRows()).toHaveLength(15);
+  const strikes = lineRows().map(row => Number(row.cells[0].textContent.replace('Above', '')));
   expect(strikes).toEqual([...strikes].sort((a, b) => a - b));
-  expect(strikes).toContain(120);
-  expect(rows[strikes.indexOf(120)]).toHaveClass('analyst-lines__illiquid');
-  expect(screen.getByRole('button', { name: 'Show all 40 lines' })).toBeInTheDocument();
+  expect(strikes).not.toContain(120);
+  const spot = rows().findIndex(row => row.classList.contains('analyst-lines__spot'));
+  expect(rows()[spot]).toHaveTextContent('Spot117.5');
+  expect(rows()[spot - 1].cells[0]).toHaveTextContent('Above117');
+  expect(rows()[spot + 1].cells[0]).toHaveTextContent('Above118');
+  fireEvent.click(screen.getByRole('button', { name: 'Show all 39 fillable lines' }));
+  expect(lineRows()).toHaveLength(39);
+  fireEvent.click(screen.getByRole('button', { name: 'Show 1 illiquid line' }));
+  expect(lineRows()).toHaveLength(40);
+  expect(lineRows()[20]).toHaveClass('analyst-lines__illiquid');
+});
+
+test('with a bet, lines show the average the whole bet fills at; unread lines are not listed and short books fold', () => {
+  const fill = (avg, contracts, best, worst, complete = true) => ({ avg, contracts, best, worst, complete, dollars: 248 });
+  const market = { id: 'gold', market: 'Gold', event: 'KXGOLDD-26NOV1617', held: [], open: true, summary: { price: 3872.5 },
+    lines: { side: null, bet: 247.83, closeTime: '2026-11-16T22:00:00Z', lines: [
+      { ticker: 'G1', strike: 3867, subtitle: 'Above $3867', kalshiOdds: 0.6, ourOdds: 0.61, sigmas: -0.2, better: 'YES', checked: true,
+        yes: { ask: 0.612, edge: -0.012, depth: 900, fill: fill(0.612, 405, 0.6, 0.63) }, no: { ask: 0.41, edge: -0.03, depth: 700, fill: fill(0.41, 605, 0.41, 0.41) } },
+      { ticker: 'G2', strike: 3877, subtitle: 'Above $3877', kalshiOdds: 0.34, ourOdds: 0.3, sigmas: -0.1, better: 'NO', checked: true,
+        yes: { ask: 0.366, edge: -0.08, depth: 1200, fill: fill(0.366, 677, 0.35, 0.46) }, no: { ask: 0.682, edge: 0.012, depth: 484, fill: fill(0.682, 364, 0.66, 0.69) } },
+      { ticker: 'G3', strike: 3887, subtitle: 'Above $3887', kalshiOdds: 0.3, ourOdds: 0.27, sigmas: 0.1, better: 'NO', checked: true, illiquid: true,
+        yes: { ask: 0.31, edge: -0.05, depth: 60, fill: fill(0.31, 190, 0.31, 0.31, false) }, no: { ask: 0.72, edge: 0.004, depth: 120, fill: fill(0.72, 166, 0.71, 0.73, false) } },
+      { ticker: 'G4', strike: 3897, subtitle: 'Above $3897', kalshiOdds: 0.22, ourOdds: 0.2, sigmas: 0.3, better: 'NO',
+        yes: { ask: 0.23, edge: -0.02, depth: 115 }, no: { ask: 0.79, edge: 0.004, depth: 395 } },
+    ] } };
+  render(<AnalystPredictionLines lines={parsePredictionLines(JSON.stringify({ markets: [market] }))} />);
+  expect(screen.getByText('Bet $248')).toHaveClass('analyst-lines__bet');
+  const table = screen.getByRole('table', { name: 'Gold Kalshi lines' });
+  const rows = () => within(table).getAllByRole('row').slice(1);
+  // G4's book was not read, so it is not listed; G3 cannot take the bet and folds.
+  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Above3867', 'Spot3872.5', 'Above3877']);
+  const g2 = rows()[2];
+  expect(g2.cells[2]).toHaveTextContent('36.6¢ −8.0');
+  expect(g2.cells[3]).toHaveTextContent('68.2¢ +1.2');
+  expect(g2.cells[3]).toHaveClass('is-take');
+  expect(g2.cells[3]).toHaveAttribute('title', '$248 buys 364 contracts at 66¢–69¢, average 68.2¢');
+  expect(rows()[0].cells[3]).toHaveAttribute('title', '$248 buys 605 contracts at 41¢, average 41.0¢');
+  fireEvent.click(screen.getByRole('button', { name: "Show 1 line that can't take $248" }));
+  const g3 = rows().find(row => row.cells[0].textContent === 'Above3887');
+  expect(g3).toHaveClass('analyst-lines__illiquid');
+  expect(g3.cells[3]).toHaveAttribute('title', 'Only $120 for sale on this side; the $248 bet does not fill');
 });

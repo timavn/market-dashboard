@@ -1,12 +1,12 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import AnalystReportLink from './AnalystReportLink';
 import AnalystPredictionRangeBar, { parsePredictionRange, predictionRangeLabel } from './AnalystPredictionRangeBar';
 import AnalystPredictionDrivers, { parsePredictionDrivers } from './AnalystPredictionDrivers';
 import AnalystPredictionResearch, { parsePredictionResearch } from './AnalystPredictionResearch';
 import AnalystPredictionSizing, { parsePredictionSizing } from './AnalystPredictionSizing';
-import AnalystPredictionLines, { parsePredictionLines } from './AnalystPredictionLines';
-import { attachCurveLevels } from './AnalystPredictionCurve';
+import AnalystPredictionLines, { expandable, MarketBook, marketShade, MarketToggles, parsePredictionLines, useMarketPanels } from './AnalystPredictionLines';
+import AnalystPredictionCurves, { attachCurveLevels } from './AnalystPredictionCurve';
 import AnalystKalshiBook, { parseKalshiBook } from './AnalystKalshiBook';
 import remarkGfm from 'remark-gfm';
 import { remarkAnalystProcessColors } from './analystProcessColors';
@@ -223,9 +223,15 @@ function cellFor({ node, children }) {
 }
 // The row renderer spans cells over the volume row, or splits the volume into one cell per window, by passing
 // rowSpan/colSpan/split through.
-const MarkdownCell = ({ rowSpan, colSpan, split, ...props }) => {
+// A board market with Kalshi lines carries its book and curve buttons stacked in the market cell, left of the name.
+const MarkdownCell = ({ rowSpan, colSpan, split, lead, leadClass, leadTitle, ...props }) => {
   const cell = cellFor(props);
-  return rowSpan || colSpan || split ? React.cloneElement(cell, { rowSpan, colSpan, split }) : cell;
+  const led = lead ? React.cloneElement(cell, {
+    className: [cell.props.className, 'analyst-board-market', leadClass].filter(Boolean).join(' '),
+    title: [cell.props.title, leadTitle].filter(Boolean).join(' · ') || undefined,
+    children: <span className="analyst-board-market__body">{lead}<span className="analyst-board-market__name">{cell.props.children}</span></span>,
+  }) : cell;
+  return rowSpan || colSpan || split ? React.cloneElement(led, { rowSpan, colSpan, split }) : led;
 };
 const isVolumeHeading = cell => cell.tagName === 'th' && /^Volume$/i.test(nodeText(cell).trim());
 const isVolumeCell = cell => cell.tagName === 'td' && VOLUME_TOKEN.test(nodeText(cell).trim());
@@ -233,20 +239,69 @@ const isZCell = cell => cell.tagName === 'td' && Z_TOKEN.test(nodeText(cell).tri
 // Boards with volume carry it as a column after Trend; Tick, Trade and Trend take the top half of the row
 // and the volume windows span the three of them underneath, while the other cells run the full height.
 // With a Z column before Tick, Z joins the top half and each volume window sits in its own cell under one of the four.
-const MarkdownRow = ({ node, children }) => {
+function boardRow(node, children) {
   const cells = (node?.children || []).filter(child => child.tagName === 'td' || child.tagName === 'th');
   const elements = React.Children.toArray(children).filter(React.isValidElement);
   const volume = cells.findIndex(cell => isVolumeHeading(cell) || isVolumeCell(cell));
-  if (volume < 3 || elements.length !== cells.length) return <tr>{children}</tr>;
+  if (volume < 3 || elements.length !== cells.length) return { rows: <tr>{children}</tr>, columns: elements.length };
   const rest = elements.filter((_cell, index) => index !== volume);
-  if (cells[volume].tagName === 'th') return <tr>{rest}</tr>;
+  if (cells[volume].tagName === 'th') return { rows: <tr>{rest}</tr>, columns: rest.length };
   const zed = cells.findIndex(isZCell) === volume - 4;
   const signal = index => index >= volume - (zed ? 4 : 3) && index < volume;
-  return <>
+  return { columns: rest.length, rows: <>
     <tr>{rest.map((cell, index) => (signal(index) ? cell : React.cloneElement(cell, { rowSpan: 2 })))}</tr>
     <tr className="analyst-prediction-volume-row">{React.cloneElement(elements[volume], zed ? { split: true } : { colSpan: 3 })}</tr>
-  </>;
+  </> };
+}
+// Each section's Kalshi lines open from its board rows: the market's book and settlement curve unfold under the row.
+export const BoardLinesContext = createContext(null);
+const RangeBoardContext = createContext(false);
+const marketName = text => {
+  const market = text.match(MARKET_TOKEN);
+  // The CPI nowcast names its release after a dot: "CPI YoY · Nov 2026".
+  return (market ? (market[1] ? market[2] : market[5]) : text).split(' · ')[0].trim();
 };
+// Markets whose Kalshi lines open from a board row; any the boards don't list keep their own lines table.
+// Only setup boards (a Price and Risk Range column) and the CPI nowcast open lines; research tables also list markets by name.
+export function boardLines(markdown) {
+  const tableNames = new Set();
+  let onBoard = false;
+  markdown.split('\n').forEach((line, index, all) => {
+    if (!line.startsWith('|')) return;
+    if (!all[index - 1]?.startsWith('|')) onBoard = /\|\s*Price and Risk Range\s*\||\|\s*(?:Nowcast low|Low)\s*\|\s*Base\s*\|\s*High\s*\|/i.test(line);
+    const cell = onBoard && line.match(/^\|([^|]*)\|/)?.[1];
+    if (cell) tableNames.add(marketName(cell.replace(/[*`\\]/g, '').trim()));
+  });
+  const markets = new Map();
+  for (const [, json] of markdown.matchAll(/```analyst-lines\n([\s\S]*?)```/g)) {
+    (parsePredictionLines(json)?.markets || []).filter(expandable)
+      .forEach(market => { if (tableNames.has(market.market) && !markets.has(market.market)) markets.set(market.market, market); });
+  }
+  return { markets };
+}
+const MarkdownRow = ({ node, children }) => {
+  const board = useContext(BoardLinesContext);
+  const rangeBoard = useContext(RangeBoardContext);
+  const first = (node?.children || []).find(child => child.tagName === 'td');
+  const market = rangeBoard && first && board?.markets.get(marketName(nodeText(first).trim()));
+  if (market) return <BoardMarketRow node={node} market={market}>{children}</BoardMarketRow>;
+  return boardRow(node, children).rows;
+};
+function BoardMarketRow({ node, market, children }) {
+  const panels = useMarketPanels(market);
+  const shade = marketShade(market);
+  const elements = React.Children.toArray(children).filter(React.isValidElement);
+  const led = elements.map((cell, index) => (index === 0 ? React.cloneElement(cell, {
+    lead: <MarketToggles market={market} panels={panels} />, leadClass: shade.className, leadTitle: shade.title }) : cell));
+  const { rows, columns } = boardRow(node, led);
+  return <>
+    {rows}
+    {panels.book && <tr className="analyst-board-detail"><td colSpan={columns}><div className="analyst-lines analyst-lines--board">
+      <MarketBook market={market} /></div></td></tr>}
+    {panels.curveOpen && panels.curve && <tr className="analyst-board-detail analyst-board-detail--curve"><td colSpan={columns}>
+      <div className="analyst-lines analyst-lines--board"><AnalystPredictionCurves curves={[panels.curve]} /></div></td></tr>}
+  </>;
+}
 const MarkdownTable = ({ children, node }) => {
   const heading = node?.children?.find(child => child.tagName === 'thead')?.children?.find(child => child.tagName === 'tr');
   const headings = (heading?.children || []).filter(child => child.tagName === 'th').map(nodeText);
@@ -266,6 +321,8 @@ const MarkdownTable = ({ children, node }) => {
   const nowcast = /^(?:Nowcast low|Low)\|Base\|High$/i.test(headings.slice(2, 5).map(label => label.trim()).join('|'));
   // The single US Dollar row pinned above the sections stays in view while the report scrolls.
   const bodyRows = node?.children?.find(child => child.tagName === 'tbody')?.children?.filter(child => child.tagName === 'tr') || [];
+  const board = useContext(BoardLinesContext);
+  const hasLines = (rangeBoard || nowcast) && Boolean(board) && bodyRows.some(row => board.markets.has(marketName(nodeText(row.children?.find(child => child.tagName === 'td')).trim())));
   const pinned = bodyRows.length === 1 && /^REF\(US Dollar;/.test(nodeText(bodyRows[0].children?.find(child => child.tagName === 'td')).trim());
   const contractComparison = headings.some(label => /^Outcome$/i.test(label.trim()))
     && headings.some(label => /^Market-implied odds$/i.test(label.trim()));
@@ -279,7 +336,7 @@ const MarkdownTable = ({ children, node }) => {
     if (/^Gross reward\/risk \(before fees\)$/i.test(label.trim())) return 'analyst-prediction-contract-payoff-col';
     return undefined;
   };
-  const frameClass = `analyst-table-frame${dated ? ' has-dates' : ''}${tickers ? ' has-tickers' : ''}${securities ? ' has-securities' : ''}${labels ? ' has-labels' : ''}${tickComparison ? ' is-tick-comparison' : ''}${contractComparison ? ' is-contract-comparison' : ''}${setupBoard ? ' is-setup-board' : ''}${rangeBoard ? ' is-range-board' : ''}${alphaBoard ? ' has-alpha' : ''}${structureBoard ? ' has-structure' : ''}${zBoard ? ' has-z' : ''}${rangeBoard && headings.some(label => /^Setup$/i.test(label.trim())) ? ' has-setup' : ''}${nowcast ? ' is-nowcast' : ''}${pinned ? ' is-pinned-dollar' : ''}`;
+  const frameClass = `analyst-table-frame${dated ? ' has-dates' : ''}${tickers ? ' has-tickers' : ''}${securities ? ' has-securities' : ''}${labels ? ' has-labels' : ''}${tickComparison ? ' is-tick-comparison' : ''}${contractComparison ? ' is-contract-comparison' : ''}${setupBoard ? ' is-setup-board' : ''}${rangeBoard ? ' is-range-board' : ''}${alphaBoard ? ' has-alpha' : ''}${structureBoard ? ' has-structure' : ''}${zBoard ? ' has-z' : ''}${rangeBoard && headings.some(label => /^Setup$/i.test(label.trim())) ? ' has-setup' : ''}${nowcast ? ' is-nowcast' : ''}${pinned ? ' is-pinned-dollar' : ''}${hasLines ? ' has-lines' : ''}`;
   // The volume column draws inside the signal columns, so it has no column of its own.
   const columns = rangeBoard ? headings.filter(label => !/^Volume$/i.test(label.trim())) : headings;
   const table = <table>{columns.length > 0 && <colgroup>{columns.map((label, index) => <col key={`${label}-${index}`} className={
@@ -288,7 +345,7 @@ const MarkdownTable = ({ children, node }) => {
           : index === 0 && labels ? 'analyst-prediction-metric-col'
             : index === columns.length - 1 && dated ? 'analyst-prediction-date-col' : undefined)
     } />)}
-    </colgroup>}{children}</table>;
+    </colgroup>}<RangeBoardContext.Provider value={rangeBoard || nowcast}>{children}</RangeBoardContext.Provider></table>;
   return pinned ? <PinnedFrame className={frameClass}>{table}</PinnedFrame> : <div className={frameClass}>{table}</div>;
 };
 // While the pinned frame is stuck it masks the transcript's top padding, so rows scrolling under it never show above it.
@@ -319,6 +376,7 @@ function PinnedFrame({ className, children }) {
 // positions and line splits, ```analyst-lines its markets' foldable Kalshi lines, ```analyst-kalshi-book the whole Kalshi
 // account, and ```analyst-research its markets' morning research; other code blocks render normally.
 const MarkdownPre = ({ node, children }) => {
+  const board = useContext(BoardLinesContext);
   const code = node?.children?.find(child => child.tagName === 'code');
   const classes = [].concat(code?.properties?.className || []);
   const drivers = classes.includes('language-analyst-drivers') ? parsePredictionDrivers(nodeText(code)) : null;
@@ -326,7 +384,10 @@ const MarkdownPre = ({ node, children }) => {
   const sizing = classes.includes('language-analyst-sizing') ? parsePredictionSizing(nodeText(code)) : null;
   if (sizing) return <AnalystPredictionSizing sizing={sizing} />;
   const lines = classes.includes('language-analyst-lines') ? parsePredictionLines(nodeText(code)) : null;
-  if (lines) return <AnalystPredictionLines lines={lines} />;
+  if (lines) {
+    const loose = lines.markets.filter(market => !board?.markets.has(market.market));
+    return loose.length ? <AnalystPredictionLines lines={{ ...lines, markets: loose }} /> : null;
+  }
   const book = classes.includes('language-analyst-kalshi-book') ? parseKalshiBook(nodeText(code)) : null;
   if (book) return <AnalystKalshiBook book={book} />;
   const research = classes.includes('language-analyst-research') ? parsePredictionResearch(nodeText(code)) : null;
@@ -349,6 +410,7 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
       // Boards saved while Structure carried its session count in the title.
       .replace(/^(\| Market \| (?:Z \| )?Tick \|.*\| )Structure \(\d+d\)( \|)/gm, '$1Structure$2') };
   }, [markdown, citations]);
+  const board = useMemo(() => boardLines(report.markdown), [report.markdown]);
   const parts = useMemo(() => {
     const match = report.markdown.match(/<details data-analyst-hedgai>\s*<summary>([^<\n]+)<\/summary>\s*([\s\S]*?)\s*<\/details>/);
     return match ? { body: report.markdown.replace(match[0], ''), title: match[1].replace(/^HedgAI comparison\b/, 'Tick comparison'), detail: match[2] } : { body: report.markdown };
@@ -369,7 +431,7 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
     p: ({ node, children }) => (FOOTER_LINE.test(node.children?.[0]?.value || '') ? null : <p>{children}</p>),
   }), [report.links, onCitation]);
   return <article data-message-id={messageId} className={`analyst-message analyst-message--assistant analyst-prediction-report${error ? ' is-error' : ''}`} aria-label="Predictive Markets Review">
-    <div className="analyst-markdown">
+    <BoardLinesContext.Provider value={board}><div className="analyst-markdown">
       <ReactMarkdown remarkPlugins={reportPlugins} components={components}
         urlTransform={url => report.links.has(url) ? url : defaultUrlTransform(url)}>
         {parts.body.replaceAll('<!-- analyst-prediction-research-rollup -->', '')
@@ -379,7 +441,7 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
         <ReactMarkdown remarkPlugins={reportPlugins} components={components}
           urlTransform={url => report.links.has(url) ? url : defaultUrlTransform(url)}>{parts.detail}</ReactMarkdown>
       </details>}
-    </div>
+    </div></BoardLinesContext.Provider>
   </article>;
 });
 export default AnalystPredictionReport;

@@ -952,11 +952,12 @@
     },
     "closingHours": 2,
     "minDepthDollars": 50,
+    "bookLines": 15,
     "newStrongMinutes": 30,
     "expirySharePct": 50,
     "sectionCapPct": null,
     "bookCapPct": null,
-    "note": "Edge tiers are points of edge (our odds − ask − fee). Rows shade short (red) when Trade and Trend are both Bearish and price is in the top third of the Risk Range, long (green) when both are Bullish in the bottom third; shading, not the board's setup rule, decides which side lines are graded on. A side is illiquid with less than minDepthDollars resting at its ask (contracts × ask). sectionCapPct and bookCapPct are % of the Kalshi account and stay null until sizing sets them; null raises no flag. heldSeries on a market maps positions in other Kalshi series (weeklies) to that market."
+    "note": "Edge tiers are points of edge (our odds − ask − fee). Rows shade short (red) when Trade and Trend are both Bearish and price is in the top third of the Risk Range, long (green) when both are Bullish in the bottom third; shading, not the board's setup rule, decides which side lines are graded on. Each market's bet is its sized % of the Kalshi account (the sizing's basePct when not sized); the order books of its bookLines lines nearest even odds are read and the bet is walked through each side's asks, so the price shown and the edge graded are the average the whole bet fills at, and a side that cannot take the whole bet is illiquid. Without books (or an account read) a side is illiquid with less than minDepthDollars resting at its top ask. sectionCapPct and bookCapPct are % of the Kalshi account and stay null until sizing sets them; null raises no flag. heldSeries on a market maps positions in other Kalshi series (weeklies) to that market."
   },
   "sections": [
     {

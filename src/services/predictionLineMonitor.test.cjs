@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { phi } = require('./predictionSizing.cjs');
-const { applyLineMonitor, gradeLines, kalshiCentre, ladderLines, marketMonitor, shadeOf, sideBook, heldDirection, heldPositions, heldState, kalshiBook,
-  marketIdForTicker, strength } = require('./predictionLineMonitor.cjs');
+const { applyLineMonitor, askLevels, betDollars, bookCandidates, bookFill, gradeLines, kalshiCentre, ladderLines, marketMonitor, shadeOf, sideBook,
+  heldDirection, heldPositions, heldState, kalshiBook, marketIdForTicker, strength } = require('./predictionLineMonitor.cjs');
 
 const NOW = new Date('2026-11-13T18:00:00Z');
 const CLOSE = '2026-11-13T22:00:00Z';
@@ -299,4 +299,85 @@ test('a ladder line marks the side with the better edge, illiquid when that side
   const thin = lines.find((line) => line.ticker === markets[5].ticker);
   assert.equal(thin.better, 'YES');
   assert.equal(thin.illiquid, true);
+});
+
+// Gold above 3877 for Mon Nov 16 as Kalshi returned it on 2026-11-15: resting bids, [price in dollars, contracts].
+const GOLD_3877 = {
+  no_dollars: [['0.5400', '40.00'], ['0.5600', '40.00'], ['0.5800', '40.00'], ['0.6000', '40.00'], ['0.6100', '5.00'], ['0.6200', '40.00'], ['0.6500', '500.00']],
+  yes_dollars: [['0.3100', '500.00'], ['0.3200', '165.00'], ['0.3400', '40.00']],
+};
+
+test('a bet walks the order book: Yes takes the No bids, No takes the Yes bids, cheapest first', () => {
+  assert.deepEqual(askLevels(GOLD_3877, 'NO'), [[0.66, 40], [0.68, 165], [0.69, 500]]);
+  assert.deepEqual(askLevels(GOLD_3877, 'YES').slice(0, 3), [[0.35, 500], [0.38, 40], [0.39, 5]]);
+  // The older cents book reads the same.
+  assert.deepEqual(askLevels({ yes: [[34, 40]] }, 'NO'), [[0.66, 40]]);
+  const yes = bookFill(askLevels(GOLD_3877, 'YES'), 248);
+  assert.equal(yes.complete, true);
+  assert.equal(Math.round(yes.avg * 1000) / 10, 36.6);
+  assert.equal(Math.round(yes.contracts * 10) / 10, 676.8);
+  assert.equal(yes.worst, 0.46);
+  const no = bookFill(askLevels(GOLD_3877, 'NO'), 248);
+  assert.equal(Math.round(no.avg * 1000) / 10, 68.2);
+  assert.equal(Math.round(no.contracts * 10) / 10, 363.6);
+  assert.equal(no.worst, 0.69);
+  // More than the book holds: what it can take, and not complete.
+  const big = bookFill(askLevels(GOLD_3877, 'NO'), 1000);
+  assert.equal(big.complete, false);
+  assert.equal(Math.round(big.dollars * 100) / 100, 26.4 + 112.2 + 345);
+});
+
+test('a side with a book is priced and graded at the average its whole bet fills at', () => {
+  const line = { yesAsk: 0.35, noAsk: 0.66, yesAskSize: 500, noAskSize: 40 };
+  const book = sideBook(line, 'NO', 0.75, { book: GOLD_3877, bet: 248 });
+  assert.equal(Math.round(book.ask * 1000) / 10, 68.2);
+  // Our odds − average − average fee, about 0.75 − 0.682 − 0.015.
+  assert.ok(Math.abs(book.edge - (0.75 - book.fill.avg - book.fill.fee)) < 1e-12);
+  assert.ok(book.fill.fee > 0.014 && book.fill.fee < 0.016);
+  assert.equal(book.illiquid, undefined);
+  // Everything resting on the No side: $26.40 + $112.20 + $345.
+  assert.equal(Math.round(book.depth * 10) / 10, 483.6);
+  // A bet bigger than the book is illiquid.
+  assert.equal(sideBook(line, 'NO', 0.75, { book: GOLD_3877, bet: 1000 }).illiquid, true);
+  // Without a book: the top ask and the minDepthDollars rule.
+  assert.equal(sideBook(line, 'NO', 0.75).ask, 0.66);
+  assert.equal(sideBook(line, 'NO', 0.75).illiquid, true);
+});
+
+test('bet size and which lines get their books read', () => {
+  assert.equal(betDollars({ sizing: { pct: 6.5 } }, 6195.84), 402.73);
+  // Not sized: the sizing's base %.
+  assert.equal(betDollars({}, 6195.84, { basePct: 4 }), 247.83);
+  assert.equal(betDollars({}, null), null);
+  const markets = ladder();
+  const picked = bookCandidates(markets, 3);
+  assert.deepEqual(picked.map((ticker) => ticker.split('-T')[1]).sort(), ['49.5', '50', '50.5']);
+  assert.deepEqual(bookCandidates(null), []);
+});
+
+test('with books, ladders and graded lines carry the bet and grade on the fill', () => {
+  const markets = ladder();
+  // Every line's book holds 100 contracts a side at 1¢ worse than its quote: a $20 bet fills, a $500 bet does not.
+  const books = new Map(markets.map((market) => [market.ticker, {
+    yes_dollars: [[String(Number(market.yes_bid_dollars) - 0.01), '100']], no_dollars: [[String(Number(market.no_bid_dollars) - 0.01), '100']] }]));
+  const small = ladderLines(markets, { books, bet: 20 });
+  assert.equal(small.bet, 20);
+  assert.ok(small.lines.every((line) => line.checked));
+  const centre = small.lines[4];
+  assert.ok(centre.yes.fill.complete && Math.abs(centre.yes.ask - (Number(markets[4].yes_ask_dollars) + 0.01)) < 1e-9);
+  const big = ladderLines(markets, { books, bet: 500 });
+  assert.ok(big.lines.every((line) => line.illiquid));
+  assert.equal(big.fillable, 0);
+  assert.equal(big.best, null);
+  // Only the books read are checked; the rest keep their top-of-book quote and cannot be the best line.
+  const one = new Map([[markets[4].ticker, books.get(markets[4].ticker)]]);
+  const partial = ladderLines(markets, { books: one, bet: 20 });
+  assert.deepEqual(partial.lines.filter((line) => line.checked).map((line) => line.ticker), [markets[4].ticker]);
+  assert.ok(partial.best === null || partial.best.ticker === markets[4].ticker);
+  const graded = gradeLines(shortRow, markets, { books, bet: 500 });
+  assert.equal(graded.bet, 500);
+  assert.ok(graded.lines.every((line) => line.strength === 'ILLIQUID' && line.checked));
+  const fine = gradeLines(shortRow, markets, { books, bet: 20 });
+  // The graded edge is the edge at the fill on the shaded side.
+  for (const line of fine.lines) assert.ok(line.edge === null || Math.abs(line.edge - line.no.edge) < 1e-12);
 });

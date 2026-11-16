@@ -5,7 +5,7 @@ const { PRODUCTS: MORNING_PRODUCTS, PROXY_TICKERS, buildMorningResearch } = requ
 const { emailPublishedAt } = require('../utils/researchPublicationTime.cjs');
 const { brokenAlphaCodeLine } = require('./analyst/alphaCodeWatch.cjs');
 const { allocateLines, kalshiAccountValue, kalshiLine, scoreConviction, sizedMarket } = require('./predictionSizing.cjs');
-const { applyLineMonitor, eventOf } = require('./predictionLineMonitor.cjs');
+const { applyLineMonitor, bookCandidates, eventOf } = require('./predictionLineMonitor.cjs');
 
 // One row per tracked Kalshi market: Hedgeye Tick/Trade/Trend, the verified
 // underlying price, its Risk Range position, and the rule-based setup. A setup
@@ -536,9 +536,30 @@ const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.h
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
   loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts, loadLatestEditions,
   loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
-  loadPublishedStatements, loadAlphaCodeWatch, loadKalshiMarkets, loadKalshiBalance, loadKalshiPositions, marketDateFor }) {
+  loadPublishedStatements, loadAlphaCodeWatch, loadKalshiMarkets, loadKalshiBalance, loadKalshiPositions, loadKalshiOrderbook,
+  marketDateFor, orderbookTtlMs = 30_000 }) {
   // When each line first read Strong, so the monitor can mark lines that just turned Strong.
   const strongSince = new Map();
+  // Order books read in the last orderbookTtlMs, by line ticker, so back-to-back board reads do not re-read them.
+  const bookCache = new Map();
+  const readBooks = async (tickers, now) => {
+    const books = new Map();
+    const due = [];
+    for (const ticker of tickers) {
+      const cached = bookCache.get(ticker);
+      if (cached && now.getTime() - cached.at < orderbookTtlMs) books.set(ticker, cached.book);
+      else due.push(ticker);
+    }
+    let failed = 0;
+    // Three at a time keeps a full board (13 markets × 15 lines) well inside Kalshi's read limit.
+    for (let index = 0; index < due.length; index += 3) {
+      await Promise.all(due.slice(index, index + 3).map((ticker) => Promise.resolve().then(() => loadKalshiOrderbook(ticker))
+        .then((book) => { if (book) { books.set(ticker, book); bookCache.set(ticker, { at: now.getTime(), book }); } })
+        .catch(() => { failed += 1; })));
+    }
+    for (const [ticker, cached] of bookCache) if (now.getTime() - cached.at >= orderbookTtlMs) bookCache.delete(ticker);
+    return { books, failed };
+  };
   return async function loadSetupBoard({ now = new Date(), researchDate = null } = {}) {
     const marketDate = researchDate || marketDateFor(now);
     const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
@@ -629,7 +650,15 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       }
       if (tickers.length) board.sourceStatus.kalshiLines = read.some((result) => result.error) ? 'failed' : 'ready';
       if (loadKalshiPositions) board.sourceStatus.kalshiPositions = positions ? 'ready' : 'failed';
-      applyLineMonitor(board, { balance, positions, marketsByEvent, seen: strongSince, now });
+      // Order books for each market's lines nearest even odds, so every line is priced at what its bet would fill at.
+      let orderbooks = null;
+      if (loadKalshiOrderbook && account > 0) {
+        const candidates = [...new Set(board.rows.flatMap((row) => bookCandidates(marketsByEvent.get(row.events?.[0]?.eventTicker))))];
+        const { books, failed } = await readBooks(candidates, now);
+        orderbooks = books;
+        if (candidates.length) board.sourceStatus.kalshiOrderbooks = failed === candidates.length ? 'failed' : 'ready';
+      }
+      applyLineMonitor(board, { balance, positions, marketsByEvent, seen: strongSince, now, orderbooks });
     }
     return board;
   };

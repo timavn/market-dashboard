@@ -139,24 +139,26 @@ describe('levels from the section table', () => {
   });
 });
 
-describe('settlement curves row', () => {
-  it('closes the lines table with a solid row, closed until clicked', () => {
-    const copper = { id: 'copper', market: 'Copper', held: [], summary: { price: 6.06 } };
-    render(<AnalystPredictionLines lines={{ markets: [wti, copper] }} />);
-    const toggle = screen.getByRole('button', { name: /Settlement curves/ });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    // Only markets whose ladder fits are named and drawn.
-    expect(toggle).toHaveTextContent('Settlement curvesWTI');
+describe('curve arrow on each market row', () => {
+  it('opens the market\'s curve under its row, apart from the order book, closed until clicked', () => {
+    render(<AnalystPredictionLines lines={{ markets: [wti] }} />);
+    expect(screen.queryByText(/Settlement curves/)).toBeNull();
+    const book = screen.getByRole('button', { name: 'WTI order book' });
+    const arrow = screen.getByRole('button', { name: 'WTI settlement curve' });
+    expect(arrow).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('figure')).toBeNull();
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(arrow);
+    expect(arrow).toHaveAttribute('aria-expanded', 'true');
+    expect(book).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('figure', { name: 'WTI settlement curve' })).toBeInTheDocument();
-    fireEvent.click(toggle);
+    expect(screen.queryByRole('table', { name: 'WTI Kalshi lines' })).toBeNull();
+    fireEvent.click(arrow);
     expect(screen.queryByRole('figure')).toBeNull();
   });
 
-  it('is left out when no market can be fitted', () => {
-    render(<AnalystPredictionLines lines={{ markets: [{ id: 'copper', market: 'Copper', held: [], summary: { price: 6.06 } }] }} />);
-    expect(screen.queryByRole('button', { name: /Settlement curves/ })).toBeNull();
+  it('greys the curve arrow out when the ladder is too thin to fit', () => {
+    const thin = { ...wti, id: 'thin', market: 'Thin', lines: { ...wti.lines, lines: wti.lines.lines.slice(0, 2) } };
+    render(<AnalystPredictionLines lines={{ markets: [thin] }} />);
+    expect(screen.getByRole('button', { name: 'Thin: too few quoted lines for a curve' })).toBeDisabled();
   });
 });
