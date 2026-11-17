@@ -184,7 +184,7 @@ class FakeSnapshotTable:
         self.items = {}
         self.put_count = 0
 
-    def get_item(self, *, Key):
+    def get_item(self, *, Key, **_kwargs):
         return {"Item": deepcopy(self.items.get((Key["date"], Key["snapshotType"]))) }
 
     def put_item(self, *, Item, **_kwargs):
@@ -5612,6 +5612,191 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertEqual(snapshot["snapshotType"], "investing-ideas")
         self.assertEqual(reclassify.call_args.kwargs["source_product_id"], "unknown")
         self.assertEqual(snapshot["data"]["alerts"][0]["ticker"], "ABNB")
+
+    INVESTING_IDEAS_KEY = ("2026-11-16", "investing-ideas")
+    AVGO_REMOVAL_HTML = (
+        "<h1>Remove Short Broadcom Inc. (AVGO)</h1>"
+        "<p>We have <strong>REMOVED</strong> the following from <em>Investing Ideas</em>:</p>"
+        "<p><strong>Short:</strong> <abbr name=\"Broadcom Inc.\">AVGO</abbr></p>"
+        "<p>This position has stopped out on our #VASP (Volatility Adjusted Signaling Process).</p>"
+    )
+
+    def _investing_ideas_roster(self, received_at, message_id="roster-1116"):
+        return ingestor.parse_html_snapshot(
+            report_type="investing-ideas",
+            html_body="""
+                <h1>Investing Ideas Newsletter: November 16, 2026</h1>
+                <p>Long: DDOG, BRKR</p>
+                <p>Short: OLLI, HCA</p>
+                <table class="investing-ideas-table">
+                  <tr class="long"><td>DDOG</td><td>$267.97</td><td>$244.00</td><td>$275.00</td></tr>
+                  <tr class="long"><td>BRKR</td><td>$62.84</td><td>$58.27</td><td>$65.48</td></tr>
+                  <tr class="short"><td>OLLI</td><td>$73.47</td><td>$61.90</td><td>$74.98</td></tr>
+                  <tr class="short"><td>HCA</td><td>$402.59</td><td>$363.00</td><td>$418.00</td></tr>
+                </table>
+            """,
+            received_at=received_at,
+            s3_key=f"hedgeye-email/messages/2026-11-16/investing-ideas/{message_id}.html",
+            message_id=message_id,
+            subject="Investing Ideas Newsletter: November 16, 2026",
+        )
+
+    def _investing_ideas_removal(self, received_at, message_id="avgo-remove"):
+        return ingestor.parse_html_snapshot(
+            report_type="unknown",
+            html_body=self.AVGO_REMOVAL_HTML,
+            received_at=received_at,
+            s3_key=f"hedgeye-email/messages/2026-11-16/unknown/{message_id}.html",
+            message_id=message_id,
+            subject="Remove Short Broadcom Inc. (AVGO)",
+        )
+
+    def test_replayed_investing_ideas_alert_keeps_the_roster_published_after_it(self):
+        # 16 November 2026: the stop-out alert arrived at 08:25 Eastern and the
+        # newsletter with the whole roster at 09:06. Replaying the alert later
+        # must not turn the day's snapshot back into an alert with no roster.
+        table = FakeSnapshotTable()
+        db = FakeDynamoDb(table)
+        roster = self._investing_ideas_roster(datetime(2026, 11, 16, 14, 6, 56, tzinfo=timezone.utc))
+        alert = self._investing_ideas_removal(datetime(2026, 11, 16, 13, 25, 40, tzinfo=timezone.utc))
+        self.assertEqual((roster["date"], roster["snapshotType"]), self.INVESTING_IDEAS_KEY)
+        self.assertEqual((alert["date"], alert["snapshotType"]), self.INVESTING_IDEAS_KEY)
+        self.assertNotIn("positions", alert["data"])
+
+        ingestor.materialize_email_snapshot(deepcopy(roster), db)
+        stored = deepcopy(table.items[self.INVESTING_IDEAS_KEY])
+        _, written = ingestor.materialize_email_snapshot(deepcopy(alert), db)
+
+        self.assertFalse(written)
+        self.assertEqual(table.put_count, 1)
+        self.assertEqual(table.items[self.INVESTING_IDEAS_KEY], stored)
+        self.assertEqual(stored["gmailMessageId"], "roster-1116")
+        self.assertEqual(stored["positionCount"], 4)
+        self.assertEqual(stored["data"]["shorts"], ["OLLI", "HCA"])
+
+    def test_investing_ideas_daily_snapshot_follows_the_latest_email_in_either_order(self):
+        roster = self._investing_ideas_roster(datetime(2026, 11, 16, 14, 6, 56, tzinfo=timezone.utc))
+        alert = self._investing_ideas_removal(datetime(2026, 11, 16, 13, 25, 40, tzinfo=timezone.utc))
+        for order in ((alert, roster), (roster, alert)):
+            table = FakeSnapshotTable()
+            db = FakeDynamoDb(table)
+            for snapshot in order:
+                ingestor.materialize_email_snapshot(deepcopy(snapshot), db)
+            self.assertEqual(table.items[self.INVESTING_IDEAS_KEY]["gmailMessageId"], "roster-1116")
+
+        # A change sent after the newsletter becomes the day's snapshot, as before.
+        afternoon = self._investing_ideas_removal(
+            datetime(2026, 11, 16, 19, 30, tzinfo=timezone.utc), "avgo-remove-afternoon"
+        )
+        _, written = ingestor.materialize_email_snapshot(deepcopy(afternoon), db)
+        self.assertTrue(written)
+        self.assertEqual(table.items[self.INVESTING_IDEAS_KEY]["gmailMessageId"], "avgo-remove-afternoon")
+
+        # A corrected parse of that same email still refreshes its own snapshot.
+        corrected = deepcopy(afternoon)
+        corrected["data"]["headline"] = "Remove Short Broadcom Inc. (AVGO), corrected"
+        _, written = ingestor.materialize_email_snapshot(corrected, db)
+        self.assertTrue(written)
+        self.assertEqual(
+            table.items[self.INVESTING_IDEAS_KEY]["data"]["headline"],
+            "Remove Short Broadcom Inc. (AVGO), corrected",
+        )
+
+        # Two emails stamped the same second: the higher Gmail id is the later one.
+        same_second = self._investing_ideas_removal(
+            datetime(2026, 11, 16, 19, 30, tzinfo=timezone.utc), "avgo-remove-a"
+        )
+        _, written = ingestor.materialize_email_snapshot(same_second, db)
+        self.assertFalse(written)
+        self.assertEqual(table.items[self.INVESTING_IDEAS_KEY]["gmailMessageId"], "avgo-remove-afternoon")
+
+    def test_investing_ideas_snapshot_without_a_readable_receipt_time_is_written_as_before(self):
+        table = FakeSnapshotTable()
+        db = FakeDynamoDb(table)
+        roster = self._investing_ideas_roster(datetime(2026, 11, 16, 14, 6, 56, tzinfo=timezone.utc))
+        legacy = deepcopy(roster)
+        legacy["scrapedAt"] = "16 Nov 2026 9:06am"
+        ingestor.materialize_email_snapshot(legacy, db)
+
+        # The stored time cannot be ordered, so nothing is held back.
+        alert = self._investing_ideas_removal(datetime(2026, 11, 16, 13, 25, 40, tzinfo=timezone.utc))
+        _, written = ingestor.materialize_email_snapshot(deepcopy(alert), db)
+        self.assertTrue(written)
+        self.assertEqual(table.items[self.INVESTING_IDEAS_KEY]["gmailMessageId"], "avgo-remove")
+
+    def test_only_investing_ideas_reads_the_stored_edition_before_writing(self):
+        class UnreadSnapshotTable(FakeSnapshotTable):
+            def get_item(self, **_kwargs):
+                raise AssertionError("this product's daily snapshot must not be read before it is written")
+
+        table = UnreadSnapshotTable()
+        snapshot = {
+            "date": "2026-11-16",
+            "snapshotType": "the-call",
+            "reportType": "the-call",
+            "scrapedAt": "2026-11-16T12:45:00+00:00",
+            "gmailMessageId": "the-call-1116",
+            "data": {"headline": "The Call @ Hedgeye"},
+        }
+
+        _, written = ingestor.materialize_email_snapshot(snapshot, FakeDynamoDb(table))
+
+        self.assertTrue(written)
+        self.assertEqual(table.items[("2026-11-16", "the-call")]["gmailMessageId"], "the-call-1116")
+
+    def test_backfilled_investing_ideas_alert_is_indexed_without_replacing_the_later_roster(self):
+        html_body = self.AVGO_REMOVAL_HTML.encode()
+        row = dict(
+            self.ABNB_LEDGER_ROW,
+            messageId="1a1e48957f3c105c",
+            subject="Remove Short Broadcom Inc. (AVGO)",
+            s3Key=(
+                "hedgeye-email/messages/2026-11-16/unknown/"
+                "1a1e48957f3c105c-message-body-html-1-message-body.html"
+            ),
+            receivedAt="2026-11-16T13:25:40+00:00",
+            contentSha256=hashlib.sha256(html_body).hexdigest(),
+        )
+        snapshots = FakeSnapshotTable()
+        ingestor.materialize_email_snapshot(
+            self._investing_ideas_roster(datetime(2026, 11, 16, 14, 6, 56, tzinfo=timezone.utc)),
+            FakeDynamoDb(snapshots),
+        )
+        stored = deepcopy(snapshots.items[self.INVESTING_IDEAS_KEY])
+        s3_client = MagicMock()
+        s3_client.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=html_body))}
+
+        with patch.object(ingestor, "s3", s3_client), patch.object(
+            ingestor, "dynamodb", FakeDynamoDb(snapshots)
+        ), patch.object(ingestor, "persist_research_event_ledger", return_value=1) as ledger, patch.object(
+            ingestor, "persist_snapshot_intelligence", return_value=1
+        ) as intelligence, patch.object(ingestor, "finalize_snapshot_intelligence") as finalize, patch.object(
+            ingestor, "reclassify_manifest_artifact"
+        ) as reclassify:
+            backfilled = ingestor.backfill_html_snapshot(
+                table=FakeLedgerTable([row]),
+                message_id=row["messageId"],
+                attachment_id=row["attachmentId"],
+                report_type="unknown",
+                mime_type="text/html",
+                received_at=datetime(2026, 11, 16, 13, 25, 40, tzinfo=timezone.utc),
+                ledger_item=row,
+                replace_entity_projection=True,
+            )
+
+        # The alert still reaches the event ledger, the entity index and the
+        # Investing Ideas manifest; only the day's snapshot is left alone.
+        self.assertTrue(backfilled)
+        [snapshot] = ledger.call_args.args[:1]
+        self.assertEqual(
+            [(alert["ticker"], alert["action"], alert["side"]) for alert in snapshot["data"]["alerts"]],
+            [("AVGO", "REMOVE", "short")],
+        )
+        intelligence.assert_called_once()
+        finalize.assert_called_once()
+        self.assertEqual(reclassify.call_args.kwargs["source_product_id"], "unknown")
+        self.assertEqual(snapshots.put_count, 1)
+        self.assertEqual(snapshots.items[self.INVESTING_IDEAS_KEY], stored)
 
     def test_single_side_subject_without_investing_ideas_body_is_not_a_position_change(self):
         snapshot = ingestor.parse_html_snapshot(
