@@ -133,9 +133,11 @@ const DashboardGuide = () => (
       <MethodStatement label="Dashboard formula">
         <p className="wp-equation"><code>percentage return = (current value ÷ reference value − 1) × 100</code></p>
         <p>
-          DAY can use a current or delayed provider quote against the previous close. The 15D, 1M, 3M, 6M, and 1Y
-          columns use dated historical observations from completed sessions. YTD uses the first available
-          observation of the calendar year. A quote and its period returns can therefore have different timestamps.
+          DAY can use a current or delayed provider quote against the previous close. The 1W, 1M, 3M, 6M, and 1Y
+          columns compare with the last close on or before the same calendar date a week, or that many months,
+          earlier, which is how Hedgeye states weekly and monthly performance. The 15D, 30D, and 90D columns count
+          completed sessions. MTD, QTD, and YTD start from the last close before the period. A quote and its period
+          returns can therefore have different timestamps.
         </p>
       </MethodStatement>
 
@@ -274,8 +276,8 @@ const DashboardGuide = () => (
           <MethodStatement label="Dashboard formula">
             <p>
               Card changes use <code>(latest completed close ÷ reference close − 1) × 100</code>. References are the
-              prior session (1D), 15 sessions (15D), 21 sessions (1M), 63 sessions (3M), 126 sessions (6M), and the
-              prior calendar-year close (YTD).
+              prior session (1D), 15 sessions (15D), the last close on or before the same calendar date one, three,
+              and six months earlier (1M, 3M, 6M), and the prior calendar-year close (YTD).
             </p>
           </MethodStatement>
           <table className="wp-table" aria-label="Implemented volatility regime ranges">
@@ -868,12 +870,13 @@ const DashboardGuide = () => (
         <thead><tr><th>Label</th><th>Default interpretation</th></tr></thead>
         <tbody>
           <tr><th scope="row">DAY / 1D</th><td>Current provider daily change or one completed-session comparison, as labeled.</td></tr>
+          <tr><th scope="row">1W</th><td>The last close on or before the date seven days earlier, so a holiday week is still Friday to Friday.</td></tr>
           <tr><th scope="row">15D</th><td>Fifteen completed trading sessions.</td></tr>
-          <tr><th scope="row">1M</th><td>Twenty-one completed trading sessions unless the field explicitly says calendar month.</td></tr>
-          <tr><th scope="row">3M</th><td>Sixty-three completed trading sessions.</td></tr>
-          <tr><th scope="row">6M</th><td>One hundred twenty-six completed trading sessions.</td></tr>
-          <tr><th scope="row">YTD</th><td>Comparison with the first valid observation of the calendar year or prior-year close, as documented by the card.</td></tr>
-          <tr><th scope="row">1Y</th><td>Two hundred fifty-two completed sessions or the nearest permitted one-year reference observation.</td></tr>
+          <tr><th scope="row">1M</th><td>The last close on or before the same calendar date one month earlier. An average labeled 1M uses 21 completed sessions.</td></tr>
+          <tr><th scope="row">3M</th><td>The last close on or before the same calendar date three months earlier. An average labeled 3M uses 63 completed sessions.</td></tr>
+          <tr><th scope="row">6M</th><td>The last close on or before the same calendar date six months earlier.</td></tr>
+          <tr><th scope="row">YTD</th><td>Comparison with the prior-year close, or with the first valid observation of the calendar year where a series starts inside it, as documented by the card.</td></tr>
+          <tr><th scope="row">1Y</th><td>The last close on or before the same calendar date one year earlier.</td></tr>
         </tbody>
       </table>
 

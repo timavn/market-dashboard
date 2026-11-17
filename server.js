@@ -3371,7 +3371,10 @@ function symbolIsYahooRateProxy(upperSym) {
 // Period maths (MTD/QTD/YTD bases, session and calendar windows) lives in
 // src/utils/marketPeriodReturns.cjs, where it is unit-tested.
 
-async function fetchYahooDailyClosesSeries(symbol, range = '1y') {
+// Two years by default: the one-year window compares with the last close on or
+// before the same date a year earlier, and a one-year history starts after
+// that close whenever the date fell on a weekend or holiday.
+async function fetchYahooDailyClosesSeries(symbol, range = '2y') {
   const upperSym = symbol.toUpperCase();
   const isRateProxy = symbolIsYahooRateProxy(upperSym);
   const mapping = getTickerMapping(symbol);

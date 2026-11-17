@@ -148,28 +148,47 @@ describe('computeVolatilityMetrics', () => {
     ]);
   });
 
-  test('uses fixed trading-session offsets and the prior year-end close', () => {
+  test('measures months by calendar date, days and the week by sessions, and the year from the prior year-end close', () => {
     const rows = tradingRows('2025-12-31', 130, 100);
     const metrics = computeVolatilityMetrics(rows);
     const last = rows.at(-1).close;
+    // The last close on or before a date.
+    const onOrBefore = (date) => [...rows].reverse().find((row) => row.date <= date).close;
 
+    // 130 sessions from 31 December 2025 end on Thursday 9 July 2026.
+    expect(rows.at(-1).date).toBe('2026-07-09');
     expect(metrics).toMatchObject({
       lastPx: last,
       day1Ago: rows.at(-2).close,
       day15Ago: rows.at(-16).close,
       week1Ago: rows.at(-6).close,
-      week4Ago: rows.at(-22).close,
-      month3Ago: rows.at(-64).close,
-      month6Ago: rows.at(-127).close,
+      week4Ago: onOrBefore('2026-06-09'),
+      month3Ago: onOrBefore('2026-04-09'),
+      month6Ago: onOrBefore('2026-01-09'),
       priorYearClose: rows[0].close,
       dayChangePct: percentageChange(last, rows.at(-2).close),
       fifteenDayChangePct: percentageChange(last, rows.at(-16).close),
       weekChangePct: percentageChange(last, rows.at(-6).close),
-      monthChangePct: percentageChange(last, rows.at(-22).close),
-      threeMonthChangePct: percentageChange(last, rows.at(-64).close),
-      sixMonthChangePct: percentageChange(last, rows.at(-127).close),
+      monthChangePct: percentageChange(last, onOrBefore('2026-06-09')),
+      threeMonthChangePct: percentageChange(last, onOrBefore('2026-04-09')),
+      sixMonthChangePct: percentageChange(last, onOrBefore('2026-01-09')),
       ytdChangePct: percentageChange(last, rows[0].close),
     });
+    // Not 21, 63 and 126 sessions back.
+    expect(metrics.week4Ago).not.toBe(rows.at(-22).close);
+    expect(metrics.month6Ago).not.toBe(rows.at(-127).close);
+  });
+
+  test('a month that ends on a weekend or holiday uses the close before it', () => {
+    // Monday 6 July 2026: one month earlier is Saturday 6 June; three months earlier,
+    // 6 April, is the Monday after Good Friday.
+    const rows = tradingRowsThrough('2026-01-02', '2026-07-06');
+    const metrics = computeVolatilityMetrics(rows);
+    const closeOn = (date) => rows.find((row) => row.date === date).close;
+
+    expect(metrics.week4Ago).toBe(closeOn('2026-06-05'));
+    expect(metrics.month3Ago).toBe(closeOn('2026-04-06'));
+    expect(metrics.month6Ago).toBe(closeOn('2026-01-06'));
   });
 
   test('returns null for periods without enough history instead of using the oldest value', () => {

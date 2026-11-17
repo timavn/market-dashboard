@@ -7,56 +7,39 @@
  * - MTD, QTD and YTD compare with the last close before the period starts
  *   (the prior month-, quarter- or year-end close). The period is the one the
  *   latest bar belongs to, never the wall clock.
- * - 1W, 15D, 1M, 3M and 6M step back whole sessions (5, 15, 21, 63 and 126
- *   bars). A series that prints every calendar day uses calendar dates
- *   instead: 21 bars is three weeks of crypto, not a month.
+ * - 1W, 1M, 3M, 6M and 1Y compare with the last close on or before the same
+ *   calendar date a week, or that many months, earlier. This is how Hedgeye
+ *   states weekly and monthly performance (its "last month" for XLV on the
+ *   13 Nov 2026 close was +11.3%: +11.31% from 13 Oct, +6.58% from 21 sessions
+ *   back), and a holiday week is still Friday to Friday.
+ * - 15D, 30D and 90D count sessions, as a duration stated in days does. A
+ *   series that prints every calendar day counts calendar days instead.
+ * - Dates are session dates, never instants: a US daily bar is stamped
+ *   13:30 UTC in summer and 14:30 in winter, so comparing instants across a
+ *   clock change would pick the session before the right one. Futures and FX
+ *   bars are stamped at local midnight, an hour either side of it across a
+ *   clock change, and are dated with that hour allowed for.
  * - A window longer than the available history has no value.
  */
 const { percentageChange } = require('../services/providers/observationChange.cjs');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const ONE_YEAR_REFERENCE_MAX_GAP_MS = 7 * DAY_MS;
-// The close before a period start is normally one to four days earlier. Long
+// The close on or before a date is normally zero to four days earlier. Long
 // exchange holidays (Lunar New Year, Golden Week) stay well inside ten.
 const PERIOD_START_REFERENCE_MAX_GAP_MS = 10 * DAY_MS;
-const SESSION_OFFSETS = Object.freeze({
-  week: 5, fifteenDay: 15, thirtyDay: 30, ninetyDay: 90, month: 21, threeMonth: 63, sixMonth: 126,
-});
-const CALENDAR_DAY_OFFSETS = Object.freeze({ week: 7, fifteenDay: 15, thirtyDay: 30, ninetyDay: 90 });
-const CALENDAR_MONTH_OFFSETS = Object.freeze({ month: 1, threeMonth: 3, sixMonth: 6 });
+// A series carries one UTC offset, the current one. A bar from the other side
+// of a clock change is therefore an hour out, which moves a bar stamped at
+// local midnight (futures, FX) onto the previous day. No daily bar is stamped
+// in the last two hours of its own local day, so two hours are allowed.
+const SESSION_DATE_TOLERANCE_MS = 2 * 60 * 60 * 1000;
+// Windows stated in days: sessions on an exchange, calendar days on a market
+// that prints every day.
+const DAY_COUNT_OFFSETS = Object.freeze({ fifteenDay: 15, thirtyDay: 30, ninetyDay: 90 });
+// Windows stated in weeks, months or years: always calendar dates.
+const CALENDAR_DAY_OFFSETS = Object.freeze({ week: 7 });
+const CALENDAR_MONTH_OFFSETS = Object.freeze({ month: 1, threeMonth: 3, sixMonth: 6, oneYear: 12 });
 // 28 of 28 days for a continuous market; about 20 for a five-day exchange.
 const CONTINUOUS_SERIES_MIN_BARS_IN_28_DAYS = 26;
-
-function findCloseAtOrBefore(closes, targetTimestamp, maxGapMs) {
-  if (!Array.isArray(closes) || !Number.isFinite(Number(targetTimestamp))) return null;
-  let match = null;
-  for (const row of closes) {
-    const timestamp = Number(row?.t);
-    const close = Number(row?.close);
-    if (!Number.isFinite(timestamp) || !Number.isFinite(close)) continue;
-    if (timestamp > Number(targetTimestamp)) break;
-    match = { t: timestamp, close };
-  }
-  if (!match || Number(targetTimestamp) - match.t > maxGapMs) return null;
-  return match;
-}
-
-function findClosestClose(closes, targetTimestamp) {
-  if (!Array.isArray(closes) || !Number.isFinite(Number(targetTimestamp))) return null;
-  let closest = null;
-  let closestDistance = Number.POSITIVE_INFINITY;
-  for (const row of closes) {
-    const timestamp = Number(row?.t);
-    const close = Number(row?.close);
-    if (!Number.isFinite(timestamp) || !Number.isFinite(close)) continue;
-    const distance = Math.abs(timestamp - Number(targetTimestamp));
-    if (distance < closestDistance) {
-      closest = row;
-      closestDistance = distance;
-    }
-  }
-  return closestDistance <= ONE_YEAR_REFERENCE_MAX_GAP_MS ? closest : null;
-}
 
 // The same day of the month `months` earlier, clamped to that month's length.
 function calendarMonthsBefore(timestamp, months) {
@@ -90,11 +73,17 @@ function utcOffsetMsOf(closes) {
   return Number.isFinite(closes?.utcOffsetMs) ? closes.utcOffsetMs : 0;
 }
 
+// The calendar day a bar belongs to on its own exchange, as that day's
+// midnight in UTC.
+function sessionDay(timestamp, offset) {
+  return Math.floor((timestamp + offset + SESSION_DATE_TOLERANCE_MS) / DAY_MS) * DAY_MS;
+}
+
 function periodStartReferences(closes) {
   const latestTime = Number(closes[closes.length - 1]?.t);
   if (!Number.isFinite(latestTime)) return { mtd: null, qtd: null, ytd: null };
   const offset = utcOffsetMsOf(closes);
-  const latestDate = new Date(latestTime + offset);
+  const latestDate = new Date(sessionDay(latestTime, offset));
   const year = latestDate.getUTCFullYear();
   const month = latestDate.getUTCMonth();
   const starts = {
@@ -110,34 +99,55 @@ function periodStartReferences(closes) {
       const timestamp = Number(row.t);
       const close = Number(row.close);
       if (!Number.isFinite(timestamp) || !Number.isFinite(close)) continue;
-      const sessionTime = timestamp + offset;
-      if (sessionTime < start) prior = { sessionTime, close };
+      const day = sessionDay(timestamp, offset);
+      if (day < start) prior = { day, close };
       else { first = close; break; }
     }
-    if (prior && start - prior.sessionTime <= PERIOD_START_REFERENCE_MAX_GAP_MS) return [period, prior.close];
+    if (prior && start - prior.day <= PERIOD_START_REFERENCE_MAX_GAP_MS) return [period, prior.close];
     // No close just before the period (a listing or a data gap): measure from its first close.
     return [period, first];
   }));
 }
 
+// The last close whose session date is on or before `targetDay`. A target
+// inside a long exchange holiday reaches back to the close before it.
+function closeOnOrBeforeDay(closes, targetDay, offset) {
+  if (!Number.isFinite(targetDay)) return null;
+  let match = null;
+  for (const row of closes) {
+    if (row?.close == null) continue;
+    const timestamp = Number(row.t);
+    const close = Number(row.close);
+    if (!Number.isFinite(timestamp) || !Number.isFinite(close)) continue;
+    const day = sessionDay(timestamp, offset);
+    if (day > targetDay) break;
+    match = { day, close };
+  }
+  if (!match || targetDay - match.day > PERIOD_START_REFERENCE_MAX_GAP_MS) return null;
+  return match.close;
+}
+
 function periodReferences(closes) {
   const latestTime = Number(closes[closes.length - 1]?.t);
+  const offset = utcOffsetMsOf(closes);
+  const latestDay = Number.isFinite(latestTime) ? sessionDay(latestTime, offset) : NaN;
+  const onOrBefore = (targetDay) => closeOnOrBeforeDay(closes, targetDay, offset);
   const continuous = printsEveryCalendarDay(closes);
-  const atOrBefore = (target) => findCloseAtOrBefore(closes, target, 7 * DAY_MS)?.close ?? null;
   const references = {};
-  for (const [name, sessions] of Object.entries(SESSION_OFFSETS)) {
-    if (!continuous) {
-      const index = closes.length - 1 - sessions;
-      references[name] = index >= 0 ? closes[index].close : null;
-    } else if (name in CALENDAR_DAY_OFFSETS) {
-      references[name] = atOrBefore(latestTime - (CALENDAR_DAY_OFFSETS[name] * DAY_MS));
+  for (const [name, days] of Object.entries(CALENDAR_DAY_OFFSETS)) {
+    references[name] = onOrBefore(latestDay - (days * DAY_MS));
+  }
+  for (const [name, months] of Object.entries(CALENDAR_MONTH_OFFSETS)) {
+    references[name] = Number.isFinite(latestDay) ? onOrBefore(calendarMonthsBefore(latestDay, months)) : null;
+  }
+  for (const [name, count] of Object.entries(DAY_COUNT_OFFSETS)) {
+    if (continuous) {
+      references[name] = onOrBefore(latestDay - (count * DAY_MS));
     } else {
-      references[name] = atOrBefore(calendarMonthsBefore(latestTime, CALENDAR_MONTH_OFFSETS[name]));
+      const index = closes.length - 1 - count;
+      references[name] = index >= 0 ? closes[index].close : null;
     }
   }
-  references.oneYear = Number.isFinite(latestTime)
-    ? findClosestClose(closes, latestTime - (365 * DAY_MS))?.close
-    : null;
   return { ...references, ...periodStartReferences(closes) };
 }
 
@@ -193,36 +203,37 @@ function computePeriodBpsFromCloses(closes, { observationFrequency = 'daily' } =
     .sort((left, right) => left.t - right.t);
   if (ordered.length < 2) return null;
   const latest = ordered[ordered.length - 1];
-  const reference = (target, maxGapDays) => (
-    findCloseAtOrBefore(ordered, target, maxGapDays * DAY_MS)?.close ?? null
-  );
+  // The same session dates as price returns: an instant comparison is a
+  // session out when a clock change lies between the two observations.
+  const offset = utcOffsetMsOf(closes);
+  const latestDay = sessionDay(latest.t, offset);
+  const onOrBefore = (targetDay) => closeOnOrBeforeDay(ordered, targetDay, offset);
   const toBps = (value) => (
     Number.isFinite(value)
       ? Math.round((latest.close - value) * 1000) / 10
       : null
   );
   const hasDailyObservations = observationFrequency === 'daily';
-  const latestDate = new Date(latest.t);
-  const yearStart = Date.UTC(latestDate.getUTCFullYear(), 0, 1);
+  const yearStart = Date.UTC(new Date(latestDay).getUTCFullYear(), 0, 1);
   // A daily series measures the year from the prior year-end observation. A
   // series that starts inside the year, or a monthly one, keeps its first
   // observation of the year.
-  const priorYearEnd = hasDailyObservations ? reference(yearStart - 1, 7) : null;
-  const firstYearObservation = ordered.find((row) => row.t >= yearStart && row.t <= latest.t);
+  const priorYearEnd = hasDailyObservations ? onOrBefore(yearStart - DAY_MS) : null;
+  const firstYearObservation = ordered.find((row) => sessionDay(row.t, offset) >= yearStart);
   const ytdReference = priorYearEnd ?? (
-    firstYearObservation && firstYearObservation.t - yearStart <= 7 * DAY_MS
+    firstYearObservation && sessionDay(firstYearObservation.t, offset) - yearStart <= 7 * DAY_MS
       ? firstYearObservation.close : null
   );
 
   const references = {
-    day: hasDailyObservations ? reference(latest.t - DAY_MS, 7) : null,
-    week: hasDailyObservations ? reference(latest.t - (7 * DAY_MS), 7) : null,
-    fifteenDay: hasDailyObservations ? reference(latest.t - (15 * DAY_MS), 7) : null,
-    month: reference(calendarMonthsBefore(latest.t, 1), 7),
-    threeMonth: reference(calendarMonthsBefore(latest.t, 3), 7),
-    sixMonth: reference(calendarMonthsBefore(latest.t, 6), 7),
+    day: hasDailyObservations ? onOrBefore(latestDay - DAY_MS) : null,
+    week: hasDailyObservations ? onOrBefore(latestDay - (7 * DAY_MS)) : null,
+    fifteenDay: hasDailyObservations ? onOrBefore(latestDay - (15 * DAY_MS)) : null,
+    month: onOrBefore(calendarMonthsBefore(latestDay, 1)),
+    threeMonth: onOrBefore(calendarMonthsBefore(latestDay, 3)),
+    sixMonth: onOrBefore(calendarMonthsBefore(latestDay, 6)),
     ytd: ytdReference,
-    oneYear: reference(calendarMonthsBefore(latest.t, 12), 7),
+    oneYear: onOrBefore(calendarMonthsBefore(latestDay, 12)),
   };
   return {
     ...Object.fromEntries(Object.entries(references).map(([period, value]) => [`${period}ChangeBps`, toBps(value)])),
@@ -233,7 +244,7 @@ function computePeriodBpsFromCloses(closes, { observationFrequency = 'daily' } =
   };
 }
 
-// Period deltas in bps for a spread series, on the same session boundaries as
+// Period deltas in bps for a spread series, on the same dates and sessions as
 // computePeriodPercentsFromCloses. Values are rounded to 0.1 bps for display.
 function computeSpreadBpsDeltas(spreadSeries) {
   if (!spreadSeries || spreadSeries.length < 2) return null;
@@ -266,9 +277,9 @@ function computeSpreadBpsDeltas(spreadSeries) {
 
 module.exports = {
   DAY_MS,
+  PERIOD_START_REFERENCE_MAX_GAP_MS,
+  calendarMonthsBefore,
   computePeriodBpsFromCloses,
   computePeriodPercentsFromCloses,
   computeSpreadBpsDeltas,
-  findCloseAtOrBefore,
-  findClosestClose,
 };
