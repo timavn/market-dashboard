@@ -2635,6 +2635,23 @@ _SINGLE_POSITION_CHANGE_SUBJECT = re.compile(
     r"^(Add|Remove)\s+.+?\(\s*([A-Z][A-Z0-9./-]{0,9})\s*\)\s+(?:to|from)\s+(?:the\s+)?(LONG|SHORT)\s+Side\b",
     re.IGNORECASE,
 )
+# Or it names the side before the company, and ends at the ticker:
+# "Remove Short Broadcom Inc. (AVGO)", the wording of a stop-out notice.
+_SINGLE_POSITION_CHANGE_SIDE_FIRST_SUBJECT = re.compile(
+    r"^(Add|Remove)\s+(Long|Short)\s+.+?\(\s*([A-Z][A-Z0-9./-]{0,9})\s*\)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _single_position_change(normalized_subject: str) -> Optional[Tuple[str, str, str]]:
+    """The (action, ticker, side) a single-change subject states, or None."""
+    match = _SINGLE_POSITION_CHANGE_SUBJECT.search(normalized_subject)
+    if match:
+        return match.group(1).upper(), match.group(2).upper(), match.group(3).lower()
+    match = _SINGLE_POSITION_CHANGE_SIDE_FIRST_SUBJECT.search(normalized_subject)
+    if match:
+        return match.group(1).upper(), match.group(3).upper(), match.group(2).lower()
+    return None
 
 
 def is_position_change_subject(subject: Optional[str]) -> bool:
@@ -2642,7 +2659,7 @@ def is_position_change_subject(subject: Optional[str]) -> bool:
     normalized = re.sub(r"\s+", " ", str(subject or "")).strip()
     return bool(
         _MULTI_POSITION_CHANGE_SUBJECT.search(normalized)
-        or _SINGLE_POSITION_CHANGE_SUBJECT.search(normalized)
+        or _single_position_change(normalized)
     )
 
 
@@ -2655,17 +2672,15 @@ def _extract_position_change_alerts(
     body = _extract_position_change_body(body_text)
     normalized = re.sub(r"\s+", " ", headline).strip()
     match = _MULTI_POSITION_CHANGE_SUBJECT.search(normalized)
-    single = None if match else _SINGLE_POSITION_CHANGE_SUBJECT.search(normalized)
+    single = None if match else _single_position_change(normalized)
     if single and re.search(r"\binvesting ideas\b", body_text or "", re.IGNORECASE):
-        action = single.group(1).upper()
-        ticker = single.group(2).upper()
-        side = single.group(3).lower()
+        action, ticker, side = single
         detail = body.get(ticker) or {}
         ranged = detail.get("action") == action and detail.get("side") == side
         return [{
             "headline": normalized,
             "signalFamily": "Position Changes",
-            "signalPhrase": f"{single.group(1).title()} {ticker}",
+            "signalPhrase": f"{action.title()} {ticker}",
             "action": action,
             "side": side,
             "context": "position-change",

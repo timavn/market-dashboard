@@ -5452,6 +5452,67 @@ class HermesGmailIngestorTests(unittest.TestCase):
         self.assertNotIn("riskRangeLow", alert)
         self.assertNotIn("ADDING", {event["entityId"] for event in research_intelligence.build_entity_events(snapshot)})
 
+    def test_single_investing_ideas_change_can_name_the_side_before_the_company(self):
+        # The wording of a stop-out notice (16 November 2026). It was filed as
+        # an unknown product, so the removal never reached Investing Ideas.
+        subject = "Remove Short Broadcom Inc. (AVGO)"
+        html_body = """
+            <h1>Remove Short Broadcom Inc. (AVGO)</h1>
+            <p><a href="https://app.hedgeye.com/investing_ideas">Access Investing Ideas Dashboard</a></p>
+            <p>We have <strong>REMOVED</strong> the following from <em>Investing Ideas</em>:</p>
+            <p><strong>Short:</strong> <abbr name="Broadcom Inc.">AVGO</abbr></p>
+            <p>This position has stopped out on our #VASP (Volatility Adjusted Signaling Process).</p>
+        """
+        self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown")
+        self.assertTrue(ingestor.is_position_change_subject(subject))
+        snapshot = ingestor.parse_html_snapshot(
+            report_type=ingestor.infer_report_type("message-body.html", subject),
+            html_body=html_body,
+            received_at=datetime(2026, 11, 16, 13, 26, tzinfo=timezone.utc),
+            s3_key="hedgeye-email/messages/2026-11-16/unknown/avgo.html",
+            message_id="avgo-remove",
+            subject=subject,
+        )
+
+        self.assertEqual(snapshot["snapshotType"], "investing-ideas")
+        [alert] = snapshot["data"]["alerts"]
+        self.assertEqual((alert["ticker"], alert["action"], alert["side"]), ("AVGO", "REMOVE", "short"))
+        self.assertEqual(alert["signalPhrase"], "Remove AVGO")
+        self.assertNotIn("riskRangeLow", alert)
+        self.assertNotIn("REMOVED", {event["entityId"] for event in research_intelligence.build_entity_events(snapshot)})
+
+        for other, expected in [
+            ("Add Long Airbnb Inc. (ABNB)", ("ADD", "ABNB", "long")),
+            ("Add Short Goldman Sachs Group Inc. (GS)", ("ADD", "GS", "short")),
+            ("Remove Long Berkshire Hathaway Inc. (BRK.B)", ("REMOVE", "BRK.B", "long")),
+            ("remove short  Broadcom Inc.  ( AVGO )", ("REMOVE", "AVGO", "short")),
+            # The older wording still states its side after the ticker.
+            ("Remove Broadcom Inc. (AVGO) from SHORT Side", ("REMOVE", "AVGO", "short")),
+        ]:
+            normalized = " ".join(other.split())
+            self.assertTrue(ingestor.is_position_change_subject(other), other)
+            self.assertEqual(email_parser._single_position_change(normalized), expected, other)
+        for other in [
+            "Remove Short Squeeze Risk",
+            "Short Broadcom Inc. (AVGO)",
+            "Remove Broadcom Inc. (AVGO)",
+            "Remove Short Broadcom Inc. (AVGO) | Replay",
+            "Early Look: Remove Short Broadcom Inc. (AVGO)",
+        ]:
+            self.assertFalse(ingestor.is_position_change_subject(other), other)
+
+    def test_a_side_first_subject_outside_investing_ideas_is_not_a_position_change_alert(self):
+        subject = "Remove Short Broadcom Inc. (AVGO)"
+        snapshot = ingestor.parse_html_snapshot(
+            report_type=ingestor.infer_report_type("message-body.html", subject),
+            html_body="<h1>Remove Short Broadcom Inc. (AVGO)</h1><p>A note that names no product.</p>",
+            received_at=datetime(2026, 11, 16, 13, 26, tzinfo=timezone.utc),
+            s3_key="hedgeye-email/messages/2026-11-16/unknown/other.html",
+            message_id="avgo-other",
+            subject=subject,
+        )
+        self.assertFalse(((snapshot or {}).get("data") or {}).get("alerts"))
+
     def test_multi_change_subject_side_word_is_not_a_ticker(self):
         subject = "2 Changes: Add Short GS, Add COST"
         html_body = """
