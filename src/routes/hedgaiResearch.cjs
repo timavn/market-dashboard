@@ -3,6 +3,12 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { withHedgaiMarketReadings } = require('../services/hedgaiMarketResearch.cjs');
 
+// The Inbox scan asks for this every 30 seconds, and a forced read of the
+// HedgAI ledger costs about 34 DynamoDB read units: 100,000 a day, the cost
+// canary's whole limit. The ledger gains a signal at most once a minute, so
+// one read serves the requests of the next two minutes.
+const LEDGER_REUSE_MS = 2 * 60_000;
+
 function createHedgaiResearchLoader({ loadEvents, loadBaseline, buildProjection, now = () => new Date() }) {
   let lastVerifiedEvents = [];
   return async ({ asOf = now().toISOString(), forceRefresh = false, refreshAfter } = {}) => {
@@ -30,7 +36,11 @@ function createHedgaiResearchHandlers({ loadResearch, loadBaseline, root, now = 
         return res.status(400).json({ error: 'A valid past research capture time is required.' });
       }
       res.set('Cache-Control', 'no-store');
-      try { return res.json(await loadResearch({ asOf, forceRefresh: true, refreshAfter: now().getTime() })); }
+      try {
+        return res.json(await loadResearch({
+          asOf, forceRefresh: true, refreshAfter: now().getTime() - LEDGER_REUSE_MS,
+        }));
+      }
       catch (_error) { return res.status(503).json({ error: 'HedgAI research unavailable' }); }
     },
     async source(req, res) {
