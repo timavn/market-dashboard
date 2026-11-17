@@ -45,15 +45,16 @@ Schwab CSV → S3 Upload → Lambda Process → DynamoDB → Express API → Rea
 
 ### Service Layer
 - **API Service**: `src/services/api/marketDataService.js` - Axios client with 10s timeout, handles both AWS API Gateway and local server formats
-- **WebSocket Service**: `src/services/websocket/marketWebSocket.js` - Singleton WebSocket manager with auto-reconnect (max 5 attempts, exponential backoff)
 - **CSV Parser**: `src/utils/csvParser.js` - Schwab CSV processing utilities
 - **Portfolio Analytics**: `src/services/portfolioAnalytics.js` - Calculates risk metrics, exposure, concentration, factor analysis
 
 ### Custom Hooks
-Located in `src/hooks/useMarketData.js`:
-- `useMarketData(symbols, options)` - Fetches quotes + optional WebSocket real-time updates (disabled by default)
-- `useOptionsData(symbol)` - Fetches options chain data
-- `useVIXData()` - Fetches VIX data (auto-refresh disabled by default)
+Located in `src/hooks/`. Each dashboard card loads its data through a resource hook, for example:
+- `useDashboardPortfolio.js` - Portfolio and provider status
+- `useDashboardOverviewResources.js` - Market overview tables
+- `useVolatilitySnapshot.js` - Volatility card
+
+The browser polls the API; the dashboard has no WebSocket client for market data.
 
 ### API Configuration
 Defined in `src/constants/apiEndpoints.js`:
@@ -136,9 +137,9 @@ Automated via GitHub Actions (`.github/workflows/deploy.yml`):
 ## Data Flow
 
 ### Development Mode (Local)
-1. **Initial Load**: Components mount → `useMarketData` hook → `MarketDataService.getPortfolio()` → Express server queries DynamoDB
+1. **Initial Load**: Components mount → resource hooks in `src/hooks/` → `MarketDataService` → Express server
 2. **CSV Upload**: User uploads via `CSVUpload` component → requests presigned URL from `/api/presigned-url` → uploads to S3 → Lambda processes → DynamoDB updated → `portfolioRefresh` event triggers UI refresh
-3. **Real-time Updates** (optional): `marketWebSocket.subscribe(channel, callback)` receives WebSocket updates (disabled by default for stability)
+3. **Updates**: each resource hook polls its endpoint on its own interval; the server's `/ws/market` endpoint has no dashboard client
 
 ### Production Mode (AWS)
 1. User uploads Schwab CSV to S3 bucket
@@ -149,7 +150,6 @@ Automated via GitHub Actions (`.github/workflows/deploy.yml`):
 
 ## Key Implementation Notes
 
-- **WebSocket Reconnect**: Exponential backoff (1s × attempt count), max 5 attempts, controlled by `shouldReconnect` flag
 - **Portfolio Data Formats**: `MarketDataService.getPortfolio()` handles both AWS API Gateway format (`{snapshot, holdings}`) and local server format (direct object)
 - **Tab Navigation**: 'M' and 'Q' tabs in left sidebar toggle dashboard views
 - **Daily Portfolio Replacement**: Lambda clears old holdings before storing new ones to prevent duplicates
