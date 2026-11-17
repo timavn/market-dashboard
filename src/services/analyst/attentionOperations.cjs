@@ -132,7 +132,10 @@ function serviceCopy(check, affected = []) {
     subject: 'Portfolio connection',
     concern: 'Brokerage connection down.',
     impact: 'Holdings, balances and IBKR quotes unverified.',
-    next: 'Restore the brokerage service in Systems.',
+    // The supervisor restarts an unreachable or duplicated sidecar by itself.
+    next: ['IBKR_SIDECAR_UNREACHABLE', 'IBKR_SIDECAR_DUPLICATES'].includes(check.errorCode)
+      ? 'Still down after 10 min → restart the dashboard in Systems.'
+      : 'Restore the brokerage service in Systems.',
   };
   if (check.id === 'ibkr.accounts' || check.id === 'ibkr.portfolio') return {
     subject: 'Portfolio updates',

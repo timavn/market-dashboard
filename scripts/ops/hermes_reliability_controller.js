@@ -64,6 +64,23 @@ const GATEWAY_API_UNRESPONSIVE = 'IBKR_GATEWAY_API_UNRESPONSIVE';
 // may be served from cache for five minutes. The instruction to relaunch the
 // Gateway waits until the failure has outlasted both.
 const GATEWAY_UNRESPONSIVE_ESCALATION_DELAY_MS = 10 * 60_000;
+const SIDECAR_UNREACHABLE = 'IBKR_SIDECAR_UNREACHABLE';
+const SIDECAR_DUPLICATES = 'IBKR_SIDECAR_DUPLICATES';
+// The supervisor restarts an unreachable or duplicated sidecar by itself after
+// three failed health probes, and a stack restart can be reported as an
+// unreachable sidecar for five minutes afterwards. The user is told only once
+// the sidecar has stayed down past both.
+const SIDECAR_DOWN_ESCALATION_DELAY_MS = 10 * 60_000;
+const ESCALATION_DELAY_MS = Object.freeze({
+  [GATEWAY_API_UNRESPONSIVE]: GATEWAY_UNRESPONSIVE_ESCALATION_DELAY_MS,
+  [SIDECAR_UNREACHABLE]: SIDECAR_DOWN_ESCALATION_DELAY_MS,
+  [SIDECAR_DUPLICATES]: SIDECAR_DOWN_ESCALATION_DELAY_MS,
+});
+// A check that has left the readiness report can never be seen passing, so its
+// incident could never close. It is retired once its cause has gone unreported
+// this long: longer than a long weekend, for checks that appear only at
+// certain hours.
+const RETIRED_CHECK_INCIDENT_AGE_MS = 7 * 24 * 60 * 60_000;
 const CONTROLLER_BUILD_FINGERPRINT = crypto
   .createHash('sha256')
   .update(fs.readFileSync(__filename))
@@ -651,6 +668,10 @@ function notificationBody(kind, incident) {
       // sidecar process meets the same silence. Only a Gateway relaunch helps.
       return `${code}: IB Gateway has not answered for 10 minutes. Quit IB Gateway, open it again and log in. Restarting the dashboard's IBKR service does not fix this.`;
     }
+    if (code === SIDECAR_UNREACHABLE || code === SIDECAR_DUPLICATES) {
+      // The supervisor's own restarts have not brought the sidecar back.
+      return `${code}: the dashboard's IBKR service has been down for 10 minutes and the supervisor has not brought it back. Restart the dashboard (npm run dev:restart -- --detach).`;
+    }
     if (incident.actionId === 'restart-ibkr-sidecar') {
       return `${code}: sidecar-only recovery is unavailable. Relaunch and log in to IB Gateway manually.`;
     }
@@ -701,13 +722,22 @@ function sendMacNotification(event, {
 }
 
 // Every other manual incident is escalated when it is first seen. A Gateway
-// that has stopped answering is escalated only once it has stayed that way,
-// so a blip never asks the user to relaunch a Gateway that is working.
+// that has stopped answering, or a sidecar the supervisor is already
+// restarting, is escalated only once it has stayed that way, so a blip never
+// asks the user to act on something that is working.
 function escalationIsDue(incident, now) {
-  if (incident.errorCode !== GATEWAY_API_UNRESPONSIVE) return true;
+  const delay = ESCALATION_DELAY_MS[incident.errorCode];
+  if (!delay) return true;
   const openedAt = timestamp(incident.openedAt);
-  return openedAt !== null
-    && now - openedAt >= GATEWAY_UNRESPONSIVE_ESCALATION_DELAY_MS;
+  return openedAt !== null && now - openedAt >= delay;
+}
+
+// True when the incident's check is no longer part of the readiness report and
+// its cause was last reported more than a week ago.
+function checkWasRetired(incident, checksById, now) {
+  if (incident.checkId && checksById.has(incident.checkId)) return false;
+  const lastSeenAt = timestamp(incident.lastSeenAt);
+  return lastSeenAt !== null && now - lastSeenAt > RETIRED_CHECK_INCIDENT_AGE_MS;
 }
 
 function notifyIncident(incident, kind, observedAt, notifier) {
@@ -917,6 +947,16 @@ function observeReport(state, report, {
 
   for (const incident of state.incidents) {
     if (incident.status === 'resolved' || activeIds.has(incident.id)) continue;
+    if (checkWasRetired(incident, checksById, now)) {
+      // Nothing recovered, so no recovery notice: the check simply no longer exists.
+      incident.status = 'resolved';
+      incident.resolvedAt = observedAt;
+      incident.verificationOutcome = 'check-retired';
+      incident.suppressionReason = null;
+      incident.nextRetryAt = null;
+      incident.circuitOpenUntil = null;
+      continue;
+    }
     const policy = policies.find((item) => item.id === incident.actionId) || null;
     if (!verificationPassed(incident, policy, checksById)) {
       incident.cleanObservationCount = 0;
