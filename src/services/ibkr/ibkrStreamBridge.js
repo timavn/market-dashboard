@@ -2,7 +2,7 @@ const { sidecarRequest, SIDECAR_BASE } = require('../providers/ibkrSidecarClient
 const { normalizeIbkrRaw } = require('../providers/normalize/normalizeQuote');
 const { withQuoteObservation, validateQuoteObservation } = require('../providers/normalize/quoteContract.cjs');
 const { toLegacyQuote } = require('../providers/normalize/legacyQuoteAdapter');
-const { resolveInstrument } = require('../providers/instruments/instrumentResolver');
+const { resolveInstrument, instrumentCacheKey } = require('../providers/instruments/instrumentResolver');
 const { setIbkrConnected, setIbkrLastQuoteAt, setIbkrStreamMeta, getProviderStatusSnapshot } = require('../providers/providerStatus');
 
 const STREAM_ENABLED = process.env.IBKR_STREAM_ENABLED !== 'false';
@@ -18,6 +18,11 @@ let running = false;
 let connected = false;
 let providerGeneration = null;
 let desiredSymbols = [];
+// Instruments a bare symbol cannot identify (an index with its contract id),
+// kept subscribed beside the symbols.
+let desiredInstruments = [];
+let desiredInstrumentsKey = '[]';
+let reconcileFailures = 0;
 let desiredRevision = 0;
 let appliedRevision = -1;
 
@@ -63,14 +68,28 @@ function upsertQuote(raw) {
   return { canonical, legacy: toLegacyQuote(canonical) };
 }
 function onQuote(callback) { quoteListeners.add(callback); return () => quoteListeners.delete(callback); }
-function instrumentsFor(symbols) {
-  return symbols.map(resolveInstrument).filter(i => i.supported).map(i => ({
-    symbol: i.symbol, secType: i.secType, exchange: i.exchange, currency: i.currency, conId: i.conid,
-  }));
+// Every instrument the dashboard wants streamed, each once.
+function desiredSidecarInstruments() {
+  const seen = new Set();
+  const instruments = [];
+  for (const input of [...desiredSymbols, ...desiredInstruments]) {
+    const instrument = resolveInstrument(input);
+    const key = instrumentCacheKey(input);
+    if (!instrument.supported || seen.has(key)) continue;
+    seen.add(key);
+    instruments.push({
+      symbol: instrument.symbol, secType: instrument.secType, exchange: instrument.exchange,
+      currency: instrument.currency, conId: instrument.conid,
+    });
+  }
+  return instruments;
 }
+// A request the sidecar keeps refusing (no free market-data line, a contract
+// it cannot identify) is retried less and less often, not once a second.
 function retryReconcile() {
   if (!running || reconcileTimer) return;
-  reconcileTimer = setTimeout(() => { reconcileTimer = null; reconcileDesired(); }, 1000);
+  const delay = Math.min(1000 * 2 ** Math.min(reconcileFailures, 5), 30000);
+  reconcileTimer = setTimeout(() => { reconcileTimer = null; reconcileDesired(); }, delay);
   reconcileTimer.unref?.();
 }
 function reconcileDesired() {
@@ -79,10 +98,12 @@ function reconcileDesired() {
   const brokerGeneration = providerGeneration;
   const revision = desiredRevision;
   reconcileTask = sidecarRequest('/subscriptions/reconcile', {
-    method: 'POST', body: { owner: 'market-dashboard', instruments: instrumentsFor(desiredSymbols) }, timeoutMs: 10000,
+    method: 'POST', body: { owner: 'market-dashboard', instruments: desiredSidecarInstruments() }, timeoutMs: 10000,
   }).then(result => {
-    if (generation === streamGeneration && providerGeneration === brokerGeneration && connected && result.ok === true && !(result.errors?.length)) appliedRevision = revision;
-  }).catch(() => { /* Pending desired state is retried; no reference counts are committed on failure. */ }).finally(() => {
+    const applied = result.ok === true && !(result.errors?.length);
+    reconcileFailures = applied ? 0 : reconcileFailures + 1;
+    if (generation === streamGeneration && providerGeneration === brokerGeneration && connected && applied) appliedRevision = revision;
+  }).catch(() => { reconcileFailures += 1; /* Pending desired state is retried; no reference counts are committed on failure. */ }).finally(() => {
     reconcileTask = null;
     if (running && appliedRevision !== desiredRevision) retryReconcile();
   });
@@ -90,7 +111,24 @@ function reconcileDesired() {
 }
 function setDesiredSymbols(symbols) {
   const next = [...new Set((symbols || []).map(cacheKey).filter(Boolean))].sort();
-  if (JSON.stringify(next) !== JSON.stringify(desiredSymbols)) { desiredSymbols = next; desiredRevision += 1; }
+  if (JSON.stringify(next) !== JSON.stringify(desiredSymbols)) { desiredSymbols = next; desiredRevision += 1; reconcileFailures = 0; }
+  return reconcileDesired();
+}
+// The complete set of instrument descriptors to keep streamed beside the
+// symbols. The two sets are independent: replacing one leaves the other.
+function setDesiredInstruments(instruments) {
+  const byKey = new Map();
+  for (const instrument of instruments || []) {
+    if (instrument && resolveInstrument(instrument).supported) byKey.set(instrumentCacheKey(instrument), instrument);
+  }
+  const next = [...byKey.values()];
+  const key = JSON.stringify([...byKey.keys()].sort());
+  if (key !== desiredInstrumentsKey) {
+    desiredInstruments = next;
+    desiredInstrumentsKey = key;
+    desiredRevision += 1;
+    reconcileFailures = 0;
+  }
   return reconcileDesired();
 }
 // Compatibility for callers that maintain an incremental set. Server uses the full union.
@@ -197,4 +235,4 @@ function stopIbkrStreamBridge() {
   invalidate('quote_stream_stopped');
 }
 module.exports = { quotesStateCache, getCachedCanonical, getCachedLegacy, onQuote, startIbkrStreamBridge, stopIbkrStreamBridge,
-  sidecarSubscribe, sidecarUnsubscribe, setDesiredSymbols, upsertQuote, STREAM_ENABLED };
+  sidecarSubscribe, sidecarUnsubscribe, setDesiredSymbols, setDesiredInstruments, upsertQuote, STREAM_ENABLED };

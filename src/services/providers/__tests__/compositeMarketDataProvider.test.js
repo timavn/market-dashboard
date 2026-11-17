@@ -15,7 +15,7 @@ jest.mock('../yahoo/yahooMarketDataProvider', () => ({
 const ibkr = require('../ibkr/ibkrMarketDataProvider');
 const yahoo = require('../yahoo/yahooMarketDataProvider');
 const composite = require('../compositeMarketDataProvider');
-const { getProviderStatusSnapshot } = require('../providerStatus');
+const { getProviderStatusSnapshot, setIbkrConnected } = require('../providerStatus');
 const { normalizeIbkrRaw } = require('../normalize/normalizeQuote');
 
 const AUTO_DOW_DESCRIPTOR = Object.freeze({
@@ -48,6 +48,7 @@ describe('compositeMarketDataProvider fallback', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     composite.setSpecialQuoteFetcher(async () => null);
+    composite.resetIbkrMisses();
   });
 
   it('returns IBKR quote when valid', async () => {
@@ -309,5 +310,142 @@ describe('compositeMarketDataProvider fallback', () => {
     await composite.getQuote(descriptor);
     expect(ibkr.getQuote).not.toHaveBeenCalled();
     expect(yahoo.getQuote).toHaveBeenCalledWith(descriptor);
+  });
+});
+
+describe('an instrument IBKR could not quote', () => {
+  const START = Date.parse('2026-11-17T02:00:00Z');
+  const flush = async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); };
+  const yahooQuote = () => ({
+    canonical: {
+      symbol: 'XLK', source: 'yahoo', mark: 164, mid: null, last: 164, close: 163,
+      timestamp: new Date().toISOString(), dataType: 'delayed', valid: true, warning: 'delayed_data',
+    },
+    error: null,
+  });
+  const ibkrQuote = () => ({
+    canonical: normalizeIbkrRaw({
+      symbol: 'XLK', bid: 164.6, ask: 164.7, last: 164.65, close: 163,
+      timestamp: new Date().toISOString(), dataType: 'live', entitlementStatus: 'live',
+    }),
+    error: null,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers({ now: START, doNotFake: ['nextTick', 'setImmediate'] });
+    composite.setSpecialQuoteFetcher(async () => null);
+    composite.resetIbkrMisses();
+    yahoo.getQuote.mockImplementation(async () => yahooQuote());
+  });
+  afterEach(() => { jest.useRealTimers(); });
+
+  it('is answered from Yahoo at once on later requests while IBKR is retried in the background', async () => {
+    ibkr.getQuote.mockResolvedValue({ canonical: null, error: 'no_quote' });
+
+    // The first request waits for IBKR, as before.
+    const first = await composite.getQuote('XLK');
+    expect(first.source).toBe('yahoo');
+    expect(first.warning).toMatch(/ibkr: no_quote/);
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(1);
+
+    // Until the retry is due, IBKR is not asked at all.
+    jest.setSystemTime(START + 29_000);
+    const second = await composite.getQuote('XLK');
+    expect(second.source).toBe('yahoo');
+    expect(second.warning).toMatch(/ibkr: no_quote/);
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(1);
+
+    // When it is due the request still does not wait: this retry never settles.
+    let settleRetry;
+    ibkr.getQuote.mockImplementation(() => new Promise((resolve) => { settleRetry = resolve; }));
+    jest.setSystemTime(START + 31_000);
+    const third = await composite.getQuote('XLK');
+    await flush();
+    expect(third.source).toBe('yahoo');
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(2);
+    // One retry at a time.
+    await composite.getQuote('XLK');
+    await flush();
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(2);
+
+    // The retry succeeds: the next request is served by IBKR again.
+    settleRetry(ibkrQuote());
+    await flush();
+    ibkr.getQuote.mockImplementation(async () => ibkrQuote());
+    const recovered = await composite.getQuote('XLK');
+    expect(recovered.source).toBe('ibkr');
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(3);
+  });
+
+  it('is retried less often while it keeps failing, up to every two minutes', async () => {
+    ibkr.getQuote.mockResolvedValue({ canonical: null, error: 'quote_timeout' });
+    const attemptsAt = async (elapsedMs) => {
+      jest.setSystemTime(START + elapsedMs);
+      await composite.getQuote('XLK');
+      await flush();
+      return ibkr.getQuote.mock.calls.length;
+    };
+    expect(await attemptsAt(0)).toBe(1);          // first miss: next retry at 30 s
+    expect(await attemptsAt(30_000)).toBe(2);     // second miss: next retry 60 s later
+    expect(await attemptsAt(89_000)).toBe(2);
+    expect(await attemptsAt(90_000)).toBe(3);     // third miss: every 120 s from here
+    expect(await attemptsAt(209_000)).toBe(3);
+    expect(await attemptsAt(210_000)).toBe(4);
+    expect(await attemptsAt(329_000)).toBe(4);
+    expect(await attemptsAt(330_000)).toBe(5);
+  });
+
+  it('reports how persistent the miss is', async () => {
+    ibkr.getQuote.mockResolvedValue({ canonical: null, error: 'no_quote' });
+    expect(composite.hasIbkrMiss('XLK')).toBe(false);
+    await composite.getQuote('XLK');
+    expect(composite.hasIbkrMiss('XLK')).toBe(true);
+    expect(composite.hasIbkrMiss('XLK', 3)).toBe(false);
+    for (const elapsed of [30_000, 90_000]) {
+      jest.setSystemTime(START + elapsed);
+      await composite.getQuote('XLK');
+      await flush();
+    }
+    expect(composite.hasIbkrMiss('XLK', 3)).toBe(true);
+    expect(composite.hasIbkrMiss('XLV', 1)).toBe(false);
+  });
+
+  it('is forgotten when the Gateway session changes', async () => {
+    setIbkrConnected(true, null, 'sidecar-a:1');
+    ibkr.getQuote.mockResolvedValue({ canonical: null, error: 'no_quote' });
+    await composite.getQuote('XLK');
+    await composite.getQuote('XLK');
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(1);
+
+    setIbkrConnected(true, null, 'sidecar-a:2');
+    await composite.getQuote('XLK');
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not treat "not connected" as a miss', async () => {
+    ibkr.getQuote.mockResolvedValue({ canonical: null, error: 'not_connected' });
+    await composite.getQuote('XLK');
+    await composite.getQuote('XLK');
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps asking IBKR for an instrument that has no Yahoo route', async () => {
+    const descriptor = { symbol: 'SPX', secType: 'IND', exchange: 'CBOE', currency: 'USD', provider: 'ibkr' };
+    ibkr.getQuote.mockResolvedValue({ canonical: null, error: 'no_quote' });
+    expect(await composite.getQuote(descriptor)).toBeNull();
+    expect(await composite.getQuote(descriptor)).toBeNull();
+    expect(ibkr.getQuote).toHaveBeenCalledTimes(2);
+    expect(yahoo.getQuote).not.toHaveBeenCalled();
+  });
+
+  it('remembers each instrument separately', async () => {
+    ibkr.getQuote.mockImplementation(async (input) => (
+      input === 'XLK' ? { canonical: null, error: 'no_quote' } : ibkrQuote()
+    ));
+    await composite.getQuote('XLK');
+    expect((await composite.getQuote('XLV')).source).toBe('ibkr');
+    expect((await composite.getQuote('XLV')).source).toBe('ibkr');
+    expect(ibkr.getQuote.mock.calls.map(([input]) => input)).toEqual(['XLK', 'XLV', 'XLV']);
   });
 });

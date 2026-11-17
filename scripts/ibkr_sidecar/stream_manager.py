@@ -6,6 +6,7 @@ import asyncio
 import json
 import uuid
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -28,6 +29,33 @@ FORCED_QUOTE_MAX_CONCURRENCY = max(
     int(os.environ.get("IBKR_FORCED_QUOTE_MAX_CONCURRENCY", "12")),
 )
 QUOTE_POLL_SEC = 0.05
+# How long the sidecar remembers which contract a symbol identifies, instead of
+# asking IBKR again on every quote. Only for a stock, ETF, index or currency
+# pair, which a symbol identifies the same way all day; a future or an option
+# asked for by symbol follows the front month and is looked up every time.
+CONTRACT_MEMORY_SEC = max(
+    0.0,
+    float(os.environ.get("IBKR_CONTRACT_MEMORY_SEC", str(12 * 60 * 60))),
+)
+# "No such contract" is remembered only briefly: a contract-definition outage
+# at IBKR gives the same empty answer as a symbol that does not exist.
+UNKNOWN_CONTRACT_MEMORY_SEC = max(
+    0.0,
+    float(os.environ.get("IBKR_UNKNOWN_CONTRACT_MEMORY_SEC", "600")),
+)
+CONTRACT_MEMORY_LIMIT = 2000
+# How long an ordinary quote waits for the next tick of a contract the stream
+# already delivers, once its last tick has gone stale.
+# Pauses between attempts to subscribe the portfolio's positions after a
+# connect. The Gateway is at its busiest then, and one timed-out attempt used
+# to leave the portfolio without streaming quotes until the next reconnect.
+PORTFOLIO_WARMUP_RETRY_SEC = (5.0, 10.0, 20.0, 40.0, 60.0, 60.0)
+SUBSCRIBED_QUOTE_WAIT_SEC = max(
+    0.0,
+    float(os.environ.get("IBKR_SUBSCRIBED_QUOTE_WAIT_SEC", "0.25")),
+)
+CONTRACT_MEMORY_SEC_TYPES = frozenset({"STK", "ETF", "IND", "CASH"})
+UNKNOWN_CONTRACT_PREFIX = "Could not qualify "
 # How long a snapshot whose quote has been read may wait for IBKR to end it
 # before the sidecar cancels it instead.
 SNAPSHOT_END_GRACE_SEC = max(
@@ -194,6 +222,34 @@ def ticker_to_raw_quote(ticker: Any, contract: Contract) -> Dict[str, Any]:
     }
 
 
+def _new_contract_lookup_counts() -> Dict[str, int]:
+    """Contract lookups sent to IBKR, and lookups answered from memory."""
+    return {"asked": 0, "reused": 0}
+
+
+def contract_memory_key(contract: Contract) -> Optional[tuple]:
+    """Identity of a symbol lookup that can be remembered, or None.
+
+    A request that names a contract id is not remembered here: a subscribed
+    contract is already held by the stream, and the rest are asked each time.
+    """
+    if getattr(contract, "conId", 0):
+        return None
+    sec_type = str(getattr(contract, "secType", "") or "").upper()
+    symbol = str(getattr(contract, "symbol", "") or "").upper()
+    if sec_type not in CONTRACT_MEMORY_SEC_TYPES or not symbol:
+        return None
+    return (
+        sec_type,
+        symbol,
+        str(getattr(contract, "exchange", "") or "").upper(),
+        str(getattr(contract, "primaryExchange", "") or "").upper(),
+        str(getattr(contract, "currency", "") or "").upper(),
+        str(getattr(contract, "localSymbol", "") or "").upper(),
+        str(getattr(contract, "tradingClass", "") or "").upper(),
+    )
+
+
 def _new_broker_snapshot_counts() -> Dict[str, int]:
     return {"requested": 0, "endedByGateway": 0, "cancelled": 0}
 
@@ -276,6 +332,9 @@ class StreamManager:
             "max_stream_subs": MAX_STREAM_SUBS,
             "forced_quote_max_concurrency": FORCED_QUOTE_MAX_CONCURRENCY,
             "broker_snapshots": dict(self._broker_snapshot_counts),
+            "contract_lookups": dict(
+                self.__dict__.get("_contract_lookup_counts") or _new_contract_lookup_counts()
+            ),
             "portfolio_account": self._portfolio_account,
             "gateway": self.connection_governor.diagnostics(),
         }
@@ -358,6 +417,8 @@ class StreamManager:
 
     def _on_disconnected(self) -> None:
         self._connection_generation += 1
+        # Contract definitions are looked up afresh in each Gateway session.
+        self.__dict__.get("_contract_memory", {}).clear()
         self.connected = False
         self._live_last_ticks.clear()
         self._tickers.clear()
@@ -388,16 +449,40 @@ class StreamManager:
                 retry_after = max(1.0, float(result.get("retry_after_ms") or 0) / 1000.0)
                 await asyncio.sleep(min(retry_after, 60.0))
 
+    def _portfolio_quotes_subscribed(self, acct: str) -> bool:
+        """True once every position of this account is subscribed to the stream."""
+        owned = self._subscription_owners.get(f"portfolio:{acct}")
+        if owned is None:
+            return False
+        positions = self._portfolio_positions.get(acct) or {}
+        return {int(con_id) for con_id in positions} <= owned
+
     async def _pre_warm_portfolio(self) -> None:
-        """Pre-warm the portfolio cache for all managed accounts after connect."""
+        """Pre-warm the portfolio cache for all managed accounts after connect.
+
+        An account whose positions could not be subscribed is tried again, with
+        growing pauses, for as long as this connection lasts.
+        """
+        generation = self._connection_generation
         try:
             await asyncio.sleep(1.0)  # brief settle for account list
-            accounts = self.ib.managedAccounts()
-            for acct in accounts:
-                try:
-                    await asyncio.wait_for(self._ensure_portfolio_stream(acct), timeout=25)
-                except Exception:
-                    pass
+            for pause in (*PORTFOLIO_WARMUP_RETRY_SEC, None):
+                if generation != self._connection_generation or not self.connected:
+                    return
+                pending = [
+                    acct for acct in self.ib.managedAccounts()
+                    if not self._portfolio_quotes_subscribed(acct)
+                ]
+                for acct in pending:
+                    try:
+                        await asyncio.wait_for(self._ensure_portfolio_stream(acct), timeout=25)
+                    except Exception:
+                        pass
+                if pause is None or all(
+                    self._portfolio_quotes_subscribed(acct) for acct in self.ib.managedAccounts()
+                ):
+                    return
+                await asyncio.sleep(pause)
         except Exception:
             pass
 
@@ -715,8 +800,49 @@ class StreamManager:
             return exact[0], None
 
         if not qualified:
-            return None, f"Could not qualify {label}"
+            return None, f"{UNKNOWN_CONTRACT_PREFIX}{label}"
         return qualified[0], None
+
+    async def _identify_contract(
+        self,
+        contract: Contract,
+        label: Any,
+    ) -> tuple[Optional[Contract], Optional[str]]:
+        """Qualify a contract, remembering the broker's answer for a symbol.
+
+        A timeout or an error is never remembered: only what IBKR actually
+        answered, a contract or "no such contract".
+        """
+        # Created on first use: tests build a manager without __init__.
+        counts = self.__dict__.setdefault("_contract_lookup_counts", _new_contract_lookup_counts())
+        memory = self.__dict__.setdefault("_contract_memory", {})
+        key = contract_memory_key(contract)
+        generation = self._connection_generation
+        if key is not None:
+            remembered = memory.get(key)
+            if remembered is not None:
+                remembered_generation, expires_at, qualified, error = remembered
+                if remembered_generation == generation and time.monotonic() < expires_at:
+                    counts["reused"] += 1
+                    return qualified, error
+                memory.pop(key, None)
+
+        counts["asked"] += 1
+        qualified, error = await self._qualify_contract(contract, label)
+        if key is None or generation != self._connection_generation:
+            return qualified, error
+        if qualified is not None and error is None:
+            lifetime = CONTRACT_MEMORY_SEC
+        elif error and error.startswith(UNKNOWN_CONTRACT_PREFIX):
+            lifetime = UNKNOWN_CONTRACT_MEMORY_SEC
+        else:
+            lifetime = 0.0
+        if lifetime > 0:
+            memory.pop(key, None)
+            memory[key] = (generation, time.monotonic() + lifetime, qualified, error)
+            while len(memory) > CONTRACT_MEMORY_LIMIT:
+                memory.pop(next(iter(memory)))
+        return qualified, error
 
     async def _wait_for_persistent_quote(
         self,
@@ -739,6 +865,22 @@ class StreamManager:
                     return raw
             await asyncio.sleep(QUOTE_POLL_SEC)
         return last_raw or ticker_to_raw_quote(self._tickers.get(cid), contract)
+
+    def _persistent_quote_wait(self, cid: int, contract: Contract, timeout_sec: float) -> float:
+        """How long to wait for a subscribed contract's next tick.
+
+        Its stream is already the freshest source there is. Once a tick has
+        arrived, a stale quote means the market is quiet, and waiting out the
+        whole timeout only holds the caller before the same answer. A
+        subscription that has delivered nothing yet is still starting and
+        gets the full wait.
+        """
+        last = self._quote_cache.get(cid)
+        if last is None:
+            ticker = self._tickers.get(cid)
+            last = ticker_to_raw_quote(ticker, contract) if ticker is not None else None
+        delivered = bool(last and last.get("timestamp"))
+        return min(timeout_sec, SUBSCRIBED_QUOTE_WAIT_SEC) if delivered else timeout_sec
 
     async def _capture_temporary_quote(
         self,
@@ -986,17 +1128,17 @@ class StreamManager:
         contract = self.instrument_to_contract(inst)
         label = getattr(inst, "localSymbol", None) or getattr(inst, "symbol", None) or getattr(inst, "conId", None)
         requested_cid = int(contract.conId) if contract.conId else None
-        # Stable contract identity is not price data. For a forced snapshot,
-        # reuse the broker-qualified contract already owned by the persistent
-        # portfolio stream, while still requesting every mark anew from IBKR.
+        # Stable contract identity is not price data. The broker-qualified
+        # contract already owned by the persistent stream is reused for every
+        # quote; a forced snapshot still requests each mark anew from IBKR.
         qualified_contract = (
             self._contracts.get(requested_cid)
-            if force_refresh and requested_cid is not None
+            if requested_cid is not None
             else None
         )
         qualification_error = None
         if qualified_contract is None:
-            qualified_contract, qualification_error = await self._qualify_contract(contract, label)
+            qualified_contract, qualification_error = await self._identify_contract(contract, label)
         if qualification_error:
             return {"quote": None, "error": qualification_error}
         cid = int(qualified_contract.conId) if qualified_contract.conId else None
@@ -1016,7 +1158,11 @@ class StreamManager:
                 self._capture_broker_snapshot(cid, qualified_contract, timeout_sec)
                 if force_refresh
                 else (
-                    self._wait_for_persistent_quote(cid, qualified_contract, timeout_sec)
+                    self._wait_for_persistent_quote(
+                        cid,
+                        qualified_contract,
+                        self._persistent_quote_wait(cid, qualified_contract, timeout_sec),
+                    )
                     if self._ref_counts.get(cid, 0) > 0
                     else self._capture_temporary_quote(cid, qualified_contract, timeout_sec)
                 )

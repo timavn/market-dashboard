@@ -7067,9 +7067,27 @@ async function buildRatesPayload(region, opts) {
   return out;
 }
 
+// The overview's IBKR rows stay subscribed while the overview is being asked
+// for, so a poll reads them from the stream instead of opening and cancelling a
+// market-data request for each one. The portfolio's lines come first; see the
+// module for the line budget.
+const { createOverviewStreamSubscription } = require('./src/services/ibkr/overviewStreamSubscription.cjs');
+const overviewStreamSubscription = createOverviewStreamSubscription({
+  rows: () => Object.values(MARKET_REGIONS).flatMap((region) => region.indices || []).map(toQuoteInstrument),
+  setDesiredInstruments: ibkrStreamBridge.setDesiredInstruments,
+  readStreamCapacity: async () => {
+    const status = await sidecarRequest('/status', { timeoutMs: 3000 });
+    return { active: status?.stream?.active_subscriptions, max: status?.stream?.max_stream_subs };
+  },
+  // Three misses in a row: a row with no entitlement, or a market that has
+  // gone quiet for the night. A row that ticks now and then stays subscribed.
+  isUnavailable: (row) => compositeMarketDataProvider.hasIbkrMiss(row, 3),
+});
+
 // Multi-Region Quotes endpoint - fetches quotes and sparklines for all regions
 app.get('/api/multi-region-quotes', async (req, res) => {
   const startTime = Date.now();
+  if (ibkrStreamBridge.STREAM_ENABLED) overviewStreamSubscription.touch();
   try {
     const { regions, includeSparklines = 'true', includePeriodReturns = 'false' } = req.query;
     const requestedRegions = regions ? regions.split(',') : Object.keys(MARKET_REGIONS);

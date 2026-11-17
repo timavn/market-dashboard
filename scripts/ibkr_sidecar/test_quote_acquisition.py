@@ -12,7 +12,8 @@ from ib_insync.client import Client
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from stream_manager import StreamManager, ticker_to_raw_quote
+import stream_manager
+from stream_manager import StreamManager, contract_memory_key, ticker_to_raw_quote
 
 
 def instrument(symbol, con_id):
@@ -109,6 +110,188 @@ def make_manager(broker, *, concurrency=6, persistent_ids=None, tickers=None):
     manager._quote_snapshot_tasks = {}
     manager.last_error = None
     return manager
+
+
+def by_symbol(symbol, sec_type="STK", exchange="SMART"):
+    """An instrument asked for by symbol, with no contract id."""
+    return SimpleNamespace(
+        symbol=symbol,
+        conId=None,
+        secType=sec_type,
+        exchange=exchange,
+        currency="USD",
+        lastTradeDateOrContractMonth=None,
+        tradingClass=None,
+        multiplier=None,
+    )
+
+
+class SymbolBroker(FakeBroker):
+    """Answers a symbol lookup with a contract id, as IBKR does."""
+
+    CON_IDS = {"XLK": 9001, "XLV": 9002, "SPX": 9003, "CL": 9004}
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.unknown = set()
+        self.front_month = "202612"
+
+    async def qualifyContractsAsync(self, contract):
+        await asyncio.sleep(0)
+        self.qualification_requests.append(contract)
+        if contract.symbol in self.unknown or contract.symbol not in self.CON_IDS:
+            return []
+        return [Contract(
+            conId=self.CON_IDS[contract.symbol],
+            symbol=contract.symbol,
+            localSymbol=contract.symbol,
+            secType="FUT" if contract.secType == "CONTFUT" else contract.secType,
+            exchange=contract.exchange,
+            currency=contract.currency,
+            lastTradeDateOrContractMonth=self.front_month if contract.secType == "CONTFUT" else "",
+        )]
+
+
+class ContractMemoryTests(unittest.IsolatedAsyncioTestCase):
+    """A symbol's contract is looked up once, not on every quote."""
+
+    async def quote(self, manager, inst, **kwargs):
+        return await manager.get_quote_for_instrument(inst, timeout_sec=0.2, **kwargs)
+
+    async def test_a_stock_asked_by_symbol_is_looked_up_once(self):
+        broker = SymbolBroker()
+        manager = make_manager(broker)
+
+        for _ in range(3):
+            result = await self.quote(manager, by_symbol("XLK"))
+            self.assertIsNone(result["error"])
+            self.assertEqual(result["quote"]["priceState"], "market_mark")
+        other = await self.quote(manager, by_symbol("XLV"))
+
+        self.assertIsNone(other["error"])
+        self.assertEqual([c.symbol for c in broker.qualification_requests], ["XLK", "XLV"])
+        # The price is still requested from IBKR every time.
+        self.assertEqual(broker.req_count, 4)
+        self.assertEqual(manager.__dict__["_contract_lookup_counts"], {"asked": 2, "reused": 2})
+
+    async def test_an_index_on_another_exchange_is_a_separate_lookup(self):
+        broker = SymbolBroker()
+        manager = make_manager(broker)
+
+        await self.quote(manager, by_symbol("SPX", "IND", "CBOE"))
+        await self.quote(manager, by_symbol("SPX", "IND", "CBOE"))
+        await self.quote(manager, by_symbol("SPX", "STK", "SMART"))
+
+        self.assertEqual(
+            [(c.symbol, c.secType, c.exchange) for c in broker.qualification_requests],
+            [("SPX", "IND", "CBOE"), ("SPX", "STK", "SMART")],
+        )
+
+    async def test_a_subscribed_contract_is_not_looked_up_for_an_ordinary_quote(self):
+        broker = SymbolBroker()
+        manager = make_manager(broker, persistent_ids=[201])
+        held = Contract(conId=201, symbol="AAPL", localSymbol="AAPL", secType="STK", exchange="SMART", currency="USD")
+        manager._contracts[201] = held
+        manager._quote_cache[201] = {
+            "symbol": "AAPL", "conId": 201, "priceState": "market_mark", "last": 190.5, "bid": 190.4, "ask": 190.6,
+            "close": 189.0, "dataType": "live", "entitlementStatus": "live",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        result = await self.quote(manager, instrument("AAPL", 201))
+
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["from_cache"])
+        self.assertEqual(broker.qualification_requests, [])
+        self.assertEqual(broker.req_count, 0)
+
+    async def test_an_unknown_symbol_is_remembered_briefly_then_asked_again(self):
+        broker = SymbolBroker()
+        broker.unknown.add("XLK")
+        manager = make_manager(broker)
+
+        first = await self.quote(manager, by_symbol("XLK"))
+        second = await self.quote(manager, by_symbol("XLK"))
+        self.assertEqual(first["error"], "Could not qualify XLK")
+        self.assertEqual(second["error"], "Could not qualify XLK")
+        self.assertEqual(len(broker.qualification_requests), 1)
+
+        # Ten minutes later the symbol exists.
+        broker.unknown.clear()
+        key = contract_memory_key(make_contract(by_symbol("XLK")))
+        generation, _expires, qualified, error = manager._contract_memory[key]
+        manager._contract_memory[key] = (generation, time_before_now(), qualified, error)
+        third = await self.quote(manager, by_symbol("XLK"))
+        self.assertIsNone(third["error"])
+        self.assertEqual(len(broker.qualification_requests), 2)
+
+    async def test_a_timeout_or_an_error_is_never_remembered(self):
+        class FailingOnce(SymbolBroker):
+            failures = [asyncio.TimeoutError(), RuntimeError("socket closed")]
+
+            async def qualifyContractsAsync(self, contract):
+                if self.failures:
+                    self.qualification_requests.append(contract)
+                    raise self.failures.pop(0)
+                return await super().qualifyContractsAsync(contract)
+
+        broker = FailingOnce()
+        manager = make_manager(broker)
+
+        self.assertEqual((await self.quote(manager, by_symbol("XLK")))["error"], "qualification_timeout for XLK")
+        self.assertEqual((await self.quote(manager, by_symbol("XLK")))["error"], "socket closed")
+        self.assertIsNone((await self.quote(manager, by_symbol("XLK")))["error"])
+        self.assertEqual(len(broker.qualification_requests), 3)
+
+    async def test_a_future_asked_by_symbol_follows_the_front_month(self):
+        broker = SymbolBroker()
+        manager = make_manager(broker)
+        manager.instrument_to_contract = lambda inst: Contract(
+            symbol=inst.symbol, secType=inst.secType, exchange=inst.exchange, currency=inst.currency,
+        )
+        self.assertIsNone(contract_memory_key(Contract(symbol="CL", secType="CONTFUT", exchange="NYMEX")))
+        self.assertIsNone(contract_memory_key(Contract(symbol="CL", secType="FUT", exchange="NYMEX")))
+        self.assertIsNone(contract_memory_key(Contract(conId=9001, symbol="XLK", secType="STK", exchange="SMART")))
+
+        await self.quote(manager, by_symbol("CL", "CONTFUT", "NYMEX"))
+        broker.front_month = "202701"
+        await self.quote(manager, by_symbol("CL", "CONTFUT", "NYMEX"))
+
+        self.assertEqual(len(broker.qualification_requests), 2)
+        self.assertEqual(
+            [c.lastTradeDateOrContractMonth for c in broker.market_data_contracts],
+            ["202612", "202701"],
+        )
+
+    async def test_a_new_gateway_session_looks_the_contract_up_again(self):
+        broker = SymbolBroker()
+        manager = make_manager(broker)
+
+        await self.quote(manager, by_symbol("XLK"))
+        manager._connection_generation += 1
+        await self.quote(manager, by_symbol("XLK"))
+        self.assertEqual(len(broker.qualification_requests), 2)
+
+        # A disconnect empties the memory outright.
+        manager._live_last_ticks = {}
+        manager._pending_notify = set()
+        manager._broadcast_status = lambda *_args: None
+        manager._on_disconnected()
+        self.assertEqual(manager._contract_memory, {})
+
+    async def test_the_memory_is_bounded(self):
+        broker = SymbolBroker()
+        manager = make_manager(broker)
+        with patch("stream_manager.CONTRACT_MEMORY_LIMIT", 2):
+            for symbol in ("XLK", "XLV", "SPX"):
+                await self.quote(manager, by_symbol(symbol))
+        self.assertEqual(len(manager._contract_memory), 2)
+        self.assertNotIn(contract_memory_key(make_contract(by_symbol("XLK"))), manager._contract_memory)
+
+
+def time_before_now():
+    return stream_manager.time.monotonic() - 1.0
 
 
 class QuoteAcquisitionTests(unittest.IsolatedAsyncioTestCase):
@@ -259,6 +442,49 @@ class QuoteAcquisitionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(broker.req_count, 0)
         self.assertEqual(broker.cancel_count, 0)
+
+    async def test_a_quiet_subscribed_contract_answers_at_once_instead_of_waiting_out_the_timeout(self):
+        broker = FakeBroker(make_ready=False)
+        contract = make_contract(instrument("XLRE", 302))
+        # The stream delivered a tick five minutes ago and nothing since.
+        ticker = SimpleNamespace(
+            bid=41.0, ask=41.1, last=41.05, close=41.0, prevClose=None, volume=10.0, marketDataType=1,
+            time=datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 300, timezone.utc), tickByTicks=[],
+        )
+        manager = make_manager(broker, persistent_ids=[302], tickers={302: ticker})
+        manager._contracts[302] = contract
+
+        started = asyncio.get_running_loop().time()
+        result = await manager.get_quote_for_instrument(instrument("XLRE", 302), timeout_sec=2.0)
+        elapsed = asyncio.get_running_loop().time() - started
+
+        self.assertEqual(result["error"], "quote_timeout")
+        self.assertLess(elapsed, 1.0)
+        self.assertEqual(broker.req_count, 0)
+        self.assertEqual(broker.cancel_count, 0)
+
+    async def test_a_new_subscription_still_gets_the_full_wait_for_its_first_tick(self):
+        broker = FakeBroker(make_ready=False)
+        contract = make_contract(instrument("XLRE", 303))
+        ticker = SimpleNamespace(
+            bid=None, ask=None, last=None, close=41.0, prevClose=None, volume=None, marketDataType=1,
+            time=None, tickByTicks=[],
+        )
+        manager = make_manager(broker, persistent_ids=[303], tickers={303: ticker})
+        manager._contracts[303] = contract
+
+        async def first_tick():
+            await asyncio.sleep(0.4)
+            ticker.last = 41.05
+            ticker.time = datetime.now(timezone.utc)
+
+        task = asyncio.create_task(first_tick())
+        with patch("stream_manager.SUBSCRIBED_QUOTE_WAIT_SEC", 0.05):
+            result = await manager.get_quote_for_instrument(instrument("XLRE", 303), timeout_sec=1.5)
+        await task
+
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["quote"]["last"], 41.05)
 
     async def test_forced_snapshot_bypasses_retained_stream_without_cancelling_it(self):
         broker = FakeBroker(ready_after=0.02)

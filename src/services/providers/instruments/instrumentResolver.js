@@ -5,6 +5,12 @@ const IBKR_CASH_INDEX_OVERRIDES = Object.freeze({
   SPX: Object.freeze({ secType: 'IND', exchange: 'CBOE' }),
 });
 
+// Yahoo's own notation for what IBKR does not list as a US stock: an index
+// (^GSPC), a continuous future (CL=F), a currency pair (EURUSD=X), a crypto
+// pair (BTC-USD) and the ICE dollar index (DX-Y.NYB). Asked of IBKR as a
+// stock, each is an unknown contract on every request.
+const YAHOO_NOTATION = /^\^|=[FX]$|-USD$|^DX-Y\.NYB$/;
+
 function normalizeProvider(provider) {
   const normalized = String(provider || 'auto').trim().toLowerCase();
   return normalized || 'auto';
@@ -99,6 +105,19 @@ function resolveInstrument(input) {
       provider: 'auto',
       supported: false,
       reason: 'empty_symbol',
+    };
+  }
+
+  if (YAHOO_NOTATION.test(symbol)) {
+    return {
+      symbol,
+      secType: 'STK',
+      exchange: 'SMART',
+      currency: 'USD',
+      provider: 'yahoo',
+      yahooSymbol: symbol,
+      supported: false,
+      reason: 'yahoo_only',
     };
   }
 
