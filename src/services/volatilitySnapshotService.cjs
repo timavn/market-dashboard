@@ -8,6 +8,10 @@ const {
   previousTradingDateKey,
   usEquityCloseMinutes,
 } = require('../utils/usEquityMarketCalendar.cjs');
+const {
+  PERIOD_START_REFERENCE_MAX_GAP_MS,
+  calendarMonthsBefore,
+} = require('../utils/marketPeriodReturns.cjs');
 
 const NEW_YORK_TIME_ZONE = 'America/New_York';
 const NEW_YORK_PARTS_FORMATTER = new Intl.DateTimeFormat('en-US', {
@@ -231,16 +235,32 @@ function computeVolatilityMetrics(rows) {
   const reference = (sessionsAgo) => (
     lastIndex - sessionsAgo >= 0 ? normalized[lastIndex - sessionsAgo] : null
   );
+  // The last close on or before the same calendar date `months` earlier: the
+  // rule the market overview uses, and how Hedgeye states monthly changes.
+  const currentTime = Date.parse(`${currentRow.date}T00:00:00Z`);
+  const monthsAgo = (months) => {
+    const target = calendarMonthsBefore(currentTime, months);
+    const targetDate = new Date(target).toISOString().slice(0, 10);
+    let match = null;
+    for (const row of normalized) {
+      if (row.date > targetDate) break;
+      match = row;
+    }
+    if (!match) return null;
+    return target - Date.parse(`${match.date}T00:00:00Z`) <= PERIOD_START_REFERENCE_MAX_GAP_MS ? match : null;
+  };
   const priorYearClose = [...normalized]
     .reverse()
     .find((row) => row.date < `${currentRow.date.slice(0, 4)}-01-01`) || null;
 
   const day = reference(1);
   const fifteenDay = reference(15);
+  // Five sessions, which is a calendar week except in a holiday week. The
+  // prediction sizing thresholds read this value, so it is left as it is.
   const week = reference(5);
-  const month = reference(21);
-  const threeMonth = reference(63);
-  const sixMonth = reference(126);
+  const month = monthsAgo(1);
+  const threeMonth = monthsAgo(3);
+  const sixMonth = monthsAgo(6);
 
   return {
     lastPx: currentRow.close,

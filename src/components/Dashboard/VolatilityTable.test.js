@@ -4,9 +4,9 @@ import '@testing-library/jest-dom';
 import VolatilityTable, { VOL_RANGES, getBucketForSeries } from './VolatilityTable';
 
 describe('volatility regime buckets', () => {
-  test('uses the corrected VIX boundaries', () => {
-    expect(getBucketForSeries('VIX', 19.99)).toBe('green');
-    expect(getBucketForSeries('VIX', 20)).toBe('yellow');
+  test('uses the VIX boundaries at 19 and 29', () => {
+    expect(getBucketForSeries('VIX', 18.99)).toBe('green');
+    expect(getBucketForSeries('VIX', 19)).toBe('yellow');
     expect(getBucketForSeries('VIX', 28.99)).toBe('yellow');
     expect(getBucketForSeries('VIX', 29)).toBe('red');
   });

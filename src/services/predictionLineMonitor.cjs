@@ -1,12 +1,12 @@
 const UNIVERSE = require('../constants/predictionMarketUniverse.json');
-const { calibrate, fee, kalshiAccountValue, kalshiLine, priceLines, fitLadder, SIZING } = require('./predictionSizing.cjs');
+const { fee, kalshiAccountValue, kalshiLine, fitLadder, SIZING } = require('./predictionSizing.cjs');
 
 // Kalshi line monitor: every rule is an ordered list of conditions, first match wins.
 //   Shade    (per market)     Long (green) / Short (red) / none: Trade and Trend agree and price is in the matching
 //                              third of the Risk Range (user-specified 2026-11-13).
-//   Lines    (per line)       Strong / Good / Watch / Pass by edge for the shaded side at the price our bet size
-//                              actually fills at (walking the order book); Illiquid when the book cannot take the bet.
-//   Held     (per owned line) Closed / Contradicts / Through line / Edge gone / Unshaded / Closing / Hold.
+//   Lines    (per line)       Both sides at the price our bet size actually fills at (walking the order book), the lines
+//                              on the sizing ticket marked; Illiquid when the book cannot take the bet.
+//   Held     (per owned line) Closed / Contradicts / Through line / Unshaded / Closing / Hold.
 //   Book     (whole account)  At risk, max payout, exposure by section and the book's flags.
 // Read-only: nothing here sizes or places an order.
 
@@ -17,22 +17,14 @@ const eventOf = (ticker) => String(ticker || '').split('-').slice(0, 2).join('-'
 const LADDER_KEEP = 60;
 const LONG_STRIKES = new Set(['greater', 'greater_or_equal']);
 const SHORT_STRIKES = new Set(['less', 'less_or_equal']);
-const STATE_RANK = { CLOSED: -1, CONTRADICTS: 0, THROUGH_LINE: 1, EDGE_GONE: 2, SETUP_LAPSED: 3, CLOSING: 4, HOLD: 5 };
-const STATE_TONE = { CLOSED: 'blue', CONTRADICTS: 'red', THROUGH_LINE: 'yellow', EDGE_GONE: 'yellow', SETUP_LAPSED: 'yellow', CLOSING: 'blue', HOLD: 'none' };
+const STATE_RANK = { CLOSED: -1, CONTRADICTS: 0, THROUGH_LINE: 1, SETUP_LAPSED: 3, CLOSING: 4, HOLD: 5 };
+const STATE_TONE = { CLOSED: 'blue', CONTRADICTS: 'red', THROUGH_LINE: 'yellow', SETUP_LAPSED: 'yellow', CLOSING: 'blue', HOLD: 'none' };
 
 /** Board market id for a Kalshi ticker: its own series, or a series the catalog maps to it (weeklies). */
 function marketIdForTicker(ticker, markets = UNIVERSE.markets) {
   const series = seriesOf(ticker);
   const match = markets.find((market) => [].concat(market.kalshi.series, market.kalshi.heldSeries || []).includes(series));
   return match ? match.id : null;
-}
-
-function strength(edge, config = MONITOR) {
-  const points = edge * 100;
-  if (points >= config.edgeTiers.strong) return 'STRONG';
-  if (points >= config.edgeTiers.good) return 'GOOD';
-  if (points >= config.edgeTiers.watch) return 'WATCH';
-  return 'PASS';
 }
 
 const word = (value) => `${value[0]}${value.slice(1).toLowerCase()}`;
@@ -90,13 +82,11 @@ function heldState(held, row, market, { now = new Date(), config = MONITOR, clos
   const mid = yesBid !== null && yesAsk !== null && yesAsk >= yesBid && yesAsk > 0 ? (yesBid + yesAsk) / 2 : null;
   const sideMid = mid === null ? null : held.side === 'YES' ? mid : 1 - mid;
   const bid = raw(held.side === 'YES' ? 'yes_bid' : 'no_bid');
-  const ours = mid === null ? null : held.side === 'YES' ? calibrate(mid) : 1 - calibrate(mid);
   const closeTime = market?.close_time || null;
   const hoursLeft = closeTime ? (Date.parse(closeTime) - now.getTime()) / 3_600_000 : null;
   const setupSide = row?.setup?.side || null;
   const base = { ...held, marketId: row?.id || null, market: row?.label || null, strike: quote?.strike ?? null, strikeType,
-    subtitle: market?.yes_sub_title || null, direction, bid, kalshiOdds: sideMid, ourOdds: ours,
-    exitEdge: ours !== null && bid !== null ? ours - bid : null, closeTime };
+    subtitle: market?.yes_sub_title || null, direction, bid, kalshiOdds: sideMid, closeTime };
   const result = (state, why) => ({ ...base, state, tone: STATE_TONE[state], why });
   const pct = (value) => `${Math.round(value * 100)}%`;
   // Its event was read and the line is no longer open: trading is over, it only waits to settle.
@@ -105,7 +95,6 @@ function heldState(held, row, market, { now = new Date(), config = MONITOR, clos
     return result('CONTRADICTS', `Shaded ${setupSide === 'LONG' ? 'long' : 'short'}; line is held ${held.side === 'YES' ? 'Yes' : 'No'}`);
   }
   if (sideMid !== null && sideMid < 0.5) return result('THROUGH_LINE', `Kalshi has the held side at ${pct(sideMid)}`);
-  if (ours !== null && bid !== null && ours < bid) return result('EDGE_GONE', `Our odds ${pct(ours)} vs ${Math.round(bid * 100)}¢ bid`);
   // CPI carries no setup rule, so it never lapses.
   if (row && 'setup' in row && !setupSide) return result('SETUP_LAPSED', row.setup?.reason || 'Unshaded');
   if (hoursLeft !== null && hoursLeft >= 0 && hoursLeft <= config.closingHours) {
@@ -151,26 +140,23 @@ function bookFill(levels, dollars, sizingConfig = SIZING) {
 }
 
 /**
- * One side of a line as we would buy it. With an order book and a bet size: the bet walked through the book, its
- * average price as the ask and our edge at that price (our odds − average − average fee); illiquid when the book cannot
- * take the whole bet. Without one: the top ask, the dollars resting there and our edge at it; illiquid with no ask or
- * under minDepthDollars at the ask (an unknown size is not held against it).
+ * One side of a line as we would buy it. With an order book and a bet size: the bet walked through the book and its
+ * average price as the ask; illiquid when the book cannot take the whole bet. Without one: the top ask and the dollars
+ * resting there; illiquid with no ask or under minDepthDollars at the ask (an unknown size is not held against it).
  */
-function sideBook(line, side, ours, { config = MONITOR, sizingConfig = SIZING, book = null, bet = null } = {}) {
+function sideBook(line, side, { config = MONITOR, sizingConfig = SIZING, book = null, bet = null } = {}) {
   if (book && bet > 0) {
     const levels = askLevels(book, side);
     const depth = levels.reduce((total, [price, count]) => total + price * count, 0);
     const fill = bookFill(levels, bet, sizingConfig);
-    if (!fill.contracts) return { ask: null, depth, edge: null, illiquid: true, fill };
-    return { ask: fill.avg, depth, edge: ours === null ? null : ours - fill.avg - fill.fee, fill,
-      ...(fill.complete ? {} : { illiquid: true }) };
+    if (!fill.contracts) return { ask: null, depth, illiquid: true, fill };
+    return { ask: fill.avg, depth, fill, ...(fill.complete ? {} : { illiquid: true }) };
   }
   const ask = side === 'YES' ? line.yesAsk : line.noAsk;
   const size = side === 'YES' ? line.yesAskSize : line.noAskSize;
-  if (ask === null) return { ask: null, depth: null, edge: null, illiquid: true };
+  if (ask === null) return { ask: null, depth: null, illiquid: true };
   const depth = size === null ? null : size * ask;
-  return { ask, depth, edge: ours === null ? null : ours - ask - fee(ask, sizingConfig),
-    ...(depth !== null && depth < config.minDepthDollars ? { illiquid: true } : {}) };
+  return { ask, depth, ...(depth !== null && depth < config.minDepthDollars ? { illiquid: true } : {}) };
 }
 
 /**
@@ -207,86 +193,66 @@ function kalshiCentre(lines) {
   return null;
 }
 
-const bestOf = (line, side, book) => ({ ticker: line.ticker, strike: line.strike, subtitle: line.subtitle || null, side,
-  ask: book.ask, edge: book.edge, depth: book.depth });
+const midOf = (line) => (line.yesBid !== null && line.yesAsk !== null ? (line.yesBid + line.yesAsk) / 2 : null);
 
 /**
- * The setup's lines in its selected event, graded by edge on the setup's side (Short buys NO, Long buys YES), with the
- * other side shown beside it. A setup side with under minDepthDollars at its ask grades Illiquid, whatever its edge.
- * `seen` remembers when each line first read Strong, so one that turned Strong within newStrongMinutes and is not held
- * is marked new.
+ * The setup's lines in its selected event, in strike order: both sides of every two-sided line, the setup's side
+ * (Short buys NO, Long buys YES) marked as the one to buy, each line the sizing rules allow marked in reach, and each
+ * line the sizing ticket buys carrying its stake, contracts and what it wins.
+ * A line whose setup side has under minDepthDollars at its ask, or cannot take the bet, is Illiquid.
  */
-function gradeLines(row, markets, { held = [], seen = new Map(), now = new Date(), config = MONITOR, sizingConfig = SIZING,
-  books = null, bet = null } = {}) {
+function setupLines(row, markets, { held = [], config = MONITOR, sizingConfig = SIZING, books = null, bet = null } = {}) {
   const side = row.setup?.side;
   if (!side || !Array.isArray(markets)) return null;
-  const quoted = quotedLines(markets);
-  const byTicker = new Map(quoted.map((line) => [line.ticker, line]));
+  const quoted = quotedLines(markets).filter((line) => midOf(line) !== null);
   const ladder = fitLadder(quoted, sizingConfig);
-  // The sizing block's tilt and widening, when the setup is sized, so its tickets and these lines agree. Every two-sided
-  // line is priced here; depth, not spread, decides whether it can be taken.
-  const priced = priceLines({ side, lines: quoted, tilt: row.sizing?.tilt || 0, widen: row.sizing?.widen || 1, ladder },
-    { ...sizingConfig, maxSpread: 1 });
   const heldBy = new Map(held.map((line) => [line.ticker, line]));
+  const ticket = new Map((row.sizing?.lines || []).map((line) => [line.ticker, line]));
+  const reach = new Set(row.sizing?.reach || []);
   const buy = side === 'LONG' ? 'YES' : 'NO';
-  const lines = priced.map((line) => {
-    const quote = byTicker.get(line.ticker);
-    const ourYes = buy === 'YES' ? line.ourOdds : 1 - line.ourOdds;
+  const lines = quoted.map((line) => {
     const book = books?.get(line.ticker) || null;
     const options = { config, sizingConfig, book, bet: book ? bet : null };
-    const yes = sideBook(quote, 'YES', ourYes, options);
-    const no = sideBook(quote, 'NO', 1 - ourYes, options);
+    const yes = sideBook(line, 'YES', options);
+    const no = sideBook(line, 'NO', options);
     const taken = buy === 'YES' ? yes : no;
-    // With a book read, the grade is the edge at the price the whole bet fills at.
-    const edge = book ? taken.edge : line.edge;
-    const grade = taken.illiquid || edge === null ? 'ILLIQUID' : strength(edge, config);
     const own = heldBy.get(line.ticker);
-    if (grade === 'STRONG') { if (!seen.has(line.ticker)) seen.set(line.ticker, now.getTime()); } else seen.delete(line.ticker);
-    const isNew = grade === 'STRONG' && !own && now.getTime() - seen.get(line.ticker) <= config.newStrongMinutes * 60_000;
-    return { ticker: line.ticker, strike: line.strike, subtitle: quote.subtitle, buy, ask: book ? taken.ask : line.ask,
-      kalshiOdds: line.kalshiOdds, ourOdds: line.ourOdds, edge, yes, no, ...(book ? { checked: true } : {}), kalshiYes: buy === 'YES' ? line.kalshiOdds : 1 - line.kalshiOdds, ourYes,
-      sigmas: line.sigmas ?? null, strength: grade, ...(isNew ? { isNew: true } : {}),
+    const staked = ticket.get(line.ticker);
+    return { ticker: line.ticker, strike: line.strike, subtitle: line.subtitle, buy, ask: taken.ask, kalshiYes: midOf(line), yes, no,
+      ...(book ? { checked: true } : {}), sigmas: ladder ? (line.strike - ladder.centre) / ladder.sigma : null,
+      ...(taken.illiquid ? { illiquid: true } : {}),
+      ...(reach.has(line.ticker) ? { reach: true } : {}),
+      ...(staked ? { ticket: { pct: staked.pct, zone: staked.zone, ask: staked.ask,
+        ...(staked.contracts === undefined ? {} : { contracts: staked.contracts, dollars: staked.dollars, win: staked.win }) } } : {}),
       ...(own ? { held: { side: own.side, contracts: own.contracts } } : {}) };
-  }).sort((left, right) => (right.edge ?? -1) - (left.edge ?? -1));
-  const count = (grade) => lines.filter((line) => line.strength === grade).length;
+  }).sort((left, right) => left.strike - right.strike);
   const closeTime = markets.map((market) => market.close_time).filter(Boolean).sort()[0] || null;
-  const takeable = lines.filter((line) => line.strength !== 'ILLIQUID');
-  const top = takeable[0];
-  return { side, buy, lines, illiquid: count('ILLIQUID'), closeTime, minDepth: config.minDepthDollars, bet: books?.size ? bet : null,
-    total: lines.length, fillable: takeable.length,
-    bestLine: top ? { ...bestOf(top, buy, buy === 'YES' ? top.yes : top.no), strength: top.strength, ...(top.isNew ? { isNew: true } : {}) } : null,
-    counts: { STRONG: count('STRONG'), GOOD: count('GOOD'), WATCH: count('WATCH'), PASS: count('PASS'), ILLIQUID: count('ILLIQUID') },
-    best: takeable.length ? takeable[0].edge : null };
+  const illiquid = lines.filter((line) => line.illiquid).length;
+  return { side, buy, lines, illiquid, closeTime, minDepth: config.minDepthDollars, bet: books?.size ? bet : null,
+    total: lines.length, fillable: lines.length - illiquid, onTicket: lines.filter((line) => line.ticket).length };
 }
 
 /**
- * A market's ladder with no setup: every quoted line with both sides (ask, dollars at the ask, our edge) and the
- * side with the better edge marked. A line whose better side has under minDepthDollars at its ask is illiquid.
- * Nothing is graded or marked bettable.
+ * A market's ladder with no setup: every quoted line with both sides (ask and the dollars at the ask). A line is
+ * illiquid when it is one-sided, or neither side has minDepthDollars at its ask or can take the bet. Nothing is marked to buy.
  */
 function ladderLines(markets, { config = MONITOR, sizingConfig = SIZING, books = null, bet = null } = {}) {
   if (!Array.isArray(markets)) return null;
   const quoted = quotedLines(markets);
   const ladder = fitLadder(quoted, sizingConfig);
   const lines = quoted.map((line) => {
-    const mid = line.yesBid !== null && line.yesAsk !== null ? (line.yesBid + line.yesAsk) / 2 : null;
-    const ourYes = mid === null ? null : calibrate(mid);
+    const mid = midOf(line);
     const book = books?.get(line.ticker) || null;
     const options = { config, sizingConfig, book, bet: book ? bet : null };
-    const yes = sideBook(line, 'YES', ourYes, options);
-    const no = sideBook(line, 'NO', ourYes === null ? null : 1 - ourYes, options);
-    const sides = [['YES', yes], ['NO', no]].filter(([, book]) => book.edge !== null);
-    const better = sides.length ? sides.reduce((top, item) => (item[1].edge > top[1].edge ? item : top))[0] : null;
-    const taken = better === 'YES' ? yes : better === 'NO' ? no : null;
-    return { ticker: line.ticker, strike: line.strike, subtitle: line.subtitle, yes, no, better,
-      kalshiOdds: mid, ourOdds: ourYes, sigmas: ladder ? (line.strike - ladder.centre) / ladder.sigma : null,
-      ...(book ? { checked: true } : {}), ...(!taken || taken.illiquid ? { illiquid: true } : {}) };
+    const yes = sideBook(line, 'YES', options);
+    const no = sideBook(line, 'NO', options);
+    return { ticker: line.ticker, strike: line.strike, subtitle: line.subtitle, yes, no,
+      kalshiOdds: mid, sigmas: ladder ? (line.strike - ladder.centre) / ladder.sigma : null,
+      // A one-sided line (no mid) is never fillable.
+      ...(book ? { checked: true } : {}), ...(mid === null || (yes.illiquid && no.illiquid) ? { illiquid: true } : {}) };
   });
-  // With books read, only a line checked against the bet can be the best one.
+  // With books read, only a line checked against the bet counts as fillable.
   const checkedOnly = Boolean(books?.size && bet);
-  const bestLine = lines.filter((line) => !line.illiquid && line.better && (!checkedOnly || line.checked))
-    .map((line) => ({ line, side: line.better, book: line.better === 'YES' ? line.yes : line.no }))
-    .reduce((top, item) => (!top || item.book.edge > top.book.edge ? item : top), null);
   // Long ladders (Nasdaq lists hundreds) keep the lines nearest even odds; unquoted lines go last.
   const distance = (line) => (line.kalshiOdds === null ? 2 : Math.abs(line.kalshiOdds - 0.5));
   const kept = [...lines].sort((left, right) => distance(left) - distance(right)).slice(0, LADDER_KEEP)
@@ -294,17 +260,15 @@ function ladderLines(markets, { config = MONITOR, sizingConfig = SIZING, books =
   const closeTime = markets.map((market) => market.close_time).filter(Boolean).sort()[0] || null;
   return { side: null, lines: kept, total: lines.length, illiquid: kept.filter((line) => line.illiquid).length, closeTime,
     minDepth: config.minDepthDollars, bet: checkedOnly ? bet : null,
-    fillable: lines.filter((line) => !line.illiquid && (!checkedOnly || line.checked)).length, centre: kalshiCentre(lines),
-    best: bestLine ? bestOf(bestLine.line, bestLine.side, bestLine.book) : null };
+    fillable: lines.filter((line) => !line.illiquid && (!checkedOnly || line.checked)).length, centre: kalshiCentre(lines) };
 }
 
 /**
- * One market's block: its shading, the summary row (price against Kalshi's centre, best line, fillable lines, close),
- * graded lines when shaded or the ungraded ladder otherwise, and the lines held in it.
+ * One market's block: its shading, the summary row (price against Kalshi's centre, fillable lines, close),
+ * the setup's lines when shaded or the plain ladder otherwise, and the lines held in it.
  */
 function marketMonitor(row, { lines = null, ladder = null, held = [], quotedAt = null } = {}) {
   const side = row.setup?.side || null;
-  const strongOrGood = lines?.counts ? lines.counts.STRONG + lines.counts.GOOD : 0;
   const top = worst(held);
   const group = UNIVERSE.markets.find((market) => market.id === row.id)?.group || null;
   // The market's own price, the one Kalshi settles on (Nasdaq-100, not the Composite its range is read against).
@@ -313,17 +277,16 @@ function marketMonitor(row, { lines = null, ladder = null, held = [], quotedAt =
   return { id: row.id, market: row.label, event: row.events?.[0]?.eventTicker || null,
     shade: side, ...(row.setup?.reason && !side ? { shadeReason: row.setup.reason } : {}),
     summary: { price, centre: ladder?.centre ?? null, position: finite(row.position), unit: group === 'rates' || group === 'inflation' ? '%' : null,
-      best: lines ? lines.bestLine : ladder?.best ?? null, fillable: ladder?.fillable ?? lines?.fillable ?? null,
+      fillable: ladder?.fillable ?? lines?.fillable ?? null,
       total: ladder?.total ?? lines?.total ?? null, closeTime: shown?.closeTime || null },
     ...(shown ? { lines: shown } : {}), held, ...(top && top.state !== 'HOLD' ? { worst: { state: top.state, tone: top.tone } } : {}),
-    open: Boolean(side && strongOrGood > 0), quotedAt };
+    open: Boolean(side && lines?.onTicket > 0), quotedAt };
 }
 
 /**
- * The whole Kalshi account: what is at risk, where, and the book-level flags. `held` are graded held lines and
- * `monitors` the market blocks (for bettable lines). Caps stay unflagged until the catalog sets them.
+ * The whole Kalshi account: what is at risk, where, and the book-level flags. `held` are the held lines with their states. Caps stay unflagged until the catalog sets them.
  */
-function kalshiBook({ balance, positions, held, monitors, config = MONITOR, now = new Date() }) {
+function kalshiBook({ balance, positions, held, config = MONITOR, now = new Date() }) {
   const account = kalshiAccountValue(balance);
   const cash = finite(balance?.balance_dollars) ?? (finite(balance?.balance) === null ? null : finite(balance.balance) / 100);
   const atRisk = held.reduce((sum, line) => sum + line.cost, 0);
@@ -371,12 +334,6 @@ function kalshiBook({ balance, positions, held, monitors, config = MONITOR, now 
       flags.push({ tone: 'yellow', text: `Stacked: ${markets.length === 2 ? markets.join(' and ') : `${markets.slice(0, -1).join(', ')} and ${markets.at(-1)}`} ${markets.length === 2 ? 'both' : 'all'} ${section.direction === 'LONG' ? 'long' : 'short'}.` });
     }
   }
-  const fresh = monitors.flatMap((monitor) => (monitor.lines?.lines || []).filter((line) => line.isNew).map((line) => ({ monitor, line })));
-  for (const { monitor, line } of fresh) {
-    flags.push({ tone: 'yellow', text: `${monitor.market} ${lineLabel(line.strike)} is a new Strong line.` });
-  }
-  const bettable = monitors.flatMap((monitor) => (monitor.lines?.lines || [])
-    .filter((line) => (line.strength === 'STRONG' || line.strength === 'GOOD') && !line.held));
   const ledger = bookLedger(held, { sections, groupOf, share });
   const valued = ledger.filter((position) => position.value !== null);
   const closeDays = [...groupBy(held.filter((line) => line.closeTime), (line) => line.closeTime.slice(0, 10))]
@@ -386,7 +343,6 @@ function kalshiBook({ balance, positions, held, monitors, config = MONITOR, now 
     maxPayout: held.reduce((total, line) => total + line.contracts, 0),
     openLines: held.length, events: new Set(held.map((line) => line.event)).size,
     flagged: { red: held.filter((line) => line.tone === 'red').length, yellow: held.filter((line) => line.tone === 'yellow').length },
-    bettable: bettable.length,
     realized: (positions?.event_positions || []).reduce((total, item) => total + (finite(item.realized_pnl_dollars) || 0), 0),
     sections: bySection, flags, positions: ledger,
     // Value now: each held line's contracts at its current bid. Lines with no bid (closed, awaiting settlement) are left out.
@@ -429,16 +385,15 @@ function groupBy(items, keyOf) {
   for (const item of items) groups.set(keyOf(item), [...(groups.get(keyOf(item)) || []), item]);
   return groups;
 }
-const lineLabel = (strike) => `Above ${Number(strike).toLocaleString('en-US', { maximumFractionDigits: 4 })}`;
 
 /**
  * Attach the monitor to a finished board. `marketsByEvent` holds the live Kalshi markets of every event read
  * (setups' selected events and held events). Rows gain `kalshiLines`; the board gains `kalshiBook`.
  */
-function applyLineMonitor(board, { balance, positions, marketsByEvent, seen, now = new Date(), orderbooks = null }) {
+function applyLineMonitor(board, { balance, positions, marketsByEvent, now = new Date(), orderbooks = null }) {
   const account = kalshiAccountValue(balance);
   const rows = board.rows || [];
-  // The monitor reads every row through its shading, not the board's setup rule (which sizing keeps using).
+  // Every row is read through its shading, which is the board's setup rule with the reason a row is unshaded.
   const shadedRows = new Map(rows.map((row) => [row.id, 'setup' in row ? { ...row, setup: shadeOf(row) } : row]));
   const rowById = shadedRows;
   const marketByTicker = new Map([...marketsByEvent.values()].flat().filter(Boolean).map((market) => [market.ticker, market]));
@@ -448,26 +403,23 @@ function applyLineMonitor(board, { balance, positions, marketsByEvent, seen, now
     const closed = !market && Array.isArray(marketsByEvent.get(line.event));
     return heldState(line, row, market, { now, closed });
   }).sort((left, right) => STATE_RANK[left.state] - STATE_RANK[right.state]);
-  const monitors = [];
   for (const row of rows) {
     const shaded = shadedRows.get(row.id);
     const own = held.filter((line) => line.marketId === row.id);
     const event = row.events?.[0]?.eventTicker;
     const markets = event ? marketsByEvent.get(event) : null;
-    // A setup grades its lines for its side; any other market still shows its ladder.
     // Each line is checked against the market's bet: what that many dollars buys through the order book.
     const bet = orderbooks?.size ? betDollars(row, account) : null;
     const ladder = ladderLines(markets, { books: orderbooks, bet });
-    // A shaded row grades its lines for its side; any other row shows its ladder.
-    const lines = shaded.setup?.side ? gradeLines(shaded, markets, { held: own, seen, now, books: orderbooks, bet }) : null;
+    // A shaded row lists its lines for its side; any other row shows its ladder.
+    const lines = shaded.setup?.side ? setupLines(shaded, markets, { held: own, books: orderbooks, bet }) : null;
     if (!lines && !ladder && !own.length && !('setup' in row)) continue;
     row.kalshiLines = marketMonitor(shaded, { lines, ladder, held: own, quotedAt: now.toISOString() });
-    monitors.push(row.kalshiLines);
   }
-  // Without a positions read the lines still grade; the book needs the account's positions.
-  if (positions) board.kalshiBook = kalshiBook({ balance, positions, held, monitors, now });
+  // Without a positions read the lines still show; the book needs the account's positions.
+  if (positions) board.kalshiBook = kalshiBook({ balance, positions, held, now });
   return board;
 }
 
-module.exports = { applyLineMonitor, askLevels, betDollars, bookCandidates, bookFill, eventOf, gradeLines, kalshiCentre, ladderLines, shadeOf, sideBook, heldDirection, heldPositions, heldState, kalshiBook,
-  marketIdForTicker, marketMonitor, strength, MONITOR };
+module.exports = { applyLineMonitor, askLevels, betDollars, bookCandidates, bookFill, eventOf, setupLines, kalshiCentre, ladderLines, shadeOf, sideBook, heldDirection, heldPositions, heldState, kalshiBook,
+  marketIdForTicker, marketMonitor, MONITOR };

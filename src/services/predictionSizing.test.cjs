@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { allocateLines, calibrate, fitLadder, invPhi, kalshiAccountValue, kalshiLine, phi, scoreConviction, SIZING } = require('./predictionSizing.cjs');
+const { allocateLines, fitLadder, invPhi, kalshiAccountValue, kalshiLine, phi, scoreConviction } = require('./predictionSizing.cjs');
 
 // A ladder priced off a normal curve: centre 4000, one-sigma 40, lines every 20, 2¢ wide.
 const ladder = ({ centre = 4000, sigma = 40, step = 20, half = 0.01 } = {}) => Array.from({ length: 13 }, (_, index) => {
@@ -9,61 +9,57 @@ const ladder = ({ centre = 4000, sigma = 40, step = 20, half = 0.01 } = {}) => A
   return { ticker: `T${strike}`, strike, yesBid: above - half, yesAsk: above + half, noBid: 1 - above - half, noAsk: 1 - above + half };
 });
 
-const fullShort = { side: 'SHORT', position: 1, trade: { direction: 'BEARISH' }, zScore: { value: 2.4 },
+const fullShort = { side: 'SHORT', tick: { direction: 'BEARISH' }, zScore: { value: 2.4 },
   usdCorrelation: { d30: -0.8 }, usd: { trend: 'BULLISH' }, volatility: { regimeKey: 'GVZ', value: 28, w1: 2 },
   volume: { signal: { tone: 'confirms' } } };
+const points = (sized) => Object.fromEntries(sized.components.map((item) => [item.key, item.points]));
 
 test('normal curve and its inverse agree', () => {
   for (const p of [0.01, 0.2, 0.5, 0.84, 0.99]) assert.ok(Math.abs(phi(invPhi(p)) - p) < 1e-6);
 });
 
-test('a setup with every input in its favor is sized at the cap', () => {
+test('a setup starts at 3% and every input in its favor takes it to the 5.5% ceiling', () => {
+  assert.equal(scoreConviction({ side: 'LONG' }).pct, 3);
   const sized = scoreConviction(fullShort);
-  assert.equal(sized.pct, 10);
-  assert.ok(sized.components.every((item) => item.lost === 0));
-});
-
-test('the bare setup at the third boundary is sized at the base', () => {
-  const sized = scoreConviction({ side: 'LONG', position: 0.3333, zScore: { value: 0.5 }, usdCorrelation: { d30: 0.9 },
-    usd: { trend: 'BEARISH' }, volatility: { regimeKey: 'GVZ', value: 40, w1: 0 }, volume: { signal: { tone: 'warns' } } });
-  assert.equal(sized.pct, 4);
-});
-
-test('gold short with the dollar and Z-score partly off lands at 8%', () => {
-  // Top of the range, Trade agrees, vol and volume fine; dollar uncorrelated (half) and price only 1 sd stretched (half).
-  const sized = scoreConviction({ ...fullShort, position: 0.95, zScore: { value: 1 }, usdCorrelation: { d30: -0.3 } });
-  assert.equal(sized.pct, 8.5);
-  const lost = Object.fromEntries(sized.components.filter((item) => item.lost > 0).map((item) => [item.key, Number(item.lost.toFixed(2))]));
-  assert.deepEqual(lost, { range: 0.3, zScore: 0.5, usd: 0.5 });
-  assert.equal(scoreConviction({ ...fullShort, position: 0.9, zScore: { value: 1 }, usdCorrelation: { d30: -0.3 }, trade: null }).pct, 7.5);
-});
-
-test('missing inputs score half and are named; an unpublished Trade earns nothing', () => {
-  const sized = scoreConviction({ side: 'SHORT', position: 1 });
-  const byKey = Object.fromEntries(sized.components.map((item) => [item.key, item]));
-  assert.equal(byKey.trade.score, 0);
-  assert.equal(byKey.trade.missing, undefined);
-  for (const key of ['zScore', 'usd', 'volatility', 'volume']) assert.equal(byKey[key].missing, true);
-  assert.equal(sized.pct, 4 + 2 + 0.5 + 0.5 + 0.25 + 0.25);
+  assert.equal(sized.pct, 5.5);
+  assert.deepEqual(points(sized), { usd: 1, tick: 0.5, volume: 0.5, zScore: 0.5 });
   assert.equal(scoreConviction({ side: null }), null);
 });
 
-test('the dollar counts for a side only through its correlation', () => {
-  const usd = (correlation, trend) => scoreConviction({ side: 'SHORT', position: 1, usdCorrelation: { d30: correlation }, usd: { trend } })
-    .components.find((item) => item.key === 'usd').score;
-  assert.equal(usd(-0.8, 'BULLISH'), 1);
-  assert.equal(usd(-0.8, 'BEARISH'), 0);
-  assert.equal(usd(0.8, 'BULLISH'), 0);
-  assert.equal(usd(-0.4, 'BULLISH'), 0.5);
-  assert.equal(usd(-0.8, 'NEUTRAL'), 0.5);
+test('Tick adds half a point when it agrees, nothing when Neutral, and takes half a point off when it opposes', () => {
+  const tick = (direction) => scoreConviction({ side: 'LONG', tick: direction ? { direction } : null });
+  assert.equal(tick('BULLISH').pct, 3.5);
+  assert.equal(tick('NEUTRAL').pct, 3);
+  assert.equal(tick('BEARISH').pct, 2.5);
+  assert.equal(tick(null).pct, 3);
+  assert.equal(tick(null).components.find((item) => item.key === 'tick').missing, true);
 });
 
-test('expanding or High volatility earns nothing', () => {
-  const vol = (volatility) => scoreConviction({ side: 'SHORT', position: 1, volatility }).components.find((item) => item.key === 'volatility');
-  assert.equal(vol({ regimeKey: 'GVZ', value: 28, w1: 12 }).score, 0);
-  assert.equal(vol({ regimeKey: 'GVZ', value: 40, w1: 0 }).score, 0);
-  assert.equal(vol({ regimeKey: 'GVZ', value: 28, w1: 0 }).score, 1);
-  assert.equal(scoreConviction({ side: 'SHORT', position: 1, volatility: { regimeKey: 'GVZ', value: 28, w1: 12 } }).expanding, true);
+test('the dollar adds only when its Trend supports the side, scaled by the 30D correlation up to 0.5', () => {
+  const usd = (correlation, trend) => points(scoreConviction({ side: 'SHORT', usdCorrelation: { d30: correlation }, usd: { trend } })).usd;
+  assert.equal(usd(-0.8, 'BULLISH'), 1);
+  assert.equal(usd(-0.5, 'BULLISH'), 1);
+  assert.equal(usd(-0.25, 'BULLISH'), 0.5);
+  assert.equal(usd(-0.8, 'BEARISH'), 0);
+  assert.equal(usd(0.8, 'BULLISH'), 0);
+  assert.equal(usd(-0.8, 'NEUTRAL'), 0);
+});
+
+test('volume adds on a supports or confirms signal and Z-score by how far price is stretched against the side', () => {
+  const volume = (tone) => points(scoreConviction({ side: 'SHORT', volume: { signal: { tone } } })).volume;
+  assert.deepEqual([volume('supports'), volume('confirms'), volume('warns'), volume(null)], [0.5, 0.5, 0, 0]);
+  const z = (side, value) => points(scoreConviction({ side, zScore: { value } })).zScore;
+  assert.deepEqual([z('SHORT', 2), z('SHORT', 1), z('SHORT', -1), z('LONG', -3), z('LONG', 1)], [0.5, 0.25, 0, 0.5, 0]);
+  // Dollar +1, Tick +0.5, Z-score +0.25 round to the nearest half point.
+  assert.equal(scoreConviction({ ...fullShort, volume: null, zScore: { value: 1 } }).pct, 5);
+});
+
+test('High or expanding volatility opens the far lines and never changes the size', () => {
+  const vol = (volatility) => scoreConviction({ side: 'SHORT', volatility });
+  assert.deepEqual([vol({ regimeKey: 'GVZ', value: 28, w1: 2 }).wide, vol({ regimeKey: 'GVZ', value: 28, w1: 12 }).wide,
+    vol({ regimeKey: 'GVZ', value: 40, w1: 0 }).wide, vol(null).wide], [false, true, true, false]);
+  assert.equal(vol({ regimeKey: 'GVZ', value: 40, w1: 12 }).pct, 3);
+  assert.equal(vol({ regimeKey: 'GVZ', value: 40, w1: 0 }).volBand, 'High');
 });
 
 test('the ladder fit recovers the centre and one-sigma move', () => {
@@ -73,53 +69,78 @@ test('the ladder fit recovers the centre and one-sigma move', () => {
   assert.equal(fitLadder(ladder().slice(0, 2)), null);
 });
 
-test('the calibration curve lifts favorites and cuts long shots', () => {
-  assert.ok(calibrate(0.9) > 0.9);
-  assert.ok(calibrate(0.1) < 0.1);
-  assert.equal(calibrate(0), 0);
-  assert.equal(calibrate(1), 1);
-});
+const strikes = (split) => split.lines.map((line) => line.strike);
 
-test('a short buys NO at its own ask, only on lines with edge, and never more than the position', () => {
-  const split = allocateLines({ side: 'SHORT', pct: 10, lines: ladder() });
-  assert.ok(split.lines.length > 0);
-  assert.ok(split.lines.every((line) => line.buy === 'NO' && line.edge > 0 && line.pct >= SIZING.minLinePct));
-  assert.ok(Math.abs(split.spentPct - 10) < 1e-9);
+test('a long splits evenly across the YES lines half to one expected move above the price', () => {
+  // Centre 4000, one move 40, lines every 20: 4020 is half a move out (about 31¢), 4040 one move (about 16¢).
+  const split = allocateLines({ side: 'LONG', pct: 4, lines: ladder() });
+  assert.deepEqual(strikes(split), [4020, 4040]);
+  assert.ok(split.lines.every((line) => line.buy === 'YES' && line.zone === 'target' && line.pct === 2 && line.ask <= 0.5));
+  assert.ok(Math.abs(split.lines[0].ask - 0.3185) < 0.002 && Math.abs(split.lines[1].ask - 0.1687) < 0.002);
+  assert.ok(Math.abs(split.lines[1].moves - 1) < 0.01 && Math.abs(split.lines[1].fromCentrePct - 1) < 0.01);
   assert.equal(split.unspentPct, 0);
-  const atCentre = split.lines.find((line) => line.strike === 4000);
-  assert.ok(Math.abs(atCentre.ask - 0.51) < 1e-6);
-  assert.ok(Math.abs(atCentre.sigmas) < 0.02);
-  // The tilt moves our odds of settling below the centre line above Kalshi's.
-  assert.ok(atCentre.ourOdds > atCentre.kalshiOdds + 0.05);
+  assert.ok(Math.abs(split.avgAsk - (split.lines[0].ask + split.lines[1].ask) / 2) < 1e-9);
 });
 
-test('a long buys YES and a line with no quote on that side is skipped', () => {
-  const lines = ladder().map((line) => (line.strike === 4000 ? { ...line, yesAsk: line.yesAsk, noAsk: null } : line));
-  const long = allocateLines({ side: 'LONG', pct: 8, lines });
-  assert.ok(long.lines.every((line) => line.buy === 'YES'));
-  const short = allocateLines({ side: 'SHORT', pct: 8, lines });
-  assert.equal(short.lines.some((line) => line.strike === 4000), false);
+test('a short buys NO below the price, at the NO side\'s own ask', () => {
+  const split = allocateLines({ side: 'SHORT', pct: 4, lines: ladder() });
+  assert.deepEqual(strikes(split), [3960, 3980]);
+  assert.ok(split.lines.every((line) => line.buy === 'NO' && line.ask <= 0.5));
+  // A line with no NO quote is skipped, never priced from the YES side.
+  const lines = ladder().map((line) => (line.strike === 3980 ? { ...line, noAsk: null } : line));
+  assert.deepEqual(strikes(allocateLines({ side: 'SHORT', pct: 4, lines })), [3960]);
+});
+
+test('lines past one expected move join only when volatility is High or expanding, and never past one and a half', () => {
+  assert.deepEqual(strikes(allocateLines({ side: 'LONG', pct: 4, lines: ladder(), wide: true })), [4020, 4040, 4060]);
+  // 4080 is two moves out: never bought.
+  assert.ok(strikes(allocateLines({ side: 'LONG', pct: 4, lines: ladder({ half: 0.005 }), wide: true })).every((strike) => strike <= 4060));
+});
+
+test('no line is bought past the far end of the Risk Range, scaled to the ladder\'s own centre', () => {
+  assert.deepEqual(strikes(allocateLines({ side: 'LONG', pct: 4, lines: ladder(), range: { low: 3980, high: 4030, price: 4000 } })), [4020]);
+  assert.deepEqual(strikes(allocateLines({ side: 'SHORT', pct: 4, lines: ladder(), range: { low: 3970, high: 4100, price: 4000 } })), [3980]);
+  // The range is in futures terms 1% above the spot ladder: its 4070 top is 4030 on the ladder.
+  const split = allocateLines({ side: 'LONG', pct: 4, lines: ladder(), range: { low: 4020, high: 4070, price: 4040 } });
+  assert.deepEqual(strikes(split), [4020]);
+  assert.ok(Math.abs(split.rangeLimit - 4030) < 1);
+});
+
+test('when no target line qualifies the whole position goes on the cheapest nearer line', () => {
+  // The range ends just past the price: only the 46¢ line next to the centre is left.
+  const split = allocateLines({ side: 'LONG', pct: 5, lines: ladder({ step: 5 }), range: { low: 3900, high: 4008, price: 4000 } });
+  assert.deepEqual(strikes(split), [4005]);
+  assert.deepEqual([split.lines[0].zone, split.lines[0].pct], ['near', 5]);
+  assert.ok(split.lines[0].ask > 0.4 && split.lines[0].ask <= 0.5);
+  // Nothing at 50¢ or less inside the range: no ticket.
+  const none = allocateLines({ side: 'LONG', pct: 5, lines: ladder(), range: { low: 3900, high: 3999, price: 3990 } });
+  assert.deepEqual([none.lines.length, none.unspentPct, none.reason], [0, 5, 'No line at 50¢ or less within reach']);
 });
 
 test('wide or one-sided lines are not priced', () => {
-  const wide = ladder({ half: 0.04 });
-  assert.equal(allocateLines({ side: 'SHORT', pct: 8, lines: wide }).reason, 'No liquid line');
+  assert.equal(allocateLines({ side: 'SHORT', pct: 4, lines: ladder({ half: 0.04 }) }).reason, 'No liquid line');
 });
 
-test('with an account balance, stakes become whole contracts capped by the size at the ask', () => {
-  const lines = ladder().map((line) => ({ ...line, askSize: 40 }));
-  const split = allocateLines({ side: 'SHORT', pct: 10, lines, bankroll: 6000 });
-  assert.ok(split.lines.length > 0 && split.lines.every((line) => Number.isInteger(line.contracts) && line.contracts <= 40 && line.capped));
-  assert.ok(split.unspentPct > 0);
-  const open = allocateLines({ side: 'SHORT', pct: 10, lines: ladder(), bankroll: 6000 });
-  assert.ok(open.spentPct <= 10 && open.spentPct > 9.5);
-  assert.ok(Math.abs(open.lines.reduce((sum, line) => sum + line.dollars, 0) - (open.spentPct / 100) * 6000) < 1e-6);
+test('with an account balance, stakes are whole contracts and what a line cannot take at its ask moves on', () => {
+  const open = allocateLines({ side: 'LONG', pct: 4, lines: ladder(), bankroll: 6000 });
+  assert.deepEqual(strikes(open), [4020, 4040]);
+  assert.ok(open.lines.every((line) => Number.isInteger(line.contracts) && line.dollars <= 120 && line.dollars > 119));
+  assert.ok(Math.abs(open.lines[0].win - (open.lines[0].contracts - open.lines[0].dollars)) < 1e-9);
+  // 100 contracts rest at each ask: the three target lines take about $75 between them and the 41¢ line the next $42.
+  const thin = allocateLines({ side: 'LONG', pct: 4, lines: ladder({ step: 10 }).map((line) => ({ ...line, yesAskSize: 100, noAskSize: 5 })), bankroll: 6000 });
+  assert.deepEqual(strikes(thin), [4010, 4020, 4030, 4040]);
+  assert.ok(thin.lines.every((line) => line.contracts === 100 && line.capped));
+  assert.equal(thin.lines[0].zone, 'near');
+  assert.ok(thin.unspentPct > 2 && Math.abs(thin.spentPct + thin.unspentPct - 4) < 1e-9);
+  // A short reads the size resting on the YES bid it sells into.
+  const short = allocateLines({ side: 'SHORT', pct: 4, lines: ladder().map((line) => ({ ...line, yesAskSize: 100, noAskSize: 5 })), bankroll: 6000 });
+  assert.ok(short.lines.every((line) => line.contracts === 5));
 });
 
-test('a base-size position has no tilt and a vol expansion widens the curve', () => {
-  assert.equal(allocateLines({ side: 'SHORT', pct: 4, lines: ladder() }).tilt, 0);
-  assert.equal(allocateLines({ side: 'SHORT', pct: 10, lines: ladder() }).tilt, SIZING.tiltSigma);
-  assert.equal(allocateLines({ side: 'SHORT', pct: 10, lines: ladder(), expanding: true }).widen, SIZING.widenOnExpansion);
+test('more than four lines in the zone are thinned to four, evenly spaced', () => {
+  const fine = allocateLines({ side: 'LONG', pct: 4, lines: ladder({ step: 10 }), wide: true });
+  assert.equal(fine.lines.length, 4);
+  assert.ok(fine.lines.every((line) => line.pct === 1));
 });
 
 test('Kalshi quotes are read in dollars from either field form and never derived across sides', () => {
@@ -131,16 +152,6 @@ test('Kalshi quotes are read in dollars from either field form and never derived
   assert.equal(cents.yesAsk, 0.43);
   assert.equal(cents.noAsk, null);
   assert.equal(cents.noBid, null);
-});
-
-test('a short is capped by the size resting on the YES bid it sells into', () => {
-  const lines = ladder().map((line) => ({ ...line, yesAskSize: 1000, noAskSize: 3 }));
-  // Three contracts are under a quarter-percent of the account, so those lines drop out and the money stays unspent.
-  const thin = allocateLines({ side: 'SHORT', pct: 10, lines, bankroll: 6000 });
-  assert.deepEqual([thin.lines.length, thin.unspentPct, thin.reason], [0, 10, 'No line with edge']);
-  const fifty = allocateLines({ side: 'SHORT', pct: 10, lines: lines.map((line) => ({ ...line, noAskSize: 50 })), bankroll: 6000 });
-  assert.ok(fifty.lines.length > 0 && fifty.lines.every((line) => line.contracts <= 50 && line.pct >= SIZING.minLinePct));
-  assert.ok(allocateLines({ side: 'LONG', pct: 10, lines, bankroll: 6000 }).lines.some((line) => line.contracts > 3));
 });
 
 test('the account is cash plus open positions', () => {

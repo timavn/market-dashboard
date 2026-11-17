@@ -23,7 +23,6 @@
 
 ## 📁 **Service Structure**
 - `api/marketDataService.js` - Market data API service
-- `websocket/marketWebSocket.js` - Real-time data connections
 - Future: AWS Lambda integration services
 
 ## 🔌 **API Endpoints**

@@ -254,6 +254,24 @@ test('an unresponsive Gateway names the Gateway restart, not a dashboard repair'
   assert.ok(!rows.some(text => /in Systems/.test(text)));
 });
 
+test('an unreachable sidecar waits for the supervisor before asking for a dashboard restart', async () => {
+  for (const errorCode of ['IBKR_SIDECAR_UNREACHABLE', 'IBKR_SIDECAR_DUPLICATES']) {
+    const data = fixture();
+    Object.assign(data.check('ibkr.sidecar'), { status: 'fail', errorCode, impact: 'No portfolio data.' });
+    const result = await run(data);
+    const rows = result.findings.flatMap(finding => finding.presentation.rows.map(row => row.text));
+    assert.ok(rows.some(text => /Still down after 10 min → restart the dashboard in Systems\./.test(text)), errorCode);
+    assert.ok(!rows.some(text => /Restore the brokerage service/.test(text)), errorCode);
+  }
+  // A sidecar that is up but on the wrong runtime is still a repair in Systems.
+  const data = fixture();
+  data.report.groups[0].checks.push({ id: 'ibkr.runtime', label: 'ibkr.runtime', status: 'fail', blocking: true,
+    errorCode: 'RUNTIME_PROVENANCE_MISSING', observedAt: NOW, dependsOn: [], capabilityIds: [], impact: 'No portfolio data.' });
+  const result = await run(data);
+  const rows = result.findings.flatMap(finding => finding.presentation.rows.map(row => row.text));
+  assert.ok(rows.some(text => /Restore the brokerage service in Systems\./.test(text)));
+});
+
 test('connection recovery alone and partial accounts do not establish portfolio recovery', async () => {
   const data = fixture();
   Object.assign(data.check('ibkr.accounts'), { status: 'warn', errorCode: 'IBKR_PARTIAL_ACCOUNT_COVERAGE', impact: 'Incomplete portfolio' });

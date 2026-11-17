@@ -90,7 +90,9 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertNotIn("Buy", report)
         self.assertIn("| Ethereum | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(2406;2825;2300;0;) | ASOF(N/A;,;,;,Crypto Quant) |", report)
         self.assertNotIn("front-month futures", report)
-        self.assertIn("Nasdaq-100 30,883; its bar shows the COMPQ range and Nasdaq Composite price.", report)
+        self.assertNotIn("its bar shows the", report)
+        self.assertNotIn("read inversely as a yield direction", report)
+        self.assertNotIn("reaches the line on any business day", report)
 
     def test_curve_levels_mark_the_alpha_code_and_only_an_own_price_range(self):
         wti = {"range": {"low": 82.96, "high": 93.11, "fit": "exact"},
@@ -109,9 +111,9 @@ class SetupBoardRenderTests(unittest.TestCase):
         data = board()
         gold = data["rows"][0]
         gold["kalshiLines"] = {"id": "gold", "market": "Gold", "gate": {"side": "SHORT", "grade": "B"}, "held": [], "open": True,
-                               "lines": {"side": "SHORT", "buy": "NO", "lines": [{"ticker": "T1", "strike": 4200, "edge": 0.06,
-                                                                                    "strength": "STRONG"}],
-                                         "illiquid": 0, "counts": {"STRONG": 1, "GOOD": 0, "WATCH": 0, "PASS": 0}, "best": 0.06}}
+                               "lines": {"side": "SHORT", "buy": "NO", "lines": [{"ticker": "T1", "strike": 4200, "kalshiYes": 0.3,
+                                                                                    "ticket": {"pct": 2.2, "zone": "target"}}],
+                                         "illiquid": 0, "onTicket": 1}}
         report = render_setup_board(data)
         self.assertNotIn("analyst-kalshi-book", report)
         block = json.loads(report.split("```analyst-lines\n", 1)[1].split("\n```", 1)[0])
@@ -132,34 +134,44 @@ class SetupBoardRenderTests(unittest.TestCase):
     def test_a_sized_setup_shows_its_position_and_line_split_under_its_section(self):
         data = board()
         gold = data["rows"][0]
+        line = lambda strike, ask, moves: {"strike": strike, "buy": "NO", "ask": ask, "moves": moves, "zone": "target",
+                                            "fromCentrePct": (strike / 4200 - 1) * 100, "pct": 2.2, "dollars": 134.0, "contracts": 456, "win": 322.0}
         gold["sizing"] = {
-            "side": "SHORT", "pct": 8.0, "maxPct": 10, "event": "KXGOLDD-26OCT1217", "quotedAt": AT, "account": {"value": 6000},
-            "components": [{"key": "range", "label": "Range", "lost": 0.0, "detail": "100% of range"},
-                           {"key": "usd", "label": "Dollar", "lost": 1.0, "detail": "0.10 corr, dollar bullish"},
-                           {"key": "zScore", "label": "Z-score", "lost": 0.5, "missing": True}],
-            "ladder": {"centre": 4200.0, "sigma": 42.0}, "unspentPct": 0.4, "spentPct": 7.6,
-            "lines": [{"strike": 4200, "buy": "NO", "ask": 0.51, "kalshiOdds": 0.52, "ourOdds": 0.586, "edge": 0.059,
-                       "fromCentrePct": 0.0, "sigmas": 0.0, "pct": 2.5, "dollars": 150.0, "contracts": 284},
-                      {"strike": 4240, "buy": "NO", "ask": 0.85, "kalshiOdds": 0.879, "ourOdds": 0.91, "edge": 0.021,
-                       "fromCentrePct": 0.952, "sigmas": 0.952, "pct": 5.1, "dollars": 306.0, "contracts": 355, "capped": True}]}
+            "side": "SHORT", "pct": 4.5, "basePct": 3, "maxPct": 5.5, "volBand": "Moderate", "expanding": False,
+            "event": "KXGOLDD-26OCT1217", "quotedAt": AT, "account": {"value": 6000},
+            "components": [{"key": "usd", "label": "Dollar", "weight": 1, "points": 1.0, "detail": "-0.62 corr, dollar bullish"},
+                           {"key": "tick", "label": "Tick", "weight": 0.5, "points": -0.5, "detail": "bullish"},
+                           {"key": "volume", "label": "Volume", "weight": 0.5, "points": 0, "missing": True},
+                           {"key": "zScore", "label": "Z-score", "weight": 0.5, "points": 0.25, "detail": "-1.0 sd"}],
+            "ladder": {"centre": 4200.0, "sigma": 42.0}, "unspentPct": 0.1, "spentPct": 4.4,
+            "lines": [line(4170, 0.28, 0.7), {**line(4160, 0.19, 0.95), "capped": True}],
+            "weekly": {"event": "KXGOLDW-26OCT1617", "closes": AT, "quotedAt": AT, "ladder": {"centre": 4200.0, "sigma": 105.0},
+                       "lines": [], "reason": "No size at the ask"}}
         report = render_setup_board(data)
         block = json.loads(report.split("```analyst-sizing\n", 1)[1].split("\n```", 1)[0])
         # The block sits in the setup's own section, after its market table.
         self.assertLess(report.index("## Metals"), report.index("```analyst-sizing"))
         self.assertLess(report.index("```analyst-sizing"), report.index("## Oil"))
         self.assertEqual(report.count("```analyst-sizing"), 1)
-        market = block["markets"][0]
-        self.assertEqual((market["market"], market["side"], market["pct"], market["maxPct"]), ("Gold", "Short", "8.0%", "10%"))
-        self.assertEqual(market["lost"], [{"label": "Dollar", "points": "−1.0", "note": "0.10 corr, dollar bullish"},
-                                          {"label": "Z-score", "points": "−0.5", "note": "no reading"}])
-        self.assertEqual(market["lines"][0], {"line": "Above 4,200", "from": "+0.0% · +0.0σ", "buy": "No", "ask": "51¢",
-                                              "kalshi": "52%", "ours": "59%", "edge": "+5.9", "pct": "2.50%", "stake": "$150 · 284"})
+        # One ticket per duration: the daily event, then the weekly one.
+        market, weekly = block["markets"]
+        self.assertEqual((market["market"], market["side"], market["duration"], market["pct"], market["maxPct"], market["dollars"]),
+                         ("Gold", "Short", "Daily", "4.5%", "5.5%", "$270 of $6,000"))
+        self.assertEqual(market["inputs"], [{"label": "Base", "points": "3%"},
+                                            {"label": "Dollar", "points": "+1", "note": "-0.62 corr, dollar bullish"},
+                                            {"label": "Tick", "points": "−0.5", "note": "bullish"},
+                                            {"label": "Volume", "points": "0", "note": "no reading"},
+                                            {"label": "Z-score", "points": "+0.25", "note": "-1.0 sd"}])
+        self.assertEqual(market["lines"][0], {"line": "Above 4,170", "from": "-0.7%", "buy": "No", "ask": "28¢",
+                                              "stake": "2.2% · $134", "contracts": "456", "wins": "$322"})
         self.assertTrue(market["lines"][1]["capped"])
-        self.assertEqual((market["unspent"], market["sigma"], market["implied"]), ("0.40%", "±1.0% · ±42", "GVZ ±1.4% · ±61"))
+        self.assertEqual((market["unspent"], market["price"], market["move"], market["vol"]), ("0.1%", "4,200", "±42 (1.0%)", "Vol moderate"))
+        self.assertTrue(weekly["duration"].startswith("Weekly · closes "))
+        self.assertEqual((weekly["move"], weekly["reason"], weekly["lines"]), ("±105 (2.5%)", "No size at the ask", []))
         # No readable lines: the size still shows, with the reason.
-        gold["sizing"] = {**gold["sizing"], "lines": [], "reason": "No line with edge", "account": None}
+        gold["sizing"] = {**gold["sizing"], "lines": [], "reason": "Kalshi lines unavailable", "account": None, "weekly": None}
         empty = json.loads(render_setup_board(data).split("```analyst-sizing\n", 1)[1].split("\n```", 1)[0])["markets"][0]
-        self.assertEqual((empty["pct"], empty["reason"], empty["lines"]), ("8.0%", "No line with edge", []))
+        self.assertEqual((empty["pct"], empty["reason"], empty["lines"]), ("4.5%", "Kalshi lines unavailable", []))
         # The paper ledger's running result sits above Sources.
         data["paper"] = {"tickets": 14, "open": 2, "settled": 12, "wonTickets": 7, "returnOnStake": -0.031}
         self.assertIn("Paper tickets: 12 settled, 7 won, -3.1% on stake after fees; 2 open.\n\nSources:", render_setup_board(data))

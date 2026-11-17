@@ -40,7 +40,7 @@ test('ledger failure retains verified history but explicitly suppresses current 
   assert.equal(result.marketReadings.nasdaq100.contextOnly, true);
 });
 
-test('endpoint requires a bounded timezone-bearing capture time and does not cache a latest report', async () => {
+test('endpoint requires a bounded timezone-bearing capture time and re-reads the ledger at most every two minutes', async () => {
   let captured;
   const handlers = createHedgaiResearchHandlers({ now: () => new Date('2026-09-28T20:00:00Z'),
     loadResearch: async input => { captured = input; return projection; }, loadBaseline: () => ({}), root: process.cwd() });
@@ -54,7 +54,8 @@ test('endpoint requires a bounded timezone-bearing capture time and does not cac
   assert.equal(res.headers['Cache-Control'], 'no-store');
   assert.equal(captured.asOf, '2026-09-28T12:43:00Z');
   assert.equal(captured.forceRefresh, true);
-  assert.equal(captured.refreshAfter, Date.parse('2026-09-28T20:00:00Z'));
+  // A ledger read from the last two minutes is reused; an older one is replaced.
+  assert.equal(captured.refreshAfter, Date.parse('2026-09-28T20:00:00Z') - 120_000);
   assert.equal(res.body, projection);
   const invalidSource = response();
   await handlers.source({ params: { sourceId: '../private' } }, invalidSource);

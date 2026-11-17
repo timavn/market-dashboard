@@ -110,7 +110,7 @@ def _setup(row: dict[str, Any]) -> str:
     setup = row.get("setup") or {}
     reason = setup.get("reason")
     return ({"LONG": "Long", "SHORT": "Short"}.get(setup.get("side"))
-            or (reason if reason in {"Below range", "Above range", "Blocked by Trade"} else DASH))
+            or (reason if reason in {"Below range", "Above range"} else DASH))
 
 
 def _cell(value: Any) -> str:
@@ -151,53 +151,61 @@ def _implied_move(gauge: dict[str, Any], row: dict[str, Any] | None) -> str | No
 
 
 def _sizing_block(members: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Each sized setup: its share of the Kalshi account, what cost it points, and the split across the event's lines."""
+    """Each sized setup's tickets (daily, then weekly): its share of the Kalshi account, what each input added, and its lines."""
     isnum = lambda value: isinstance(value, (int, float)) and not isinstance(value, bool)
-    share = lambda value: f"{value:.2f}%" if isnum(value) else NA
-    odds = lambda value: f"{value * 100:.0f}%" if isnum(value) else NA
+    signed = lambda value: "0" if abs(value) < 0.005 else f"{value:+.2f}".rstrip("0").rstrip(".").replace("-", "−")
     markets = []
     for row in members:
         sizing = row.get("sizing")
         if not isinstance(sizing, dict) or not isnum(sizing.get("pct")):
             continue
-        components = [item for item in sizing.get("components") or [] if isinstance(item, dict)]
-        ladder = sizing.get("ladder") or {}
-        centre, sigma = ladder.get("centre"), ladder.get("sigma")
-        lines = []
-        for line in sizing.get("lines") or []:
-            distance = ([f"{line['fromCentrePct']:+.1f}%", f"{line['sigmas']:+.1f}σ"]
-                        if isnum(line.get("fromCentrePct")) and isnum(line.get("sigmas")) else [])
-            stake = ([f"${line['dollars']:,.0f}", f"{line['contracts']:,}"]
-                     if isnum(line.get("dollars")) and isnum(line.get("contracts")) else [])
-            lines.append({"line": f"Above {_number(line.get('strike'))}", "from": " · ".join(distance) or NA,
-                          "buy": "Yes" if line.get("buy") == "YES" else "No",
-                          "ask": f"{line['ask'] * 100:.0f}¢" if isnum(line.get("ask")) else NA,
-                          "kalshi": odds(line.get("kalshiOdds")), "ours": odds(line.get("ourOdds")),
-                          "edge": f"{line['edge'] * 100:+.1f}" if isnum(line.get("edge")) else NA,
-                          "pct": share(line.get("pct")), **({"stake": " · ".join(stake)} if stake else {}),
-                          **({"capped": True} if line.get("capped") else {})})
-        market = {
-            "market": row.get("label"), "side": "Long" if sizing.get("side") == "LONG" else "Short",
-            "pct": f"{sizing['pct']:.1f}%", "maxPct": f"{sizing.get('maxPct', 10):g}%",
-            "lost": [{"label": item.get("label"), "points": f"−{item['lost']:.1f}",
-                      **({"note": "no reading" if item.get("missing") else item["detail"]} if item.get("missing") or item.get("detail") else {})}
-                     for item in components if isnum(item.get("lost")) and item["lost"] >= 0.05],
-            "event": sizing.get("event"), "lines": lines,
-        }
-        if not lines:
-            market["reason"] = sizing.get("reason") or "Kalshi lines not read"
-        elif isnum(sizing.get("unspentPct")) and sizing["unspentPct"] >= 0.05:
-            market["unspent"] = share(sizing["unspentPct"])
-        if isnum(centre) and isnum(sigma) and centre:
-            market["sigma"] = f"±{sigma / centre * 100:.1f}% · ±{_number(sigma)}"
-        implied = _implied_move(row.get("volatility") or {}, row)
-        if implied:
-            market["implied"] = f"{(row.get('volatility') or {}).get('symbol')} {implied}"
-        if sizing.get("quotedAt"):
-            market["quoted"] = _pacific(sizing["quotedAt"])
-        if lines and not sizing.get("account"):
-            market["note"] = "Kalshi balance unavailable; shares of the account only."
-        markets.append({key: value for key, value in market.items() if value not in (None, "")})
+        account = (sizing.get("account") or {}).get("value")
+        inputs = [{"label": "Base", "points": f"{sizing.get('basePct', 3):g}%"}] + [
+            {"label": item.get("label"), "points": signed(item["points"]),
+             **({"note": "no reading" if item.get("missing") else item["detail"]} if item.get("missing") or item.get("detail") else {})}
+            for item in sizing.get("components") or [] if isinstance(item, dict) and isnum(item.get("points"))]
+        band = sizing.get("volBand")
+        for duration, ticket in (("Daily", sizing), ("Weekly", sizing.get("weekly"))):
+            if not isinstance(ticket, dict) or (duration == "Weekly" and not ticket.get("event")):
+                continue
+            lines = []
+            for line in ticket.get("lines") or []:
+                funded = isnum(line.get("dollars")) and isnum(line.get("contracts"))
+                lines.append({"line": f"Above {_number(line.get('strike'))}",
+                              "from": f"{line['fromCentrePct']:+.1f}%" if isnum(line.get("fromCentrePct")) else NA,
+                              "buy": "Yes" if line.get("buy") == "YES" else "No",
+                              "ask": f"{line['ask'] * 100:.0f}¢" if isnum(line.get("ask")) else NA,
+                              "stake": (f"{line['pct']:.1f}%" if isnum(line.get("pct")) else NA) + (f" · ${line['dollars']:,.0f}" if funded else ""),
+                              **({"contracts": f"{line['contracts']:,}", "wins": f"${line.get('win') or 0:,.0f}"} if funded else {}),
+                              **({"capped": True} if line.get("capped") else {})})
+            market = {
+                "market": row.get("label"), "side": "Long" if sizing.get("side") == "LONG" else "Short",
+                "duration": duration + (f" · closes {_pacific(ticket['closes'])}" if ticket.get("closes") else ""),
+                "pct": f"{sizing['pct']:.1f}%", "maxPct": f"{sizing.get('maxPct', 5.5):g}%",
+                "dollars": f"${account * sizing['pct'] / 100:,.0f} of ${account:,.0f}" if isnum(account) else None,
+                "inputs": inputs, "event": ticket.get("event"), "lines": lines,
+            }
+            if not lines:
+                market["reason"] = ticket.get("reason") or "Kalshi lines not read"
+            elif isnum(ticket.get("unspentPct")) and ticket["unspentPct"] >= 0.05:
+                market["unspent"] = f"{ticket['unspentPct']:.1f}%"
+            ladder = ticket.get("ladder") or {}
+            centre, sigma = ladder.get("centre"), ladder.get("sigma")
+            if isnum(centre) and isnum(sigma) and centre:
+                market["price"] = _number(centre)
+                market["move"] = f"±{_number(sigma)} ({sigma / centre * 100:.1f}%)"
+            span = row.get("range") or {}
+            if isnum(span.get("low")) and isnum(span.get("high")):
+                market["range"] = f"{_number(span['low'])}–{_number(span['high'])}"
+            if band or sizing.get("expanding"):
+                market["vol"] = " · ".join(filter(None, [band and f"Vol {band.lower()}", "expanding" if sizing.get("expanding") else None]))
+                if not band:
+                    market["vol"] = "Vol expanding"
+            if ticket.get("quotedAt"):
+                market["quoted"] = _pacific(ticket["quotedAt"])
+            if lines and not sizing.get("account"):
+                market["note"] = "Kalshi balance unavailable; shares of the account only."
+            markets.append({key: value for key, value in market.items() if value not in (None, "")})
     return {"markets": markets} if markets else None
 
 
@@ -744,20 +752,13 @@ def render_setup_board(board: dict[str, Any]) -> str:
                               else (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)])])
         lines += _table(["Market", "Tick", "Trade", "Trend", *(["Volume"] if with_volume else []), "Price and Risk Range",
                          *(["Structure"] if sessions else []), "Status"], table)
+        # Only a withheld price is noted under the table; the explanatory proxy, inverse-Tick and
+        # Kalshi-rule footnotes were removed at Tim's request (2026-11-16).
         notes = []
-        for row in members:
-            if row.get("rangePrice") and row.get("range"):
-                notes.append(f"{row['label']} {_number((row.get('price') or {}).get('value'))}; its bar shows the "
-                             f"{row['range'].get('ticker')} range and {row['rangePrice'].get('label')} price.")
         for row in members:
             if rejected := row.get("priceRejected"):
                 notes.append(f"{row['label']} price withheld: {rejected.get('symbol')} returned "
                              f"{_number(rejected.get('value'))}, inconsistent with its Risk Range.")
-        inverse = [f"{row['label']} ({row['tick']['ticker']})" for row in members if (row.get("tick") or {}).get("inverse")]
-        if inverse:
-            notes.append("Tick for " + ", ".join(inverse) + " is a Treasury price ETF signal, read inversely as a yield direction.")
-        if section_id == "rates":
-            notes.append("Kalshi yield contracts pay if the daily Treasury yield reaches the line on any business day this month.")
         if notes:
             lines += [" ".join(notes), ""]
         # Boards captured with the line monitor fold each market's Kalshi lines under its section's table.

@@ -246,8 +246,6 @@ test('controller policy manifest is complete, low risk, and exact-code allowlist
     'IBKR_LIVE_SESSION_UNVERIFIED',
     'IBKR_POSITIONS_CLIENT_UNAVAILABLE',
     'IBKR_POSITIONS_REQUEST_TIMEOUT',
-    'IBKR_SIDECAR_DUPLICATES',
-    'IBKR_SIDECAR_UNREACHABLE',
     'IBKR_SOCKET_VERIFICATION_TIMEOUT',
   ]);
   for (const serviceId of ['local-sidecar', 'ibkr.sidecar']) {
@@ -525,8 +523,8 @@ test('a poll held by another long repair keeps a deferred restart on its origina
   const nowRef = { value: BASE_TIME };
   const deferredAt = BASE_TIME + 60_000;
   const sidecarDown = (now) => stackDriftReport(now, {
-    checks: [check('ibkr.sidecar', 'fail', now, { errorCode: 'IBKR_SIDECAR_UNREACHABLE' })],
-    rootCauses: [cause('IBKR_SIDECAR_UNREACHABLE', 'ibkr.sidecar')],
+    checks: [check('ibkr.portfolio', 'fail', now, { errorCode: 'IBKR_LIVE_SESSION_UNAVAILABLE' })],
+    rootCauses: [cause('IBKR_LIVE_SESSION_UNAVAILABLE', 'ibkr.portfolio')],
   });
   const sidecarUp = (now) => stackDriftReport(now, {
     checks: ['ibkr.sidecar', 'ibkr.gateway', 'ibkr.accounts', 'ibkr.portfolio'].map((id) => check(id, 'pass', now)),
@@ -670,8 +668,8 @@ test('an unreadable activity check holds the restart for at most thirty minutes 
 test('a deferred stack restart leaves another eligible action free to run', async () => {
   const nowRef = { value: BASE_TIME };
   const sidecarDown = (now) => stackDriftReport(now, {
-    checks: [check('ibkr.sidecar', 'fail', now, { errorCode: 'IBKR_SIDECAR_UNREACHABLE' })],
-    rootCauses: [cause('IBKR_SIDECAR_UNREACHABLE', 'ibkr.sidecar')],
+    checks: [check('ibkr.portfolio', 'fail', now, { errorCode: 'IBKR_LIVE_SESSION_UNAVAILABLE' })],
+    rootCauses: [cause('IBKR_LIVE_SESSION_UNAVAILABLE', 'ibkr.portfolio')],
   });
   const dispatches = [];
   const harness = controllerHarness({
@@ -755,10 +753,10 @@ test('unresolved incidents rebind when their configured recovery action changes'
   const policies = compilePolicies(manifest);
   const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME });
   state.incidents = [{
-    id: 'ibkr.sidecar:IBKR_SIDECAR_UNREACHABLE',
-    checkId: 'ibkr.sidecar',
-    errorCode: 'IBKR_SIDECAR_UNREACHABLE',
-    label: 'IBKR sidecar',
+    id: 'ibkr.portfolio:IBKR_LIVE_SESSION_UNAVAILABLE',
+    checkId: 'ibkr.portfolio',
+    errorCode: 'IBKR_LIVE_SESSION_UNAVAILABLE',
+    label: 'IBKR portfolio',
     status: 'circuit_open',
     actionId: 'restart-local-stack',
     suppressionReason: 'CIRCUIT_OPEN',
@@ -767,7 +765,7 @@ test('unresolved incidents rebind when their configured recovery action changes'
     lastMatchingObservationAt: new Date(BASE_TIME - 60_000).toISOString(),
     observationCount: 2,
     cleanObservationCount: 0,
-    affectedCheckIds: ['ibkr.sidecar'],
+    affectedCheckIds: ['ibkr.portfolio'],
     capabilityIds: ['portfolio.live'],
     circuitOpenedAt: new Date(BASE_TIME - 30_000).toISOString(),
     circuitOpenUntil: new Date(BASE_TIME + 300_000).toISOString(),
@@ -776,10 +774,10 @@ test('unresolved incidents rebind when their configured recovery action changes'
 
   observeReport(state, report({
     now: BASE_TIME,
-    checks: [check('ibkr.sidecar', 'fail', BASE_TIME, {
-      errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+    checks: [check('ibkr.portfolio', 'fail', BASE_TIME, {
+      errorCode: 'IBKR_LIVE_SESSION_UNAVAILABLE',
     })],
-    rootCauses: [cause('IBKR_SIDECAR_UNREACHABLE', 'ibkr.sidecar')],
+    rootCauses: [cause('IBKR_LIVE_SESSION_UNAVAILABLE', 'ibkr.portfolio')],
   }), { policies, now: BASE_TIME });
 
   assert.equal(state.incidents[0].actionId, 'restart-ibkr-sidecar');
@@ -791,12 +789,12 @@ test('unresolved incidents rebind when their configured recovery action changes'
 test('persisted in-flight incidents retire an obsolete recovery action', () => {
   const policies = compilePolicies(manifest);
   const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME });
-  const incidentId = 'ibkr.sidecar:IBKR_SIDECAR_UNREACHABLE';
+  const incidentId = 'ibkr.portfolio:IBKR_LIVE_SESSION_UNAVAILABLE';
   state.incidents = [{
     id: incidentId,
-    checkId: 'ibkr.sidecar',
-    errorCode: 'IBKR_SIDECAR_UNREACHABLE',
-    label: 'IBKR sidecar',
+    checkId: 'ibkr.portfolio',
+    errorCode: 'IBKR_LIVE_SESSION_UNAVAILABLE',
+    label: 'IBKR portfolio',
     status: 'verifying',
     actionId: 'restart-local-stack',
     openedAt: new Date(BASE_TIME - 120_000).toISOString(),
@@ -804,7 +802,7 @@ test('persisted in-flight incidents retire an obsolete recovery action', () => {
     lastMatchingObservationAt: new Date(BASE_TIME - 60_000).toISOString(),
     observationCount: 2,
     cleanObservationCount: 0,
-    affectedCheckIds: ['ibkr.sidecar'],
+    affectedCheckIds: ['ibkr.portfolio'],
     capabilityIds: ['portfolio.live'],
     notifications: {},
   }];
@@ -827,10 +825,10 @@ test('persisted in-flight incidents retire an obsolete recovery action', () => {
 
   observeReport(state, report({
     now: BASE_TIME,
-    checks: [check('ibkr.sidecar', 'fail', BASE_TIME, {
-      errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+    checks: [check('ibkr.portfolio', 'fail', BASE_TIME, {
+      errorCode: 'IBKR_LIVE_SESSION_UNAVAILABLE',
     })],
-    rootCauses: [cause('IBKR_SIDECAR_UNREACHABLE', 'ibkr.sidecar')],
+    rootCauses: [cause('IBKR_LIVE_SESSION_UNAVAILABLE', 'ibkr.portfolio')],
   }), { policies, now: BASE_TIME });
 
   assert.equal(state.inFlight, null);
@@ -1013,21 +1011,114 @@ test('inconclusive sidecar ownership stays degraded without automatic restart, i
   assert.equal(state.incidents[0].suppressionReason, 'NO_AUTOMATIC_POLICY');
 });
 
-test('confirmed unreachable and duplicate sidecars retain bounded automatic recovery', () => {
+test('an unreachable or duplicated sidecar is left to the supervisor and reported only if it stays down', () => {
   const policies = compilePolicies(manifest);
+  // The supervisor restarts a sidecar after three failed health probes. All 16
+  // controller restarts for an unreachable sidecar between 30 Oct and 16 Nov
+  // 2026 hit one that was already back, and every one was scored as failed.
   for (const errorCode of ['IBKR_SIDECAR_UNREACHABLE', 'IBKR_SIDECAR_DUPLICATES']) {
-    const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME, enabledActionIds: ['restart-ibkr-sidecar'] });
-    let observation;
-    for (const now of [BASE_TIME, BASE_TIME + 60_000]) {
-      observation = observeReport(state, report({ now, checks: [
-        check('ibkr.sidecar', 'fail', now, { errorCode }),
-        check('dashboard.supervisor', 'pass', now),
-      ], rootCauses: [cause(errorCode, 'ibkr.sidecar')] }), { policies, now });
-    }
-    assert.deepEqual(eligibleActions(state, observation.checksById, {
-      policies, now: BASE_TIME + 60_000, mode: ACTIVE_MODE,
-    }).map(({ policy }) => policy.id), ['restart-ibkr-sidecar']);
+    const run = () => {
+      const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME, enabledActionIds: ALL_ACTION_IDS });
+      const notified = [];
+      const notifier = (event) => { notified.push(event); return { delivered: true }; };
+      const observe = (now, sidecarStatus = 'fail') => {
+        const down = sidecarStatus === 'fail';
+        const observation = observeReport(state, report({ now, checks: [
+          down ? check('ibkr.sidecar', 'fail', now, { errorCode }) : check('ibkr.sidecar', 'pass', now),
+          // The Gateway can be down the whole time: it has no say in this incident.
+          check('ibkr.gateway', 'fail', now, { errorCode: 'IBKR_GATEWAY_NOT_AUTHENTICATED' }),
+          check('dashboard.supervisor', 'pass', now),
+        ], rootCauses: down ? [cause(errorCode, 'ibkr.sidecar')] : [] }), { policies, now, notifier });
+        assert.deepEqual(eligibleActions(state, observation.checksById, {
+          policies, now, mode: ACTIVE_MODE, enabledActionIds: ALL_ACTION_IDS, notifier,
+        }).filter(({ incident }) => incident.checkId === 'ibkr.sidecar'), []);
+      };
+      const sidecarIncident = () => state.incidents.find((item) => item.checkId === 'ibkr.sidecar');
+      const kinds = () => notified.filter((event) => event.service === 'ibkr.sidecar').map((event) => event.kind);
+      return { state, notified, observe, sidecarIncident, kinds };
+    };
+
+    // A stack restart can stand in a cached report as an unreachable sidecar
+    // for five minutes. It restarts nothing and tells the user nothing more.
+    const blip = run();
+    for (let minute = 0; minute < 5; minute += 1) blip.observe(BASE_TIME + minute * 60_000);
+    assert.equal(blip.sidecarIncident().actionId, null);
+    assert.equal(blip.sidecarIncident().status, 'manual');
+    assert.equal(blip.sidecarIncident().suppressionReason, 'NO_AUTOMATIC_POLICY');
+    assert.deepEqual(blip.state.actions, []);
+    assert.deepEqual(blip.kinds(), ['opening']);
+    blip.observe(BASE_TIME + 5 * 60_000, 'pass');
+    blip.observe(BASE_TIME + 6 * 60_000, 'pass');
+    assert.equal(blip.sidecarIncident().status, 'resolved');
+    assert.deepEqual(blip.kinds(), ['opening', 'recovery']);
+
+    // Still down after ten minutes: one notice, saying what to do.
+    const outage = run();
+    for (let minute = 0; minute < 10; minute += 1) outage.observe(BASE_TIME + minute * 60_000);
+    assert.deepEqual(outage.kinds(), ['opening']);
+    for (let minute = 10; minute < 14; minute += 1) outage.observe(BASE_TIME + minute * 60_000);
+    assert.deepEqual(outage.kinds(), ['opening', 'escalation']);
+    const escalation = outage.notified.find((event) => event.kind === 'escalation' && event.service === 'ibkr.sidecar');
+    assert.match(escalation.body, /has been down for 10 minutes/);
+    assert.match(escalation.body, /npm run dev:restart/);
+    assert.deepEqual(outage.state.actions, []);
   }
+
+  // An incident saved while the old policy still restarted the sidecar for it.
+  const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME, enabledActionIds: ALL_ACTION_IDS });
+  state.incidents = [{
+    id: 'ibkr.sidecar:IBKR_SIDECAR_UNREACHABLE', checkId: 'ibkr.sidecar', errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+    actionId: 'restart-ibkr-sidecar', status: 'open', observationCount: 9, notifications: {},
+  }];
+  const checks = new Map([
+    ['ibkr.sidecar', check('ibkr.sidecar', 'fail', BASE_TIME, { errorCode: 'IBKR_SIDECAR_UNREACHABLE' })],
+    ['dashboard.supervisor', check('dashboard.supervisor', 'pass', BASE_TIME)],
+  ]);
+  assert.deepEqual(eligibleActions(state, checks, {
+    policies, now: BASE_TIME, mode: ACTIVE_MODE, enabledActionIds: ALL_ACTION_IDS,
+  }), []);
+  assert.equal(state.incidents[0].status, 'manual');
+  assert.equal(state.incidents[0].suppressionReason, 'NO_AUTOMATIC_POLICY');
+});
+
+test('an incident whose check has left the report is retired after a week, with no recovery notice', () => {
+  const policies = compilePolicies(manifest);
+  const state = newState({ mode: ACTIVE_MODE, now: BASE_TIME });
+  const daysAgo = (days) => new Date(BASE_TIME - days * 24 * 60 * 60_000).toISOString();
+  const manual = (checkId, errorCode, lastSeenDays) => ({
+    id: `${checkId}:${errorCode}`, checkId, errorCode, label: checkId, actionId: null,
+    status: 'manual', suppressionReason: 'NO_AUTOMATIC_POLICY',
+    openedAt: daysAgo(lastSeenDays + 1), lastSeenAt: daysAgo(lastSeenDays),
+    observationCount: 3, cleanObservationCount: 0, notifications: {},
+  });
+  state.incidents = [
+    // Its check was removed from the dashboard months ago, so it can never be seen passing.
+    manual('prediction.ibkrExecution', 'UNSUPPORTED_OR_NOT_ENTITLED', 60),
+    // A check that appears only at certain hours: absent now, reported six days ago.
+    manual('portfolio.close-capture', 'CLOSE_CAPTURE_MISSED', 6),
+    // Old as well, but its check is still reported and still not passing.
+    manual('gmail.ingestion', 'GMAIL_POLL_STALE', 60),
+  ];
+  const notified = [];
+  const observe = (now) => observeReport(state, report({
+    now, checks: [check('gmail.ingestion', 'warn', now)], rootCauses: [],
+  }), { policies, now, notifier: (event) => { notified.push(event); return { delivered: true }; } });
+
+  observe(BASE_TIME);
+  const incident = (checkId) => state.incidents.find((item) => item.checkId === checkId);
+  assert.equal(incident('prediction.ibkrExecution').status, 'resolved');
+  assert.equal(incident('prediction.ibkrExecution').verificationOutcome, 'check-retired');
+  assert.equal(incident('prediction.ibkrExecution').resolvedAt, new Date(BASE_TIME).toISOString());
+  assert.equal(incident('prediction.ibkrExecution').suppressionReason, null);
+  assert.equal(incident('portfolio.close-capture').status, 'manual');
+  assert.equal(incident('gmail.ingestion').status, 'manual');
+  assert.deepEqual(notified, []);
+
+  // Two days later the hourly check has been gone for more than a week too.
+  observe(BASE_TIME + 2 * 24 * 60 * 60_000);
+  assert.equal(incident('portfolio.close-capture').status, 'resolved');
+  assert.equal(incident('gmail.ingestion').status, 'manual');
+  assert.deepEqual(notified, []);
 });
 
 test('a Gateway that has stopped answering never restarts the sidecar and names the real remedy', () => {
@@ -1654,11 +1745,11 @@ test('an error code on an unrelated check cannot select a check-scoped action', 
     now: BASE_TIME,
     checks: [
       check('gmail.ingestion', 'fail', BASE_TIME, {
-        errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+        errorCode: 'IBKR_LIVE_SESSION_UNAVAILABLE',
       }),
     ],
     rootCauses: [
-      cause('IBKR_SIDECAR_UNREACHABLE', 'gmail.ingestion'),
+      cause('IBKR_LIVE_SESSION_UNAVAILABLE', 'gmail.ingestion'),
     ],
   }), { policies, now: BASE_TIME });
 

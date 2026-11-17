@@ -585,6 +585,56 @@ function collectUniverseSymbols({
   return [...symbols].sort();
 }
 
+// Products that print a security's Trade-duration Risk Range beside the daily
+// sheet: Early Look's table at the bottom, Investing Ideas' position rows, and
+// the trackers' Buy Trade / Sell Trade columns. Ranges reset every session, so
+// only a range printed for the current market date counts.
+const SECONDARY_RANGE_PRODUCTS = Object.freeze(['early-look', 'investing-ideas', 'momo-tracker', 'bitcoin-trend-tracker']);
+
+/**
+ * The risk-range decision when the verified daily sheet has none for this
+ * security: the same-day range the secondary products print, labelled with
+ * the product it came from. Two products printing different ranges is a
+ * conflict, never a pick. The daily sheet, when it has the security, always
+ * wins and is left untouched.
+ */
+function secondaryRangeDecision(decision, products, marketDate) {
+  if (decision?.status === 'available') return decision;
+  const readings = SECONDARY_RANGE_PRODUCTS.map((id) => {
+    const product = products[id];
+    const field = product?.fields?.riskRange;
+    if (!field || product.status !== 'available' || product.conflicts?.includes('riskRange')) return null;
+    if (field.marketDate !== marketDate || field.referenceOnly || !VERIFIED_CURRENT_QUALITY.has(field.qualityStatus)) return null;
+    const lrr = finiteNumber(field.value?.lrr);
+    const hrr = finiteNumber(field.value?.hrr);
+    if (!(lrr > 0) || !(hrr > lrr)) return null;
+    return { id, label: product.label || id, lrr, hrr, trend: normalizeBias(field.trend), field };
+  }).filter(Boolean);
+  if (!readings.length) return decision;
+  const printed = readings.map(({ id, lrr, hrr }) => ({ sourceId: id, lrr, hrr }));
+  if (new Set(readings.map(({ lrr, hrr }) => `${lrr}:${hrr}`)).size > 1) {
+    return { ...decision, status: 'conflict', reason: 'conflicting-same-day-risk-ranges', conflictingRanges: printed, sourceDate: marketDate };
+  }
+  const [first] = readings;
+  return {
+    status: 'available',
+    value: { lrr: first.lrr, hrr: first.hrr },
+    lrr: first.lrr,
+    hrr: first.hrr,
+    trend: readings.map((reading) => reading.trend).find(Boolean) || null,
+    sourceId: first.id,
+    sourceLabel: first.label,
+    sourceDate: marketDate,
+    publishedAt: first.field.publishedAt || null,
+    sourceUrl: first.field.sourceUrl || null,
+    decisionEligible: false,
+    secondary: true,
+    corroboratedBy: readings.slice(1).map((reading) => reading.id),
+    primaryReason: decision?.reason || null,
+    reason: null,
+  };
+}
+
 function buildSecurityIntelligenceV2({
   symbols = [],
   scope = 'symbols',
@@ -666,8 +716,12 @@ function buildSecurityIntelligenceV2({
         ],
         unavailableProducts,
       };
+      const riskRange = security.decision
+        ? secondaryRangeDecision(security.decision.riskRange, products, base.marketDate)
+        : null;
       return [symbol, {
         ...security,
+        ...(riskRange ? { decision: { ...security.decision, riskRange } } : {}),
         products,
         health,
       }];
@@ -695,6 +749,8 @@ function buildSecurityIntelligenceV2({
 
 module.exports = {
   RESPONSE_SCHEMA_VERSION,
+  SECONDARY_RANGE_PRODUCTS,
   buildSecurityIntelligenceV2,
   collectUniverseSymbols,
+  secondaryRangeDecision,
 };

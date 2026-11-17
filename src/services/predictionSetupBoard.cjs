@@ -301,18 +301,35 @@ function rangePosition(price, range) {
   return (price.value - range.low) / (range.high - range.low);
 }
 
-function evaluateSetup({ trend, tick, trade, position }, rule = UNIVERSE.setupRule) {
+/**
+ * A setup needs the published Trade and the Trend pointing the same way, and price in that side's third of the
+ * Risk Range. Tick is not required: it only adjusts the size.
+ */
+function evaluateSetup({ trend, trade, position }, rule = UNIVERSE.setupRule) {
   if (position === null || position === undefined) return { side: null, reason: 'No comparable range position' };
   if (position < 0 || position > 1) return { side: null, reason: position < 0 ? 'Below range' : 'Above range' };
-  const long = trend === 'BULLISH' && tick?.direction === 'BULLISH' && position <= rule.bottomThird;
-  const short = trend === 'BEARISH' && tick?.direction === 'BEARISH' && position >= rule.topThird;
-  const side = long ? 'LONG' : short ? 'SHORT' : null;
-  if (!side) return { side: null, reason: null };
-  // Trade blocks only when it is published and points the other way.
-  if (trade?.direction === OPPOSITE[side === 'LONG' ? 'BULLISH' : 'BEARISH']) {
-    return { side: null, reason: 'Blocked by Trade' };
-  }
+  const agreed = trade?.direction === trend ? trend : null;
+  const side = agreed === 'BULLISH' && position <= rule.bottomThird ? 'LONG'
+    : agreed === 'BEARISH' && position >= rule.topThird ? 'SHORT' : null;
   return { side, reason: null };
+}
+
+const WEEKDAY = (ticker) => {
+  const key = eventSortKey(ticker);
+  return key ? new Date(Date.UTC(2000 + Number(key.slice(0, 2)), Number(key.slice(2, 4)) - 1, Number(key.slice(4, 6)))).getUTCDay() : null;
+};
+
+/**
+ * The market's weekly event: the earliest open 5 PM event of its weekly series, or for a series that lists every day
+ * (Bitcoin, Ethereum) its next Friday 5 PM event. None when that is the daily event itself.
+ */
+function selectWeeklyEvent(market, eventsBySeries, dailyTicker = null) {
+  const weekly = market.kalshi?.weekly;
+  if (!weekly) return null;
+  const event = (eventsBySeries?.[weekly.series] || [])
+    .filter((item) => item?.event_ticker && EVENT_FILTERS['5pm'](item.event_ticker) && (!weekly.friday || WEEKDAY(item.event_ticker) === 5))
+    .sort((left, right) => eventSortKey(left.event_ticker).localeCompare(eventSortKey(right.event_ticker)))[0];
+  return event && event.event_ticker !== dailyTicker ? { series: weekly.series, eventTicker: event.event_ticker, title: event.title || null } : null;
 }
 
 function eventSortKey(ticker) {
@@ -441,6 +458,7 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
     rangeHistory(market, { riskRangeHistory, cryptoQuantHistory }), allTimeHighs?.[allTimeHighSymbol(market)]) : null);
   const rows = UNIVERSE.markets.map((market) => {
     const events = selectEvents(market, eventsBySeries);
+    const weeklyEvent = selectWeeklyEvent(market, eventsBySeries, events[0]?.eventTicker);
     if (market.id === 'cpi') {
       return { id: market.id, label: market.label, group: market.group, cadence: market.cadence,
         events, forecast: cpiForecast(nowcast, events[0]),
@@ -468,7 +486,8 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       ...(mismatch ? { priceRejected: { symbol: rangePrice.symbol, value: rangePrice.value } } : {}),
       volatility: volatilityReading(market, { volatility, quotes, riskRanges }),
       usdCorrelation: usdCorrelationReading(market, usdCorrelations),
-      tick, trade, trend, setup: evaluateSetup({ trend, tick, trade, position }),
+      tick, trade, trend, setup: evaluateSetup({ trend, trade, position }),
+      ...(weeklyEvent ? { weeklyEvent } : {}),
       ...(broken.alphaBreaks ? { alphaBreaks: broken.alphaBreaks } : {}),
       ...(withStructure ? { structure: structureFor(market, range) } : {}),
       ...(volumeHistory ? { volume: volumeFor(market.volume, trend) } : {}),
@@ -492,7 +511,7 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
   // A setup's size in % of the Kalshi account, scored against the finished dollar reading.
   for (const row of rows) {
     if (!row.setup?.side || !sizedMarket(row.id)) continue;
-    row.sizing = scoreConviction({ side: row.setup.side, position: row.position, trade: row.trade, zScore: row.zScore,
+    row.sizing = scoreConviction({ side: row.setup.side, tick: row.tick, zScore: row.zScore,
       usdCorrelation: row.usdCorrelation, usd, volatility: row.volatility, volume: row.volume });
   }
   const research = morningResearch({ morningSnapshots, latestEditions, cryptoQuant, rows, usd, quotes, marketDate });
@@ -516,7 +535,7 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
 }
 
 const seriesNames = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
-  Array.isArray(market.kalshi.series) ? market.kalshi.series : [market.kalshi.series]))];
+  (Array.isArray(market.kalshi.series) ? market.kalshi.series : [market.kalshi.series]).concat(market.kalshi.weekly?.series || [])))];
 // ETF prices check levels the research prints for a market's proxy (QQQ, GLD, SPY …).
 const priceSymbols = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
   [market.price?.symbol, market.hedgeye.riskRange?.priceSymbol]).concat(UNIVERSE.usd.symbol, PROXY_TICKERS).filter(Boolean))];
@@ -538,8 +557,6 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
   loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
   loadPublishedStatements, loadAlphaCodeWatch, loadKalshiMarkets, loadKalshiBalance, loadKalshiPositions, loadKalshiOrderbook,
   marketDateFor, orderbookTtlMs = 30_000 }) {
-  // When each line first read Strong, so the monitor can mark lines that just turned Strong.
-  const strongSince = new Map();
   // Order books read in the last orderbookTtlMs, by line ticker, so back-to-back board reads do not re-read them.
   const bookCache = new Map();
   const readBooks = async (tickers, now) => {
@@ -633,20 +650,23 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       const heldEvents = (positions?.market_positions || []).filter((item) => Number(item.position_fp ?? item.position))
         .map((item) => eventOf(item.ticker));
       // Every market's selected event, so each one can show its ladder, plus the events of held lines.
-      const boardEvents = board.rows.map((row) => row.events?.[0]?.eventTicker);
+      const boardEvents = board.rows.flatMap((row) => [row.events?.[0]?.eventTicker, row.sizing ? row.weeklyEvent?.eventTicker : null]);
       const tickers = [...new Set([...boardEvents, ...heldEvents].filter(Boolean))];
       const read = await Promise.all(tickers.map((ticker) => settle(Promise.resolve().then(() => loadKalshiMarkets(ticker)))));
       const marketsByEvent = new Map(tickers.map((ticker, index) => [ticker, Array.isArray(read[index].value) ? read[index].value : null]));
-      for (const row of board.rows.filter((item) => item.sizing && item.events?.[0]?.eventTicker)) {
-        const event = row.events[0].eventTicker;
+      // Each sized setup gets a ticket for its daily event and, where one is listed, its weekly event.
+      const ticketFor = (row, event) => {
         const markets = marketsByEvent.get(event);
-        if (!markets) {
-          row.sizing = { ...row.sizing, event, lines: [], reason: 'Kalshi lines unavailable' };
-          continue;
-        }
-        const split = allocateLines({ side: row.sizing.side, pct: row.sizing.pct, expanding: row.sizing.expanding,
-          lines: markets.map(kalshiLine), bankroll: account });
-        row.sizing = { ...row.sizing, ...split, event, quotedAt: now.toISOString(), account: account === null ? null : { value: account } };
+        if (!markets) return { event, lines: [], reason: 'Kalshi lines unavailable' };
+        const rangePrice = (row.rangePrice || row.price)?.value;
+        return { ...allocateLines({ side: row.sizing.side, pct: row.sizing.pct, wide: row.sizing.wide, lines: markets.map(kalshiLine),
+          bankroll: account, range: row.range ? { low: row.range.low, high: row.range.high, price: rangePrice } : null }),
+        event, closes: markets.find((market) => market.close_time)?.close_time || null, quotedAt: now.toISOString() };
+      };
+      for (const row of board.rows.filter((item) => item.sizing && item.events?.[0]?.eventTicker)) {
+        const weekly = row.weeklyEvent?.eventTicker ? ticketFor(row, row.weeklyEvent.eventTicker) : null;
+        row.sizing = { ...row.sizing, ...ticketFor(row, row.events[0].eventTicker), account: account === null ? null : { value: account },
+          ...(weekly ? { weekly } : {}) };
       }
       if (tickers.length) board.sourceStatus.kalshiLines = read.some((result) => result.error) ? 'failed' : 'ready';
       if (loadKalshiPositions) board.sourceStatus.kalshiPositions = positions ? 'ready' : 'failed';
@@ -658,7 +678,7 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
         orderbooks = books;
         if (candidates.length) board.sourceStatus.kalshiOrderbooks = failed === candidates.length ? 'failed' : 'ready';
       }
-      applyLineMonitor(board, { balance, positions, marketsByEvent, seen: strongSince, now, orderbooks });
+      applyLineMonitor(board, { balance, positions, marketsByEvent, now, orderbooks });
     }
     return board;
   };
@@ -668,5 +688,5 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
 const extraCboeSeries = () => UNIVERSE.markets.map((market) => market.volatility)
   .filter((spec) => spec?.cboeSymbol).map((spec) => ({ name: spec.key, symbol: spec.cboeSymbol }));
 
-module.exports = { allTimeHighSymbols, alphaCodeBreaks, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents,
+module.exports = { allTimeHighSymbols, alphaCodeBreaks, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents, selectWeeklyEvent,
   priceSymbols, seriesNames, tradeTickers };

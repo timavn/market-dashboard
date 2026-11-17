@@ -5,29 +5,32 @@ const { alphaCodeBreaks, buildSetupBoard, createSetupBoardLoader, evaluateSetup,
 const rule = { bottomThird: 0.3333, topThird: 0.6667 };
 const tick = (direction) => ({ direction });
 
-test('long requires Bullish Trend and Tick in the bottom third of the range', () => {
-  assert.equal(evaluateSetup({ trend: 'BULLISH', tick: tick('BULLISH'), position: 0.2 }, rule).side, 'LONG');
-  assert.equal(evaluateSetup({ trend: 'BULLISH', tick: tick('BULLISH'), position: 0.5 }, rule).side, null);
-  assert.equal(evaluateSetup({ trend: 'BULLISH', tick: tick('NEUTRAL'), position: 0.2 }, rule).side, null);
-  assert.equal(evaluateSetup({ trend: 'BULLISH', tick: null, position: 0.2 }, rule).side, null);
+const trade = (direction) => ({ direction });
+
+test('long requires a Bullish Trend and Trade in the bottom third of the range', () => {
+  assert.equal(evaluateSetup({ trend: 'BULLISH', trade: trade('BULLISH'), position: 0.2 }, rule).side, 'LONG');
+  assert.equal(evaluateSetup({ trend: 'BULLISH', trade: trade('BULLISH'), position: 0.5 }, rule).side, null);
+  assert.equal(evaluateSetup({ trend: 'BULLISH', trade: trade('NEUTRAL'), position: 0.2 }, rule).side, null);
+  assert.equal(evaluateSetup({ trend: 'BULLISH', trade: trade('BEARISH'), position: 0.2 }, rule).side, null);
+  // No published Trade, no setup.
+  assert.equal(evaluateSetup({ trend: 'BULLISH', trade: null, position: 0.2 }, rule).side, null);
 });
 
-test('short requires Bearish Trend and Tick in the top third of the range', () => {
-  assert.equal(evaluateSetup({ trend: 'BEARISH', tick: tick('BEARISH'), position: 0.9 }, rule).side, 'SHORT');
-  assert.equal(evaluateSetup({ trend: 'BEARISH', tick: tick('BEARISH'), position: 0.4 }, rule).side, null);
+test('short requires a Bearish Trend and Trade in the top third of the range', () => {
+  assert.equal(evaluateSetup({ trend: 'BEARISH', trade: trade('BEARISH'), position: 0.9 }, rule).side, 'SHORT');
+  assert.equal(evaluateSetup({ trend: 'BEARISH', trade: trade('BEARISH'), position: 0.4 }, rule).side, null);
 });
 
-test('Trade blocks only when it is published and points the other way', () => {
-  const long = { trend: 'BULLISH', tick: tick('BULLISH'), position: 0.1 };
-  assert.equal(evaluateSetup({ ...long, trade: null }, rule).side, 'LONG');
-  assert.equal(evaluateSetup({ ...long, trade: { direction: 'BULLISH' } }, rule).side, 'LONG');
-  assert.deepEqual(evaluateSetup({ ...long, trade: { direction: 'BEARISH' } }, rule), { side: null, reason: 'Blocked by Trade' });
+test('Tick is not part of the setup: it only adjusts the size', () => {
+  const long = { trend: 'BULLISH', trade: trade('BULLISH'), position: 0.1 };
+  assert.equal(evaluateSetup({ ...long, tick: tick('BEARISH') }, rule).side, 'LONG');
+  assert.equal(evaluateSetup({ ...long, tick: null }, rule).side, 'LONG');
 });
 
 test('prices outside the range never qualify', () => {
-  assert.deepEqual(evaluateSetup({ trend: 'BULLISH', tick: tick('BULLISH'), position: -0.1 }, rule),
+  assert.deepEqual(evaluateSetup({ trend: 'BULLISH', trade: trade('BULLISH'), position: -0.1 }, rule),
     { side: null, reason: 'Below range' });
-  assert.deepEqual(evaluateSetup({ trend: 'BEARISH', tick: tick('BEARISH'), position: 1.2 }, rule),
+  assert.deepEqual(evaluateSetup({ trend: 'BEARISH', trade: trade('BEARISH'), position: 1.2 }, rule),
     { side: null, reason: 'Above range' });
 });
 
@@ -82,7 +85,8 @@ test('builds rows from Hedgeye research, quotes and Kalshi events', () => {
     marketDate: '2026-10-09',
   });
   const row = (id) => board.rows.find((item) => item.id === id);
-  assert.equal(row('bitcoin').setup.side, 'LONG');
+  // Bullish Trend and Tick at the low end of the range, but no published Trade: no setup.
+  assert.equal(row('bitcoin').setup.side, null);
   assert.equal(Math.round(row('bitcoin').position * 100), 20);
   assert.equal(row('ethereum').range.product, 'crypto-quant');
   assert.equal(row('ethereum').tick, null);
@@ -602,17 +606,31 @@ const goldShort = {
   hedgai: { book: { rows: [{ ticker: 'GLD', position: 'Short', publicationDate: '2026-11-10' }] } },
   usdCorrelations: { calculationDate: '2026-11-09', correlations: { GOLD: { '30D': -0.8 } } },
   volatility: { GVZ: { availability: 'available', lastPx: 28, weekChangePct: 2 } },
+  marketDate: '2026-11-11',
 };
+// Gold's published spot Trade, as the morning products state it.
+const goldTrade = (() => {
+  const { extractPublishedStatements } = require('../utils/publishedResearchSignals.cjs');
+  const statements = extractPublishedStatements({ date: '2026-11-10', snapshotType: 'early-look', source: 'gmail-html',
+    publishedAt: '2026-11-10T00:00:00+00:00', htmlSource: 'hedgeye-email/messages/2026-11-10/early-look/original.html',
+    article: { feedUrl: 'https://app.hedgeye.com/feed_items/1', bodyText: '11/10/2026 07:27 AM EST\nGold remains Bearish TRADE and TREND' } });
+  return { references: statements.references.map((reading) => ({ ...reading, sourceProduct: 'early-look', sourceLabel: 'Early Look',
+    qualityStatus: 'validated' })), trends: [], alphaCodes: [] };
+})();
+goldShort.publishedStatements = goldTrade;
 
 test('a setup in a ladder market is sized; other rows are not', () => {
   const board = buildSetupBoard(goldShort);
   const gold = board.rows.find((row) => row.id === 'gold');
   assert.equal(gold.setup.side, 'SHORT');
-  // Base 4 + range 1.7 + dollar 1 + volatility 0.5, with Z-score and volume missing (half) and no Trade.
-  assert.equal(gold.sizing.pct, 8);
-  assert.deepEqual(gold.sizing.components.filter((item) => item.missing).map((item) => item.key), ['zScore', 'volume']);
+  assert.equal(gold.trade.direction, 'BEARISH');
+  // Base 3 + dollar 1 (−0.8 correlation, dollar Bullish) + Tick 0.5 (Bearish); volume and Z-score have no reading.
+  assert.equal(gold.sizing.pct, 4.5);
+  assert.deepEqual(gold.sizing.components.filter((item) => item.missing).map((item) => item.key), ['volume', 'zScore']);
   assert.equal(board.rows.find((row) => row.id === 'silver').sizing, undefined);
-  assert.equal(board.sizing.maxPct, 10);
+  assert.deepEqual([board.sizing.basePct, board.sizing.maxPct], [3, 5.5]);
+  // Without the published Trade there is no setup, whatever Tick says.
+  assert.equal(buildSetupBoard({ ...goldShort, publishedStatements: undefined }).rows.find((row) => row.id === 'gold').setup.side, null);
 });
 
 test('the loader splits a sized setup across its Kalshi lines and the account', async () => {
@@ -625,7 +643,9 @@ test('the loader splits a sized setup across its Kalshi lines and the account', 
     loadRiskRanges: () => Promise.resolve(goldShort.riskRanges), loadCryptoQuant: empty, loadHedgai: () => Promise.resolve(goldShort.hedgai),
     loadSecurityIntelligence: empty, loadNowcast: empty, loadQuotes: () => Promise.resolve(goldShort.quotes),
     loadVolatility: () => Promise.resolve(goldShort.volatility), loadUsdCorrelations: () => Promise.resolve(goldShort.usdCorrelations),
-    loadKalshiEvents: (series) => Promise.resolve(series === 'KXGOLDD' ? [{ event_ticker: 'KXGOLDD-26NOV1117' }] : []),
+    loadPublishedStatements: () => Promise.resolve(goldTrade),
+    loadKalshiEvents: (series) => Promise.resolve(series === 'KXGOLDD' ? [{ event_ticker: 'KXGOLDD-26NOV1117' }]
+      : series === 'KXGOLDW' ? [{ event_ticker: 'KXGOLDW-26NOV1317' }] : []),
     loadKalshiMarkets: (event) => { asked.push(event); return Promise.resolve([quote(3960, 0.84), quote(3980, 0.69), quote(4000, 0.5),
       quote(4020, 0.31), quote(4040, 0.16)]); },
     loadKalshiBalance: () => Promise.resolve({ balance_dollars: '5000.00', portfolio_value: 100000 }),
@@ -633,13 +653,21 @@ test('the loader splits a sized setup across its Kalshi lines and the account', 
   };
   const board = await createSetupBoardLoader(options)({ now: new Date('2026-11-11T16:00:00Z') });
   const { sizing } = board.rows.find((row) => row.id === 'gold');
-  // Only the setup's event is read.
-  assert.deepEqual(asked, ['KXGOLDD-26NOV1117']);
+  // The setup's daily and weekly events are each read once.
+  assert.deepEqual(asked.sort(), ['KXGOLDD-26NOV1117', 'KXGOLDW-26NOV1317']);
   assert.equal(sizing.event, 'KXGOLDD-26NOV1117');
   assert.equal(sizing.account.value, 6000);
-  assert.ok(sizing.lines.length > 0 && sizing.lines.every((line) => line.buy === 'NO' && line.contracts > 0));
-  assert.ok(sizing.spentPct <= sizing.pct);
+  // Short from 4,000 with the range low at 3,900 (3,905 on the ladder): NO on the 17¢ line one move below the price takes
+  // the 500 contracts at its ask, and the nearer 32¢ line takes what it can of the rest.
+  assert.deepEqual(sizing.lines.map((line) => [line.strike, line.buy, line.zone, line.contracts]),
+    [[3960, 'NO', 'target', 500], [3980, 'NO', 'near', 500]]);
+  assert.ok(sizing.lines.every((line) => line.capped && line.ask <= 0.5));
+  assert.ok(sizing.spentPct < sizing.pct && Math.abs(sizing.spentPct + sizing.unspentPct - sizing.pct) < 1e-9);
   assert.ok(Math.abs(sizing.ladder.centre - 4000) < 2);
+  assert.ok(Math.abs(sizing.rangeLimit - 3905) < 3);
+  // The weekly event gets its own ticket for the same position.
+  assert.equal(sizing.weekly.event, 'KXGOLDW-26NOV1317');
+  assert.equal(sizing.weekly.lines.length, 2);
   assert.equal(board.sourceStatus.kalshiLines, 'ready');
   // A failed line read keeps the size and says so; no balance leaves shares of the account only.
   const failed = await createSetupBoardLoader({ ...options, loadKalshiMarkets: () => Promise.reject(new Error('down')) })({ now: new Date('2026-11-11T16:00:00Z') });
@@ -674,8 +702,8 @@ test('the loader adds every market\'s Kalshi lines, checks held lines and adds t
   const board = await createSetupBoardLoader(options)({ now: new Date('2026-11-11T16:00:00Z') });
   assert.deepEqual(asked.sort(), ['KXGOLDD-26NOV1117', 'KXGOLDW-26NOV1317']);
   const gold = board.rows.find((row) => row.id === 'gold').kalshiLines;
-  // The board sizes a Short (Tick and Trend), but no Trade is published, so the row is unshaded and shows its ladder.
-  assert.equal(board.rows.find((row) => row.id === 'gold').setup.side, 'SHORT');
+  // No Trade is published, so there is no setup: the row is unshaded and shows its ladder.
+  assert.equal(board.rows.find((row) => row.id === 'gold').setup.side, null);
   assert.equal(gold.shade, null);
   assert.equal(gold.shadeReason, 'No Trade');
   assert.equal(gold.lines.side, null);
@@ -683,8 +711,8 @@ test('the loader adds every market\'s Kalshi lines, checks held lines and adds t
   assert.ok(Math.abs(gold.summary.centre - 4000) < 1);
   // Held lines from the daily and the weekly event both land on Gold.
   assert.deepEqual(gold.held.map((line) => line.ticker).sort(), ['KXGOLDD-26NOV1117-T4020', 'KXGOLDW-26NOV1317-T4000']);
-  // Its 49¢ bid is above our 48% odds, which outranks the row being unshaded.
-  assert.equal(gold.held.find((line) => line.ticker === 'KXGOLDW-26NOV1317-T4000').state, 'EDGE_GONE');
+  // The row is unshaded, so the held weekly line reads Unshaded.
+  assert.equal(gold.held.find((line) => line.ticker === 'KXGOLDW-26NOV1317-T4000').state, 'SETUP_LAPSED');
   assert.equal(board.kalshiBook.atRisk, 95);
   assert.equal(board.kalshiBook.account, 6000);
   assert.equal(board.sourceStatus.kalshiPositions, 'ready');
@@ -706,6 +734,7 @@ test('the loader reads order books for lines near even odds and prices each mark
     loadRiskRanges: () => Promise.resolve(goldShort.riskRanges), loadCryptoQuant: empty, loadHedgai: () => Promise.resolve(goldShort.hedgai),
     loadSecurityIntelligence: empty, loadNowcast: empty, loadQuotes: () => Promise.resolve(goldShort.quotes),
     loadVolatility: () => Promise.resolve(goldShort.volatility), loadUsdCorrelations: () => Promise.resolve(goldShort.usdCorrelations),
+    loadPublishedStatements: () => Promise.resolve(goldTrade),
     loadKalshiEvents: (series) => Promise.resolve(series === 'KXGOLDD' ? [{ event_ticker: 'KXGOLDD-26NOV1117' }] : []),
     loadKalshiMarkets: (event) => Promise.resolve([quote(event, 3960, 0.84), quote(event, 3980, 0.69), quote(event, 4000, 0.5),
       quote(event, 4020, 0.31), quote(event, 4040, 0.16), quote(event, 4300, 0.01)]),

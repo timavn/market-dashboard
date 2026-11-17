@@ -30,14 +30,14 @@
     "label": "Europe",
     "railLabel": "EU",
     "rows": [
-      { "symbol": "STOXX600", "label": "STOXX Europe 600", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^STOXX", "secType": "IND" } },
-      { "symbol": "SX5E", "label": "Euro STOXX 50", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^STOXX50E", "secType": "IND" } },
-      { "symbol": "FTSE", "label": "FTSE 100", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^FTSE", "secType": "IND" } },
-      { "symbol": "DAX", "label": "DAX", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^GDAXI", "secType": "IND" } },
-      { "symbol": "CAC", "label": "CAC 40", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^FCHI", "secType": "IND" } },
-      { "symbol": "FTSEMIB", "label": "FTSE MIB", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "FTSEMIB.MI", "secType": "IND" } },
-      { "symbol": "IBEX", "label": "IBEX 35", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^IBEX", "secType": "IND" } },
-      { "symbol": "SMI", "label": "SMI", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^SSMI", "secType": "IND" } }
+      { "symbol": "STOXX600", "label": "STOXX Europe 600", "place": "Europe-wide", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^STOXX", "secType": "IND" } },
+      { "symbol": "SX5E", "label": "Euro STOXX 50", "place": "Eurozone", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^STOXX50E", "secType": "IND" } },
+      { "symbol": "FTSE", "label": "FTSE 100", "place": "UK", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^FTSE", "secType": "IND" } },
+      { "symbol": "DAX", "label": "DAX", "place": "Germany", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^GDAXI", "secType": "IND" } },
+      { "symbol": "CAC", "label": "CAC 40", "place": "France", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^FCHI", "secType": "IND" } },
+      { "symbol": "FTSEMIB", "label": "FTSE MIB", "place": "Italy", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "FTSEMIB.MI", "secType": "IND" } },
+      { "symbol": "IBEX", "label": "IBEX 35", "place": "Spain", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^IBEX", "secType": "IND" } },
+      { "symbol": "SMI", "label": "SMI", "place": "Switzerland", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^SSMI", "secType": "IND" } }
     ]
   },
   {
@@ -45,15 +45,15 @@
     "label": "Asia",
     "railLabel": "ASIA",
     "rows": [
-      { "symbol": "N225", "label": "Nikkei 225", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^N225", "secType": "IND" } },
-      { "symbol": "HSI", "label": "Hang Seng", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^HSI", "secType": "IND" } },
-      { "symbol": "CSI300", "label": "CSI 300", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "000300.SS", "secType": "IND" } },
-      { "symbol": "NIFTY50", "label": "Nifty 50", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^NSEI", "secType": "IND" } },
-      { "symbol": "SSEC", "label": "Shanghai Composite", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "000001.SS", "secType": "IND" } },
-      { "symbol": "KOSPI", "label": "KOSPI", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^KS11", "secType": "IND" } },
-      { "symbol": "TAIEX", "label": "TAIEX", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^TWII", "secType": "IND" } },
-      { "symbol": "AXJO", "label": "ASX 200", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^AXJO", "secType": "IND" } },
-      { "symbol": "JKSE", "label": "Jakarta Composite", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^JKSE", "secType": "IND" } },
+      { "symbol": "N225", "label": "Nikkei 225", "place": "Japan", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^N225", "secType": "IND" } },
+      { "symbol": "HSI", "label": "Hang Seng", "place": "Hong Kong", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^HSI", "secType": "IND" } },
+      { "symbol": "CSI300", "label": "CSI 300", "place": "China", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "000300.SS", "secType": "IND" } },
+      { "symbol": "NIFTY50", "label": "Nifty 50", "place": "India", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^NSEI", "secType": "IND" } },
+      { "symbol": "SSEC", "label": "Shanghai Composite", "place": "China", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "000001.SS", "secType": "IND" } },
+      { "symbol": "KOSPI", "label": "KOSPI", "place": "South Korea", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^KS11", "secType": "IND" } },
+      { "symbol": "TAIEX", "label": "TAIEX", "place": "Taiwan", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^TWII", "secType": "IND" } },
+      { "symbol": "AXJO", "label": "ASX 200", "place": "Australia", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^AXJO", "secType": "IND" } },
+      { "symbol": "JKSE", "label": "Jakarta Composite", "place": "Indonesia", "summary": true, "provider": { "provider": "yahoo", "yahooSymbol": "^JKSE", "secType": "IND" } },
       { "symbol": "KLSE", "label": "Malaysia KLCI", "summary": false, "provider": { "provider": "yahoo", "yahooSymbol": "^KLSE", "secType": "IND" } }
     ]
   },

@@ -1,5 +1,6 @@
 const {
   buildSecurityIntelligenceV2,
+  secondaryRangeDecision,
 } = require('./securityIntelligenceV2.cjs');
 const {
   manifestChecksumForArtifacts,
@@ -535,5 +536,57 @@ describe('canonical security intelligence v2', () => {
       hasRiskRange: true,
       riskRangeProducts: ['investing-ideas'],
     });
+  });
+});
+
+describe('same-day secondary Risk Ranges', () => {
+  const missingRange = { status: 'unavailable', value: null, sourceId: null, reason: 'symbol-not-in-verified-primary-publication', lrr: null, hrr: null, decisionEligible: false };
+  const product = (label, lrr, hrr, extra = {}) => ({ label, status: 'available', conflicts: [], fields: { riskRange: {
+    value: { lrr, hrr }, marketDate: MARKET_DATE, referenceOnly: false, qualityStatus: 'indexed', publishedAt: `${MARKET_DATE}T00:00:00+00:00`,
+    sourceUrl: 'https://app.hedgeye.com/feed_items/1', trend: null, ...extra } } });
+
+  test('fills a range the daily sheet left missing, labelled with its product', () => {
+    const decision = secondaryRangeDecision(missingRange, { 'investing-ideas': product('Investing Ideas', 1022, 1136) }, MARKET_DATE);
+    expect(decision).toMatchObject({ status: 'available', lrr: 1022, hrr: 1136, value: { lrr: 1022, hrr: 1136 }, sourceId: 'investing-ideas',
+      sourceLabel: 'Investing Ideas', sourceDate: MARKET_DATE, secondary: true, decisionEligible: false, corroboratedBy: [],
+      primaryReason: 'symbol-not-in-verified-primary-publication' });
+  });
+
+  test('agreeing products corroborate; Early Look leads and carries its Trend', () => {
+    const decision = secondaryRangeDecision(missingRange, {
+      'investing-ideas': product('Investing Ideas', 217, 226),
+      'early-look': product('Early Look', 217, 226, { trend: 'BULLISH' }),
+    }, MARKET_DATE);
+    expect(decision).toMatchObject({ status: 'available', sourceId: 'early-look', trend: 'BULLISH', corroboratedBy: ['investing-ideas'] });
+  });
+
+  test('two products printing different ranges are a conflict, never a pick', () => {
+    const decision = secondaryRangeDecision(missingRange, {
+      'investing-ideas': product('Investing Ideas', 5.67, 7.98),
+      'bitcoin-trend-tracker': product('Bitcoin Trend Tracker', 5.67, 7.78),
+    }, MARKET_DATE);
+    expect(decision.status).toBe('conflict');
+    expect(decision.reason).toBe('conflicting-same-day-risk-ranges');
+    expect(decision.conflictingRanges).toEqual([
+      { sourceId: 'investing-ideas', lrr: 5.67, hrr: 7.98 },
+      { sourceId: 'bitcoin-trend-tracker', lrr: 5.67, hrr: 7.78 },
+    ]);
+  });
+
+  test('the verified daily sheet always wins and is left untouched', () => {
+    const sheet = { status: 'available', lrr: 183, hrr: 192, value: { lrr: 183, hrr: 192 }, sourceId: 'risk-ranges', decisionEligible: true };
+    expect(secondaryRangeDecision(sheet, { 'investing-ideas': product('Investing Ideas', 180, 195) }, MARKET_DATE)).toBe(sheet);
+  });
+
+  test('an earlier session, an unindexed read, a conflicted product or bad bounds count for nothing', () => {
+    const products = {
+      'investing-ideas': product('Investing Ideas', 100, 110, { marketDate: '2026-07-22' }),
+      'early-look': product('Early Look', 100, 110, { qualityStatus: 'parsed' }),
+      'momo-tracker': { ...product('Momo Tracker', 100, 110), conflicts: ['riskRange'] },
+      'bitcoin-trend-tracker': product('Bitcoin Trend Tracker', 110, 100),
+      'risk-ranges': product('Risk Ranges', 100, 110),
+      'etf-pro': product('ETF Pro', 100, 110),
+    };
+    expect(secondaryRangeDecision(missingRange, products, MARKET_DATE)).toBe(missingRange);
   });
 });

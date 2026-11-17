@@ -38,7 +38,10 @@
         "comparator": ">",
         "heldSeries": [
           "KXGOLDW"
-        ]
+        ],
+        "weekly": {
+          "series": "KXGOLDW"
+        }
       },
       "hedgeye": {
         "riskRange": {
@@ -104,7 +107,10 @@
         "comparator": ">",
         "heldSeries": [
           "KXSILVERW"
-        ]
+        ],
+        "weekly": {
+          "series": "KXSILVERW"
+        }
       },
       "hedgeye": {
         "riskRange": {
@@ -170,7 +176,10 @@
         "comparator": ">",
         "heldSeries": [
           "KXCOPPERW"
-        ]
+        ],
+        "weekly": {
+          "series": "KXCOPPERW"
+        }
       },
       "hedgeye": {
         "riskRange": {
@@ -289,7 +298,10 @@
         "strikeType": "greater",
         "eventSelection": "next 5:00 PM ET event",
         "underlying": "Brent USD/bbl (Pyth Commodities.Index.BRENT/USD 1-minute close at 5:00 PM ET)",
-        "comparator": ">"
+        "comparator": ">",
+        "weekly": {
+          "series": "KXBRENTW"
+        }
       },
       "hedgeye": {
         "riskRange": {
@@ -352,7 +364,11 @@
         "strikeType": "greater",
         "eventSelection": "today's 5 PM ET event",
         "underlying": "CF Benchmarks BRTI, 60-second average before 5 PM ET",
-        "comparator": ">"
+        "comparator": ">",
+        "weekly": {
+          "series": "KXBTCD",
+          "friday": true
+        }
       },
       "hedgeye": {
         "riskRange": {
@@ -423,7 +439,11 @@
         "strikeType": "greater",
         "eventSelection": "today's 5 PM ET event",
         "underlying": "CF Benchmarks ERTI, 60-second average before 5 PM ET",
-        "comparator": ">"
+        "comparator": ">",
+        "weekly": {
+          "series": "KXETHD",
+          "friday": true
+        }
       },
       "hedgeye": {
         "riskRange": {
@@ -900,8 +920,8 @@
     }
   ],
   "setupRule": {
-    "long": "Trend and Tick both Bullish, price in the bottom third of the Risk Range, and no published Bearish Trade.",
-    "short": "Trend and Tick both Bearish, price in the top third of the Risk Range, and no published Bullish Trade.",
+    "long": "Trend and Trade both Bullish and price in the bottom third of the Risk Range.",
+    "short": "Trend and Trade both Bearish and price in the top third of the Risk Range.",
     "bottomThird": 0.3333,
     "topThird": 0.6667,
     "outsideRange": "no setup"
@@ -909,28 +929,29 @@
   "sizing": {
     "status": "active",
     "accountBasis": "kalshi",
-    "basePct": 4,
-    "maxPct": 10,
+    "basePct": 3,
+    "minPct": 2.5,
+    "maxPct": 5.5,
     "roundPct": 0.5,
     "weights": {
-      "range": 2,
-      "trade": 1,
-      "zScore": 1,
       "usd": 1,
-      "volatility": 0.5,
-      "volume": 0.5
+      "tick": 0.5,
+      "volume": 0.5,
+      "zScore": 0.5
     },
     "zScoreFull": 2,
     "usdCorrelationWindow": "d30",
-    "usdCorrelationFloor": 0.5,
-    "usdCorrelationFull": 0.75,
+    "usdCorrelationFull": 0.5,
     "volExpansionPct": 10,
-    "tiltSigma": 0.25,
-    "widenOnExpansion": 1.1,
+    "lines": {
+      "maxAsk": 0.5,
+      "targetFrom": 0.5,
+      "targetTo": 1,
+      "maxMoves": 1.5,
+      "maxLines": 4
+    },
     "maxSpread": 0.05,
     "feeRate": 0.07,
-    "minEdge": 0.01,
-    "minLinePct": 0.25,
     "markets": [
       "gold",
       "silver",
@@ -942,22 +963,16 @@
       "sp500",
       "nasdaq100"
     ],
-    "note": "A setup starts at basePct and earns up to the weights' total. The position is split across Kalshi lines by edge against our own odds: the ladder's calibrated odds shifted toward the setup by tiltSigma at a maxPct position. tiltSigma is a starting assumption the paper ledger tests."
+    "note": "A setup starts at basePct. The dollar adds its weight when its Trend supports the side through the 30D correlation (scaled up to usdCorrelationFull); Tick adds its weight when it agrees and subtracts it when it opposes; a supports or confirms volume signal and a Z-score stretched against the side add theirs. Lines are bought in the setup's direction at maxAsk or less, within maxMoves expected moves (Kalshi's own odds: 31¢ is half a move away, 16¢ one, 7¢ one and a half) and never past the far end of the Risk Range. The position is split evenly across the target lines (targetFrom to targetTo moves); lines beyond targetTo join only when the volatility gauge is in its High band or up more than volExpansionPct in a week; nearer lines take only what those cannot. Each market gets a ticket for its daily event and, where one is listed, its weekly event."
   },
   "lineMonitor": {
-    "edgeTiers": {
-      "strong": 5,
-      "good": 3,
-      "watch": 1
-    },
     "closingHours": 2,
     "minDepthDollars": 50,
     "bookLines": 15,
-    "newStrongMinutes": 30,
     "expirySharePct": 50,
     "sectionCapPct": null,
     "bookCapPct": null,
-    "note": "Edge tiers are points of edge (our odds − ask − fee). Rows shade short (red) when Trade and Trend are both Bearish and price is in the top third of the Risk Range, long (green) when both are Bullish in the bottom third; shading, not the board's setup rule, decides which side lines are graded on. Each market's bet is its sized % of the Kalshi account (the sizing's basePct when not sized); the order books of its bookLines lines nearest even odds are read and the bet is walked through each side's asks, so the price shown and the edge graded are the average the whole bet fills at, and a side that cannot take the whole bet is illiquid. Without books (or an account read) a side is illiquid with less than minDepthDollars resting at its top ask. sectionCapPct and bookCapPct are % of the Kalshi account and stay null until sizing sets them; null raises no flag. heldSeries on a market maps positions in other Kalshi series (weeklies) to that market."
+    "note": "Rows shade short (red) when Trade and Trend are both Bearish and price is in the top third of the Risk Range, long (green) when both are Bullish in the bottom third; this is the board's setup rule, and it decides which side of a market's lines is the one to buy. Each market's bet is its sized % of the Kalshi account (the sizing's basePct when not sized); the order books of its bookLines lines nearest even odds are read and the bet is walked through each side's asks, so the price shown is the average the whole bet fills at, and a side that cannot take the whole bet is illiquid. Without books (or an account read) a side is illiquid with less than minDepthDollars resting at its top ask. sectionCapPct and bookCapPct are % of the Kalshi account and stay null until sizing sets them; null raises no flag. heldSeries on a market maps positions in other Kalshi series (weeklies) to that market."
   },
   "sections": [
     {

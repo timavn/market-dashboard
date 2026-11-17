@@ -1243,6 +1243,14 @@ function buildSidecarChecks({
     label: 'Restart only the repo-owned IBKR sidecar.',
     command: 'npm run dev:sidecar:restart',
   };
+  // The supervisor restarts an unreachable or duplicated sidecar by itself after
+  // three failed health probes, and the controller no longer repeats that
+  // repair. Nothing is asked of the user unless the sidecar stays down.
+  const supervisorRestartsSidecar = {
+    kind: 'manual',
+    label: 'The supervisor restarts the IBKR sidecar by itself after three failed health checks. If this lasts more than 10 minutes, restart the dashboard.',
+    command: 'npm run dev:restart -- --detach',
+  };
 
   const sidecar = sidecarDuplicateFailure
     ? serviceFailureCheck({
@@ -1255,7 +1263,7 @@ function buildSidecarChecks({
           ? (sidecarState?.sidecarProcessCleanup?.errorCode || 'IBKR_SIDECAR_PROCESS_DISCOVERY_FAILED')
           : 'IBKR_SIDECAR_DUPLICATES',
         impact: 'The sidecar is not singleton-safe; duplicate Gateway sessions can cause connection errors and live data is not considered ready.',
-        recovery: restartSidecar,
+        recovery: supervisorRestartsSidecar,
         provenance: {
           sidecarProcessPids: sidecarState?.sidecarProcessPids || [],
           managedSidecarProcessPids: sidecarState?.managedSidecarProcessPids || [],
@@ -1281,7 +1289,7 @@ function buildSidecarChecks({
         message: `Sidecar did not answer /livez${errorMessage(livezResult) ? `: ${errorMessage(livezResult)}` : '.'}`,
         errorCode: 'IBKR_SIDECAR_UNREACHABLE',
         impact: 'Portfolio and IBKR quotes are unavailable.',
-        recovery: restartSidecar,
+        recovery: supervisorRestartsSidecar,
       });
 
   const runtime = livez?.runtime;

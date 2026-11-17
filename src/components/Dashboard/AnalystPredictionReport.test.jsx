@@ -63,6 +63,16 @@ test('saved review puts dates in reading tables, keeps footer sources, and enabl
   expect(props.remarkPlugins).toContainEqual([remarkAnalystProcessColors, { reviewKind: 'prediction-markets-review' }]);
 });
 
+test('saved boards drop the proxy-range, inverse-Tick and Kalshi-rule footnotes but keep a withheld price', () => {
+  const markdown = ['## Rates', '',
+    'Tick for UST 2Y (SHY), UST 10Y (UST) is a Treasury price ETF signal, read inversely as a yield direction. Kalshi yield contracts pay if the daily Treasury yield reaches the line on any business day this month.', '',
+    '## Indices', '',
+    'Gold price withheld: GC=F returned 1, inconsistent with its Risk Range. Nasdaq-100 27,493; its bar shows the COMPQ range and Nasdaq Composite price.', ''].join('\n');
+  const { container } = render(<AnalystPredictionReport messageId="m" markdown={markdown} citations={[]} />);
+  expect(container).not.toHaveTextContent(/read inversely|reaches the line|its bar shows/);
+  expect(container).toHaveTextContent('Gold price withheld: GC=F returned 1, inconsistent with its Risk Range.');
+});
+
 test('research tables use bordered table layout with a final date column and full-name tooltips', () => {
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown="### S&P 500" />);

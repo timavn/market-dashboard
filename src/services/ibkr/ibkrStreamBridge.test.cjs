@@ -2,7 +2,8 @@ const { test, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const sidecar = require('../providers/ibkrSidecarClient');
 const requests = [];
-sidecar.sidecarRequest = async (path, options) => { requests.push({ path, ...options }); return { ok: true }; };
+let sidecarReply = { ok: true };
+sidecar.sidecarRequest = async (path, options) => { requests.push({ path, ...options }); return sidecarReply; };
 const bridge = require('./ibkrStreamBridge');
 const { getProviderStatusSnapshot } = require('../providers/providerStatus');
 const originalFetch = global.fetch;
@@ -78,4 +79,46 @@ test('stream listeners receive the same immutable envelope that the cache valida
   assert.equal(seen[0].observation, cached.observation);
   assert.equal(seen[0].receivedAt, cached.receivedAt);
   assert.equal(seen[0].expiresAt, cached.expiresAt);
+});
+
+test('instrument descriptors are streamed beside the symbols, each instrument once, and the two sets are independent', async () => {
+  const SPX = { symbol: 'SPX', provider: 'auto', ibkrSymbol: 'SPX', yahooSymbol: '^GSPC', conId: 416904, secType: 'IND', exchange: 'CBOE', currency: 'USD' };
+  const XLK = { symbol: 'XLK', name: 'Technology', yahooSymbol: 'XLK' };
+  const YAHOO_ONLY = { symbol: 'NDX', provider: 'yahoo', yahooSymbol: '^NDX', secType: 'IND' };
+  transport(); bridge.setDesiredSymbols(['SPY']); bridge.setDesiredInstruments([SPX, XLK, XLK, YAHOO_ONLY]);
+  bridge.startIbkrStreamBridge(); await flush(); status(); await flush();
+  assert.deepEqual(requests.at(-1).body.owner, 'market-dashboard');
+  assert.deepEqual(requests.at(-1).body.instruments, [
+    { symbol: 'SPY', secType: 'STK', exchange: 'SMART', currency: 'USD', conId: undefined },
+    { symbol: 'SPX', secType: 'IND', exchange: 'CBOE', currency: 'USD', conId: 416904 },
+    { symbol: 'XLK', secType: 'STK', exchange: 'SMART', currency: 'USD', conId: undefined },
+  ]);
+
+  // Replacing the symbols leaves the descriptors, and the other way round.
+  bridge.setDesiredSymbols([]); await flush();
+  assert.deepEqual(requests.at(-1).body.instruments.map(i => i.symbol), ['SPX', 'XLK']);
+  const sent = requests.length;
+  bridge.setDesiredInstruments([XLK, SPX]); await flush();
+  assert.equal(requests.length, sent, 'the same set in another order is not sent again');
+  bridge.setDesiredInstruments([]); await flush();
+  assert.deepEqual(requests.at(-1).body.instruments, []);
+});
+
+test('a request the sidecar keeps refusing is retried with a growing delay', async () => {
+  const actualSetTimeout = global.setTimeout;
+  const delays = [];
+  const pending = [];
+  sidecarReply = { ok: false, errors: ['Max subscriptions (100) reached'] };
+  try {
+    transport(); bridge.setDesiredSymbols(['SPY']); bridge.startIbkrStreamBridge(); await flush();
+    // Only the reconcile retry is run; the stream's own 45-second heartbeat timer is left pending.
+    global.setTimeout = (callback, delay) => { if (delay !== 45000) { delays.push(delay); pending.push(callback); } return { unref() {} }; };
+    status(); await flush();
+    for (let attempt = 0; attempt < 6; attempt += 1) { pending.shift()?.(); await flush(); }
+    assert.deepEqual(delays, [2000, 4000, 8000, 16000, 30000, 30000, 30000]);
+  } finally {
+    global.setTimeout = actualSetTimeout;
+    sidecarReply = { ok: true };
+    bridge.setDesiredSymbols([]);
+  }
 });

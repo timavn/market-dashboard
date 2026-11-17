@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import AnalystPredictionCurves, { settlementCurve } from './AnalystPredictionCurve';
+import AnalystPredictionCurves, { curveLevel, settlementCurve } from './AnalystPredictionCurve';
 
 // Each section's Kalshi line monitor, emitted by the setup board renderer as an ```analyst-lines JSON block:
 // one row per market (book icon, centred name, curve icon), shaded red (short) or green (long) by Trade, Trend and the Risk Range
@@ -21,11 +21,6 @@ export function parsePredictionLines(text) {
 const isNum = value => typeof value === 'number' && Number.isFinite(value);
 const pct = value => (isNum(value) ? `${Math.round(value * 100)}%` : 'N/A');
 const cents = value => (isNum(value) ? `${Math.round(value * 100)}¢` : 'N/A');
-const points = value => {
-  if (!isNum(value)) return 'N/A';
-  const shown = Math.abs(value * 100).toFixed(1);
-  return shown === '0.0' ? '0.0' : `${value > 0 ? '+' : '−'}${shown}`;
-};
 const dollars = value => (isNum(value) ? `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'N/A');
 const contracts = value => (isNum(value) ? Math.round(value).toLocaleString('en-US') : 'N/A');
 export const lineLabel = line => line.subtitle
@@ -34,11 +29,9 @@ const pacific = value => (value && Number.isFinite(Date.parse(value))
   ? new Date(value).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', hour: 'numeric', minute: '2-digit' }) + ' PT'
   : null);
 
-const STRENGTH = { STRONG: ['Strong', 'is-strong'], GOOD: ['Good', 'is-good'], WATCH: ['Watch', 'is-watch'], PASS: ['Pass', 'is-pass'],
-  ILLIQUID: ['Illiquid', 'is-red'] };
 export const STATE = {
   CLOSED: ['Closed', 'is-blue'],
-  CONTRADICTS: ['Contradicts', 'is-red'], THROUGH_LINE: ['Through line', 'is-yellow'], EDGE_GONE: ['Edge gone', 'is-yellow'],
+  CONTRADICTS: ['Contradicts', 'is-red'], THROUGH_LINE: ['Through line', 'is-yellow'],
   SETUP_LAPSED: ['Unshaded', 'is-yellow'], CLOSING: ['Closing', 'is-blue'], HOLD: ['Hold', 'is-hold'],
 };
 
@@ -61,12 +54,12 @@ export const closes = value => {
 };
 
 const sigma = value => (isNum(value) ? `${value >= 0 ? '+' : '−'}${Math.abs(value).toFixed(1)}σ` : 'N/A');
-const SIDE_HEAD = 'Ask · our edge in points. Hover for the dollars resting at the ask.';
-const FILL_HEAD = 'Average price the whole bet fills at through the order book · our edge at that price. Hover for the fill.';
+const SIDE_HEAD = 'Ask. Hover for the dollars resting at the ask.';
+const FILL_HEAD = 'Average price the whole bet fills at through the order book. Hover for the fill.';
 const whole = value => `$${Math.round(value).toLocaleString('en-US')}`;
 const fillCents = value => `${(value * 100).toFixed(1)}¢`;
 
-// One side of a line: its price and our edge; the side we would take is highlighted, a thin side is underlined red.
+// One side of a line: its price; the side a setup buys is highlighted, a thin side is underlined red.
 // With a bet checked against the order book, the price is the average the whole bet fills at.
 function SideCell({ book, take, bet }) {
   if (!book || !isNum(book.ask)) return <td className="is-muted" title={book?.fill ? 'Nothing for sale on this side' : undefined}>N/A</td>;
@@ -78,7 +71,7 @@ function SideCell({ book, take, bet }) {
       : `Only ${whole(book.depth)} for sale on this side; the ${whole(bet)} bet does not fill`
     : isNum(book.depth) ? `${whole(book.depth)} at ${cents(book.ask)}` : 'Size at the ask not quoted';
   return <td className={`analyst-lines__side${take ? ' is-take' : ''}${book.illiquid ? ' is-thin' : ''}`} title={title}>
-    {fill ? fillCents(book.ask) : cents(book.ask)} <span className={isNum(book.edge) && book.edge > 0 ? 'is-positive' : 'is-muted'}>{points(book.edge)}</span>
+    {fill ? fillCents(book.ask) : cents(book.ask)}
   </td>;
 }
 
@@ -103,8 +96,9 @@ const LineCell = ({ line, title }) => {
   return <td title={title}><LineName word={word} number={number} /></td>;
 };
 
-// Spot as a blue row between the strikes it sits between (strikes run low to high), its number lined up with
-// theirs and written the same way (thousands separators only when the lines use them).
+// Spot as a thin blue rule between the strikes it sits between (strikes run low to high). Its tag sits in the Line
+// column, aligned like that column's cells, so its number lines up with theirs; it is written the same way (thousands
+// separators only when the lines use them).
 function withSpot(visible, spot, columns, renderLine) {
   const out = visible.map(renderLine);
   if (!isNum(spot.price) || !visible.some(line => isNum(line.strike))) return out;
@@ -114,52 +108,70 @@ function withSpot(visible, spot, columns, renderLine) {
   const number = spot.unit === '%' ? `${spot.price.toFixed(2)}%`
     : spot.price.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: grouped });
   out.splice(at === -1 ? out.length : at, 0, <tr key="spot" className="analyst-lines__spot">
-    <td><LineName word="Spot" number={number} /></td><td colSpan={columns - 1} /></tr>);
+    <td><span className="analyst-lines__spot-slot"><span className="analyst-lines__spot-tag"><LineName word="Spot" number={number} /></span></span></td>
+    <td colSpan={columns - 1} /></tr>);
   return out;
 }
 
-// Lines that cannot take the bet on the side we would buy (or, without a bet, have under minDepthDollars at its ask)
+// Lines that cannot take the bet (or, without a bet, have under minDepthDollars at the ask)
 // stay folded behind their own button, tinted red once shown.
 const IlliquidButton = ({ count, shown, onClick, bet }) => (count > 0 && !shown
   ? <button type="button" className="analyst-lines__more" onClick={onClick}>
     {isNum(bet) ? `Show ${count} line${count === 1 ? '' : 's'} that can't take ${whole(bet)}` : `Show ${count} illiquid line${count === 1 ? '' : 's'}`}</button>
   : null);
 
+const fromPrice = (line, centre) => (isNum(centre) && centre && isNum(line.strike)
+  ? `${line.strike >= centre ? '+' : '−'}${Math.abs(((line.strike - centre) / centre) * 100).toFixed(1)}%` : sigma(line.sigmas));
+// A stake as its share of the account over its dollars, each centred on its own line.
+const Stake = ({ pct: share, dollars: amount }) => <>
+  <span className="analyst-lines__stack">{isNum(share) ? `${share.toFixed(2).replace(/0$/, '')}%` : 'N/A'}</span>
+  {isNum(amount) && <span className="analyst-lines__stack">{whole(amount)}</span>}</>;
+
+// A setup's order book (user-specified 2026-11-16): only the side the setup buys and only the lines its rules allow
+// (50¢ or less, within reach, inside the Risk Range), plus the one line on the other side of spot so spot sits between
+// rows. The ticket's lines are tinted and carry stake, contracts and winnings; a Ticket row totals them.
 function LineTable({ market, lines }) {
-  const [showAll, setShowAll] = useState(false);
-  const [showIlliquid, setShowIlliquid] = useState(false);
-  // With a bet, only the lines whose order books were read are listed.
-  const listed = isNum(lines.bet) ? lines.lines.filter(line => line.checked) : lines.lines;
-  const count = strength => listed.filter(line => line.strength === strength).length;
-  // Strike order, so spot sits between the lines around it; strength marks the best.
-  const visible = listed.filter(line => (line.strength === 'ILLIQUID' ? showIlliquid : showAll || line.strength !== 'PASS'))
-    .sort((a, b) => (isNum(a.strike) && isNum(b.strike) ? a.strike - b.strike : 0));
-  const hidden = showAll ? 0 : count('PASS');
+  const yes = lines.buy === 'YES';
+  const ordered = [...lines.lines].sort((a, b) => (isNum(a.strike) && isNum(b.strike) ? a.strike - b.strike : 0));
+  const inReach = ordered.filter(line => line.reach || line.ticket);
+  // Yes is bought above the price, so the neighbour is the line just below the first one in reach; No, just above the last.
+  const at = inReach.length ? ordered.indexOf(yes ? inReach[0] : inReach[inReach.length - 1]) : -1;
+  const neighbour = at === -1 ? null : ordered[yes ? at - 1 : at + 1];
+  const visible = ordered.filter(line => inReach.includes(line) || line === neighbour);
+  const staked = inReach.filter(line => line.ticket);
+  const sum = key => staked.reduce((total, line) => total + (line.ticket[key] || 0), 0);
+  const funded = staked.some(line => isNum(line.ticket.contracts));
+  const head = isNum(lines.bet) ? FILL_HEAD : SIDE_HEAD;
   return <>
     <Label market={market} lines={lines} />
-    {visible.length > 0 && <table className="analyst-drivers__table analyst-lines__table" aria-label={`${market.market} Kalshi lines`}>
-      <thead><tr><th>Line</th><th>From centre</th><th title={isNum(lines.bet) ? FILL_HEAD : SIDE_HEAD}>Yes</th>
-        <th title={isNum(lines.bet) ? FILL_HEAD : SIDE_HEAD}>No</th>
-        <th title="Kalshi odds / our odds that the line pays Yes">Yes odds K / ours</th><th>Strength</th><th>Held</th></tr></thead>
-      <tbody>{withSpot(visible, market.summary, 7, line => <tr key={line.ticker} className={line.strength === 'ILLIQUID' ? 'analyst-lines__illiquid' : undefined}>
-        <LineCell line={line} />
-        <td>{sigma(line.sigmas)}</td>
-        <SideCell book={line.yes} take={line.buy === 'YES'} bet={lines.bet} /><SideCell book={line.no} take={line.buy === 'NO'} bet={lines.bet} />
-        <td>{pct(line.kalshiYes)} / {pct(line.ourYes)}</td>
-        <td><Chip className={STRENGTH[line.strength]?.[1]} flash={line.isNew}>{STRENGTH[line.strength]?.[0] || line.strength}{line.isNew ? ' · new' : ''}</Chip></td>
-        <td>{line.held ? <span className="analyst-lines__held">{line.held.side === 'YES' ? 'Yes' : 'No'} {contracts(line.held.contracts)}</span> : '—'}</td>
-      </tr>)}</tbody>
-    </table>}
-    {hidden > 0 && <button type="button" className="analyst-lines__more" onClick={() => setShowAll(true)}>
-      {hidden} below 1 point of edge · show</button>}
-    <IlliquidButton count={count('ILLIQUID')} shown={showIlliquid} onClick={() => setShowIlliquid(true)} bet={lines.bet} />
+    <table className="analyst-drivers__table analyst-lines__table analyst-lines__setup" aria-label={`${market.market} Kalshi lines`}>
+      <thead><tr><th>Line</th><th>From price</th><th title={head}>{yes ? 'Yes' : 'No'} ask</th>
+        <th title="Dollars resting at the ask on the side bought">At the ask</th><th>Stake</th><th>Contracts</th><th>Wins</th></tr></thead>
+      <tbody>{withSpot(visible, market.summary, 7, line => {
+        const book = yes ? line.yes : line.no;
+        return <tr key={line.ticker} className={line.ticket ? 'analyst-lines__ticket' : undefined}>
+          <LineCell line={line} />
+          <td>{fromPrice(line, market.summary.centre)}</td>
+          <td className={book?.illiquid ? 'analyst-lines__side is-thin' : undefined}>{isNum(lines.bet) && book?.fill && isNum(book.ask) ? fillCents(book.ask) : cents(book?.ask)}</td>
+          <td>{isNum(book?.depth) ? whole(book.depth) : 'N/A'}</td>
+          <td className={line.ticket ? 'analyst-lines__stake' : undefined}>{line.ticket ? <Stake pct={line.ticket.pct} dollars={line.ticket.dollars} /> : '—'}</td>
+          <td>{line.ticket && isNum(line.ticket.contracts) ? contracts(line.ticket.contracts) : '—'}</td>
+          <td>{line.ticket && isNum(line.ticket.win) ? whole(line.ticket.win) : '—'}</td>
+        </tr>;
+      })}
+      {staked.length > 0 && <tr className="analyst-lines__total">
+        <td>Ticket</td><td />
+        <td>{sum('pct') > 0 ? `${Math.round((staked.reduce((total, line) => total + (line.ticket.ask ?? 0) * line.ticket.pct, 0) / sum('pct')) * 100)}¢ avg` : ''}</td><td />
+        <td><Stake pct={sum('pct')} dollars={funded ? sum('dollars') : null} /></td>
+        <td>{funded ? contracts(sum('contracts')) : '—'}</td><td>{funded ? whole(sum('win')) : '—'}</td></tr>}</tbody>
+    </table>
   </>;
 }
 
-// An unshaded market: its ladder as Kalshi quotes it, both sides priced and the better side highlighted.
+// An unshaded market: its ladder as Kalshi quotes it, both sides priced and neither marked.
 // Opened, it shows the 15 fillable lines closest to even odds in strike order: with a bet, the lines whose order books
-// take the whole bet on their better side (only lines whose books were read are listed); without one, at least $50 at
-// the better side's ask. The other fillable lines and the ones that cannot fill each open with their own button.
+// take the whole bet on either side (only lines whose books were read are listed); without one, at least $50 at
+// either side's ask. The other fillable lines and the ones that cannot fill each open with their own button.
 export const LADDER_LINES = 15;
 function LadderTable({ market, lines }) {
   const [showAll, setShowAll] = useState(false);
@@ -174,12 +186,12 @@ function LadderTable({ market, lines }) {
     {visible.length > 0 && <table className="analyst-drivers__table analyst-lines__table" aria-label={`${market.market} Kalshi lines`}>
       <thead><tr><th>Line</th><th>From centre</th><th title={isNum(lines.bet) ? FILL_HEAD : SIDE_HEAD}>Yes</th>
         <th title={isNum(lines.bet) ? FILL_HEAD : SIDE_HEAD}>No</th>
-        <th title="Kalshi odds / our odds that the line pays Yes">Yes odds K / ours</th></tr></thead>
+        <th title="Kalshi odds that the line pays Yes">Yes odds</th></tr></thead>
       <tbody>{withSpot(visible, market.summary, 5, line => <tr key={line.ticker} className={fillable.has(line) ? undefined : 'analyst-lines__illiquid'}>
         <LineCell line={line} />
         <td>{sigma(line.sigmas)}</td>
-        <SideCell book={line.yes} take={line.better === 'YES'} bet={lines.bet} /><SideCell book={line.no} take={line.better === 'NO'} bet={lines.bet} />
-        <td>{pct(line.kalshiOdds)} / {pct(line.ourOdds)}</td>
+        <SideCell book={line.yes} bet={lines.bet} /><SideCell book={line.no} bet={lines.bet} />
+        <td>{pct(line.kalshiOdds)}</td>
       </tr>)}</tbody>
     </table>}
     {!showAll && fillable.size > nearest.size && <button type="button" className="analyst-lines__more" onClick={() => setShowAll(true)}>
@@ -190,13 +202,13 @@ function LadderTable({ market, lines }) {
 
 function HeldTable({ market }) {
   return <table className="analyst-drivers__table analyst-lines__table" aria-label={`${market.market} held lines`}>
-    <thead><tr><th>Held line</th><th>Held</th><th>Cost</th><th>Bid</th><th title="Kalshi odds / our odds">Odds K / ours</th><th>State</th></tr></thead>
+    <thead><tr><th>Held line</th><th>Held</th><th>Cost</th><th>Bid</th><th title="Kalshi odds that the held side pays">Odds</th><th>State</th></tr></thead>
     <tbody>{market.held.map(line => {
       const state = STATE[line.state] || STATE.HOLD;
       return <tr key={line.ticker} className={`analyst-lines__tone-${line.tone || 'none'}`}>
         <LineCell line={line} title={line.ticker} />
         <td>{line.side === 'YES' ? 'Yes' : 'No'} {contracts(line.contracts)}</td>
-        <td>{dollars(line.cost)}</td><td>{cents(line.bid)}</td><td>{pct(line.kalshiOdds)} / {pct(line.ourOdds)}</td>
+        <td>{dollars(line.cost)}</td><td>{cents(line.bid)}</td><td>{pct(line.kalshiOdds)}</td>
         <td><Chip className={state[1]}>{state[0]}</Chip>{line.why && <span className="analyst-lines__why">{line.why}</span>}</td>
       </tr>;
     })}</tbody>
@@ -220,10 +232,10 @@ function Toggle({ open, onClick, label, icon, off, className }) {
     aria-expanded={off ? undefined : open} aria-label={label} title={label} disabled={off} onClick={onClick}>{icon}</button>;
 }
 
-// A market's two panels, its order book and its settlement curve, open independently; only the book of a shaded market
-// with a Good or Strong line starts open.
+// A market's two panels, its order book and its settlement curve, open independently and start closed: nothing shows
+// until its button is clicked (user-specified 2026-11-16), whatever the board's open flag says.
 export function useMarketPanels(market) {
-  const [book, setBook] = useState(Boolean(market.open));
+  const [book, setBook] = useState(false);
   const [curveOpen, setCurveOpen] = useState(false);
   const curve = useMemo(() => settlementCurve(market), [market]);
   return { book, curveOpen, curve, toggleBook: () => setBook(value => !value), toggleCurve: () => setCurveOpen(value => !value) };
@@ -237,11 +249,88 @@ export function MarketToggles({ market, panels, className = '' }) {
   </span>;
 }
 
+// Settlement grid: what the held lines pay across settlement prices. Held strikes cut the axis into zones (P&L is flat
+// inside one); each zone gets two sample prices, spot is marked in its zone, and Kalshi's ladder gives the odds of
+// settling above each price and inside each zone. Odds x P&L summed over the zones is the book's expected P&L.
+const PAYS_ABOVE = new Set(['greater', 'greater_or_equal']);
+const PAYS_BELOW = new Set(['less', 'less_or_equal']);
+const linePays = (line, x) => {
+  const above = PAYS_ABOVE.has(line.strikeType) ? x > line.strike : PAYS_BELOW.has(line.strikeType) ? x < line.strike : null;
+  return above === null ? null : line.side === 'YES' ? above : !above;
+};
+const money = value => `${Math.round(value) < 0 ? '−' : Math.round(value) > 0 ? '+' : ''}$${Math.abs(Math.round(value)).toLocaleString('en-US')}`;
+const tone = value => (Math.round(value) > 0 ? 'is-positive' : Math.round(value) < 0 ? 'is-negative' : 'is-muted');
+const signedPct = value => `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value).toFixed(1)}%`;
+
+export function settlementGrid(market) {
+  const held = (market.held || []).filter(line => isNum(line.strike) && isNum(line.contracts) && isNum(line.cost)
+    && linePays(line, line.strike) !== null);
+  if (!held.length) return null;
+  const cuts = [...new Set(held.map(line => line.strike))].sort((a, b) => a - b);
+  const strikes = [...new Set((market.lines?.lines || []).map(line => line.strike).filter(isNum))].sort((a, b) => a - b);
+  const gaps = strikes.slice(1).map((value, index) => value - strikes[index]).filter(gap => gap > 0).sort((a, b) => a - b);
+  const price = market.summary?.price;
+  const step = gaps.length ? gaps[Math.floor(gaps.length / 2)] : Math.abs(price || cuts[0]) * 0.01 || 1;
+  const curve = settlementCurve(market);
+  const above = x => (curve ? curve.above(x) : null);
+  const bounds = [...cuts.map((cut, index) => [index ? cuts[index - 1] : null, cut]), [cuts[cuts.length - 1], null]];
+  const zones = bounds.map(([lo, hi]) => {
+    const samples = lo === null ? [hi - 2 * step, hi - step] : hi === null ? [lo + step, lo + 2 * step]
+      : [lo + (hi - lo) / 3, lo + (2 * (hi - lo)) / 3];
+    const inside = x => (lo === null || x > lo) && (hi === null || x <= hi);
+    const rows = samples.map(x => ({ x, spot: false }));
+    if (isNum(price) && inside(price)) rows.push({ x: price, spot: true });
+    rows.sort((a, b) => a.x - b.x);
+    const probe = samples[0];
+    const perLine = held.map(line => (linePays(line, probe) ? line.contracts : 0) - line.cost);
+    const pnl = perLine.reduce((total, value) => total + value, 0);
+    const odds = curve ? (lo === null ? 1 : above(lo)) - (hi === null ? 0 : above(hi)) : null;
+    return { lo, hi, rows, perLine, pnl, odds };
+  });
+  const cost = held.reduce((total, line) => total + line.cost, 0);
+  const marked = held.every(line => isNum(line.bid)) ? held.reduce((total, line) => total + line.bid * line.contracts, 0) - cost : null;
+  const expected = curve ? zones.reduce((total, zone) => total + zone.odds * zone.pnl, 0) : null;
+  return { held, zones, cost, price, above, expected, marked, unit: market.summary?.unit || null };
+}
+
+function SettlementGrid({ market, grid }) {
+  const { held, zones, cost, price, above, expected, marked, unit } = grid;
+  const level = value => curveLevel(value, unit);
+  const win = value => `analyst-lines__pnl ${value > 0 ? 'is-win' : 'is-loss'}`;
+  const expectedTone = isNum(expected) ? tone(expected) : undefined;
+  return <table className="analyst-drivers__table analyst-lines__table analyst-lines__grid" aria-label={`${market.market} settlement grid`}>
+    <thead><tr><th>Settle</th><th>Δ spot</th>
+      {held.map(line => <th key={line.ticker} title={line.ticker}>{line.side === 'YES' ? 'Yes' : 'No'} {level(line.strike)}</th>)}
+      <th>Book P&amp;L</th><th>P&amp;L %</th><th title="Kalshi odds of settling above this price">Above %</th>
+      <th title="Kalshi odds of settling in this zone">Zone odds</th><th>Odds × P&amp;L</th></tr></thead>
+    <tbody>{zones.flatMap((zone, zoneIndex) => zone.rows.map((row, index) => <tr key={`${zoneIndex}-${row.x}`} className={row.spot ? 'is-spot' : undefined}>
+      <td>{level(row.x)}{row.spot ? ' spot' : ''}</td>
+      <td>{isNum(price) && price ? signedPct(((row.x - price) / price) * 100) : 'N/A'}</td>
+      {zone.perLine.map((value, lineIndex) => <td key={held[lineIndex].ticker} className={win(value)}>{money(value)}</td>)}
+      <td className={win(zone.pnl)}>{money(zone.pnl)}</td>
+      <td className={tone(zone.pnl)}>{cost ? signedPct((zone.pnl / cost) * 100) : 'N/A'}</td>
+      <td>{isNum(above(row.x)) ? `${(above(row.x) * 100).toFixed(1)}%` : 'N/A'}</td>
+      {index === 0 && <td rowSpan={zone.rows.length} className="analyst-lines__zone">{isNum(zone.odds) ? `${(zone.odds * 100).toFixed(1)}%` : 'N/A'}</td>}
+      {index === 0 && <td rowSpan={zone.rows.length} className={`analyst-lines__zone ${tone(zone.pnl)}`}>
+        {isNum(zone.odds) ? money(zone.odds * zone.pnl) : 'N/A'}</td>}
+    </tr>))}
+      <tr className="analyst-lines__grid-total">
+        <td colSpan={2 + held.length}>Expected at Kalshi odds{isNum(marked) ? ` · marked ${money(marked)} at the bid` : ''}</td>
+        <td className={expectedTone}>{isNum(expected) ? money(expected) : 'N/A'}</td>
+        <td className={expectedTone}>{isNum(expected) && cost ? signedPct((expected / cost) * 100) : 'N/A'}</td>
+        <td /><td>100%</td><td className={expectedTone}>{isNum(expected) ? money(expected) : 'N/A'}</td>
+      </tr>
+    </tbody>
+  </table>;
+}
+
 export function MarketBook({ market }) {
+  const grid = useMemo(() => settlementGrid(market), [market]);
   return <>
-    {market.lines?.lines.length > 0 && (market.lines.side
+    {market.lines?.lines.length > 0 && (market.lines.side && market.lines.lines.some(line => line.reach || line.ticket)
       ? <LineTable market={market} lines={market.lines} /> : <LadderTable market={market} lines={market.lines} />)}
     {market.held.length > 0 && <HeldTable market={market} />}
+    {grid && <SettlementGrid market={market} grid={grid} />}
   </>;
 }
 

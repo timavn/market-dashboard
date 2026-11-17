@@ -80,14 +80,33 @@ describe('settlement curve', () => {
     expect(new Set(chips.map(chip => chip.querySelector('rect').getAttribute('y'))).size).toBe(1);
     expect(container.querySelector('.analyst-curve__level.is-low')).not.toBeNull();
     expect(container.querySelector('.analyst-curve__level.is-high')).not.toBeNull();
-    // The Risk Range in thirds, in the plot and as the bar under the axis.
+    // The Risk Range in thirds in the plot, and the range cell's bar under the axis: its third ticks, the Alpha Code's
+    // dots, the price with its place in range, and the Alpha Code.
     expect(container.querySelectorAll('.analyst-curve__range-band')).toHaveLength(3);
-    expect(container.querySelectorAll('.analyst-curve__range rect')).toHaveLength(3);
+    expect(container.querySelectorAll('.analyst-curve__range-mark')).toHaveLength(2);
+    expect(container.querySelectorAll('.analyst-curve__range-alpha')).toHaveLength(2);
+    expect(container.querySelector('.analyst-curve__range-dot')).not.toBeNull();
+    expect(container.querySelector('.analyst-curve__range-position')).toHaveTextContent('55%');
+    expect(container.querySelector('.analyst-curve__range-code')).toHaveTextContent('92/91');
     // Every labelled axis tick reads its price and the chance it settles above it.
     const ticks = [...container.querySelectorAll('.analyst-curve__tick')].map(node => node.textContent);
     expect(ticks).toContain(`90${Math.round(settlementCurve(wti).above(90) * 100)}%`);
     expect(within(figure).getByText('Below Trend 91')).toBeInTheDocument();
     expect(within(figure).getByText('±2.6%')).toBeInTheDocument();
+  });
+  it('holds the whole Risk Range and the price on the axis, however far they sit from the bell', () => {
+    // Copper: a bell 6.09 ±0.02 inside a 5.98–6.37 range, the price at its foot and no Alpha Code.
+    const ladder = [[6.05, 0.97], [6.07, 0.88], [6.09, 0.55], [6.11, 0.17], [6.13, 0.05]];
+    const copper = settlementCurve({ id: 'cu', market: 'Copper', summary: { price: 6.0 },
+      levels: { rangeLow: 5.98, rangeHigh: 6.37 },
+      lines: { lines: ladder.map(([strike, odds]) => ({ strike, kalshiOdds: odds, sigmas: (strike - 6.094) / 0.018 })) } });
+    const { container } = render(<AnalystPredictionCurve curve={copper} width={860} />);
+    const tags = [...container.querySelectorAll('.analyst-curve__tag')].map(tag => [...tag.querySelectorAll('text')].map(node => node.textContent).join(' '));
+    expect(tags).toEqual(['RR low 5.98', 'Price 6.00', 'Bot ⅓ 6.11', 'Top ⅓ 6.24', 'RR high 6.37']);
+    expect(container.querySelectorAll('.analyst-curve__level')).toHaveLength(5);
+    expect(container.querySelector('.analyst-curve__range-position')).toHaveTextContent('5%');
+    expect(container.querySelector('.analyst-curve__range-position')).toHaveClass('is-bottom');
+    expect(container.querySelector('.analyst-curve__range-code')).toHaveTextContent('N/A');
   });
 });
 

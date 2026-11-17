@@ -12,6 +12,7 @@ const { randomBytes } = require('crypto');
 const net = require('net');
 const { spawn, execFileSync, execFile } = require('child_process');
 const { analystHealthFailureRequiresInvalidation, createAnalystVerificationController } = require('./analystLifecycle.cjs');
+const { createLineTimer, rotateLog } = require('./logLines');
 const { CONTRACT_MESSAGE, CONTRACT_READY_MESSAGE } = require('../../src/services/analyst/analystRuntimeGate.cjs');
 const { buildSystemReadiness } = require('../../src/utils/systemReadiness.cjs');
 const { computeRuntimeFingerprint } = require('../../src/utils/runtimeFingerprint.cjs');
@@ -1232,33 +1233,43 @@ function applyControllerStatusPayload(item, payload, observedAt = new Date().toI
   return true;
 }
 
-function rotate(file) {
-  try {
-    if (fs.statSync(file).size < maxLogBytes) return;
-    for (let n = 4; n >= 1; n--) { const from = `${file}.${n}`; const to = `${file}.${n + 1}`; if (fs.existsSync(from)) fs.renameSync(from, to); }
-    fs.renameSync(file, `${file}.1`);
-  } catch (error) { if (error.code !== 'ENOENT') throw error; }
-}
-function streamToLog(stream, file, onActivity) {
-  stream.on('data', chunk => {
+// The API and the IBKR sidecar print no time of their own, so the supervisor
+// puts one in front of each of their lines. That adds about a third to those
+// logs, so more of their files are kept. The Analyst sidecar writes about
+// 58 MB a day and kept a day and a half at the default; it now keeps a week.
+const logPolicies = {
+  api: { timed: true, keep: 8 },
+  sidecar: { timed: true, keep: 10 },
+  analystSidecar: { maxBytes: 50 * 1024 * 1024, keep: 8 },
+};
+function streamToLog(stream, file, onActivity, { timed = false, maxBytes = maxLogBytes, keep = 5 } = {}) {
+  const lines = timed ? createLineTimer() : null;
+  const append = text => {
+    if (!text.length) return;
     try {
-      rotate(file);
-      fs.appendFileSync(file, chunk);
+      rotateLog(file, { maxBytes, keep });
+      fs.appendFileSync(file, text);
     } catch (error) {
       if (!['ENOSPC', 'EDQUOT'].includes(error?.code)) {
         console.error(`[dashboard-supervisor] Could not append ${path.basename(file)}: ${error.message}`);
       }
     }
+  };
+  stream.on('data', chunk => {
+    append(lines ? lines.push(chunk) : chunk);
+    // The activity parser reads the service's own output, without the added time.
     onActivity?.(chunk);
   });
+  // A service that exits without ending its last line still gets it logged.
+  if (lines) stream.on('end', () => append(lines.flush()));
 }
 function childFor(name, onActivity) {
   const service = services[name];
   const file = path.join(logDir, `${name}.log`);
   const options = { cwd: root, env: childEnvironment(name), stdio: name === 'api' ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe'] };
   const child = service.shell ? spawn('bash', service.args, options) : spawn(process.execPath, service.args, options);
-  streamToLog(child.stdout, file, chunk => onActivity?.('stdout', chunk));
-  streamToLog(child.stderr, file, chunk => onActivity?.('stderr', chunk));
+  streamToLog(child.stdout, file, chunk => onActivity?.('stdout', chunk), logPolicies[name]);
+  streamToLog(child.stderr, file, chunk => onActivity?.('stderr', chunk), logPolicies[name]);
   return child;
 }
 function assertPorts() {

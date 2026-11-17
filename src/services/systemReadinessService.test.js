@@ -453,8 +453,14 @@ describe('IBKR sidecar process readiness', () => {
     });
 
     expect(checks.find(check => check.id === 'ibkr.sidecar')).toMatchObject({
-      status: 'fail', errorCode: 'IBKR_SIDECAR_UNREACHABLE', recovery: { automatic: true },
+      status: 'fail', errorCode: 'IBKR_SIDECAR_UNREACHABLE',
+      // The supervisor restarts it; the controller no longer repeats that repair.
+      recovery: { kind: 'manual', automatic: false, command: 'npm run dev:restart -- --detach' },
     });
+    const sidecarRecovery = checks.find(check => check.id === 'ibkr.sidecar').recovery;
+    expect(sidecarRecovery.label).toMatch(/supervisor restarts the IBKR sidecar by itself/);
+    expect(sidecarRecovery.label).toMatch(/more than 10 minutes, restart the dashboard/);
+    expect(sidecarRecovery).not.toHaveProperty('actionId');
     expect(checks.find(check => check.id === 'ibkr.portfolio')).toMatchObject({
       status: 'fail', errorCode: 'IBKR_PORTFOLIO_UNAVAILABLE',
     });
@@ -653,8 +659,9 @@ describe('IBKR sidecar process readiness', () => {
       id: 'ibkr.sidecar',
       status: 'fail',
       errorCode: 'IBKR_SIDECAR_DUPLICATES',
-      recovery: { command: 'npm run dev:sidecar:restart' },
+      recovery: { kind: 'manual', automatic: false, command: 'npm run dev:restart -- --detach' },
     });
+    expect(checks[0].recovery).not.toHaveProperty('actionId');
     expect(checks[0].summary).toMatch(/102/);
   });
 });

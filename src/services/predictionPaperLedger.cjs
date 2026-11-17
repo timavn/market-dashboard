@@ -1,5 +1,5 @@
 // Paper record of the setup board's sized tickets: the first split shown for each event on a market day,
-// scored after Kalshi settles it. It measures whether the sizing inputs and the tilt pay; no order is placed.
+// scored after Kalshi settles it. It measures whether the sizing inputs and the line zones pay; no order is placed.
 
 const TABLE = 'PredictionMarketPerformanceLedger';
 const ACCOUNT = 'paper';
@@ -9,18 +9,21 @@ const PRICE_BUCKETS = [[0, 0.2, 'under 20¢'], [0.2, 0.5, '20–50¢'], [0.5, 0.
 // DynamoDB stores no undefined values; a ticket is plain JSON.
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-function ticketOf(row, marketDate) {
-  const sizing = row.sizing;
+function ticketOf(row, marketDate, duration = 'daily') {
+  const sizing = duration === 'weekly' ? row.sizing?.weekly : row.sizing;
   if (!sizing?.event || !Array.isArray(sizing.lines) || !sizing.lines.length || !marketDate) return null;
   return plain({
-    accountId: ACCOUNT, recordKey: `${PREFIX}${marketDate}#${sizing.event}`, kind: 'paper-ticket', status: 'open',
-    marketDate, market: row.id, label: row.label, event: sizing.event, side: sizing.side, pct: sizing.pct, spentPct: sizing.spentPct,
-    tilt: sizing.tilt, widen: sizing.widen, ladder: sizing.ladder || null, quotedAt: sizing.quotedAt || null,
-    components: (sizing.components || []).map(({ key, score, lost, missing }) => ({ key, score, lost, ...(missing ? { missing: true } : {}) })),
-    lines: sizing.lines.map(({ ticker, strike, buy, ask, fee, kalshiOdds, ourOdds, edge, pct }) =>
-      ({ ticker, strike, buy, ask, fee, kalshiOdds, ourOdds, edge, pct })),
+    accountId: ACCOUNT, recordKey: `${PREFIX}${marketDate}#${sizing.event}`, kind: 'paper-ticket', status: 'open', duration,
+    marketDate, market: row.id, label: row.label, event: sizing.event, side: row.sizing.side, pct: row.sizing.pct, spentPct: sizing.spentPct,
+    wide: Boolean(sizing.wide), volBand: row.sizing.volBand || null, ladder: sizing.ladder || null, rangeLimit: sizing.rangeLimit ?? null,
+    quotedAt: sizing.quotedAt || null,
+    components: (row.sizing.components || []).map(({ key, weight, points, missing }) => ({ key, weight, points, ...(missing ? { missing: true } : {}) })),
+    lines: sizing.lines.map(({ ticker, strike, buy, ask, fee, moves, zone, pct }) => ({ ticker, strike, buy, ask, fee, moves, zone, pct })),
   });
 }
+
+/** Both tickets of a sized row: its daily event and, when listed, its weekly event. */
+const ticketsOf = (row, marketDate) => ['daily', 'weekly'].map((duration) => ticketOf(row, marketDate, duration)).filter(Boolean);
 
 /** P&L of a ticket in % of the account once every line has a result; null while any is still open. */
 function scoreTicket(ticket, results) {
@@ -54,10 +57,14 @@ function summarize(tickets) {
     wonTickets: settled.filter((ticket) => ticket.pnlPct > 0).length, ...tally(all),
     byMarket: group((ticket) => ticket.market),
     bySide: group((ticket) => ticket.side),
+    byDuration: group((ticket) => ticket.duration || 'daily'),
+    byZone: Object.fromEntries(['target', 'far', 'near'].map((zone) => [zone, tally(all.filter((line) => line.zone === zone))])
+      .filter(([, bucket]) => bucket.lines)),
     byPrice: Object.fromEntries(PRICE_BUCKETS.map(([from, to, label]) => [label, tally(all.filter((line) => line.ask >= from && line.ask < to))])
       .filter(([, bucket]) => bucket.lines)),
-    // Each size input, split by whether it earned most of its weight on the ticket.
-    byInput: group((ticket) => (ticket.components || []).map((item) => `${item.key}:${item.missing ? 'missing' : item.score >= 0.75 ? 'for' : 'against'}`)),
+    // Each size input, split by what it did to the ticket's size.
+    byInput: group((ticket) => (ticket.components || []).map((item) => `${item.key}:${item.missing ? 'missing'
+      : item.points >= 0.75 * item.weight ? 'added' : item.points < 0 ? 'subtracted' : item.points > 0 ? 'part' : 'nothing'}`)),
   };
 }
 
@@ -80,7 +87,7 @@ function createPaperLedger({ dynamodb, loadKalshiMarkets, tableName = TABLE, set
 
   /** Save the first split shown for each event on its market day; later boards leave it as it was. */
   async function record(board) {
-    const tickets = (board?.rows || []).map((row) => ticketOf(row, board.marketDate)).filter((ticket) => ticket && !recorded.has(ticket.recordKey));
+    const tickets = (board?.rows || []).flatMap((row) => ticketsOf(row, board.marketDate)).filter((ticket) => !recorded.has(ticket.recordKey));
     await Promise.all(tickets.map(async (ticket) => {
       try {
         await dynamodb.put({ TableName: tableName, Item: { ...ticket, recordedAt: new Date().toISOString() },
@@ -125,4 +132,4 @@ function createPaperLedger({ dynamodb, loadKalshiMarkets, tableName = TABLE, set
   return { record, settle, summary };
 }
 
-module.exports = { createPaperLedger, scoreTicket, summarize, ticketOf };
+module.exports = { createPaperLedger, scoreTicket, summarize, ticketOf, ticketsOf };

@@ -223,7 +223,8 @@ function cellFor({ node, children }) {
 }
 // The row renderer spans cells over the volume row, or splits the volume into one cell per window, by passing
 // rowSpan/colSpan/split through.
-// A board market with Kalshi lines carries its book and curve buttons stacked in the market cell, left of the name.
+// A board market with Kalshi lines carries its book and curve buttons in the market cell: stacked left of the name, or
+// side by side under it on a Structure board (CSS orders them).
 const MarkdownCell = ({ rowSpan, colSpan, split, lead, leadClass, leadTitle, ...props }) => {
   const cell = cellFor(props);
   const led = lead ? React.cloneElement(cell, {
@@ -398,6 +399,11 @@ const SourceButton = ({ group, onCitation, children }) => <button type="button" 
   onClick={() => onCitation?.(group.source, group.context)}>{children || group.label}</button>;
 
 const FOOTER_LINE = /^(Sources?:\s|Paper tickets:|Research read for\b)/i;
+const SAVED_BOARD_FOOTNOTES = new RegExp([
+  /[^\n.|]*?[\d,.]+; its bar shows the [^\n]*? range and [^\n]*? price\. ?/.source,
+  /Tick for [^\n]*? is a Treasury price ETF signal, read inversely as a yield direction\. ?/.source,
+  /Kalshi yield contracts pay if the daily Treasury yield reaches the line on any business day this month\. ?/.source,
+].join('|'), 'g');
 const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageId, markdown, citations, onCitation, error }) {
   const report = useMemo(() => {
     const sourced = predictionReportSources(markdown, citations);
@@ -408,7 +414,9 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
       // Setup boards saved before Status was named for their publication times.
       .replace(/^(\| Market \| (?:Z \| )?Tick \|.*\| )As of \(PT\)( \|)$/gm, '$1Status$2')
       // Boards saved while Structure carried its session count in the title.
-      .replace(/^(\| Market \| (?:Z \| )?Tick \|.*\| )Structure \(\d+d\)( \|)/gm, '$1Structure$2') };
+      .replace(/^(\| Market \| (?:Z \| )?Tick \|.*\| )Structure \(\d+d\)( \|)/gm, '$1Structure$2')
+      // Boards saved with the proxy-range, inverse-Tick and Kalshi-rule footnotes under a section's table.
+      .replace(SAVED_BOARD_FOOTNOTES, '').replace(/^[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n') };
   }, [markdown, citations]);
   const board = useMemo(() => boardLines(report.markdown), [report.markdown]);
   const parts = useMemo(() => {

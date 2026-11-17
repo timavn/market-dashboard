@@ -1491,8 +1491,8 @@ app.get('/api/analyst/risk-range-lines', async (req, res) => {
       return field?.status === 'available' && field.match === 'direct' && low > 0 && high > low
         ? { symbol, low, high, source: field.source || null, sourceId: field.sourceId || null, asOf: field.asOf || null, cadence: field.cadence || 'daily', messageId: field.sourceMessageId || null } : null;
     }).filter(Boolean);
-    // The daily sheet's own email, named by its stored copy.
-    for (const range of ranges.filter(item => item.sourceId === 'risk-ranges' && item.asOf)) range.messageId = await snapshotEmailId('risk-ranges', range.asOf);
+    // The printing product's own email (daily sheet, Early Look, Investing Ideas, a tracker), named by its stored copy.
+    for (const range of ranges.filter(item => item.sourceId && item.asOf && !item.messageId)) range.messageId = await snapshotEmailId(range.sourceId, range.asOf);
     const prices = Object.fromEntries((await Promise.all(ranges.map(async ({ symbol }) => {
       const quote = await getQuote(symbol).catch(() => null);
       const price = Number(quote?.price);
@@ -3558,7 +3558,10 @@ function symbolIsYahooRateProxy(upperSym) {
 // Period maths (MTD/QTD/YTD bases, session and calendar windows) lives in
 // src/utils/marketPeriodReturns.cjs, where it is unit-tested.
 
-async function fetchYahooDailyClosesSeries(symbol, range = '1y') {
+// Two years by default: the one-year window compares with the last close on or
+// before the same date a year earlier, and a one-year history starts after
+// that close whenever the date fell on a weekend or holiday.
+async function fetchYahooDailyClosesSeries(symbol, range = '2y') {
   const upperSym = symbol.toUpperCase();
   const isRateProxy = symbolIsYahooRateProxy(upperSym);
   const mapping = getTickerMapping(symbol);
@@ -7267,9 +7270,27 @@ async function buildRatesPayload(region, opts) {
   return out;
 }
 
+// The overview's IBKR rows stay subscribed while the overview is being asked
+// for, so a poll reads them from the stream instead of opening and cancelling a
+// market-data request for each one. The portfolio's lines come first; see the
+// module for the line budget.
+const { createOverviewStreamSubscription } = require('./src/services/ibkr/overviewStreamSubscription.cjs');
+const overviewStreamSubscription = createOverviewStreamSubscription({
+  rows: () => Object.values(MARKET_REGIONS).flatMap((region) => region.indices || []).map(toQuoteInstrument),
+  setDesiredInstruments: ibkrStreamBridge.setDesiredInstruments,
+  readStreamCapacity: async () => {
+    const status = await sidecarRequest('/status', { timeoutMs: 3000 });
+    return { active: status?.stream?.active_subscriptions, max: status?.stream?.max_stream_subs };
+  },
+  // Three misses in a row: a row with no entitlement, or a market that has
+  // gone quiet for the night. A row that ticks now and then stays subscribed.
+  isUnavailable: (row) => compositeMarketDataProvider.hasIbkrMiss(row, 3),
+});
+
 // Multi-Region Quotes endpoint - fetches quotes and sparklines for all regions
 app.get('/api/multi-region-quotes', async (req, res) => {
   const startTime = Date.now();
+  if (ibkrStreamBridge.STREAM_ENABLED) overviewStreamSubscription.touch();
   try {
     const { regions, includeSparklines = 'true', includePeriodReturns = 'false' } = req.query;
     const requestedRegions = regions ? regions.split(',') : Object.keys(MARKET_REGIONS);

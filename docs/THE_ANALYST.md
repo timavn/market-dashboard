@@ -70,7 +70,7 @@ Date-scoped portfolio research starts alongside independent broker/supporting re
 
 ## Predictive Markets Review
 
-Predictive Markets Review is a minimal setup board served by `GET /api/prediction-markets/setup-board` from `src/constants/predictionMarketUniverse.json`. The setup rule and section layout are specified in `AGENTS.md`. A setup in a ladder market is sized as a share of the Kalshi account (4–10%) and split across the event's Kalshi lines in code (`src/services/predictionSizing.cjs`; rules in `AGENTS.md`), and each day's first split is kept as a paper ticket and scored at settlement. No analyst tool places orders. Stale, cached-disconnected, seeded, inferred, or fallback inputs cannot support a current setup.
+Predictive Markets Review is a minimal setup board served by `GET /api/prediction-markets/setup-board` from `src/constants/predictionMarketUniverse.json`. The setup rule and section layout are specified in `AGENTS.md`. A setup in a ladder market is sized as a share of the Kalshi account (2.5–5.5%) and given a ticket of Kalshi lines for its daily and, where listed, weekly event in code (`src/services/predictionSizing.cjs`; rules in `AGENTS.md`), and each day's first ticket per event is kept as a paper ticket and scored at settlement. No analyst tool places orders. Stale, cached-disconnected, seeded, inferred, or fallback inputs cannot support a current setup.
 
 ## Persistent portfolio inbox
 

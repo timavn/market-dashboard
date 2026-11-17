@@ -48,6 +48,8 @@ const BACKDROP_GROUPS = marketBackdropCatalog.map((group) => ({
   rows: group.rows.map((row) => ({
     symbols: [row.symbol],
     label: row.label,
+    // The country or region a non-US index tracks, shown after its name.
+    place: row.place || null,
     summary: row.summary === true,
     unit: row.unit,
     changeUnit: row.changeUnit,
@@ -543,7 +545,7 @@ const BackdropRow = ({ descriptor, row, providerStatus, detailed, research }) =>
           label={descriptor.label}
           reading={research}
           formatBound={(value) => formatLevel(value, '', descriptor.symbols[0], unit)}
-        />
+        >{descriptor.place ? `${descriptor.label} (${descriptor.place})` : descriptor.label}</DashboardResearchLabel>
       </td>
       <td
         title={available && isFiniteNumber(row?.price) ? `${row.price} · ${provenance}` : provenance}

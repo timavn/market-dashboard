@@ -67,9 +67,11 @@ function statedField(readings, symbol, field, missing) {
 function descriptorField(descriptor, extra = {}) {
   if (!descriptor || flagged(descriptor)) return unavailable('research-reading-unverified', { source: SOURCE });
   const source = descriptor.sourceLabel || descriptor.sourceId || SOURCE;
-  if (descriptor.status !== 'available') return unavailable(descriptor.reason || 'unavailable', { source, asOf: descriptor.sourceDate || null });
+  if (descriptor.status !== 'available') return unavailable(descriptor.reason || 'unavailable', { source, asOf: descriptor.sourceDate || null,
+    ...(descriptor.conflictingRanges ? { conflictingRanges: descriptor.conflictingRanges } : {}) });
   return available(descriptor.value, { source, sourceId: descriptor.sourceId || null, asOf: descriptor.sourceDate || null,
-    publishedAt: descriptor.publishedAt || null, ...extra });
+    publishedAt: descriptor.publishedAt || null,
+    ...(descriptor.secondary ? { secondary: true, corroboratedBy: descriptor.corroboratedBy || [] } : {}), ...extra });
 }
 
 // Which instrument a decision range was published for. A reading routed to this
@@ -81,10 +83,14 @@ function rangeInstrument(entry, descriptor, symbol, price = null) {
   if (descriptor?.status !== 'available') return {};
   const lrr = Number(descriptor.lrr ?? descriptor.value?.lrr);
   const hrr = Number(descriptor.hrr ?? descriptor.value?.hrr);
+  // A secondary product's range (Early Look, Investing Ideas, a tracker) is never decision
+  // eligible; its own same-day rows printing exactly these bounds are the evidence instead.
   const references = (Array.isArray(entry?.directReferences) ? entry.directReferences : []).filter(reference => reference
-    && !flagged(reference) && reference.decisionEligible === true && reference.productId === descriptor.sourceId
+    && !flagged(reference) && (reference.decisionEligible === true || descriptor.secondary === true) && reference.productId === descriptor.sourceId
     && reference.marketDate === descriptor.sourceDate && Number(reference.value?.lrr) === lrr && Number(reference.value?.hrr) === hrr);
-  const keys = [...new Set(references.map(reference => String(reference.matchedText || '').trim().toUpperCase()).filter(Boolean))];
+  // "RUSSELL 2000 (RUT)" and "RUT" are one printed instrument.
+  const printedKey = text => { const key = String(text || '').trim().toUpperCase(); return key.match(/\(([A-Z0-9./^-]{1,12})\)\s*$/)?.[1] || key; };
+  const keys = [...new Set(references.map(reference => printedKey(reference.matchedText)).filter(Boolean))];
   if (keys.length !== 1) return { sourceInstrument: null, match: 'unverified' };
   const instrument = EQUIVALENCE.rewrittenAtIngest?.[descriptor.sourceId]?.[keys[0]] || keys[0];
   const same = instrument === symbol || (EQUIVALENCE.sameInstrument[symbol] || []).includes(instrument);

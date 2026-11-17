@@ -164,3 +164,26 @@ test('a daily range from an earlier session is no range', async () => {
   const field = (await piece.loadMany(['AAPL'])).get('AAPL').riskRange;
   assert.deepEqual([field.status, field.reason, field.asOf], ['unavailable', 'range-not-from-current-session', '2026-10-30']);
 });
+
+test('a same-day secondary range is matched by its own rows and labelled with its product', async () => {
+  const secondary = (sourceId, sourceLabel, lrr, hrr, extra = {}) => ({ status: 'available', value: { lrr, hrr }, lrr, hrr, trend: null, sourceId, sourceLabel,
+    sourceDate: '2026-10-30', publishedAt: '2026-10-30T00:00:00+00:00', decisionEligible: false, secondary: true, corroboratedBy: [], reason: null, ...extra });
+  const row = (productId, matchedText, lrr, hrr) => reference(matchedText, lrr, hrr, { productId, kind: 'investing_idea_position', matchType: 'direct', decisionEligible: false });
+  const piece = createResearchPiece({ now: () => NOW, tradeArchiveStatus: freshArchive, loadReferencePrices: async () => new Map([['COST', 1080]]),
+    loadSecurityIntelligence: intelligence({
+      COST: entry(secondary('investing-ideas', 'Investing Ideas', 1022, 1136), [row('investing-ideas', 'COST', 1022, 1136)]),
+      IWM: entry(secondary('early-look', 'Early Look', 2717, 2846, { corroboratedBy: ['investing-ideas'] }),
+        [row('early-look', 'RUT', 2717, 2846), row('early-look', 'RUSSELL 2000 (RUT)', 2717, 2846)]),
+      MARA: entry({ status: 'conflict', value: null, sourceId: null, sourceDate: '2026-10-30', reason: 'conflicting-same-day-risk-ranges',
+        conflictingRanges: [{ sourceId: 'investing-ideas', lrr: 5.67, hrr: 7.98 }, { sourceId: 'bitcoin-trend-tracker', lrr: 5.67, hrr: 7.78 }] }, []),
+    }) });
+  const research = await piece.loadMany(['COST', 'IWM', 'MARA']);
+  assert.deepEqual([research.get('COST').riskRange.status, research.get('COST').riskRange.match, research.get('COST').riskRange.source, research.get('COST').riskRange.secondary],
+    ['available', 'direct', 'Investing Ideas', true]);
+  assert.deepEqual(research.get('COST').riskRange.value, { lrr: 1022, hrr: 1136 });
+  // The table's long label and its ticker are one printed instrument, still another index's range.
+  assert.deepEqual([research.get('IWM').riskRange.sourceInstrument, research.get('IWM').riskRange.match], ['RUT', 'proxy']);
+  assert.deepEqual(research.get('IWM').riskRange.corroboratedBy, ['investing-ideas']);
+  assert.deepEqual([research.get('MARA').riskRange.status, research.get('MARA').riskRange.reason], ['unavailable', 'conflicting-same-day-risk-ranges']);
+  assert.equal(research.get('MARA').riskRange.conflictingRanges.length, 2);
+});

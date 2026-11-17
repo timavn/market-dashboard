@@ -58,7 +58,7 @@
     {
       "id": "ibkr-connectivity",
       "label": "IBKR connectivity",
-      "text": "Rebuild or restart the repo-owned sidecar automatically. IB Gateway login and API socket authorization remain manual security actions. A Gateway that is running but has stopped answering is quit and reopened by hand; restarting the sidecar does not fix it."
+      "text": "Rebuild or restart the repo-owned sidecar automatically. The supervisor restarts a sidecar that is unreachable or duplicated by itself; the controller restarts one whose IBKR sessions are stuck. IB Gateway login and API socket authorization remain manual security actions. A Gateway that is running but has stopped answering is quit and reopened by hand; restarting the sidecar does not fix it."
     },
     {
       "id": "automation-schedules",
@@ -589,9 +589,7 @@
         "IBKR_BALANCE_REQUEST_TIMEOUT",
         "IBKR_LIVE_SESSION_STALE",
         "IBKR_LIVE_SESSION_UNAVAILABLE",
-        "IBKR_LIVE_SESSION_UNVERIFIED",
-        "IBKR_SIDECAR_UNREACHABLE",
-        "IBKR_SIDECAR_DUPLICATES"
+        "IBKR_LIVE_SESSION_UNVERIFIED"
       ],
       "triggeringCheckIds": ["local-sidecar", "ibkr.sidecar", "ibkr.gateway", "ibkr.portfolio"],
       "scope": "repo-processes",

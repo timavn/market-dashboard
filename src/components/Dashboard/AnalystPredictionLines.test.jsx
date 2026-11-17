@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import AnalystPredictionLines, { parsePredictionLines } from './AnalystPredictionLines';
+import AnalystPredictionLines, { parsePredictionLines, settlementGrid } from './AnalystPredictionLines';
 import AnalystKalshiBook, { parseKalshiBook } from './AnalystKalshiBook';
 
 const silver = {
@@ -11,13 +11,13 @@ const silver = {
   lines: { side: 'SHORT', buy: 'NO', illiquid: 1, closeTime: '2026-11-13T22:00:00Z', best: 0.06,
     counts: { STRONG: 2, GOOD: 0, WATCH: 0, PASS: 1 },
     lines: [
-      { ticker: 'A', strike: 51.99, subtitle: '$51.99 or above', buy: 'NO', ask: 0.71, kalshiOdds: 0.71, ourOdds: 0.78, edge: 0.06, sigmas: 0.9,
+      { ticker: 'A', strike: 51.99, subtitle: '$51.99 or above', reach: true, buy: 'NO', ask: 0.71, kalshiOdds: 0.71, ourOdds: 0.78, edge: 0.06, sigmas: 0.9,
         kalshiYes: 0.29, ourYes: 0.22, yes: { ask: 0.3, depth: 300, edge: -0.08 }, no: { ask: 0.71, depth: 400, edge: 0.06 },
         strength: 'STRONG', held: { side: 'NO', contracts: 317.73 } },
-      { ticker: 'B', strike: 52.49, buy: 'NO', ask: 0.8, kalshiOdds: 0.8, ourOdds: 0.86, edge: 0.051, sigmas: 1.3, kalshiYes: 0.2, ourYes: 0.14,
-        yes: { ask: 0.21, depth: 90, edge: -0.07 }, no: { ask: 0.8, depth: 800, edge: 0.051 }, strength: 'STRONG', isNew: true },
-      { ticker: 'D', strike: 51.49, buy: 'NO', ask: 0.5, kalshiOdds: 0.5, ourOdds: 0.55, edge: 0.04, sigmas: 0.4, kalshiYes: 0.5, ourYes: 0.45,
-        yes: { ask: 0.52, depth: 520, edge: -0.08 }, no: { ask: 0.5, depth: 20, edge: 0.04, illiquid: true }, strength: 'ILLIQUID' },
+      { ticker: 'B', strike: 52.49, reach: true, buy: 'NO', ask: 0.8, kalshiOdds: 0.8, ourOdds: 0.86, edge: 0.051, sigmas: 1.3, kalshiYes: 0.2, ourYes: 0.14,
+        yes: { ask: 0.21, depth: 90, edge: -0.07 }, no: { ask: 0.8, depth: 800, edge: 0.051 }, ticket: { pct: 2.25, zone: 'target', ask: 0.8, contracts: 400, dollars: 320, win: 80 } },
+      { ticker: 'D', strike: 51.49, reach: true, buy: 'NO', ask: 0.5, kalshiOdds: 0.5, ourOdds: 0.55, edge: 0.04, sigmas: 0.4, kalshiYes: 0.5, ourYes: 0.45,
+        yes: { ask: 0.52, depth: 520, edge: -0.08 }, no: { ask: 0.5, depth: 20, illiquid: true }, illiquid: true },
       { ticker: 'C', strike: 53.99, buy: 'NO', ask: 0.96, kalshiOdds: 0.96, ourOdds: 0.965, edge: 0.002, sigmas: 2.5, strength: 'PASS' },
     ] },
   held: [{ ticker: 'KXSILVERW-26NOV1317-T50.99', subtitle: '$50.99 or above', side: 'NO', contracts: 778.53, cost: 214.38, bid: 0.32,
@@ -71,8 +71,8 @@ test('one row per market: book icon, centred name, curve icon, shaded by Trade, 
   expect(row('Gold')).not.toHaveClass('is-shade-short');
   expect(row('Gold')).not.toHaveClass('is-shade-long');
   expect(row('Gold')).toHaveAttribute('title', 'Unshaded: Trade Bullish, Trend Bearish');
-  // Only a shaded market with a Good or Strong line opens by default.
-  expect(within(table).getByRole('button', { name: 'Silver order book' })).toHaveAttribute('aria-expanded', 'true');
+  // Every book starts closed, even a shaded market's with a Good or Strong line.
+  expect(within(table).getByRole('button', { name: 'Silver order book' })).toHaveAttribute('aria-expanded', 'false');
   expect(within(table).getByRole('button', { name: 'Bitcoin order book' })).toHaveAttribute('aria-expanded', 'false');
   expect(within(table).getByRole('button', { name: 'Gold order book' })).toHaveAttribute('aria-expanded', 'false');
   // Copper (no open event) and UST 30Y (no lines, nothing held) have nothing to open, so no row.
@@ -81,37 +81,45 @@ test('one row per market: book icon, centred name, curve icon, shaded by Trade, 
   expect(screen.queryByRole('table', { name: 'Bitcoin Kalshi lines' })).toBeNull();
 });
 
-test('an open market lists graded lines in strike order with spot between them; Pass and illiquid lines fold', () => {
+test('a setup\'s order book lists the side it buys and the lines in reach, the ticket tinted and totalled, spot as a rule', () => {
   jest.useFakeTimers().setSystemTime(new Date('2026-11-13T20:00:00Z'));
   renderLines();
+  fireEvent.click(screen.getByRole('button', { name: 'Silver order book' }));
   jest.useRealTimers();
   // The label carries only the event and its close.
   expect(screen.getByText('KXSILVERD-26NOV1317').parentElement).toHaveTextContent(/^KXSILVERD-26NOV1317closes Fri 2:00 PM PT$/);
   const lines = screen.getByRole('table', { name: 'Silver Kalshi lines' });
-  const rows = () => within(lines).getAllByRole('row').slice(1);
-  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Above51.99', 'Above52.49', 'Spot52.80']);
-  expect(rows()[0]).toHaveTextContent('Above51.99+0.9σ30¢ −8.071¢ +6.029% / 22%StrongNo 318');
-  expect(rows()[1]).toHaveTextContent('Above52.49+1.3σ21¢ −7.080¢ +5.120% / 14%Strong · new—');
-  expect(rows()[2]).toHaveClass('analyst-lines__spot');
-  // Every number in the Line column starts after the same fixed-width word slot.
-  expect([...lines.querySelectorAll('tbody td:first-child .analyst-lines__word')].map(word => word.textContent)).toEqual(['Above', 'Above', 'Spot']);
-  // The shaded side (No) is the one highlighted; Yes sits beside it.
-  expect(rows()[0].cells[3]).toHaveClass('is-take');
-  expect(rows()[0].cells[2]).not.toHaveClass('is-take');
-  expect(rows()[0].cells[3]).toHaveAttribute('title', '$400 at 71¢');
-  expect(within(rows()[1]).getByText('Strong · new')).toHaveClass('is-flash');
-  fireEvent.click(screen.getByRole('button', { name: '1 below 1 point of edge · show' }));
-  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Above51.99', 'Above52.49', 'Spot52.80', 'Above53.99']);
-  // Under $50 at the No ask: folded behind its own button, then a red Illiquid row with the thin side marked.
-  fireEvent.click(screen.getByRole('button', { name: 'Show 1 illiquid line' }));
-  expect(screen.queryByRole('button', { name: 'Show 1 illiquid line' })).toBeNull();
-  const illiquid = rows()[0];
-  expect(illiquid).toHaveTextContent(/^Above51\.49/);
-  expect(illiquid).toHaveClass('analyst-lines__illiquid');
-  expect(illiquid).toHaveTextContent('Illiquid');
-  expect(illiquid.cells[3]).toHaveClass('is-thin');
+  // A short buys No: only that side is shown, with no zone, odds, edge or grade.
+  expect(within(lines).getAllByRole('columnheader').map(cell => cell.textContent))
+    .toEqual(['Line', 'From price', 'No ask', 'At the ask', 'Stake', 'Contracts', 'Wins']);
+  expect(lines).not.toHaveTextContent(/Strong|Good|Watch|Pass|edge|ours|Target|Near|Far/i);
+  const rows = within(lines).getAllByRole('row').slice(1);
+  // The three lines in reach below the price, then spot, then the one line on its other side.
+  expect(rows.map(row => row.cells[0].textContent)).toEqual(['Above51.49', 'Above51.99', 'Above52.49', 'Spot52.80', 'Above53.99', 'Ticket']);
+  expect(rows[1]).toHaveTextContent(/^Above51\.99−1\.3%71¢\$400———$/);
+  // The ticket's line is tinted, its stake the share of the account over its dollars.
+  expect(rows[2]).toHaveClass('analyst-lines__ticket');
+  expect(rows[2]).toHaveTextContent(/^Above52\.49−0\.3%80¢\$8002\.25%\$320400\$80$/);
+  expect([...rows[2].cells[4].querySelectorAll('.analyst-lines__stack')].map(item => item.textContent)).toEqual(['2.25%', '$320']);
+  // Under $50 at the No ask: the thin ask is marked.
+  expect(rows[0].cells[2]).toHaveClass('is-thin');
+  // Spot is a rule across the table whose number sits in the same slot as the strikes.
+  expect(rows[3]).toHaveClass('analyst-lines__spot');
+  expect(rows[3].cells).toHaveLength(2);
+  expect(rows[3].cells[1]).toHaveAttribute('colspan', '6');
+  expect(rows[3].querySelector('.analyst-lines__spot-tag .analyst-lines__word')).toHaveTextContent('Spot');
+  expect(rows[5]).toHaveClass('analyst-lines__total');
+  expect(rows[5]).toHaveTextContent(/^Ticket80¢ avg2\.25%\$320400\$80$/);
   const held = screen.getByRole('table', { name: 'Silver held lines' });
-  expect(within(held).getAllByRole('row')[1]).toHaveTextContent('Above50.99No 779$214.3832¢34% / 34%Through lineKalshi has the held side at 34%');
+  expect(within(held).getAllByRole('row')[1]).toHaveTextContent('Above50.99No 779$214.3832¢34%Through lineKalshi has the held side at 34%');
+});
+
+test('a setup with no line in reach falls back to the plain two-sided ladder', () => {
+  const market = { ...silver, held: [], lines: { ...silver.lines, lines: silver.lines.lines.map(({ reach, ticket, ...line }) => line) } };
+  render(<AnalystPredictionLines lines={parsePredictionLines(JSON.stringify({ markets: [market] }))} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Silver order book' }));
+  expect(within(screen.getByRole('table', { name: 'Silver Kalshi lines' })).getAllByRole('columnheader').map(cell => cell.textContent))
+    .toEqual(['Line', 'From centre', 'Yes', 'No', 'Yes odds']);
 });
 
 test('a held line shows in the opened market with its state and reason', () => {
@@ -128,11 +136,11 @@ const book = {
   positions: [
     { market: 'UST 10Y', sectionLabel: 'Rates', side: 'NO', cost: 481, pct: 8.3, value: 552.2, pnl: 71.2, maxPayout: 1375,
       closeTime: '2026-11-13T17:30:00Z', state: 'HOLD', tone: 'none', why: null,
-      lines: [{ subtitle: '4.92% or above', strikeType: 'greater', contracts: 700, cost: 250 },
-        { subtitle: '4.94% or above', strikeType: 'greater', contracts: 675, cost: 231 }] },
+      lines: [{ ticker: 'T1', subtitle: '4.92% or above', strikeType: 'greater', contracts: 700, cost: 250, bid: 0.4, value: 280 },
+        { ticker: 'T2', subtitle: '4.94% or above', strikeType: 'greater', contracts: 675, cost: 231, value: 272.2 }] },
     { market: 'Bitcoin', sectionLabel: 'Crypto', side: 'NO', cost: 167.2, pct: 2.9, value: 148.2, pnl: -19, maxPayout: 300,
       closeTime: '2026-11-13T22:00:00Z', state: 'CONTRADICTS', tone: 'red', why: 'Shaded long; line is held No',
-      lines: [{ subtitle: 'Above $73000', strikeType: 'greater', contracts: 300, cost: 167.2 }] },
+      lines: [{ ticker: 'B1', subtitle: 'Above $73000', strikeType: 'greater', contracts: 300, cost: 167.2, bid: 0.494, state: 'CONTRADICTS' }] },
     { market: 'KXOTHER', sectionLabel: 'Other', side: 'YES', cost: 20, pct: 0.3, value: null, pnl: null, maxPayout: 45,
       closeTime: null, state: 'CLOSED', tone: 'blue', why: 'Closed; awaiting settlement',
       lines: [{ strike: 1, contracts: 45, cost: 20 }] },
@@ -144,41 +152,42 @@ test('parses only a book with an at-risk figure', () => {
   expect(parseKalshiBook(JSON.stringify({ atRisk: 0 }))).toMatchObject({ positions: [], flagged: {} });
 });
 
-test('the book is a strip of totals over a positions ledger grouped by section', () => {
+test('the book is a row of account figures over a per-line ledger: market groups with subtotals and a book total', () => {
   jest.useFakeTimers().setSystemTime(new Date('2026-11-13T12:00:00Z'));
   render(<AnalystKalshiBook book={parseKalshiBook(JSON.stringify(book))} />);
   jest.useRealTimers();
-  const region = screen.getByRole('region', { name: 'Kalshi book' });
-  expect(region).toHaveTextContent('Account$5,784 $2,922 cash');
-  expect(region).toHaveTextContent('At risk$668 11.6%');
-  expect(region).toHaveTextContent('Value now$700 +$52 · +8.1%');
-  expect(region).toHaveTextContent('Max payout$1,720 +$1,052 if all pay');
-  expect(region).toHaveTextContent('Needs a look1 · 1 red · yellow');
+  const figures = screen.getByRole('region', { name: 'Kalshi book' }).querySelector('.analyst-book__figures');
+  expect([...figures.children].map(item => item.textContent)).toEqual(['Account$5,784', 'Cash$2,922', 'At risk$668 · 11.6%', 'Flags1 · 1']);
   const ledger = screen.getByRole('table', { name: 'Kalshi positions' });
   expect(within(ledger).getAllByRole('columnheader').map(cell => cell.textContent))
-    .toEqual(['Market', 'Bet', 'Lines', 'Cost', '% acct', 'Value now', 'P&L', 'Max payout', 'Closes', 'State']);
+    .toEqual(['Line', 'Side', 'Qty', 'Avg ¢', 'Mark ¢', 'Cost', 'Value', 'P&L', 'P&L %', 'Max pay', '% acct', 'State']);
   const rows = within(ledger).getAllByRole('row').slice(1).map(row => row.textContent);
   expect(rows).toEqual([
-    'Rates',
-    'UST 10YNo above 4.92%, 4.94%2$4818.3%$552+$71$1,375Fri 9:30 AMHold',
-    'Crypto',
-    'BitcoinNo above $730001$1672.9%$148−$19$300Fri 2 PMContradicts',
-    'Other',
-    'KXOTHERYes 11$200.3%N/AN/A$45N/AClosed',
-    'Total3 markets4$66811.6%$700*+$52$1,72060% closes Fri',
+    'Rates · UST 10Y · closes Fri 9:30 AM',
+    // Avg and Mark in cents per contract; a line with no bid is marked from its value.
+    'Above 4.92%No70035.740.0$250$280+$30+12%$7004.32%Hold',
+    'Above 4.94%No67534.240.3$231$272+$41+18%$6753.99%Hold',
+    'UST 10Y1,37535.040.2$481$552+$71+15%$1,3758.32%',
+    'Crypto · Bitcoin · closes Fri 2 PM',
+    'Above $73000No30055.749.4$167$148−$19−11%$3002.89%Contradicts',
+    'Bitcoin30055.749.4$167$148−$19−11%$3002.89%',
+    'Other · KXOTHER',
+    '1Yes4544.4N/A$20N/AN/AN/A$450.35%Closed',
+    'KXOTHER4544.4N/A$20N/AN/AN/A$450.35%',
+    // The total's P&L is the book's own, against the cost of the valued lines; the value is starred for the unvalued one.
+    'Book3 mkt1,72038.840.7$668$700*+$52+8.1%$1,72011.55%60% closes Fri',
   ]);
-  const bitcoin = within(ledger).getByText('Bitcoin').closest('tr');
+  const bitcoin = within(ledger).getByText('Above $73000').closest('tr');
   expect(bitcoin).toHaveClass('analyst-lines__tone-red');
   expect(within(bitcoin).getByText('Contradicts')).toHaveClass('is-red', 'is-flash');
   expect(within(bitcoin).getByText('Contradicts')).toHaveAttribute('title', 'Shaded long; line is held No');
-  expect(within(ledger).getByText('UST 10Y').closest('tr').querySelector('[title]'))
-    .toHaveAttribute('title', 'No 4.92% or above: 700 contracts, $250\nNo 4.94% or above: 675 contracts, $231');
+  expect(within(ledger).getByText('Book')).toHaveAttribute('title', '1 position with no bid left out');
 });
 
 test('a book with no positions says so under its totals', () => {
   render(<AnalystKalshiBook book={parseKalshiBook(JSON.stringify({ account: 6196, cash: 6196, atRisk: 0, atRiskPct: 0, maxPayout: 0,
     value: null, pnl: null, positions: [], flagged: { red: 0, yellow: 0 } }))} />);
-  expect(screen.getByRole('region', { name: 'Kalshi book' })).toHaveTextContent('Account$6,196 $6,196 cash');
+  expect(screen.getByRole('region', { name: 'Kalshi book' })).toHaveTextContent('Account$6,196Cash$6,196At risk$0 · 0.0%Flags0 · 0');
   expect(screen.queryByRole('table', { name: 'Kalshi positions' })).toBeNull();
   expect(screen.getByText('No open lines.')).toBeInTheDocument();
 });
@@ -187,21 +196,21 @@ test('an unshaded market opens to its fillable lines with spot between them; ill
   renderLines();
   fireEvent.click(screen.getByRole('button', { name: 'Gold order book' }));
   const ladder = screen.getByRole('table', { name: 'Gold Kalshi lines' });
-  expect(within(ladder).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Line', 'From centre', 'Yes', 'No', 'Yes odds K / ours']);
+  expect(within(ladder).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Line', 'From centre', 'Yes', 'No', 'Yes odds']);
   expect(screen.queryByText(/not graded|illiquid \(/i)).toBeNull();
   // Only the fillable line shows, with spot (3,887.6) above it; no other fillable lines to show.
   const rows = () => within(ladder).getAllByRole('row').slice(1);
   expect(rows().map(row => row.cells[0].textContent)).toEqual(['Spot3,887.6', 'Above4,000']);
   expect(rows()[0]).toHaveClass('analyst-lines__spot');
-  expect(rows()[1]).toHaveTextContent('Above4,000−0.3σ62¢ −2.040¢ −0.461% / 60%');
-  // No has the better edge here, so No is highlighted.
-  expect(rows()[1].cells[3]).toHaveClass('is-take');
+  expect(rows()[1]).toHaveTextContent(/^Above4,000−0\.3σ62¢40¢61%$/);
+  // No setup, so neither side is marked.
+  expect(rows()[1].cells[3]).not.toHaveClass('is-take');
   expect(rows()[1].cells[2]).not.toHaveClass('is-take');
   expect(screen.queryByRole('button', { name: /fillable lines/ })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Show 2 illiquid lines' }));
   expect(rows()).toHaveLength(4);
   expect(rows()[2]).toHaveClass('analyst-lines__illiquid');
-  expect(rows()[2].cells[2]).toHaveClass('is-take', 'is-thin');
+  expect(rows()[2].cells[2]).toHaveClass('is-thin');
   expect(rows()[3]).toHaveClass('analyst-lines__illiquid');
 });
 
@@ -246,19 +255,59 @@ test('with a bet, lines show the average the whole bet fills at; unread lines ar
         yes: { ask: 0.23, edge: -0.02, depth: 115 }, no: { ask: 0.79, edge: 0.004, depth: 395 } },
     ] } };
   render(<AnalystPredictionLines lines={parsePredictionLines(JSON.stringify({ markets: [market] }))} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Gold order book' }));
   expect(screen.getByText('Bet $248')).toHaveClass('analyst-lines__bet');
   const table = screen.getByRole('table', { name: 'Gold Kalshi lines' });
   const rows = () => within(table).getAllByRole('row').slice(1);
   // G4's book was not read, so it is not listed; G3 cannot take the bet and folds.
   expect(rows().map(row => row.cells[0].textContent)).toEqual(['Above3867', 'Spot3872.5', 'Above3877']);
   const g2 = rows()[2];
-  expect(g2.cells[2]).toHaveTextContent('36.6¢ −8.0');
-  expect(g2.cells[3]).toHaveTextContent('68.2¢ +1.2');
-  expect(g2.cells[3]).toHaveClass('is-take');
+  expect(g2.cells[2]).toHaveTextContent(/^36\.6¢$/);
+  expect(g2.cells[3]).toHaveTextContent(/^68\.2¢$/);
   expect(g2.cells[3]).toHaveAttribute('title', '$248 buys 364 contracts at 66¢–69¢, average 68.2¢');
   expect(rows()[0].cells[3]).toHaveAttribute('title', '$248 buys 605 contracts at 41¢, average 41.0¢');
   fireEvent.click(screen.getByRole('button', { name: "Show 1 line that can't take $248" }));
   const g3 = rows().find(row => row.cells[0].textContent === 'Above3887');
   expect(g3).toHaveClass('analyst-lines__illiquid');
   expect(g3.cells[3]).toHaveAttribute('title', 'Only $120 for sale on this side; the $248 bet does not fill');
+});
+
+describe('settlement grid under the held lines', () => {
+  const ladder = [[1700, 0.99], [1740, 0.97], [1760, 0.95], [1780, 0.9], [1800, 0.85], [1820, 0.75], [1840, 0.6], [1860, 0.42], [1880, 0.25], [1900, 0.12]];
+  const eth = { id: 'eth', market: 'Ethereum', event: 'KXETHD-26NOV1614', held: [
+    { ticker: 'E1760', side: 'NO', contracts: 590, cost: 47, bid: 0.03, strike: 1760, strikeType: 'greater', subtitle: '$1,760 or above', state: 'THROUGH_LINE' },
+    { ticker: 'E1800', side: 'NO', contracts: 159, cost: 48, bid: 0.14, strike: 1800, strikeType: 'greater', subtitle: '$1,800 or above', state: 'THROUGH_LINE' },
+  ], summary: { price: 1850, centre: 1852, unit: null },
+  lines: { side: null, lines: ladder.map(([strike, odds]) => ({ ticker: `L${strike}`, strike, subtitle: `Above $${strike}`, kalshiOdds: odds })) } };
+
+  it('cuts the axis at the held strikes: P&L per line and in total by zone, odds that sum to one, odds × P&L summed', () => {
+    const grid = settlementGrid(eth);
+    expect(grid.zones.map(zone => [zone.lo, zone.hi, zone.perLine.map(Math.round), Math.round(zone.pnl)]))
+      .toEqual([[null, 1760, [543, 111], 654], [1760, 1800, [-47, 111], 64], [1800, null, [-47, -48], -95]]);
+    expect(grid.zones.reduce((total, zone) => total + zone.odds, 0)).toBeCloseTo(1, 6);
+    expect(grid.expected).toBeCloseTo(grid.zones.reduce((total, zone) => total + zone.odds * zone.pnl, 0), 6);
+    expect(grid.marked).toBeCloseTo(0.03 * 590 + 0.14 * 159 - 95, 6);
+    // Two sample prices a ladder step apart outside the held strikes, thirds between them, and spot in its zone.
+    expect(grid.zones.map(zone => zone.rows.map(row => `${Math.round(row.x)}${row.spot ? ' spot' : ''}`)))
+      .toEqual([['1720', '1740'], ['1773', '1787'], ['1820', '1840', '1850 spot']]);
+  });
+
+  it('draws under the held lines in the book, with spot ruled and zone odds merged per zone', () => {
+    render(<AnalystPredictionLines lines={{ markets: [eth] }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ethereum order book' }));
+    const grid = screen.getByRole('table', { name: 'Ethereum settlement grid' });
+    expect(within(grid).getAllByRole('columnheader').map(cell => cell.textContent))
+      .toEqual(['Settle', 'Δ spot', 'No 1,760', 'No 1,800', 'Book P&L', 'P&L %', 'Above %', 'Zone odds', 'Odds × P&L']);
+    const rows = within(grid).getAllByRole('row').slice(1);
+    expect(rows[0].textContent).toMatch(/^1,720−7\.0%\+\$543\+\$111\+\$654\+688\.4%/);
+    expect(rows[0].querySelectorAll('td[rowspan="2"]')).toHaveLength(2);
+    const spot = rows.find(row => row.classList.contains('is-spot'));
+    expect(spot.textContent).toMatch(/^1,850 spot0\.0%−\$47−\$48−\$95−100\.0%/);
+    expect(rows.at(-1).textContent).toMatch(/^Expected at Kalshi odds · marked −\$55 at the bid−\$42−43\.8%100%−\$42$/);
+  });
+
+  it('is left out when no held line can be priced', () => {
+    expect(settlementGrid({ ...eth, held: [{ ...eth.held[0], strikeType: 'between' }] })).toBeNull();
+    expect(settlementGrid({ ...eth, held: [] })).toBeNull();
+  });
 });

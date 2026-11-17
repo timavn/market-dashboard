@@ -59,6 +59,26 @@ describe('instrumentResolver provider identity', () => {
     expect(canUseSymbolStream(descriptor)).toBe(false);
   });
 
+  it('sends a bare symbol in Yahoo notation straight to Yahoo', () => {
+    for (const symbol of ['^GSPC', '^VIX', 'CL=F', 'GC=F', 'EURUSD=X', 'BTC-USD', 'ETH-USD', 'DX-Y.NYB', 'cl=f']) {
+      expect(resolveInstrument(symbol)).toMatchObject({
+        symbol: symbol.toUpperCase(),
+        provider: 'yahoo',
+        yahooSymbol: symbol.toUpperCase(),
+        supported: false,
+        reason: 'yahoo_only',
+      });
+      expect(canUseSymbolStream(symbol)).toBe(false);
+    }
+    expect(instrumentCacheKey('^GSPC')).not.toBe(instrumentCacheKey('GSPC'));
+  });
+
+  it('keeps ordinary tickers, class shares and plain names on the IBKR-first route', () => {
+    for (const symbol of ['AAPL', 'BRK.B', 'BRK B', 'BF-B', 'RDS-A', 'XLK', 'USD', 'SILVER', 'IXIC']) {
+      expect(resolveInstrument(symbol)).toMatchObject({ symbol, secType: 'STK', provider: 'auto', supported: true });
+    }
+  });
+
   it('keeps a Yahoo cash index out of the IBKR stock route', () => {
     const descriptor = {
       symbol: 'SPX',

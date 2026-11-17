@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { phi } = require('./predictionSizing.cjs');
-const { applyLineMonitor, askLevels, betDollars, bookCandidates, bookFill, gradeLines, kalshiCentre, ladderLines, marketMonitor, shadeOf, sideBook,
-  heldDirection, heldPositions, heldState, kalshiBook, marketIdForTicker, strength } = require('./predictionLineMonitor.cjs');
+const { applyLineMonitor, askLevels, betDollars, bookCandidates, bookFill, setupLines, kalshiCentre, ladderLines, marketMonitor, shadeOf, sideBook,
+  heldDirection, heldPositions, heldState, kalshiBook, marketIdForTicker } = require('./predictionLineMonitor.cjs');
 
 const NOW = new Date('2026-11-13T18:00:00Z');
 const CLOSE = '2026-11-13T22:00:00Z';
@@ -19,14 +19,6 @@ const ladder = ({ event = 'KXSILVERD-26NOV1317', centre = 50, sigma = 1, half = 
 
 const shortRow = { id: 'silver', label: 'Silver', group: 'metals', events: [{ eventTicker: 'KXSILVERD-26NOV1317' }],
   tick: { direction: 'BEARISH' }, trade: { direction: 'BEARISH' }, trend: 'BEARISH', position: 0.95, setup: { side: 'SHORT', reason: null } };
-
-test('edge tiers', () => {
-  assert.equal(strength(0.06), 'STRONG');
-  assert.equal(strength(0.035), 'GOOD');
-  assert.equal(strength(0.012), 'WATCH');
-  assert.equal(strength(0.005), 'PASS');
-  assert.equal(strength(-0.02), 'PASS');
-});
 
 test('shading: Trade and Trend agree and price sits in the matching third of the Risk Range', () => {
   const row = (trade, trend, position) => ({ trade: trade && { direction: trade }, trend, position, tick: { direction: 'NEUTRAL' } });
@@ -71,43 +63,41 @@ test('positions map to markets through their own or held series', () => {
     [['NO', 778.53, 'KXSILVERW-26NOV1317'], ['YES', 1000, 'KXCPIYOY-26NOV']]);
 });
 
-test('lines are graded by edge for the setup side, best first, with held and new marks', () => {
+test('a setup lists its lines in strike order for its side, with held lines and the ticket\'s stakes marked', () => {
   const markets = ladder();
-  // Widen the NO asks below the centre so those lines carry edge, and leave one line one-sided.
-  markets[3].no_ask_dollars = (Number(markets[3].no_ask_dollars) - 0.12).toFixed(4);
-  markets[5].no_ask_dollars = (Number(markets[5].no_ask_dollars) - 0.04).toFixed(4);
   markets[8].yes_bid_dollars = '0.0000';
-  // 10 contracts behind the NO ask on one line: under $50, so it grades Illiquid whatever its edge.
+  // 10 contracts behind the NO ask on one line: under $50, so it is illiquid.
   markets[2].yes_bid_size_fp = '10.00';
   const held = [{ ticker: markets[5].ticker, side: 'NO', contracts: 300 }];
-  const seen = new Map();
-  const graded = gradeLines(shortRow, markets, { held, seen, now: NOW });
-  assert.equal(graded.buy, 'NO');
-  assert.equal(graded.lines[0].ticker, markets[3].ticker);
-  assert.equal(graded.lines[0].strength, 'STRONG');
-  assert.equal(graded.lines[0].isNew, true);
-  const heldLine = graded.lines.find((line) => line.ticker === markets[5].ticker);
-  assert.deepEqual(heldLine.held, { side: 'NO', contracts: 300 });
-  const thin = graded.lines.find((line) => line.ticker === markets[2].ticker);
-  assert.equal(thin.strength, 'ILLIQUID');
+  const row = { ...shortRow, sizing: { reach: [markets[2].ticker, markets[3].ticker],
+    lines: [{ ticker: markets[3].ticker, pct: 2.25, zone: 'target', ask: 0.32, contracts: 400, dollars: 135, win: 265 }] } };
+  const listed = setupLines(row, markets, { held });
+  assert.equal(listed.buy, 'NO');
+  assert.deepEqual(listed.lines.map((line) => line.strike), [48, 48.5, 49, 49.5, 50, 50.5, 51, 51.5]);
+  assert.deepEqual(listed.lines.find((line) => line.ticker === markets[5].ticker).held, { side: 'NO', contracts: 300 });
+  // The line the sizing ticket buys carries its stake; nothing else is marked.
+  assert.deepEqual(listed.lines.find((line) => line.ticker === markets[3].ticker).ticket,
+    { pct: 2.25, zone: 'target', ask: 0.32, contracts: 400, dollars: 135, win: 265 });
+  // Lines the sizing rules allow are marked in reach, bought or not.
+  assert.deepEqual(listed.lines.filter((line) => line.reach).map((line) => line.strike), [49, 49.5]);
+  assert.deepEqual([listed.onTicket, listed.lines.filter((line) => line.ticket).length], [1, 1]);
+  const thin = listed.lines.find((line) => line.ticker === markets[2].ticker);
+  assert.equal(thin.illiquid, true);
   assert.equal(thin.no.illiquid, true);
   assert.ok(thin.no.depth < 50);
-  assert.equal(graded.illiquid, 1);
-  assert.equal(graded.counts.ILLIQUID, 1);
-  // Both sides are shown: the other side's edge is our complementary odds against its own ask.
-  const top = graded.lines[0];
-  assert.ok(Math.abs(top.no.edge - top.edge) < 1e-9);
-  assert.ok(top.yes.ask > 0 && top.yes.edge < top.no.edge);
-  // The one-sided line (no YES bid) is not priced at all.
-  assert.equal(graded.lines.some((line) => line.ticker === markets[8].ticker), false);
-  assert.equal(graded.closeTime, CLOSE);
-  // Still Strong 40 minutes later: no longer new.
-  const later = gradeLines(shortRow, markets, { held, seen, now: new Date(NOW.getTime() + 40 * 60_000) });
-  assert.equal(later.lines[0].isNew, undefined);
+  assert.deepEqual([listed.illiquid, listed.fillable, listed.total], [1, 7, 8]);
+  // Both sides are shown at their own ask, with Kalshi's odds and no figure of ours.
+  const centre = listed.lines.find((line) => line.strike === 50);
+  assert.ok(centre.yes.ask > 0 && centre.no.ask > 0 && Math.abs(centre.kalshiYes - 0.5) < 1e-9);
+  assert.equal(centre.ask, centre.no.ask);
+  assert.deepEqual([centre.edge, centre.ourOdds, centre.strength, centre.yes.edge], [undefined, undefined, undefined, undefined]);
+  // The one-sided line (no YES bid) is not listed at all.
+  assert.equal(listed.lines.some((line) => line.ticker === markets[8].ticker), false);
+  assert.equal(listed.closeTime, CLOSE);
 });
 
-test('no setup grades no lines', () => {
-  assert.equal(gradeLines({ ...shortRow, setup: { side: null } }, ladder()), null);
+test('no setup lists no setup lines', () => {
+  assert.equal(setupLines({ ...shortRow, setup: { side: null } }, ladder()), null);
 });
 
 test('held states: first match wins', () => {
@@ -119,9 +109,9 @@ test('held states: first match wins', () => {
   const through = heldState(line(2), shortRow, markets[2], { now: NOW });
   assert.equal(through.state, 'THROUGH_LINE');
   assert.match(through.why, /^Kalshi has the held side at \d+%$/);
-  // A bid above our odds: selling beats holding.
-  const rich = { ...markets[6], no_bid_dollars: '0.9500' };
-  assert.equal(heldState(line(6), shortRow, rich, { now: NOW }).state, 'EDGE_GONE');
+  // A rich bid changes nothing: no odds of our own are compared with it.
+  const rich = heldState(line(6), shortRow, { ...markets[6], no_bid_dollars: '0.9500' }, { now: NOW });
+  assert.deepEqual([rich.state, rich.ourOdds, rich.exitEdge], ['HOLD', undefined, undefined]);
   const lapsed = { ...shortRow, setup: { side: null, reason: 'Price not in the top third' }, position: 0.6 };
   const unshaded = heldState(line(6), lapsed, markets[6], { now: NOW });
   assert.deepEqual([unshaded.state, unshaded.why], ['SETUP_LAPSED', 'Price not in the top third']);
@@ -166,10 +156,9 @@ test('book: at risk, sections, flags, and the board blocks', () => {
     event_positions: [{ event_ticker: 'KXGOLDW-26NOV1317', realized_pnl_dollars: '147.53' }, { realized_pnl_dollars: '-95.09' }],
   };
   const marketsByEvent = new Map([['KXSILVERD-26NOV1317', silver], ['KXBTCD-26NOV1317', btc]]);
-  applyLineMonitor(board, { balance: { balance_dollars: '1000', portfolio_value: 50000 }, positions, marketsByEvent,
-    seen: new Map(), now: NOW });
+  applyLineMonitor(board, { balance: { balance_dollars: '1000', portfolio_value: 50000 }, positions, marketsByEvent, now: NOW });
   const [silverRow, btcRow, goldRow, wtiRow, cpiRow] = board.rows;
-  // Shading, not the board's setup rule: Bitcoin's board setup is none but Trade and Trend are Bullish in the bottom third.
+  // Shading is read from Trade, Trend and the range, whatever the row's own setup field says.
   assert.equal(silverRow.kalshiLines.shade, 'SHORT');
   assert.equal(silverRow.kalshiLines.lines.buy, 'NO');
   assert.equal(silverRow.kalshiLines.held.length, 1);
@@ -179,7 +168,7 @@ test('book: at risk, sections, flags, and the board blocks', () => {
   assert.equal(btcRow.setup.side, null);
   assert.equal(goldRow.kalshiLines.shade, null);
   assert.equal(goldRow.kalshiLines.shadeReason, 'No Trade');
-  // Summary: price, Kalshi's centre (from the ladder), best line, fillable lines, close.
+  // Summary: price, Kalshi's centre (from the ladder), fillable lines, close.
   const summary = silverRow.kalshiLines.summary;
   assert.ok(Math.abs(summary.centre - 50) < 0.01);
   assert.equal(summary.position, 0.95);
@@ -188,7 +177,8 @@ test('book: at risk, sections, flags, and the board blocks', () => {
   assert.equal(marketMonitor(composite, {}).summary.price, 27943);
   assert.equal(summary.closeTime, CLOSE);
   assert.equal(summary.total, silverRow.kalshiLines.lines.total);
-  assert.ok(summary.best === null || summary.best.side === 'NO');
+  assert.equal(summary.best, undefined);
+  assert.equal(board.kalshiBook.bettable, undefined);
   assert.equal(goldRow.kalshiLines.open, false);
   // Gold has no setup and no event read here: no lines, but the row is still listed with its reason.
   assert.equal(goldRow.kalshiLines.lines, undefined);
@@ -237,7 +227,7 @@ test('caps flag only once set', () => {
     ['At risk 40.0% of the account, over the 30% book cap.', 'Metals at 40.0% of the account, over the 25% section cap.']);
 });
 
-test('a market without a setup still lists its ladder, ungraded', () => {
+test('a market without a setup still lists its ladder, nothing marked', () => {
   const markets = ladder();
   markets[0].yes_bid_dollars = '0.0000';
   const lines = ladderLines(markets);
@@ -248,9 +238,8 @@ test('a market without a setup still lists its ladder, ungraded', () => {
   assert.equal(centre.subtitle, '$50 or above');
   assert.ok(Math.abs(centre.kalshiOdds - 0.5) < 1e-9);
   assert.ok(Math.abs(centre.sigmas) < 0.05);
-  assert.equal(centre.strength, undefined);
-  // No YES bid: no mid, so no odds and no edge on either side; nothing to take.
-  assert.equal(lines.lines[0].better, null);
+  assert.deepEqual([centre.strength, centre.better, centre.ourOdds, centre.yes.edge], [undefined, undefined, undefined, undefined]);
+  // No YES bid: no mid, so no odds; nothing to take.
   assert.equal(lines.lines[0].illiquid, true);
   assert.equal(lines.illiquid, 1);
   assert.equal(lines.total, 9);
@@ -263,7 +252,7 @@ test('a market without a setup still lists its ladder, ungraded', () => {
   assert.ok(long.lines.every((line) => line.strike >= 70 && line.strike <= 130));
   // Through the board: a no-setup row with a read event gets its ladder and stays folded.
   const board = { rows: [{ ...shortRow, setup: { side: null, reason: null }, position: 0.5 }] };
-  applyLineMonitor(board, { balance: null, positions: null, marketsByEvent: new Map([['KXSILVERD-26NOV1317', markets]]), seen: new Map(), now: NOW });
+  applyLineMonitor(board, { balance: null, positions: null, marketsByEvent: new Map([['KXSILVERD-26NOV1317', markets]]), now: NOW });
   assert.equal(board.rows[0].kalshiLines.lines.lines.length, 9);
   assert.equal(board.rows[0].kalshiLines.summary.fillable, 8);
   assert.ok(Math.abs(board.rows[0].kalshiLines.summary.centre - 50) < 0.01);
@@ -273,32 +262,25 @@ test('a market without a setup still lists its ladder, ungraded', () => {
 
 test('side books: dollars at the ask decide liquidity; an unknown size is not held against a side', () => {
   const line = { yesAsk: 0.48, noAsk: 0.54, yesAskSize: 40, noAskSize: 500 };
-  const yes = sideBook(line, 'YES', 0.5);
+  const yes = sideBook(line, 'YES');
   assert.ok(Math.abs(yes.depth - 19.2) < 1e-9);
   assert.equal(yes.illiquid, true);
-  const no = sideBook(line, 'NO', 0.5);
-  assert.equal(no.depth, 270);
-  assert.equal(no.illiquid, undefined);
-  assert.ok(Math.abs(no.edge - (0.5 - 0.54 - 0.07 * 0.54 * 0.46)) < 1e-9);
-  assert.equal(sideBook({ ...line, yesAskSize: null }, 'YES', 0.5).illiquid, undefined);
-  assert.deepEqual(sideBook({ ...line, noAsk: null }, 'NO', 0.5), { ask: null, depth: null, edge: null, illiquid: true });
+  const no = sideBook(line, 'NO');
+  assert.deepEqual(no, { ask: 0.54, depth: 270 });
+  assert.equal(sideBook({ ...line, yesAskSize: null }, 'YES').illiquid, undefined);
+  assert.deepEqual(sideBook({ ...line, noAsk: null }, 'NO'), { ask: null, depth: null, illiquid: true });
 });
 
-test('a ladder line marks the side with the better edge, illiquid when that side is thin', () => {
+test('a ladder line is illiquid only when neither side has the depth', () => {
   const markets = ladder();
-  // A wide NO ask makes YES the better side on two lines; the second has only 20 contracts at its YES ask.
-  markets[4].no_ask_dollars = '0.6000';
-  markets[4].yes_ask_size_fp = '200.00';
-  markets[5].no_ask_dollars = '0.8000';
+  // 20 contracts at the YES ask on two lines; the second is thin on the NO side too.
+  markets[4].yes_ask_size_fp = '20.00';
   markets[5].yes_ask_size_fp = '20.00';
+  markets[5].yes_bid_size_fp = '20.00';
   const lines = ladderLines(markets).lines;
   const even = lines.find((line) => line.ticker === markets[4].ticker);
-  assert.equal(even.better, 'YES');
-  assert.ok(even.yes.edge > even.no.edge);
-  assert.equal(even.illiquid, undefined);
-  const thin = lines.find((line) => line.ticker === markets[5].ticker);
-  assert.equal(thin.better, 'YES');
-  assert.equal(thin.illiquid, true);
+  assert.deepEqual([even.yes.illiquid, even.no.illiquid, even.illiquid], [true, undefined, undefined]);
+  assert.equal(lines.find((line) => line.ticker === markets[5].ticker).illiquid, true);
 });
 
 // Gold above 3877 for Mon Nov 16 as Kalshi returned it on 2026-11-15: resting bids, [price in dollars, contracts].
@@ -327,21 +309,20 @@ test('a bet walks the order book: Yes takes the No bids, No takes the Yes bids, 
   assert.equal(Math.round(big.dollars * 100) / 100, 26.4 + 112.2 + 345);
 });
 
-test('a side with a book is priced and graded at the average its whole bet fills at', () => {
+test('a side with a book is priced at the average its whole bet fills at', () => {
   const line = { yesAsk: 0.35, noAsk: 0.66, yesAskSize: 500, noAskSize: 40 };
-  const book = sideBook(line, 'NO', 0.75, { book: GOLD_3877, bet: 248 });
+  const book = sideBook(line, 'NO', { book: GOLD_3877, bet: 248 });
   assert.equal(Math.round(book.ask * 1000) / 10, 68.2);
-  // Our odds − average − average fee, about 0.75 − 0.682 − 0.015.
-  assert.ok(Math.abs(book.edge - (0.75 - book.fill.avg - book.fill.fee)) < 1e-12);
+  assert.equal(book.edge, undefined);
   assert.ok(book.fill.fee > 0.014 && book.fill.fee < 0.016);
   assert.equal(book.illiquid, undefined);
   // Everything resting on the No side: $26.40 + $112.20 + $345.
   assert.equal(Math.round(book.depth * 10) / 10, 483.6);
   // A bet bigger than the book is illiquid.
-  assert.equal(sideBook(line, 'NO', 0.75, { book: GOLD_3877, bet: 1000 }).illiquid, true);
+  assert.equal(sideBook(line, 'NO', { book: GOLD_3877, bet: 1000 }).illiquid, true);
   // Without a book: the top ask and the minDepthDollars rule.
-  assert.equal(sideBook(line, 'NO', 0.75).ask, 0.66);
-  assert.equal(sideBook(line, 'NO', 0.75).illiquid, true);
+  assert.equal(sideBook(line, 'NO').ask, 0.66);
+  assert.equal(sideBook(line, 'NO').illiquid, true);
 });
 
 test('bet size and which lines get their books read', () => {
@@ -355,7 +336,7 @@ test('bet size and which lines get their books read', () => {
   assert.deepEqual(bookCandidates(null), []);
 });
 
-test('with books, ladders and graded lines carry the bet and grade on the fill', () => {
+test('with books, ladders and setup lines carry the bet and are priced on the fill', () => {
   const markets = ladder();
   // Every line's book holds 100 contracts a side at 1¢ worse than its quote: a $20 bet fills, a $500 bet does not.
   const books = new Map(markets.map((market) => [market.ticker, {
@@ -368,16 +349,15 @@ test('with books, ladders and graded lines carry the bet and grade on the fill',
   const big = ladderLines(markets, { books, bet: 500 });
   assert.ok(big.lines.every((line) => line.illiquid));
   assert.equal(big.fillable, 0);
-  assert.equal(big.best, null);
-  // Only the books read are checked; the rest keep their top-of-book quote and cannot be the best line.
+  // Only the books read are checked; the rest keep their top-of-book quote.
   const one = new Map([[markets[4].ticker, books.get(markets[4].ticker)]]);
   const partial = ladderLines(markets, { books: one, bet: 20 });
   assert.deepEqual(partial.lines.filter((line) => line.checked).map((line) => line.ticker), [markets[4].ticker]);
-  assert.ok(partial.best === null || partial.best.ticker === markets[4].ticker);
-  const graded = gradeLines(shortRow, markets, { books, bet: 500 });
-  assert.equal(graded.bet, 500);
-  assert.ok(graded.lines.every((line) => line.strength === 'ILLIQUID' && line.checked));
-  const fine = gradeLines(shortRow, markets, { books, bet: 20 });
-  // The graded edge is the edge at the fill on the shaded side.
-  for (const line of fine.lines) assert.ok(line.edge === null || Math.abs(line.edge - line.no.edge) < 1e-12);
+  const thin = setupLines(shortRow, markets, { books, bet: 500 });
+  assert.equal(thin.bet, 500);
+  assert.ok(thin.lines.every((line) => line.illiquid && line.checked));
+  const fine = setupLines(shortRow, markets, { books, bet: 20 });
+  // The price shown is the fill on the shaded side.
+  assert.ok(fine.fillable > 0);
+  for (const line of fine.lines.filter((item) => !item.illiquid)) assert.ok(Math.abs(line.ask - line.no.fill.avg) < 1e-12);
 });

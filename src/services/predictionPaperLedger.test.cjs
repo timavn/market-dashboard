@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createPaperLedger, scoreTicket, summarize, ticketOf } = require('./predictionPaperLedger.cjs');
+const { createPaperLedger, scoreTicket, summarize, ticketOf, ticketsOf } = require('./predictionPaperLedger.cjs');
 
 // The slice of DocumentClient the ledger uses, over a Map.
 function fakeTable() {
@@ -18,18 +18,26 @@ function fakeTable() {
     }) };
 }
 
-const line = (strike, ask, pct) => ({ ticker: `G-T${strike}`, strike, buy: 'NO', ask, fee: 0.07 * ask * (1 - ask), kalshiOdds: ask, ourOdds: ask + 0.05, edge: 0.03, pct });
-const board = (lines = [line(4000, 0.5, 2), line(4040, 0.85, 4)]) => ({ marketDate: '2026-11-11', rows: [
-  { id: 'gold', label: 'Gold', sizing: { side: 'SHORT', pct: 8, spentPct: 6, event: 'KXGOLDD-26NOV1117', tilt: 0.17, widen: 1, quotedAt: '2026-11-11T16:00:00Z',
-    components: [{ key: 'range', label: 'Range', score: 1, lost: 0 }, { key: 'usd', label: 'Dollar', score: 0.5, lost: 0.5, missing: true }], lines } },
-  { id: 'silver', label: 'Silver', sizing: { side: 'LONG', pct: 5, event: 'KXSILVERD-26NOV1117', lines: [], reason: 'No line with edge' } },
+const line = (strike, ask, pct, zone = 'target') => ({ ticker: `G-T${strike}`, strike, buy: 'NO', ask, fee: 0.07 * ask * (1 - ask), moves: 0.7, zone, pct });
+const board = (lines = [line(4000, 0.5, 2, 'near'), line(4040, 0.85, 4)]) => ({ marketDate: '2026-11-11', rows: [
+  { id: 'gold', label: 'Gold', sizing: { side: 'SHORT', pct: 4.5, spentPct: 6, event: 'KXGOLDD-26NOV1117', wide: false, volBand: 'Moderate',
+    quotedAt: '2026-11-11T16:00:00Z',
+    components: [{ key: 'usd', label: 'Dollar', weight: 1, points: 1 }, { key: 'tick', label: 'Tick', weight: 0.5, points: -0.5 },
+      { key: 'volume', label: 'Volume', weight: 0.5, points: 0, missing: true }], lines } },
+  { id: 'silver', label: 'Silver', sizing: { side: 'LONG', pct: 3, event: 'KXSILVERD-26NOV1117', lines: [], reason: 'No liquid line' } },
   { id: 'copper', label: 'Copper' }] });
 
-test('only a setup with funded lines becomes a ticket', () => {
+test('only a setup with funded lines becomes a ticket, one per duration', () => {
   const tickets = board().rows.map((row) => ticketOf(row, '2026-11-11')).filter(Boolean);
   assert.equal(tickets.length, 1);
   assert.equal(tickets[0].recordKey, 'ticket#2026-11-11#KXGOLDD-26NOV1117');
-  assert.deepEqual(tickets[0].components[1], { key: 'usd', score: 0.5, lost: 0.5, missing: true });
+  assert.deepEqual([tickets[0].duration, tickets[0].pct, tickets[0].lines[0].zone], ['daily', 4.5, 'near']);
+  assert.deepEqual(tickets[0].components[2], { key: 'volume', weight: 0.5, points: 0, missing: true });
+  // A weekly ticket is its own record under the weekly event, sized like the daily one.
+  const gold = board().rows[0];
+  gold.sizing.weekly = { event: 'KXGOLDW-26NOV1317', spentPct: 4.5, lines: [line(3900, 0.3, 4.5)] };
+  assert.deepEqual(ticketsOf(gold, '2026-11-11').map((ticket) => [ticket.duration, ticket.recordKey, ticket.side, ticket.pct]),
+    [['daily', 'ticket#2026-11-11#KXGOLDD-26NOV1117', 'SHORT', 4.5], ['weekly', 'ticket#2026-11-11#KXGOLDW-26NOV1317', 'SHORT', 4.5]]);
 });
 
 test('a ticket scores only when every line has settled', () => {
@@ -64,7 +72,8 @@ test('the first split of the day is kept, then settled once and summarised', asy
   assert.ok(summary.returnOnStake > 0);
   assert.equal(summary.byMarket.gold.tickets, 1);
   assert.deepEqual(Object.keys(summary.byPrice), ['50–80¢', '80¢ and up']);
-  assert.deepEqual(Object.keys(summary.byInput).sort(), ['range:for', 'usd:missing']);
+  assert.deepEqual(Object.keys(summary.byInput).sort(), ['tick:subtracted', 'usd:added', 'volume:missing']);
+  assert.deepEqual([Object.keys(summary.byZone), Object.keys(summary.byDuration)], [['target', 'near'], ['daily']]);
   assert.equal((await ledger.summary({ tickets: true })).list.length, 1);
 });
 

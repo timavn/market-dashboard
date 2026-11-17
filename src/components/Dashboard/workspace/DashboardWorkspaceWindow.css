@@ -53,6 +53,11 @@
   --analyst-inbox-width: 380px;
 }
 
+/* A Predictive Markets board with Structure needs about 845px of table; the window grows to fit it, never shrinks. */
+.dashboard-workspace-window--analyst:has(.is-range-board.has-structure.has-z) {
+  --dashboard-window-width: max(var(--analyst-panel-width, 440px), 900px);
+}
+
 .dashboard-workspace-window--analyst:has(.analyst-inbox-drawer) {
   --dashboard-window-width: calc(var(--analyst-panel-width, 440px) + var(--analyst-inbox-width));
 }

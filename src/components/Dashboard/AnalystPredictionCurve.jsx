@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { parsePredictionRange } from './AnalystPredictionRangeBar';
+import { alphaCodeLevels, parsePredictionRange } from './AnalystPredictionRangeBar';
 
 // A market's Kalshi ladder drawn as where it is expected to settle: a bell fitted to the ladder, split into
 // zones by the Alpha Code (or, without one, the Risk Range), with the price and each level marked. Odds at a
@@ -287,14 +287,27 @@ export function AnalystPredictionCurve({ curve, width = 720 }) {
   const X1 = W - 14;
   const svg = useRef(null);
   const [hover, setHover] = useState(null);
-  const { centre, sigma, unit, above, levels } = curve;
+  const { centre, sigma, unit, above, levels, price } = curve;
   const zones = curveZones(curve);
   const marks = curveMarkers(curve);
-  // The bell's ±3.2σ, widened to take in any level within 4.5σ; levels further out sit at the edge.
+  const hasRange = isNum(levels.rangeLow) && isNum(levels.rangeHigh) && levels.rangeHigh > levels.rangeLow;
   let lo = centre - 3.2 * sigma;
   let hi = centre + 3.2 * sigma;
-  for (const mark of marks) {
-    if (Math.abs(mark.value - centre) <= 4.5 * sigma) { lo = Math.min(lo, mark.value - 0.3 * sigma); hi = Math.max(hi, mark.value + 0.3 * sigma); }
+  if (hasRange) {
+    // With a Risk Range the chart is the range cell on a bell: the axis always holds the whole range, the price and the
+    // bell's ±3.2σ, and any Alpha Code level within one range-width of it.
+    const span = levels.rangeHigh - levels.rangeLow;
+    for (const mark of marks) {
+      if (mark.value >= levels.rangeLow - span && mark.value <= levels.rangeHigh + span) { lo = Math.min(lo, mark.value); hi = Math.max(hi, mark.value); }
+    }
+    const pad = (hi - lo) * 0.03;
+    lo -= pad;
+    hi += pad;
+  } else {
+    // Without one: the bell's ±3.2σ, widened to take in any level within 4.5σ; levels further out sit at the edge.
+    for (const mark of marks) {
+      if (Math.abs(mark.value - centre) <= 4.5 * sigma) { lo = Math.min(lo, mark.value - 0.3 * sigma); hi = Math.max(hi, mark.value + 0.3 * sigma); }
+    }
   }
   const X = value => X0 + ((value - lo) / (hi - lo)) * (X1 - X0);
   const format = value => curveLevel(value, unit);
@@ -317,15 +330,15 @@ export function AnalystPredictionCurve({ curve, width = 720 }) {
   const chipTop = row => Y_BASE - 6 - CHIP_H - row * (CHIP_H + 4);
   const chips = rows(tags.filter(tag => !tag.off).map(tag => ({ ...tag, text: `${tag.percent}%`, width: `${tag.percent}%`.length * 7.2 + 10 })),
     3, X0, X1);
-  const hasRange = isNum(levels.rangeLow) && isNum(levels.rangeHigh) && levels.rangeHigh > levels.rangeLow;
   const ROW_PRICE = Y_BASE + 17;
   const ROW_ODDS = Y_BASE + 33;
-  const ROW_RANGE = Y_BASE + 46;
-  const H = hasRange ? ROW_RANGE + 18 : ROW_ODDS + 10;
+  const ROW_RANGE = Y_BASE + 50;
+  const ROW_AC = ROW_RANGE + 20;
+  const H = hasRange ? ROW_AC + 6 : ROW_ODDS + 10;
 
   const density = value => Math.exp(-0.5 * ((value - centre) / sigma) ** 2);
   const Y = value => Y_BASE - density(value) * (Y_BASE - Y_TOP);
-  const samples = 180;
+  const samples = 360;
   const points = Array.from({ length: samples + 1 }, (_, index) => lo + ((hi - lo) * index) / samples);
   const path = points.map((value, index) => `${index ? 'L' : 'M'}${X(value).toFixed(1)} ${Y(value).toFixed(1)}`).join('');
   const area = (from, to) => {
@@ -355,6 +368,20 @@ export function AnalystPredictionCurve({ curve, width = 720 }) {
     const to = Math.min(hi, levels.rangeLow + (index + 1) * size);
     return { part, left: X(from), width: X(to) - X(from) };
   }).filter(third => third.width > 0) : [];
+  // The range cell's bar under the axis: its line, the thirds' ticks, the Alpha Code's dots, the price and its place in range.
+  const bar = hasRange ? (() => {
+    const third = (levels.rangeHigh - levels.rangeLow) / 3;
+    const position = isNum(price) ? Math.round(((price - levels.rangeLow) / (levels.rangeHigh - levels.rangeLow)) * 100) : null;
+    const tone = position === null ? '' : position >= 66 ? 'is-top' : position <= 33 ? 'is-bottom' : 'is-middle';
+    const dotX = isNum(price) ? X(Math.max(lo, Math.min(hi, price))) : null;
+    const alphaDots = [levels.trade, levels.trend].filter(level => isNum(level) && level >= levels.rangeLow && level <= levels.rangeHigh);
+    const code = isNum(levels.trade) || isNum(levels.trend)
+      ? alphaCodeLevels({ trade: isNum(levels.trade) ? levels.trade : null, trend: isNum(levels.trend) ? levels.trend : null,
+        approximate: Boolean(levels.approximate) }, unit) : 'N/A';
+    return { bottom: X(levels.rangeLow + third), top: X(levels.rangeHigh - third), position, tone, dotX,
+      dotTone: !isNum(price) ? '' : price < levels.rangeLow ? 'is-below' : price > levels.rangeHigh ? 'is-above' : '',
+      positionRight: dotX !== null && dotX > X1 - 40, alphaDots: [...new Set(alphaDots)].map(X), code };
+  })() : null;
 
   const spread = unit === '%' ? `±${Math.round(sigma * 100)} bp` : `±${((sigma / centre) * 100).toFixed(1)}%`;
   const move = (event) => {
@@ -395,11 +422,17 @@ export function AnalystPredictionCurve({ curve, width = 720 }) {
       </g>)}
       <text x={4} y={ROW_PRICE} className="analyst-curve__row-title">{unit === '%' ? 'Yield' : 'Price'}</text>
       <text x={4} y={ROW_ODDS} className="analyst-curve__row-title">Above</text>
-      {hasRange && <g className="analyst-curve__range">
-        <text x={4} y={ROW_RANGE + 5} className="analyst-curve__row-title">RR</text>
-        {thirds.map(third => <rect key={third.part} x={third.left} y={ROW_RANGE - 2} width={third.width} height={7} className={`is-${third.part}`} />)}
-        {levels.rangeLow < lo && <text x={X0} y={ROW_RANGE + 5} className="analyst-curve__range-off">◂</text>}
-        {levels.rangeHigh > hi && <text x={X1} y={ROW_RANGE + 5} textAnchor="end" className="analyst-curve__range-off">▸</text>}
+      {bar && <g className="analyst-curve__range">
+        <text x={4} y={ROW_RANGE + 4} className="analyst-curve__row-title">RR</text>
+        <line x1={X(levels.rangeLow)} x2={X(levels.rangeHigh)} y1={ROW_RANGE} y2={ROW_RANGE} className="analyst-curve__range-line" />
+        <line x1={bar.bottom} x2={bar.bottom} y1={ROW_RANGE - 5.5} y2={ROW_RANGE + 5.5} className="analyst-curve__range-mark is-bottom" />
+        <line x1={bar.top} x2={bar.top} y1={ROW_RANGE - 5.5} y2={ROW_RANGE + 5.5} className="analyst-curve__range-mark is-top" />
+        {bar.alphaDots.map(x => <circle key={x} cx={x} cy={ROW_RANGE} r="3" className="analyst-curve__range-alpha" />)}
+        {bar.dotX !== null && <circle cx={bar.dotX} cy={ROW_RANGE} r="4" className={`analyst-curve__range-dot ${bar.dotTone}`.trim()} />}
+        {bar.position !== null && <text x={bar.positionRight ? bar.dotX - 8 : bar.dotX + 8} y={ROW_RANGE + 4}
+          textAnchor={bar.positionRight ? 'end' : 'start'} className={`analyst-curve__range-position ${bar.tone}`}>{bar.position}%</text>}
+        <text x={4} y={ROW_AC} className="analyst-curve__row-title">AC</text>
+        <text x={X0} y={ROW_AC} className={`analyst-curve__range-code${bar.code === 'N/A' ? ' is-na' : ''}`}>{bar.code}</text>
       </g>}
       {tags.filter(tag => !tag.off).map(tag => <g key={tag.key} className={`analyst-curve__level is-${tag.kind}`}>
         {tag.note && <title>{tag.note}</title>}
