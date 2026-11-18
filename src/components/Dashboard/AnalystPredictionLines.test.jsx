@@ -61,9 +61,9 @@ test('one row per market: book icon, centred name, curve icon, shaded by Trade, 
   const table = screen.getByRole('table', { name: 'Kalshi lines' });
   expect(table.querySelector(':scope > thead')).toBeNull();
   const row = name => within(table).getByRole('button', { name: `${name} order book` }).closest('tr');
-  expect([...table.querySelectorAll(':scope > tbody > tr.analyst-lines__row')].map(item => item.textContent)).toEqual(['Silver', 'Gold', 'Bitcoin']);
+  expect([...table.querySelectorAll(':scope > tbody > tr.analyst-lines__row')].map(item => item.textContent)).toEqual(['BookCurveSilver', 'BookCurveGold', 'BookCurveBitcoin']);
   expect(row('Gold').cells).toHaveLength(1);
-  expect(row('Gold')).toHaveTextContent(/^Gold$/);
+  expect(row('Gold')).toHaveTextContent(/^BookCurveGold$/);
   // Shading: Silver short (red), Bitcoin long (green), the rest plain, each with a reason on hover.
   expect(row('Silver')).toHaveClass('is-shade-short');
   expect(row('Silver')).toHaveAttribute('title', 'Shaded short: Trade and Trend Bearish, price in the top third of the Risk Range');
@@ -200,9 +200,9 @@ test('an unshaded market opens to its fillable lines with spot between them; ill
   expect(screen.queryByText(/not graded|illiquid \(/i)).toBeNull();
   // Only the fillable line shows, with spot (3,887.6) above it; no other fillable lines to show.
   const rows = () => within(ladder).getAllByRole('row').slice(1);
-  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Spot3,887.6', 'Above4,000']);
+  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Spot3,887.6', 'Above4,000.0']);
   expect(rows()[0]).toHaveClass('analyst-lines__spot');
-  expect(rows()[1]).toHaveTextContent(/^Above4,000−0\.3σ62¢40¢61%$/);
+  expect(rows()[1]).toHaveTextContent(/^Above4,000\.0−0\.3σ62¢40¢61%$/);
   // No setup, so neither side is marked.
   expect(rows()[1].cells[3]).not.toHaveClass('is-take');
   expect(rows()[1].cells[2]).not.toHaveClass('is-take');
@@ -260,14 +260,14 @@ test('with a bet, lines show the average the whole bet fills at; unread lines ar
   const table = screen.getByRole('table', { name: 'Gold Kalshi lines' });
   const rows = () => within(table).getAllByRole('row').slice(1);
   // G4's book was not read, so it is not listed; G3 cannot take the bet and folds.
-  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Above3867', 'Spot3872.5', 'Above3877']);
+  expect(rows().map(row => row.cells[0].textContent)).toEqual(['Above3867.0', 'Spot3872.5', 'Above3877.0']);
   const g2 = rows()[2];
   expect(g2.cells[2]).toHaveTextContent(/^36\.6¢$/);
   expect(g2.cells[3]).toHaveTextContent(/^68\.2¢$/);
   expect(g2.cells[3]).toHaveAttribute('title', '$248 buys 364 contracts at 66¢–69¢, average 68.2¢');
   expect(rows()[0].cells[3]).toHaveAttribute('title', '$248 buys 605 contracts at 41¢, average 41.0¢');
   fireEvent.click(screen.getByRole('button', { name: "Show 1 line that can't take $248" }));
-  const g3 = rows().find(row => row.cells[0].textContent === 'Above3887');
+  const g3 = rows().find(row => row.cells[0].textContent === 'Above3887.0');
   expect(g3).toHaveClass('analyst-lines__illiquid');
   expect(g3.cells[3]).toHaveAttribute('title', 'Only $120 for sale on this side; the $248 bet does not fill');
 });

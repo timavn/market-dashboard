@@ -706,7 +706,8 @@ describe('Kalshi lines open from the board rows', () => {
     expect(container.querySelector('.analyst-table-frame')).toHaveClass('has-lines');
     const cell = container.querySelector('td.analyst-board-market');
     expect(cell).toHaveClass('is-shade-short');
-    expect(cell).toHaveTextContent(/^WTI$/);
+    // The switch reads Book | Curve; the name follows it in the DOM (CSS sets it above).
+    expect(cell).toHaveTextContent(/^BookCurveWTI$/);
     expect([...cell.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['WTI order book', 'WTI settlement curve']);
     expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
     fireEvent.click(within(cell).getByRole('button', { name: 'WTI settlement curve' }));

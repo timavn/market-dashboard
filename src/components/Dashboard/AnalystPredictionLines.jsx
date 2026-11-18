@@ -89,23 +89,36 @@ export const lineParts = line => {
   const [word, number] = before ? [before[1], before[2]] : after ? [after[2], after[1]] : [null, text];
   return [word ? `${word[0].toUpperCase()}${word.slice(1).toLowerCase()}` : null, number.replace(/\$/g, '')];
 };
+// A book writes every number with the same count of decimals (user-specified 2026-11-17): 6 → 6.00 beside 5.98.
+const NUMBER = /^([\d,]+)(?:\.(\d+))?(%?)$/;
+const decimalsOf = text => (text.match(NUMBER)?.[2] || '').length;
+const padTo = (text, digits) => {
+  const match = text.match(NUMBER);
+  if (!match || !digits) return text;
+  return `${match[1]}.${(match[2] || '').padEnd(digits, '0')}${match[3]}`;
+};
+// Spot's own precision: none from 10,000, one from 100, else two.
+const spotDigits = spot => (spot.unit === '%' ? 2 : Math.abs(spot.price) >= 10000 ? 0 : Math.abs(spot.price) >= 100 ? 1 : 2);
+// One count for a market's book: the most any of its lines (or spot) carries.
+const bookDigits = (lines, spot) => Math.max(0, ...lines.map(line => decimalsOf(lineParts(line)[1])),
+  isNum(spot?.price) ? spotDigits(spot) : 0);
+
 // The word sits in a fixed-width slot so every number in the column starts at the same place.
 const LineName = ({ word, number }) => <><span className="analyst-lines__word">{word || ''}</span>{number}</>;
-const LineCell = ({ line, title }) => {
+const LineCell = ({ line, title, digits }) => {
   const [word, number] = lineParts(line);
-  return <td title={title}><LineName word={word} number={number} /></td>;
+  return <td title={title}><LineName word={word} number={padTo(number, digits)} /></td>;
 };
 
 // Spot as a thin blue rule between the strikes it sits between (strikes run low to high). Its tag sits in the Line
 // column, aligned like that column's cells, so its number lines up with theirs; it is written the same way (thousands
-// separators only when the lines use them).
-function withSpot(visible, spot, columns, renderLine) {
+// separators only when the lines use them, with the book's decimals).
+function withSpot(visible, spot, columns, renderLine, digits = spotDigits(spot)) {
   const out = visible.map(renderLine);
   if (!isNum(spot.price) || !visible.some(line => isNum(line.strike))) return out;
   const at = visible.findIndex(line => isNum(line.strike) && line.strike > spot.price);
   const grouped = visible.some(line => lineParts(line)[1].includes(','));
-  const digits = Math.abs(spot.price) >= 10000 ? 0 : Math.abs(spot.price) >= 100 ? 1 : 2;
-  const number = spot.unit === '%' ? `${spot.price.toFixed(2)}%`
+  const number = spot.unit === '%' ? `${spot.price.toFixed(digits)}%`
     : spot.price.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: grouped });
   out.splice(at === -1 ? out.length : at, 0, <tr key="spot" className="analyst-lines__spot">
     <td><span className="analyst-lines__spot-slot"><span className="analyst-lines__spot-tag"><LineName word="Spot" number={number} /></span></span></td>
@@ -142,6 +155,7 @@ function LineTable({ market, lines }) {
   const sum = key => staked.reduce((total, line) => total + (line.ticket[key] || 0), 0);
   const funded = staked.some(line => isNum(line.ticket.contracts));
   const head = isNum(lines.bet) ? FILL_HEAD : SIDE_HEAD;
+  const digits = bookDigits(lines.lines, market.summary);
   return <>
     <Label market={market} lines={lines} />
     <table className="analyst-drivers__table analyst-lines__table analyst-lines__setup" aria-label={`${market.market} Kalshi lines`}>
@@ -150,7 +164,7 @@ function LineTable({ market, lines }) {
       <tbody>{withSpot(visible, market.summary, 7, line => {
         const book = yes ? line.yes : line.no;
         return <tr key={line.ticker} className={line.ticket ? 'analyst-lines__ticket' : undefined}>
-          <LineCell line={line} />
+          <LineCell line={line} digits={digits} />
           <td>{fromPrice(line, market.summary.centre)}</td>
           <td className={book?.illiquid ? 'analyst-lines__side is-thin' : undefined}>{isNum(lines.bet) && book?.fill && isNum(book.ask) ? fillCents(book.ask) : cents(book?.ask)}</td>
           <td>{isNum(book?.depth) ? whole(book.depth) : 'N/A'}</td>
@@ -158,7 +172,7 @@ function LineTable({ market, lines }) {
           <td>{line.ticket && isNum(line.ticket.contracts) ? contracts(line.ticket.contracts) : '—'}</td>
           <td>{line.ticket && isNum(line.ticket.win) ? whole(line.ticket.win) : '—'}</td>
         </tr>;
-      })}
+      }, digits)}
       {staked.length > 0 && <tr className="analyst-lines__total">
         <td>Ticket</td><td />
         <td>{sum('pct') > 0 ? `${Math.round((staked.reduce((total, line) => total + (line.ticket.ask ?? 0) * line.ticket.pct, 0) / sum('pct')) * 100)}¢ avg` : ''}</td><td />
@@ -181,6 +195,7 @@ function LadderTable({ market, lines }) {
   const nearest = new Set([...fillable].sort((a, b) => Math.abs(a.kalshiOdds - 0.5) - Math.abs(b.kalshiOdds - 0.5))
     .slice(0, LADDER_LINES));
   const visible = listed.filter(line => (fillable.has(line) ? showAll || nearest.has(line) : showIlliquid));
+  const digits = bookDigits(lines.lines, market.summary);
   return <>
     <Label market={market} lines={lines} />
     {visible.length > 0 && <table className="analyst-drivers__table analyst-lines__table" aria-label={`${market.market} Kalshi lines`}>
@@ -188,11 +203,11 @@ function LadderTable({ market, lines }) {
         <th title={isNum(lines.bet) ? FILL_HEAD : SIDE_HEAD}>No</th>
         <th title="Kalshi odds that the line pays Yes">Yes odds</th></tr></thead>
       <tbody>{withSpot(visible, market.summary, 5, line => <tr key={line.ticker} className={fillable.has(line) ? undefined : 'analyst-lines__illiquid'}>
-        <LineCell line={line} />
+        <LineCell line={line} digits={digits} />
         <td>{sigma(line.sigmas)}</td>
         <SideCell book={line.yes} bet={lines.bet} /><SideCell book={line.no} bet={lines.bet} />
         <td>{pct(line.kalshiOdds)}</td>
-      </tr>)}</tbody>
+      </tr>, digits)}</tbody>
     </table>}
     {!showAll && fillable.size > nearest.size && <button type="button" className="analyst-lines__more" onClick={() => setShowAll(true)}>
       Show all {fillable.size} fillable lines</button>}
@@ -201,12 +216,13 @@ function LadderTable({ market, lines }) {
 }
 
 function HeldTable({ market }) {
+  const digits = bookDigits(market.held, null);
   return <table className="analyst-drivers__table analyst-lines__table" aria-label={`${market.market} held lines`}>
     <thead><tr><th>Held line</th><th>Held</th><th>Cost</th><th>Bid</th><th title="Kalshi odds that the held side pays">Odds</th><th>State</th></tr></thead>
     <tbody>{market.held.map(line => {
       const state = STATE[line.state] || STATE.HOLD;
       return <tr key={line.ticker} className={`analyst-lines__tone-${line.tone || 'none'}`}>
-        <LineCell line={line} title={line.ticker} />
+        <LineCell line={line} title={line.ticker} digits={digits} />
         <td>{line.side === 'YES' ? 'Yes' : 'No'} {contracts(line.contracts)}</td>
         <td>{dollars(line.cost)}</td><td>{cents(line.bid)}</td><td>{pct(line.kalshiOdds)}</td>
         <td><Chip className={state[1]}>{state[0]}</Chip>{line.why && <span className="analyst-lines__why">{line.why}</span>}</td>
@@ -215,21 +231,11 @@ function HeldTable({ market }) {
   </table>;
 }
 
-// One row per market: the order-book arrow and the settlement-curve arrow open independently, both closed until clicked.
-// Row icons in place of the triangles: an open book for the order book, a miniature bell for the settlement curve.
-const BookIcon = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
-  <path d="M8 4.2C6.6 3.1 4.6 2.7 2 2.8v9.4c2.6-.1 4.6.3 6 1.4 1.4-1.1 3.4-1.5 6-1.4V2.8c-2.6-.1-4.6.3-6 1.4z" fill="none"
-    stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-  <path d="M8 4.2v9.4" stroke="currentColor" strokeWidth="1.3" /></svg>;
-const CurveIcon = () => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
-  <path d="M1.5 13.5h13" stroke="currentColor" strokeWidth="1.1" opacity=".55" />
-  <path d="M1 13c2.4 0 3.2-1.6 4.2-4.6S6.9 3.6 8 3.6s1.8 1.8 2.8 4.8S12.6 13 15 13z" fill="currentColor" opacity=".18" />
-  <path d="M1 13c2.4 0 3.2-1.6 4.2-4.6S6.9 3.6 8 3.6s1.8 1.8 2.8 4.8S12.6 13 15 13" fill="none" stroke="currentColor"
-    strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-
-function Toggle({ open, onClick, label, icon, off, className }) {
-  return <button type="button" className={`analyst-lines__toggle analyst-lines__icon ${className}${open ? ' is-active' : ''}${off ? ' is-off' : ''}`}
-    aria-expanded={off ? undefined : open} aria-label={label} title={label} disabled={off} onClick={onClick}>{icon}</button>;
+// One row per market: the order book and the settlement curve open independently, both closed until clicked. Their
+// buttons read as one black-and-white switch, Book | Curve, the open half filled black (2026-11-17).
+function Toggle({ open, onClick, label, word, off, className }) {
+  return <button type="button" className={`analyst-lines__toggle analyst-lines__switch ${className}${open ? ' is-active' : ''}${off ? ' is-off' : ''}`}
+    aria-expanded={off ? undefined : open} aria-label={label} title={label} disabled={off} onClick={onClick}>{word}</button>;
 }
 
 // A market's two panels, its order book and its settlement curve, open independently and start closed: nothing shows
@@ -243,8 +249,8 @@ export function useMarketPanels(market) {
 
 export function MarketToggles({ market, panels, className = '' }) {
   return <span className={`analyst-lines__toggles ${className}`.trim()}>
-    <Toggle className="is-book" open={panels.book} onClick={panels.toggleBook} label={`${market.market} order book`} icon={<BookIcon />} />
-    <Toggle className="is-curve" open={panels.curveOpen} onClick={panels.toggleCurve} off={!panels.curve} icon={<CurveIcon />}
+    <Toggle className="is-book" open={panels.book} onClick={panels.toggleBook} label={`${market.market} order book`} word="Book" />
+    <Toggle className="is-curve" open={panels.curveOpen} onClick={panels.toggleCurve} off={!panels.curve} word="Curve"
       label={panels.curve ? `${market.market} settlement curve` : `${market.market}: too few quoted lines for a curve`} />
   </span>;
 }

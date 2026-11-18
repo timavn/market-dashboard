@@ -454,12 +454,13 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 /* Spot, between the strikes it sits between. */
 /* A thin blue rule through the middle of a row just tall enough for its tag, so it never covers the lines around it.
    The tag sits in the Line column with that column's alignment and padding, so its number lines up with the strikes. */
-.analyst-panel-v2 .analyst-prediction-report table.analyst-lines__table tr.analyst-lines__spot > td { padding: 0 6px; line-height: 18px;
+.analyst-panel-v2 .analyst-prediction-report table.analyst-lines__table tr.analyst-lines__spot > td { padding: 0 6px; line-height: 12px;
   border-left: 0; border-right: 0; background: #fff
     linear-gradient(to bottom, transparent calc(50% - 1px), var(--portfolio-review-blue, #2563eb) calc(50% - 1px),
       var(--portfolio-review-blue, #2563eb) calc(50% + 1px), transparent calc(50% + 1px)); }
 .analyst-lines__spot-slot { display: block; white-space: nowrap; }
-.analyst-lines__spot-tag { display: inline-block; margin: 0 -6px; padding: 0 6px; background: var(--portfolio-review-blue, #2563eb); color: #fff; }
+/* The Spot tag reads two-thirds the table's size (2026-11-17): padding and row height scaled by 2/3, text one pixel above that. */
+.analyst-lines__spot-tag { display: inline-block; margin: 0 -4px; padding: 0 4px; font-size: calc(.67em + 1px); background: var(--portfolio-review-blue, #2563eb); color: #fff; }
 /* A setup's order book: nothing wraps, the ticket's lines are tinted and a Ticket row totals them. */
 .analyst-panel-v2 .analyst-prediction-report table.analyst-lines__setup { table-layout: fixed; }
 .analyst-panel-v2 .analyst-prediction-report table.analyst-lines__setup :is(th, td) { white-space: nowrap; }
@@ -491,26 +492,23 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-lines__chip.is-flash { animation: analyst-lines-flash 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .analyst-lines__chip.is-flash { animation: none; outline: 2px solid currentColor; outline-offset: 1px; } }
 
-/* Book and curve buttons. On a setup board they sit stacked in the market cell, left of the name; a market the boards
-   don't list keeps its own row in the lines table, buttons then name. */
-.analyst-lines__toggles { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+/* Book and curve buttons: one black-and-white switch, Book | Curve, the open half filled black (2026-11-17). On a setup
+   board it sits in the market cell; a market the boards don't list keeps its own row in the lines table, switch then name. */
+.analyst-lines__toggles { display: inline-flex; align-items: stretch; flex: none; border: 1px solid #111; border-radius: 3px; overflow: hidden; }
 .analyst-lines__head { display: inline-flex; align-items: center; gap: 8px; min-height: 22px; }
 .analyst-lines__name { line-height: 22px; font-weight: 600; color: var(--analyst-ink, #172033); }
-.analyst-lines__icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border-radius: 4px;
-  border: 1px solid #93c5fd; background: #eff6ff; color: var(--portfolio-review-blue, #2563eb); }
-.analyst-lines__icon:hover { background: #dbeafe; }
-.analyst-lines__icon.is-active { background: var(--portfolio-review-blue, #2563eb); border-color: var(--portfolio-review-blue, #2563eb); color: #fff; }
-.analyst-lines__icon.is-off { opacity: .45; background: #fff; border-color: var(--analyst-border, #dbe1e8); color: var(--dashboard-muted-text, #667085); }
+.analyst-lines__toggle.analyst-lines__switch { padding: 1px 7px; border-radius: 0; background: #fff; color: #111; font-size: 11px; font-weight: 400; line-height: 15px; }
+.analyst-lines__toggle.analyst-lines__switch + .analyst-lines__switch { border-left: 1px solid #111; }
+.analyst-lines__toggle.analyst-lines__switch:hover:not(:disabled) { background: #f1f1f1; }
+.analyst-lines__toggle.analyst-lines__switch.is-active { background: #111; color: #fff; }
+.analyst-lines__toggle.analyst-lines__switch.is-off { color: #a3a3a3; background: #fff; }
+.analyst-lines__toggle.analyst-lines__switch:focus-visible { outline: 2px solid #111; outline-offset: -3px; }
 .analyst-board-market__body { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.analyst-board-market .analyst-lines__toggles { flex-direction: column; gap: 3px; }
-.analyst-board-market .analyst-lines__icon { width: 18px; height: 18px; }
-.analyst-board-market .analyst-lines__icon svg { width: 12px; height: 12px; }
 .analyst-board-market__body { gap: 5px; }
 .analyst-board-market__name { min-width: 0; }
-/* On a Structure board the buttons sit side by side under the name, all centered. */
+/* On a Structure board the switch sits under the name, all centered. */
 .analyst-prediction-report .is-range-board.has-structure .analyst-board-market__body { flex-direction: column; justify-content: center; gap: 4px; }
 .analyst-prediction-report .is-range-board.has-structure .analyst-board-market__name { order: -1; text-align: center; }
-.analyst-prediction-report .is-range-board.has-structure .analyst-board-market .analyst-lines__toggles { flex-direction: row; gap: 4px; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-table-frame td.analyst-board-market.is-shade-short { background: #fde8e8; }
 .analyst-panel-v2 .analyst-prediction-report .analyst-table-frame td.analyst-board-market.is-shade-long { background: #e3f5ec; }
 /* The market column widens for the buttons; boards with Structure and Z set every table's widths above. */

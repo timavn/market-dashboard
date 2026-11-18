@@ -113,6 +113,11 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 MESSAGE_LEDGER_ATTACHMENT_ID = "__MESSAGE__"
 TEXTRACT_LEDGER_ATTACHMENT_ID = "__TEXTRACT_CONTENT__"
 MATERIALIZED_SNAPSHOT_TYPES = {"real-time-alert", "etf-pro", "top-3-things", "inflation-nowcast", "hedgai-signals", "signal-strength", "signal-strength-shorts"}
+# Products whose different emails share one daily snapshot. Investing Ideas
+# sends a position-change alert and, on Mondays, the newsletter that holds the
+# whole roster. The day's snapshot keeps the latest email, whatever order the
+# emails are processed in.
+LATEST_EDITION_SNAPSHOT_TYPES = frozenset({"investing-ideas"})
 RESEARCH_EVENT_SNAPSHOT_TYPES = set(product_ids())
 MATERIALIZED_DATA_VERSION = "gmail-materialized-v12-hedgai-signals"
 MARKET_STRUCTURE_ASSET_PREFIX = "hedgeye-email/assets/market-structure/"
@@ -2547,12 +2552,60 @@ def _merge_materialized_snapshot(
     return merged
 
 
+def _edition_received_at(snapshot: Dict[str, Any]) -> Optional[datetime]:
+    """Gmail receipt time of the email a daily snapshot was parsed from."""
+    try:
+        received_at = datetime.fromisoformat(
+            str(snapshot.get("scrapedAt") or "").replace("Z", "+00:00")
+        )
+    except ValueError:
+        return None
+    if received_at.tzinfo is None:
+        received_at = received_at.replace(tzinfo=timezone.utc)
+    return received_at
+
+
+def _stored_edition_is_later(snapshot: Dict[str, Any], db: Any) -> bool:
+    """True when the day's stored snapshot came from a later email than this one.
+
+    An operator replay, or an email delivered out of order, would otherwise
+    replace the day's snapshot with an earlier email: a replayed Monday
+    position-change alert would erase the roster the newsletter published
+    after it. The earlier email's events are already in the immutable ledgers;
+    only this daily projection keeps the later edition. The same email
+    replayed (a corrected parse) still refreshes its own snapshot.
+    """
+    if snapshot.get("snapshotType") not in LATEST_EDITION_SNAPSHOT_TYPES:
+        return False
+    received_at = _edition_received_at(snapshot)
+    if received_at is None:
+        return False
+    stored = db.Table("HedgeyeDailySnapshot").get_item(
+        Key={"date": snapshot["date"], "snapshotType": snapshot["snapshotType"]},
+        ConsistentRead=True,
+    ).get("Item")
+    if not stored:
+        return False
+    stored_received_at = _edition_received_at(stored)
+    if stored_received_at is None:
+        return False
+    return (
+        stored_received_at,
+        str(stored.get("gmailMessageId") or ""),
+    ) > (
+        received_at,
+        str(snapshot.get("gmailMessageId") or ""),
+    )
+
+
 def materialize_email_snapshot(
     snapshot: Dict[str, Any], db: Any
 ) -> Tuple[Dict[str, Any], bool]:
     """Idempotently merge versioned email products into daily snapshots."""
     snapshot = validate_research_ranges(snapshot)
     if snapshot.get("snapshotType") not in MATERIALIZED_SNAPSHOT_TYPES:
+        if _stored_edition_is_later(snapshot, db):
+            return snapshot, False
         save_snapshot_to_dynamodb(snapshot, db)
         return snapshot, True
 
