@@ -1200,9 +1200,21 @@ EVENT_SCHEDULE_SEGMENT_RE = re.compile(
 )
 
 
-def link_only_notice_reason(subject: str) -> Optional[str]:
-    """Name a Hedgeye email whose body only links to research hosted elsewhere.
+# Account mail about a subscription: "Your Signal Strength Stocks subscription
+# renews on December 18, 2026", "Your subscription has been updated", "Your
+# trial has been activated", "Quick Start Guide for your Market Situation
+# Report Subscription".
+ACCOUNT_NOTICE_RE = re.compile(
+    r"(?:your (?:[^|]{1,80} )?subscriptions? (?:renews\b|(?:has|have) been updated\b)"
+    r"|your trial has been activated\b"
+    r"|quick start guide for your [^|]{1,80} subscription\b)"
+)
 
+
+def link_only_notice_reason(subject: str) -> Optional[str]:
+    """Name a Hedgeye email that carries no research of its own.
+
+    Its body only links to research hosted elsewhere, or it is account mail.
     These carry no parseable research, so they are ignored from metadata
     instead of being filed as unsupported publications.
     """
@@ -1225,6 +1237,10 @@ def link_only_notice_reason(subject: str) -> Optional[str]:
     # download link, with no positions or levels in the body.
     if normalized.startswith("l1 watch"):
         return "chart-book-link"
+    # A renewal reminder names the product it bills for, so a product rule
+    # would claim it and the parser would fail on it until it was quarantined.
+    if ACCOUNT_NOTICE_RE.match(normalized):
+        return "account-notice"
     # The rules below read looser wording, so they never take an email from a
     # registered product: "CALL REPLAY | Q4 2026 MACRO THEMES MID-QUARTER
     # UPDATE" stays a Global Quads source and "MARKET SITUATION REPORT: FLASH
@@ -3599,6 +3615,24 @@ def process_message(
             "stored": [],
             "skipped": [],
         }
+        notice_reason = link_only_notice_reason(str(representative.get("subject") or ""))
+        if notice_reason:
+            # An email stored before its notice rule existed has no research to
+            # replay. Record the same terminal decision a new copy would get,
+            # so a quarantined notice leaves the queue instead of failing the
+            # replay and staying quarantined.
+            mark_message_ignored(
+                table,
+                message_id=message_id,
+                headers={
+                    "subject": representative.get("subject", ""),
+                    "from": representative.get("sender", ""),
+                },
+                reason=notice_reason,
+            )
+            result["ignored"] = True
+            result["skipped"].append({"filename": "", "detail": notice_reason})
+            return result
         for item in attachment_items:
             require_work_budget()
             filename = str(item.get("filename") or "")

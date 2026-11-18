@@ -5514,6 +5514,11 @@ class HermesGmailIngestorTests(unittest.TestCase):
                 "The Midterms Are Finally Over → Our Quick Take At The Terrain Ahead | Wednesday at 11AM ET",
                 "event-notice",
             ),
+            (
+                "gmail-renewal-reminder",
+                "Your Signal Strength Stocks subscription renews on December 18, 2026",
+                "account-notice",
+            ),
         ]:
             with self.subTest(subject=subject):
                 table = FakeLedgerTable()
@@ -5543,6 +5548,171 @@ class HermesGmailIngestorTests(unittest.TestCase):
                 self.assertEqual(sentinel["status"], "MESSAGE_IGNORED")
                 self.assertEqual(sentinel["ignoredReason"], reason)
                 self.assertFalse(sentinel["bodyFetched"])
+
+    RENEWAL_SUBJECT = "Your Signal Strength Stocks subscription renews on December 18, 2026"
+    RENEWAL_LEDGER_ROW = {
+        "messageId": "1a1ee52a3bf0f168",
+        "attachmentId": "message-body-html-1",
+        "status": "ERROR",
+        "filename": "message-body.html",
+        "mimeType": "text/html",
+        "reportType": "signal-strength",
+        "subject": RENEWAL_SUBJECT,
+        "sender": "Hedgeye <info@hedgeye.com>",
+        "s3Bucket": "test-bucket",
+        "s3Key": "hedgeye-email/messages/2026-11-18/signal-strength/1a1ee52a3bf0f168-message-body-html-1-message-body.html",
+        "contentSha256": "e" * 64,
+        "receivedAt": "2026-11-18T11:02:34+00:00",
+        "error": "Research parser returned no signal-strength snapshot",
+        "errorCode": "GMAIL_RESEARCH_MATERIALIZATION_ERROR",
+        "parseError": "Research parser returned no signal-strength snapshot",
+        "retryable": True,
+        "materializationStatus": "ERROR",
+    }
+
+    def test_account_mail_is_a_notice_even_when_it_names_a_product(self):
+        for subject in [
+            self.RENEWAL_SUBJECT,
+            "Your ETF Pro subscription renews on January 3, 2027",
+            "Your subscription has been updated",
+            "Your subscriptions have been updated",
+            "Your trial has been activated",
+            "Quick Start Guide for your Market Situation Report Subscription",
+            "Quick Start Guide for your Elite Macro Subscription",
+        ]:
+            self.assertEqual(ingestor.link_only_notice_reason(subject), "account-notice", subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown", subject)
+        # The renewal reminder would otherwise be typed by the product it names.
+        self.assertEqual(
+            ingestor.registered_report_type("message-body.html", self.RENEWAL_SUBJECT),
+            "signal-strength",
+        )
+        for subject, report_type in [
+            ("Signal Strength Stocks: 51 Stocks (0 added, 3 removed)", "signal-strength"),
+            ("Early Look: Your Subscription To Volatility", "early-look"),
+            ("Your New “Macro Week Summary Notes” Starts Today", "unknown"),
+            ("Welcome To Macro Pro", "unknown"),
+        ]:
+            self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), report_type, subject)
+
+    def test_operator_replay_of_a_stored_notice_records_the_ignore_decision(self):
+        row = dict(self.RENEWAL_LEDGER_ROW)
+        table = FakeLedgerTable([row])
+
+        with patch.object(ingestor, "backfill_html_snapshot") as backfill, patch.object(
+            ingestor, "get_message_metadata"
+        ) as get_metadata, patch.object(ingestor, "get_message") as get_message, patch.object(
+            ingestor, "s3"
+        ) as s3_client:
+            result = ingestor.process_message("token", "me", row["messageId"], table, allow_version_backfill=True)
+
+        # Nothing is fetched, read or parsed for a notice.
+        backfill.assert_not_called()
+        get_metadata.assert_not_called()
+        get_message.assert_not_called()
+        s3_client.get_object.assert_not_called()
+        self.assertTrue(result["ignored"])
+        self.assertEqual(result["stored"], [])
+        self.assertEqual(result["skipped"], [{"filename": "", "detail": "account-notice"}])
+        sentinel = table.items[(row["messageId"], ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]
+        self.assertEqual(sentinel["status"], "MESSAGE_IGNORED")
+        self.assertEqual(sentinel["ignoredReason"], "account-notice")
+        self.assertEqual(sentinel["subject"], self.RENEWAL_SUBJECT)
+        self.assertTrue(ingestor.message_is_fully_processed(table.items.values()))
+        # The stored artifact row is left as the audit of what happened.
+        self.assertEqual(table.items[(row["messageId"], row["attachmentId"])]["status"], "ERROR")
+
+    def test_operator_replay_of_a_quarantined_notice_clears_the_quarantine(self):
+        row = dict(self.RENEWAL_LEDGER_ROW)
+        state_key = (ingestor.RUNTIME_STATE_MESSAGE_ID, ingestor.HISTORY_CURSOR_ATTACHMENT_ID)
+        ledger = FakeLedgerTable(
+            [
+                {
+                    "messageId": ingestor.RUNTIME_STATE_MESSAGE_ID,
+                    "attachmentId": ingestor.HISTORY_CURSOR_ATTACHMENT_ID,
+                    "status": "WARNING",
+                    "historyId": "125",
+                    "quarantinedCount": 1,
+                    "quarantinedMessages": [
+                        {
+                            "messageId": row["messageId"],
+                            "errorCode": "GMAIL_RESEARCH_MATERIALIZATION_ERROR",
+                            "quarantinedAt": "2026-11-18T11:42:50+00:00",
+                            "attemptCount": 3,
+                        }
+                    ],
+                    "createdAt": "2026-11-18T11:00:00+00:00",
+                    "updatedAt": "2026-11-18T11:42:50+00:00",
+                },
+                row,
+            ]
+        )
+        database = FakeRuntimeDynamoDb(ledger)
+        secret = {
+            "client_id": "client",
+            "client_secret": "secret",
+            "refresh_token": "refresh",
+            "user_id": "me",
+            "_secret_version": "version-replay",
+        }
+
+        with patch.object(ingestor, "dynamodb", database), patch.object(
+            ingestor, "cloudwatch", MagicMock()
+        ), patch.object(
+            ingestor, "load_oauth_secret", return_value=secret
+        ), patch.object(
+            ingestor, "refresh_access_token", return_value="access"
+        ), patch.object(
+            ingestor, "get_profile_history_id", return_value="125"
+        ), patch.object(
+            ingestor, "resolve_label_id", return_value="Label_1"
+        ), patch.object(
+            ingestor, "list_history_message_ids", return_value=[]
+        ), patch.object(
+            ingestor, "list_message_ids"
+        ) as list_messages, patch.object(
+            ingestor, "get_message_metadata"
+        ) as get_metadata, patch.object(
+            ingestor, "get_message"
+        ) as get_message:
+            response = ingestor.lambda_handler(
+                {
+                    "source": ingestor.OPERATOR_REPLAY_SOURCE,
+                    "messageIds": [row["messageId"]],
+                    "forceBackfill": True,
+                    "materializationVersion": ingestor.MATERIALIZED_DATA_VERSION,
+                },
+                None,
+            )
+
+        body = json.loads(response["body"])
+        self.assertEqual(body["status"], "SUCCESS")
+        self.assertIsNone(body.get("errorCode"))
+        final_state = ledger.items[state_key]
+        self.assertEqual(final_state["status"], "READY")
+        self.assertEqual(final_state["quarantinedCount"], 0)
+        self.assertEqual(final_state["quarantinedMessages"], [])
+        self.assertEqual(database.heartbeat.writes[-1]["status"], "success")
+        self.assertNotIn("errorCode", database.heartbeat.writes[-1])
+        self.assertEqual(
+            ledger.items[(row["messageId"], ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]["ignoredReason"],
+            "account-notice",
+        )
+        # The replay decides from the stored subject alone.
+        get_metadata.assert_not_called()
+        get_message.assert_not_called()
+        list_messages.assert_not_called()
+
+    def test_operator_replay_still_fails_when_a_stored_research_email_has_nothing_to_replay(self):
+        row = dict(self.RENEWAL_LEDGER_ROW, subject="Signal Strength Stocks: 51 Stocks (0 added, 3 removed)")
+        table = FakeLedgerTable([row])
+
+        with patch.object(ingestor, "backfill_html_snapshot", return_value=False):
+            with self.assertRaises(ingestor.GmailOperatorReplayError):
+                ingestor.process_message("token", "me", row["messageId"], table, allow_version_backfill=True)
+
+        self.assertNotIn((row["messageId"], ingestor.MESSAGE_LEDGER_ATTACHMENT_ID), table.items)
 
     def test_single_investing_ideas_add_takes_its_side_from_the_subject(self):
         subject = "Add Airbnb Inc. (ABNB) to LONG Side"
