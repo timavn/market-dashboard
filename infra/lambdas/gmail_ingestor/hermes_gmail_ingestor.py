@@ -45,6 +45,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from parse_hedgeye_email_html import (
+    extract_byline_names,
     is_position_change_subject,
     parse_html_snapshot,
     save_snapshot_to_dynamodb,
@@ -55,6 +56,7 @@ from hedgai_signals import is_publication_subject as is_hedgai_publication_subje
 from research_intelligence import (
     PARSER_VERSION as SECURITY_INTELLIGENCE_PARSER_VERSION,
     UNSUPPORTED_PRODUCT_KEY,
+    byline_rules,
     finalize_snapshot_intelligence,
     persist_snapshot_failure,
     persist_snapshot_intelligence,
@@ -295,6 +297,7 @@ class ImmutableArtifactDriftError(RuntimeError):
 
 
 REPORT_RULES = report_rules()
+BYLINE_RULES = byline_rules()
 
 
 def utc_now() -> datetime:
@@ -1308,6 +1311,49 @@ def registered_report_type(filename: str, subject: str) -> str:
         if any(needle in haystack for needle in needles):
             return report_type
     return "unknown"
+
+
+def byline_report_type(html_body: str) -> str:
+    """Name the product whose author is the email's only byline, else "unknown".
+
+    Some research has no fixed subject wording (a macro data note is titled
+    "NFP | Rearview Report?" one month and "ISM | That Which Cannot Continue"
+    the next), so the author named in the body is the only stable mark. An
+    email several analysts sign, such as a sector call replay, is not claimed.
+    """
+    authors = list(dict.fromkeys(
+        re.sub(r"\s+", " ", name).strip().casefold()
+        for name in extract_byline_names(html_body)
+    ))
+    if len(authors) != 1:
+        return "unknown"
+    for report_type, bylines in BYLINE_RULES:
+        if authors[0] in bylines:
+            return report_type
+    return "unknown"
+
+
+def body_report_type(attachment: Dict[str, Any], subject: str) -> str:
+    """Classify a message body whose subject names no product.
+
+    Only the email's own HTML body is read. A notice stays a notice and an
+    Investing Ideas position change stays with the parser that reads it from
+    the subject.
+    """
+    if (
+        not str(attachment.get("attachmentId") or "").startswith("message-body-")
+        or str(attachment.get("mimeType") or "").lower() != "text/html"
+        or not attachment.get("inlineData")
+        or link_only_notice_reason(subject)
+        or is_position_change_subject(subject)
+    ):
+        return "unknown"
+    try:
+        html_body = decode_base64url(attachment["inlineData"]).decode("utf-8", errors="replace")
+    except (ValueError, TypeError):
+        # The upload below decodes the same data and records the failure.
+        return "unknown"
+    return byline_report_type(html_body)
 
 
 def build_s3_key(
@@ -3283,6 +3329,8 @@ def upload_attachment(
     subject = headers.get("subject", "")
     report_type = infer_report_type(filename, subject)
     mime_type = attachment["mimeType"]
+    if report_type == "unknown":
+        report_type = body_report_type(attachment, subject)
 
     if not claim_attachment(
         table,

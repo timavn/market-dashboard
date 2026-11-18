@@ -3235,6 +3235,249 @@ def _inflation_legacy_scenarios(forecast: Dict[str, Any]) -> List[Dict[str, Any]
     ]
 
 
+BYLINE_TABLE_PATTERN = re.compile(
+    r'<table\b[^>]*\bclass="[^"]*\bbyline\b[^"]*"[^>]*>(.*?)</table>',
+    re.IGNORECASE | re.DOTALL,
+)
+BYLINE_NAME_PATTERN = re.compile(
+    r'<div\b[^>]*\bclass="[^"]*\bfull-name\b[^"]*"[^>]*>(.*?)</div>',
+    re.IGNORECASE | re.DOTALL,
+)
+PUBLICATION_STAMP_PATTERN = re.compile(
+    r"\d{2}/\d{2}/\d{4}\s+\d{1,2}:\d{2}\s+[AP]M(?:\s+[A-Z]{2,4})?"
+)
+PUBLICATION_FOOTER_PATTERN = re.compile(
+    r"\n\s*(?:Please visit\b|©|If you believe this has been sent)",
+    re.IGNORECASE,
+)
+PUBLICATION_IMAGE_LABEL_PATTERN = re.compile(r"\(\s*view larger image\s*\)", re.IGNORECASE)
+PUBLICATION_LINK_LABEL_PATTERN = re.compile(
+    r"(?:\(\s*view larger image\s*\)|view link)",
+    re.IGNORECASE,
+)
+
+
+def _image_urls_without_tracking(html_body: str) -> List[str]:
+    """Image links with their query strings removed.
+
+    Hedgeye appends the subscriber's address to every image link
+    ("?src=email&email=..."); the image itself needs none of it.
+    """
+    cleaned: List[str] = []
+    for url in _extract_image_urls(html_body):
+        try:
+            parts = urllib.parse.urlsplit(url.strip())
+        except ValueError:
+            continue
+        if parts.scheme not in {"http", "https"} or not parts.netloc:
+            continue
+        bare = urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+        if bare not in cleaned:
+            cleaned.append(bare)
+    return cleaned
+
+
+def extract_byline_names(html_body: str) -> List[str]:
+    """Authors named in the email's byline block, in the order shown."""
+    names: List[str] = []
+    for table_html in BYLINE_TABLE_PATTERN.findall(html_body or ""):
+        for block in BYLINE_NAME_PATTERN.findall(table_html):
+            name = re.sub(r"\s+", " ", _strip_tags(block)).strip()
+            if name:
+                names.append(name)
+    return names
+
+
+def _publication_body_text(
+    text: str,
+    *,
+    headline: Optional[str],
+    bylines: List[str],
+) -> str:
+    """The publication's own prose: after its headline and byline, before the footer.
+
+    The lines above the date stamp name the subscriber the email was sent to,
+    so they are never part of the stored body.
+    """
+    stamp = PUBLICATION_STAMP_PATTERN.search(text)
+    body = text[stamp.end():] if stamp else text
+    footer = PUBLICATION_FOOTER_PATTERN.search(body)
+    if footer:
+        body = body[: footer.start()]
+
+    def fold(value: Optional[str]) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+
+    authors = {fold(name) for name in bylines}
+    kept: List[str] = []
+    headline_pending = bool(fold(headline))
+    after_author = False
+    for raw_line in body.splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            continue
+        folded = line.casefold()
+        if headline_pending and not kept:
+            headline_pending = False
+            if folded == fold(headline):
+                continue
+        if not kept and folded in authors:
+            after_author = True
+            continue
+        if not kept and after_author and line.startswith("@"):
+            after_author = False
+            continue
+        after_author = False
+        if PUBLICATION_LINK_LABEL_PATTERN.fullmatch(line):
+            continue
+        kept.append(line)
+    return "\n".join(kept)[:40_000]
+
+
+def _extract_outlook_themes(html_body: str) -> List[Dict[str, str]]:
+    """Theme paragraphs of a Quarterly Investment Outlook email.
+
+    Each is a list item that opens with its bold title:
+    "<li><strong>Theme title: </strong>The paragraph that explains it.</li>".
+    """
+    themes: List[Dict[str, str]] = []
+    for item_html in re.findall(r"<li\b[^>]*>(.*?)</li>", html_body, re.IGNORECASE | re.DOTALL):
+        bold = re.search(r"<(strong|b)\b[^>]*>(.*?)</\1>", item_html, re.IGNORECASE | re.DOTALL)
+        if not bold:
+            continue
+        lead = re.sub(r"\s+", " ", _strip_tags(bold.group(2))).strip()
+        item_text = re.sub(r"\s+", " ", _strip_tags(item_html)).strip()
+        if len(lead) < 3 or not item_text.startswith(lead):
+            continue
+        title = lead.rstrip(": ").strip()
+        body = item_text[len(lead):].lstrip(": ").strip()
+        if not title or len(body) < 40:
+            continue
+        themes.append({"title": title, "text": body})
+    return themes
+
+
+TREND_TAIL_TICKER_PATTERN = re.compile(r"[A-Z]{1,6}(?:\.[A-Z])?")
+
+
+def _trend_tail_number(value: str) -> Optional[Decimal]:
+    match = re.search(r"\d[\d,]*(?:\.\d+)?", str(value or ""))
+    if not match:
+        return None
+    try:
+        return Decimal(match.group(0).replace(",", ""))
+    except InvalidOperation:
+        return None
+
+
+def _trend_tail_arrow(value: str) -> Optional[str]:
+    if "▲" in value:
+        return "up"
+    if "▼" in value:
+        return "down"
+    return None
+
+
+def _extract_trend_tail_levels(html_body: str) -> Dict[str, Any]:
+    """Read the Trend & Tail Levels table: one row per fund.
+
+    Columns are Ticker Description, Ticker, Closing Price, Trend Level and its
+    Current Status, Tail Level and its Current Status. Compared across five
+    consecutive 2026 editions, the arrow beside a status marks a status that
+    changed since the previous edition, and the arrow beside the close marks a
+    close above or below the previous edition's.
+    """
+    rows: List[Dict[str, Any]] = []
+    seen: set = set()
+    columns: Dict[str, int] = {}
+    close_date: Optional[str] = None
+    group: Optional[str] = None
+    for row_html in re.findall(r"<tr\b[^>]*>(.*?)</tr>", html_body, re.IGNORECASE | re.DOTALL):
+        headers = [
+            re.sub(r"\s+", " ", _strip_tags(cell)).strip()
+            for cell in re.findall(r"<th\b[^>]*>(.*?)</th>", row_html, re.IGNORECASE | re.DOTALL)
+        ]
+        if len(headers) >= 7:
+            folded = [re.sub(r"[^a-z]", "", header.casefold()) for header in headers]
+            found = {
+                "name": next((i for i, h in enumerate(folded) if h.startswith("tickerdescription")), None),
+                "ticker": next((i for i, h in enumerate(folded) if h == "ticker"), None),
+                "close": next((i for i, h in enumerate(folded) if h.startswith("clos")), None),
+                "trendLevel": next((i for i, h in enumerate(folded) if h.startswith("trendlevel")), None),
+                "tailLevel": next((i for i, h in enumerate(folded) if h.startswith("taillevel")), None),
+            }
+            if all(index is not None for index in found.values()):
+                columns = {key: int(index) for key, index in found.items()}
+                dated = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", headers[columns["close"]])
+                if dated:
+                    month, day, year = (int(part) for part in dated.groups())
+                    try:
+                        close_date = datetime(year, month, day).strftime("%Y-%m-%d")
+                    except ValueError:
+                        close_date = None
+            continue
+        if not columns:
+            continue
+        if len(headers) == 1 and headers[0]:
+            group = headers[0]
+            continue
+        cells = [
+            re.sub(r"\s+", " ", _strip_tags(cell)).strip()
+            for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", row_html, re.IGNORECASE | re.DOTALL)
+        ]
+        if len(cells) <= max(columns["trendLevel"], columns["tailLevel"]) + 1:
+            continue
+        ticker = cells[columns["ticker"]].upper()
+        close = _trend_tail_number(cells[columns["close"]])
+        trend_level = _trend_tail_number(cells[columns["trendLevel"]])
+        tail_level = _trend_tail_number(cells[columns["tailLevel"]])
+        if (
+            not TREND_TAIL_TICKER_PATTERN.fullmatch(ticker)
+            or ticker in seen
+            or close is None
+            or trend_level is None
+            or tail_level is None
+        ):
+            continue
+        row: Dict[str, Any] = {"ticker": ticker, "close": close, "trendLevel": trend_level, "tailLevel": tail_level}
+        name = cells[columns["name"]]
+        if name:
+            row["name"] = name
+        if group:
+            row["group"] = group
+        close_direction = _trend_tail_arrow(cells[columns["close"]])
+        if close_direction:
+            row["closeDirection"] = close_direction
+        complete = True
+        for prefix, level_key in (("trend", "trendLevel"), ("tail", "tailLevel")):
+            status_cell = cells[columns[level_key] + 1]
+            status = re.match(r"(above|below)\b", status_cell, re.IGNORECASE)
+            if not status:
+                complete = False
+                break
+            row[f"{prefix}Status"] = status.group(1).lower()
+            row[f"{prefix}StatusChanged"] = _trend_tail_arrow(status_cell) is not None
+        if not complete:
+            continue
+        seen.add(ticker)
+        rows.append(row)
+    return {"rows": rows, "closeDate": close_date}
+
+
+def _trend_tail_body_text(lead: str, rows: List[Dict[str, Any]], close_date: Optional[str]) -> str:
+    """One readable line per fund, in place of the table flattened cell by cell."""
+    lines = [lead] if lead else []
+    for row in rows:
+        label = f"{row['ticker']} ({row['name']})" if row.get("name") else row["ticker"]
+        lines.append(
+            f"{label}: close {row['close']}"
+            + (f" on {close_date}" if close_date else "")
+            + f"; {row['trendStatus']} its Trend level {row['trendLevel']}"
+            + f"; {row['tailStatus']} its Tail level {row['tailLevel']}"
+        )
+    return "\n".join(lines)[:40_000]
+
+
 def _base_snapshot(
     *,
     snapshot_type: str,
@@ -4133,6 +4376,79 @@ def parse_html_snapshot(
             "headline": headline,
             "alert": alert,
             "alerts": [alert],
+        }
+        return snapshot
+
+    if report_type == "trend-tail-levels":
+        table = _extract_trend_tail_levels(html_body)
+        rows = table["rows"]
+        if not rows:
+            # An edition without the table (August 2025 sent it as an image)
+            # has nothing to read; fail rather than store an empty record.
+            return None
+        snapshot = _base_snapshot(
+            snapshot_type="trend-tail-levels",
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        headline = snapshot["article"].get("headline") or subject
+        lead = _publication_body_text(text, headline=headline, bylines=[]).split("Ticker Description", 1)[0].strip()
+        snapshot["article"]["headline"] = headline
+        snapshot["article"]["imageUrls"] = _image_urls_without_tracking(html_body)
+        snapshot["article"]["bodyText"] = _trend_tail_body_text(lead, rows, table["closeDate"])
+        snapshot["itemCount"] = len(rows)
+        snapshot["data"] = {
+            "headline": headline,
+            "asOf": _extract_first(r"readings as of ([^.\n]+?)\.", text),
+            "previousAsOf": _extract_first(r"Previous signal data was as of ([^)\n]+?)\)", text),
+            "closeDate": table["closeDate"],
+            "rows": rows,
+        }
+        return snapshot
+
+    if report_type in {"quarterly-investment-outlook", "us-macro-notes"}:
+        snapshot = _base_snapshot(
+            snapshot_type=report_type,
+            report_type=report_type,
+            html_body=html_body,
+            text=text,
+            received_at=received_at,
+            s3_key=s3_key,
+            message_id=message_id,
+        )
+        headline = snapshot["article"].get("headline") or subject
+        bylines = extract_byline_names(html_body)
+        body = _publication_body_text(text, headline=headline, bylines=bylines)
+        if not body and not re.sub(r"\s+", "", str(headline or "")):
+            return None
+        snapshot["article"]["headline"] = headline
+        snapshot["article"]["imageUrls"] = _image_urls_without_tracking(html_body)
+        # The stored body is the publication's prose alone, without the lines
+        # that name the subscriber.
+        snapshot["article"]["bodyText"] = body or str(headline)
+        if report_type == "quarterly-investment-outlook":
+            themes = _extract_outlook_themes(html_body)
+            quarter = re.search(r"\b([1-4])Q\s*(20\d{2})\b", str(headline or ""))
+            snapshot["itemCount"] = len(themes)
+            snapshot["data"] = {
+                "headline": headline,
+                "quarter": f"{quarter.group(1)}Q {quarter.group(2)}" if quarter else None,
+                "edition": (
+                    "mid-quarter-update"
+                    if re.search(r"mid-quarter", str(headline or ""), re.IGNORECASE)
+                    else "quarterly-outlook"
+                ),
+                "themes": themes,
+            }
+            return snapshot
+        snapshot["data"] = {
+            "headline": headline,
+            "author": bylines[0] if bylines else None,
+            "chartCount": len(PUBLICATION_IMAGE_LABEL_PATTERN.findall(text)),
         }
         return snapshot
 
