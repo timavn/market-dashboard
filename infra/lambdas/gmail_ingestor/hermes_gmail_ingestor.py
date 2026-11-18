@@ -1190,6 +1190,16 @@ def is_market_structure_webcast_subject(subject: str) -> bool:
     )
 
 
+# A subject segment that ends by saying when a webcast airs: "Wednesday at
+# 11AM ET", "TODAY @ 12:00PM ET", "Wednesday, October 14 @ 10AM". The day and
+# the clock time must both be present and must close the segment.
+EVENT_SCHEDULE_SEGMENT_RE = re.compile(
+    r"\b(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|today|tomorrow)"
+    r"(?:,? [a-z]{3,9}\.? \d{1,2}(?:st|nd|rd|th)?(?:, \d{4})?)?"
+    r",? (?:at|@) ?\d{1,2}(?::\d{2})? ?[ap]m(?: e[sd]?t)?$"
+)
+
+
 def link_only_notice_reason(subject: str) -> Optional[str]:
     """Name a Hedgeye email whose body only links to research hosted elsewhere.
 
@@ -1215,6 +1225,32 @@ def link_only_notice_reason(subject: str) -> Optional[str]:
     # download link, with no positions or levels in the body.
     if normalized.startswith("l1 watch"):
         return "chart-book-link"
+    # The rules below read looser wording, so they never take an email from a
+    # registered product: "CALL REPLAY | Q4 2026 MACRO THEMES MID-QUARTER
+    # UPDATE" stays a Global Quads source and "MARKET SITUATION REPORT: FLASH
+    # EVENT TODAY @ 12:00PM ET | ..." stays a Market Situation Report.
+    if registered_report_type("", str(subject or "")) != "unknown" or is_position_change_subject(subject):
+        return None
+    # "Call Replay | Q4 2026 / 1H 2027 US Housing Update & Outlook" describes
+    # the call and links to its video and materials.
+    if re.match(r"call replay\s*\|", normalized):
+        return "event-notice"
+    # An invite names the webcast and when it airs, in either order:
+    # "The Midterms Are Finally Over → ... | Wednesday at 11AM ET",
+    # "FLASH EVENT TODAY @ 12:00PM ET | Tier1 Alpha: ...".
+    if any(
+        EVENT_SCHEDULE_SEGMENT_RE.search(segment.strip())
+        for segment in normalized.split("|")
+    ):
+        return "event-notice"
+    # "The Big Theme | AI Bubble | November 1, 2026 Update" and "The AI Bubble
+    # Tracker | November 1, 2026 Update" carry one welcome line and a link to
+    # the week's slide deck; the deck itself is never in the email.
+    if re.match(
+        r"(?:the big theme|the ai bubble tracker)\s*[|:].*\b20\d{2} update$",
+        normalized,
+    ):
+        return "slide-deck-link"
     return None
 
 
@@ -1234,6 +1270,14 @@ def infer_report_type(filename: str, subject: str) -> str:
     # metadata before Gmail's full MIME body is fetched.
     if link_only_notice_reason(subject):
         return "unknown"
+    return registered_report_type(filename, subject)
+
+
+def registered_report_type(filename: str, subject: str) -> str:
+    """Name the registered product a filename and subject belong to.
+
+    Notice rules are not applied here; "unknown" means no product claims them.
+    """
     # Real-Time Alerts can mention a refreshed SPX Risk Range in the subject.
     # Classify the alert before the broader Risk Range matcher so the RTA
     # parser persists the alert and its refreshed range together.

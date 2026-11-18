@@ -5429,6 +5429,121 @@ class HermesGmailIngestorTests(unittest.TestCase):
         ]:
             self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
 
+    def test_call_replays_and_dated_invites_are_event_notices(self):
+        for subject in [
+            # Filed as unknown between 27 Oct and 16 Nov 2026.
+            "Call Replay | Q4 2026 / 1H 2027 US Housing Update & Outlook",
+            "FLASH EVENT TODAY @ 12:00PM ET | Tier1 Alpha: From Hedge Unwind to Mechanical Deleveraging",
+            "The Midterms Are Finally Over → Our Quick Take At The Terrain Ahead | Wednesday at 11AM ET",
+            # Earlier invites that state the day and time the same way.
+            "EVENT TOMORROW | Wednesday, October 14 @ 10AM | MID-TERM MANIA: UPDATE ON THE MIDTERM ELECTION WITH NEIL HOWE and JT TAYLOR",
+            "Geopolitics Call Wednesday at 10AM ET | Spanning the Globe w/ JT Taylor & Col. McCausland",
+            "Geopolitical Event Thursday at 10AM ET | Spanning the Globe w/ JT Taylor & Col. Jeff McCausland",
+            "Call Tomorrow at 10AM ET | Will Trump's Sec. 301 Forced Labor Tariffs Survive Legal Challenge?",
+            "TODAY AT 10AM ET | Geopolitical Risk Update w/ JT Taylor, Fernando Valle & Col. Jeff McCausland",
+            "Hedgeye Policy Investing Themes - Thursday, July 9, 2026 at 12:30PM",
+        ]:
+            self.assertEqual(ingestor.link_only_notice_reason(subject), "event-notice", subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown", subject)
+
+    def test_weekly_theme_deck_links_are_link_only_notices(self):
+        for subject in [
+            "The Big Theme | AI Bubble | November 1, 2026 Update",
+            "The Big Theme | AI Bubble | November 15, 2026 Update",
+            "The AI Bubble Tracker | November 1, 2026 Update",
+            "The Big Theme: October 18, 2026 Update",
+        ]:
+            self.assertEqual(ingestor.link_only_notice_reason(subject), "slide-deck-link", subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown", subject)
+        # The launch note is not a dated weekly update.
+        self.assertIsNone(ingestor.link_only_notice_reason("The Big Theme, Q4 2026: The AI Bubble"))
+
+    def test_unregistered_research_is_not_a_link_only_notice(self):
+        # These carry levels, position changes or analysis in the email body,
+        # so no notice rule may hide them.
+        for subject in [
+            "Trend & Tail Levels | Monthly Dashboard",
+            "Hedgeye QIO | 4Q 2026 Mid-Quarter Update",
+            "Digital Assets Position Monitor",
+            "NFP | Rearview Report?",
+            "ISM | That Which Cannot Continue",
+            'WAGE ACCELERATION? | ECI RAISES "PROVE IT" BAR',
+            # A clock time without a day, or a day without a clock time, is
+            # not a closing day-and-time.
+            "CPI at 8:30AM ET | What To Watch",
+            "Retail Sales | What Changed Today",
+            "Chart Check | Friday at the Fed",
+        ]:
+            self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+
+    def test_notice_wording_never_takes_an_email_from_a_registered_product(self):
+        for subject, report_type in [
+            ("CALL REPLAY | Q4 2026 MACRO THEMES MID-QUARTER UPDATE", "global-quads"),
+            ("CALL TODAY @ 11AM | Q4 2026 MACRO THEMES PRESENTATION", "global-quads"),
+            (
+                "MARKET SITUATION REPORT: FLASH EVENT TODAY @ 12:00PM ET | "
+                "Tier1 Alpha: From Hedge Unwind to Mechanical Deleveraging",
+                "market-structure",
+            ),
+            ("Early Look: Fed Day | Wednesday at 2PM ET", "early-look"),
+        ]:
+            self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), report_type, subject)
+        self.assertIsNone(ingestor.link_only_notice_reason("Add Airbnb Inc. (ABNB) to LONG Side | Today at 9AM ET"))
+
+    def test_registered_report_type_names_the_product_before_notice_rules(self):
+        webcast = "MARKET SITUATION REPORT: VIDEO | Market Situation Report Webcast | August 10, 2026"
+        self.assertEqual(ingestor.registered_report_type("message-body.html", webcast), "market-structure")
+        self.assertEqual(ingestor.infer_report_type("message-body.html", webcast), "unknown")
+        self.assertEqual(
+            ingestor.registered_report_type("", "The Big Theme | AI Bubble | November 1, 2026 Update"),
+            "unknown",
+        )
+
+    def test_new_link_only_notices_are_ignored_from_metadata_without_fetching_body(self):
+        for message_id, subject, reason in [
+            ("gmail-big-theme", "The Big Theme | AI Bubble | November 15, 2026 Update", "slide-deck-link"),
+            ("gmail-call-replay", "Call Replay | Q4 2026 / 1H 2027 US Housing Update & Outlook", "event-notice"),
+            (
+                "gmail-flash-event",
+                "FLASH EVENT TODAY @ 12:00PM ET | Tier1 Alpha: From Hedge Unwind to Mechanical Deleveraging",
+                "event-notice",
+            ),
+            (
+                "gmail-day-ahead-invite",
+                "The Midterms Are Finally Over → Our Quick Take At The Terrain Ahead | Wednesday at 11AM ET",
+                "event-notice",
+            ),
+        ]:
+            with self.subTest(subject=subject):
+                table = FakeLedgerTable()
+                metadata = {
+                    "internalDate": "1794744170000",
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": subject},
+                            {"name": "From", "value": "Hedgeye <info@hedgeye.com>"},
+                            {"name": "Date", "value": "Sun, 15 Nov 2026 07:02:50 -0500"},
+                        ]
+                    },
+                }
+
+                with patch.object(
+                    ingestor, "get_message_metadata", return_value=metadata
+                ), patch.object(ingestor, "get_message") as get_message, patch.object(
+                    ingestor, "s3"
+                ) as s3_client:
+                    result = ingestor.process_message("token", "me", message_id, table)
+
+                get_message.assert_not_called()
+                s3_client.put_object.assert_not_called()
+                self.assertTrue(result["ignored"])
+                self.assertEqual(result["skipped"][0]["detail"], reason)
+                sentinel = table.items[(message_id, ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]
+                self.assertEqual(sentinel["status"], "MESSAGE_IGNORED")
+                self.assertEqual(sentinel["ignoredReason"], reason)
+                self.assertFalse(sentinel["bodyFetched"])
+
     def test_single_investing_ideas_add_takes_its_side_from_the_subject(self):
         subject = "Add Airbnb Inc. (ABNB) to LONG Side"
         html_body = """
