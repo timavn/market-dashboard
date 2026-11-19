@@ -1,7 +1,12 @@
 .portfolio-review-section { display: flex; flex-direction: column; align-items: center; }
 .portfolio-review-section > h2 { justify-content: center; text-align: center; }
 .portfolio-review-section > .portfolio-review-dateline { text-align: center; }
-.portfolio-review-section > :not(h2):not(.portfolio-review-dateline) { align-self: stretch; min-width: 0; text-align: center; }
+.portfolio-review-section > :not(h2):not(.portfolio-review-dateline):not(.analyst-report-prose) { align-self: stretch; min-width: 0; text-align: center; }
+/* Long-form prose reads left-aligned in a centered column about 80 characters wide; titles, dates and tables stay centered. */
+.portfolio-review-section .analyst-report-prose { box-sizing: border-box; width: 100%; max-width: 80.5ch; margin-inline: auto; text-align: left; line-height: 1.6; }
+.portfolio-review-section p.analyst-report-prose + p.analyst-report-prose { margin-top: 10px; }
+.portfolio-review-section .analyst-portfolio-topic-block.analyst-report-prose { margin-top: 14px; }
+.portfolio-review-section .analyst-portfolio-topic-block.analyst-report-prose:first-child { margin-top: 0; }
 .portfolio-review-section.analyst-hedgai-section > :not(h2):not(.portfolio-review-dateline) { text-align: left; }
 .portfolio-brief .portfolio-review-section > h2,
 .portfolio-brief .portfolio-review-section > .portfolio-review-dateline { margin: 0; }
