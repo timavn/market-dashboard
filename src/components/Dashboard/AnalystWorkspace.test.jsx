@@ -2241,7 +2241,9 @@ test('portfolio refresh progress and failure preserve the saved report and Sourc
   const header = sources.querySelector('header');
   const list = sources.querySelector('ul');
   const sourceRow = within(sources).getByText('IB Gateway').closest('li');
-  expect(within(sources).getAllByRole('listitem')).toHaveLength(23);
+  // Every registered research product has a row here: 23 rows before Trend &
+  // Tail Levels, the Quarterly Investment Outlook and U.S. Macro Notes.
+  expect(within(sources).getAllByRole('listitem')).toHaveLength(26);
   expect(within(header).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
   expect(within(sourceRow).getByText('Checking')).toBeVisible();
   expect(within(sourceRow).queryByText('Sep 4 08:00 PDT')).not.toBeInTheDocument();

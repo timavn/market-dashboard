@@ -488,6 +488,71 @@
         "riskRange": false,
         "supplementalRiskRange": false
       }
+    },
+    {
+      "id": "trend-tail-levels",
+      "label": "Trend & Tail Levels",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "trend & tail levels",
+        "trend and tail levels"
+      ],
+      "parserModes": [
+        "html"
+      ],
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "entity_rows",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "quarterly-investment-outlook",
+      "label": "Quarterly Investment Outlook",
+      "cadence": "event_driven",
+      "matchTerms": [
+        "hedgeye qio",
+        "quarterly investment outlook"
+      ],
+      "parserModes": [
+        "html"
+      ],
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "non_empty",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
+    },
+    {
+      "id": "us-macro-notes",
+      "label": "U.S. Macro Notes",
+      "cadence": "event_driven",
+      "matchBylines": [
+        "Christian Drake"
+      ],
+      "parserModes": [
+        "html"
+      ],
+      "parsers": {
+        "html": "hedgeye_html_dispatch"
+      },
+      "validationRule": "non_empty",
+      "authorities": {
+        "trade": false,
+        "trend": false,
+        "riskRange": false,
+        "supplementalRiskRange": false
+      }
     }
   ]
 }
