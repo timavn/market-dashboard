@@ -681,7 +681,18 @@ def _typed_reference_citation(reference: dict[str, Any]) -> Optional[dict[str, A
         "sourceUri": source_uri,
         "title": reference.get("productLabel") or product,
         "excerpt": reference.get("excerpt"),
+        # The original email, when the reference names it, so Source can show it.
+        **({"sourceMessageId": message_id} if (message_id := _source_message_id(reference)) else {}),
     }
+
+
+def _source_message_id(value: dict[str, Any]) -> Optional[str]:
+    candidate = str(value.get("sourceMessageId") or value.get("gmailMessageId") or "")
+    if not candidate:
+        found = re.search(r"(?:gmail://message/|hedgeye-email/messages/[^/]+/[^/]+/)([0-9a-f]{12,32})",
+                          str(value.get("sourceUrl") or value.get("sourceUri") or value.get("htmlSource") or ""), re.I)
+        candidate = found[1] if found else ""
+    return candidate if re.fullmatch(r"[0-9a-f]{12,32}", candidate, re.I) else None
 
 
 _STATEMENT_GRAMMAR: list = []
@@ -769,7 +780,8 @@ def published_trade_display(security, symbol, as_of):
         except (ValueError, TypeError):
             continue
         citation = _typed_reference_citation({"productId": descriptor.get("sourceId"), "productLabel": descriptor.get("sourceLabel"),
-            "marketDate": date, "sourceUrl": descriptor.get("sourceUrl"), "sourceEventId": descriptor.get("sourceEventId"), "excerpt": proof["sourceText"]})
+            "marketDate": date, "sourceUrl": descriptor.get("sourceUrl"), "sourceEventId": descriptor.get("sourceEventId"),
+            "sourceMessageId": descriptor.get("sourceMessageId"), "excerpt": proof["sourceText"]})
         if citation:
             return {"status": "historical" if historical else "published", "value": descriptor["value"],
                 "sourceTicker": source_ticker, "signalProvenance": proof, "referenceOnly": True, "executable": False,

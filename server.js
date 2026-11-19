@@ -176,6 +176,7 @@ const {
   getConfig: getFlexConfig,
   getReconciliation: getFlexReconciliation,
   publicConfigStatus: getFlexPublicConfigStatus,
+  readAccountPositions: readFlexAccountPositions,
   startFlexActivitySync,
   stopFlexActivitySync,
 } = require('./src/services/ibkrFlexService.cjs');
@@ -1469,6 +1470,21 @@ async function marketStructureEmailId(marketDate) {
   if (messageId) marketStructureEmailIds.set(marketDate, messageId);
   return messageId;
 }
+
+// Books for products that are followed in one account only. Go-Anywhere runs in the Roth IRA,
+// which the Gateway session does not list, so its holdings come from the newest IBKR activity
+// statement: the one statement account that is not the primary (Gateway) account.
+app.get('/api/analyst/account-books', (req, res) => {
+  try {
+    const primary = String(process.env.IBKR_FLEX_EXPECTED_ACCOUNT_ID || '').trim();
+    const others = getFlexConfig().expectedAccountIds.filter(accountId => accountId !== primary);
+    const roth = primary && others.length === 1 ? readFlexAccountPositions(others[0]) : null;
+    res.json({ books: roth ? { 'go-anywhere': { account: 'Roth IRA', asOf: roth.asOf, fetchedAt: roth.fetchedAt,
+      positions: roth.positions.map(({ symbol, quantity, marketValue }) => ({ symbol, quantity, marketValue })) } } : {} });
+  } catch {
+    res.status(503).json({ error: 'Account books unavailable' });
+  }
+});
 
 // Each held security's published range with a live price, for the Analyst's range watch,
 // and what Keith has said about his own size in the last week of Real-Time Alerts.

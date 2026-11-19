@@ -201,7 +201,8 @@ def signal_context(security, field, published_value):
                            "source": {"publishedAt": indication.get("publishedAt") or indication.get("marketDate"),
                                       "citation": _typed_reference_citation({"productId": product["id"], "productLabel": product.get("label"),
                                           "marketDate": indication.get("marketDate"), "sourceUrl": indication.get("sourceUrl"),
-                                          "sourceEventId": indication.get("sourceEventId")})}})
+                                          "sourceEventId": indication.get("sourceEventId"),
+                                          "sourceMessageId": indication.get("sourceMessageId")})}})
     # Old saved projections may predate normalized product fields. Apply the
     # site's existing list interpretation to the same captured structured rank.
     if not any(candidate.get("rule") == "portfolio-solutions-listed" for candidate in candidates):

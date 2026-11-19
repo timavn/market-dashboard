@@ -76,6 +76,19 @@ test('an operational issue (a service down, evidence that could not be verified)
   expect(screen.getByText('No new items requiring attention.')).toBeInTheDocument();
 });
 
+test('a Go-Anywhere alert names the Roth IRA and its dated position right under Ticker', () => {
+  const roth = attention('rsp', { kind: 'portfolio', severity: 'action-required', presentation: { subject: 'RSP', date: '2026-11-18',
+    rows: [{ label: 'Account', text: 'Roth IRA' }, { label: 'Account position', text: 'Long (as of Nov 17)' },
+      { label: 'Action', text: 'Go-Anywhere Portfolio removed RSP (Long) → exit Long' }],
+    sourceLinks: [{ label: 'Go-Anywhere Portfolio', citation: { id: 'c', title: 'Go-Anywhere Portfolio', product: 'go-anywhere', sourceUri: 'gmail://message/abc' } }] } });
+  render(<AnalystInbox findings={[roth]} />);
+  const card = screen.getByRole('heading', { name: 'RSP' }).closest('article');
+  const labels = [...card.querySelectorAll('dt')].map(node => node.textContent.trim());
+  expect(labels.slice(0, 4)).toEqual(['Action:', 'Ticker:', 'Account:', 'Account position:']);
+  expect(within(card).getByText('Roth IRA')).toBeInTheDocument();
+  expect(within(card).getByText('Account position:').nextSibling).toHaveTextContent('LONG (as of Nov 17)');
+});
+
 test('the Inbox groups cards as red Alerts, yellow Signals and blue Actions', () => {
   const red = attention('snow', { kind: 'portfolio', severity: 'action-required', presentation: { subject: 'SNOW', date: '2026-11-11',
     rows: [{ label: 'Action', text: 'Investing Ideas removed SNOW → exit Long' }] } });

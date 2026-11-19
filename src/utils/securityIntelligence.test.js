@@ -272,6 +272,25 @@ describe('security intelligence projection', () => {
     });
   });
 
+  test('a reference names the email its publication came from: by artifact, else the day\'s only email', () => {
+    const manifest = indexedManifest('early-look', MARKET_DATE, { eventCount: 1 });
+    manifest.artifacts[0].sourceMessageId = '1a1ef5cfe8b12c7e';
+    const event = { marketDate: MARKET_DATE, productKey: 'early-look', entityKey: 'ticker#RUT', excerpt: 'RUT LRR 2834 HRR 2825' };
+    const build = events => buildSecurityIntelligence({ symbols: ['RUT'], marketDate: MARKET_DATE, historyDays: 0, now: NOW,
+      productManifests: [manifest], entityEvents: events });
+    const [byArtifact] = build([{ ...event, sourceEventId: manifest.artifacts[0].artifactId }]).bySymbol.RUT.directReferences;
+    expect(byArtifact).toMatchObject({ sourceMessageId: '1a1ef5cfe8b12c7e' });
+    const [byDay] = build([event]).bySymbol.RUT.directReferences;
+    expect(byDay).toMatchObject({ sourceMessageId: '1a1ef5cfe8b12c7e' });
+    // Two emails that day: no guess.
+    const twice = indexedManifest('early-look', MARKET_DATE, { eventCount: 1, artifactCount: 2 });
+    twice.artifacts[0].sourceMessageId = '1a1ef5cfe8b12c7e';
+    twice.artifacts[1].sourceMessageId = '1a1ef5cfe8b12c7f';
+    const [ambiguous] = buildSecurityIntelligence({ symbols: ['RUT'], marketDate: MARKET_DATE, historyDays: 0, now: NOW,
+      productManifests: [twice], entityEvents: [event] }).bySymbol.RUT.directReferences;
+    expect(ambiguous?.sourceMessageId).toBeUndefined();
+  });
+
   test('requires exact artifact revision and keeps independent artifacts from the same message', () => {
     const productKey = 'early-look';
     const record = { marketDate: MARKET_DATE, productKey, sourceMessageId: 'same-message' };

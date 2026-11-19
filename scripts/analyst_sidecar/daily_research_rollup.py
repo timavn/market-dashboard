@@ -264,6 +264,12 @@ def _citation(snapshot, product):
               "productLabel": PRODUCTS[product], "excerpt": excerpt}
     if chart_readings:
         result["chartReadings"] = chart_readings
+    # The original email, so Source can show it beside the window (user-asked 2026-11-18).
+    message_id = str(snapshot.get("sourceMessageId") or snapshot.get("gmailMessageId") or "")
+    if not message_id and (stored := re.search(r"hedgeye-email/messages/[^/]+/[^/]+/([0-9a-f]{12,32})", str(snapshot.get("htmlSource") or ""), re.I)):
+        message_id = stored[1]
+    if re.fullmatch(r"[0-9a-f]{12,32}", message_id, re.I):
+        result["sourceMessageId"] = message_id
     if published := publication_time(snapshot):
         result["publishedAt"] = published.isoformat()
     return result

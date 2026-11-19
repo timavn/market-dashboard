@@ -271,13 +271,44 @@ test('ETF Pro and Real-Time Alert openings on the opposite side oppose the holdi
   assert.deepEqual(stance('TSLA').calls, [{ product: 'Real-Time Alert', action: 'LONG', date: '2026-09-22', bias: 'BULLISH' }]);
   assert.deepEqual(stance('TSLA').order, { verb: 'BUY', quantity: 4, note: 'to close short' });
 });
-test('a Go-Anywhere removal of a held Long is an exit alert; its aligned add is silent', () => {
+test('a Go-Anywhere removal is checked against the Roth IRA book, not the live book', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'XLK', quantity: 20 }, { symbol: 'HGER', quantity: 30 }];
   const goAnywhere = { productKey: 'go-anywhere', productLabel: 'Go-Anywhere Portfolio', entityType: 'ticker', eventType: 'position_change' };
-  ctx.events = [changeEvent('XLK', 'REMOVE', 'LONG', goAnywhere), changeEvent('HGER', 'ADD', 'LONG', goAnywhere)];
+  ctx.events = [changeEvent('XLK', 'REMOVE', 'LONG', goAnywhere), changeEvent('RSP', 'REMOVE', 'LONG', goAnywhere), changeEvent('HGER', 'ADD', 'LONG', goAnywhere)];
+  // Without the Roth book nothing can be checked: XLK in the live (Individual) book raises no card.
+  assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings, []);
+  // The Roth holds RSP (two lots summed by the statement reader) and not XLK.
+  ctx.accountBooks = { 'go-anywhere': { account: 'Roth IRA', asOf: '2026-09-21', fetchedAt: '2026-09-22T10:00:00Z', positions: [{ symbol: 'RSP', quantity: 20 }, { symbol: 'HGER', quantity: 5 }] } };
   const findings = evaluateResearchAttention(ctx, NOW).findings;
-  assert.deepEqual(findings.map(item => [item.symbol, item.severity]), [['XLK', 'action-required']]);
-  assert.equal(findings[0].presentation.rows.find(row => row.label === 'Action').text, 'Go-Anywhere Portfolio removed XLK (Long) → exit Long');
+  // HGER is held Long in the Roth already, so its add raises nothing; RSP's removal is red.
+  assert.deepEqual(findings.map(item => [item.symbol, item.severity]), [['RSP', 'action-required']]);
+  assert.deepEqual(findings[0].presentation.rows.slice(0, 3), [{ label: 'Account', text: 'Roth IRA' },
+    { label: 'Account position', text: 'Long (as of Sep 21)' }, { label: 'Action', text: 'Go-Anywhere Portfolio removed RSP (Long) → exit Long' }]);
+  assert.equal(findings[0].quantity, 20);
+  // The Roth card does not wait for the live book.
+  ctx.holdings = { ...ctx.holdings, liveVerified: false };
+  assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings.filter(item => item.kind === 'portfolio').map(item => item.symbol), ['RSP']);
+  // An add the Roth does not hold yet is a blue Action to buy it, whatever the live book holds.
+  ctx.accountBooks['go-anywhere'].positions = [{ symbol: 'RSP', quantity: 20 }];
+  const add = evaluateResearchAttention(ctx, NOW).findings.find(item => item.symbol === 'HGER');
+  assert.equal(add.severity, undefined); assert.equal(add.kind, 'opportunity');
+  assert.deepEqual(add.presentation.rows.slice(0, 3), [{ label: 'Action', text: 'Go-Anywhere Portfolio added HGER (Long) → buy Long' },
+    { label: 'Account', text: 'Roth IRA' }, { label: 'Account position', text: 'Not held (as of Sep 21)' }]);
+  // The whole published list is matched too: a listed ETF the Roth lacks is a blue buy card;
+  // a listed ETF already held, today's add (its own card) and a held ETF off the list raise nothing.
+  ctx.accountBooks['go-anywhere'].published = { date: '2026-09-22', messageId: 'aabbcc0011223344', rows: [
+    { ticker: 'TLT', side: 'Long', etf: '20+ Year Treasury', dateAdded: '2026-09-01' }, { ticker: 'RSP', side: 'Long' }, { ticker: 'HGER', side: 'Long' }] };
+  ctx.accountBooks['go-anywhere'].positions = [{ symbol: 'RSP', quantity: 20 }, { symbol: 'TBIL', quantity: 10 }];
+  const book = evaluateResearchAttention(ctx, NOW).findings.filter(item => item.kind === 'opportunity');
+  assert.deepEqual(book.map(item => item.symbol).sort(), ['HGER', 'TLT']);
+  const tlt = book.find(item => item.symbol === 'TLT');
+  assert.deepEqual(tlt.presentation.rows.slice(0, 4), [{ label: 'Action', text: 'Go-Anywhere Portfolio holds TLT (Long) → buy Long' },
+    { label: 'Account', text: 'Roth IRA' }, { label: 'Account position', text: 'Not held (as of Sep 21)' }, { label: 'In the book since', text: 'Sep 1' }]);
+  assert.equal(tlt.presentation.sourceLinks[0].citation.sourceUri, 'gmail://message/aabbcc0011223344');
+  delete ctx.accountBooks['go-anywhere'].published;
+  // Other products still use the live book and carry no Account row.
+  const live = context(); live.holdings.positions = [{ symbol: 'XLK', quantity: 20 }]; live.events = [changeEvent('XLK', 'REMOVE', 'LONG')];
+  assert.equal(evaluateResearchAttention(live, NOW).findings[0].presentation.rows.some(row => row.label === 'Account'), false);
 });
 test('Signal Strength removals apply to held longs only', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'NVDA', quantity: 10 }, { symbol: 'AMD', quantity: -10 }];

@@ -34,7 +34,7 @@ function unavailableFinding(channel, now) {
     presentation: { subject, date: now.toISOString().slice(0, 10), rows: [{ label: 'Issue', text }], sourceLinks: [] } };
 }
 
-function createAttentionWorkflow({ call: workspaceCall, request, now = () => new Date(), fetchJson, collectOperations, evaluateResearch, loadStanceHistory, loadSecurities, loadAlphaCodeLines, loadRiskRangeLines }) {
+function createAttentionWorkflow({ call: workspaceCall, request, now = () => new Date(), fetchJson, collectOperations, evaluateResearch, loadStanceHistory, loadSecurities, loadAlphaCodeLines, loadRiskRangeLines, loadAccountBooks }) {
   const get = fetchJson || (async (path, { timeoutMs = 45_000 } = {}) => {
     if (!path.startsWith('/api/')) throw new Error('Unexpected attention source');
     const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3001}${path}`, { signal: AbortSignal.timeout(timeoutMs) });
@@ -44,6 +44,20 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
   const stanceHistory = loadStanceHistory || (() => get(`/api/analyst/stance-ledger?days=${STANCE_HISTORY_DAYS}`));
   const alphaCodeLines = loadAlphaCodeLines || (() => get('/api/analyst/alpha-code-lines', { timeoutMs: 20_000 }));
   const riskRangeLines = loadRiskRangeLines || (symbols => get(`/api/analyst/risk-range-lines?symbols=${encodeURIComponent(symbols.join(','))}`, { timeoutMs: 20_000 }));
+  // Holdings of accounts the Gateway session does not list (the Roth IRA), per product that follows them.
+  // Each book carries the product's latest published list, so the account can be matched to it in full.
+  const accountBooks = loadAccountBooks || (async () => {
+    const books = (await get('/api/analyst/account-books', { timeoutMs: 20_000 }))?.books || {};
+    await Promise.all(Object.entries(books).map(async ([product, book]) => {
+      const snapshot = await get(`/api/hedgeye/snapshot/${product}`, { timeoutMs: 20_000 }).catch(() => null);
+      const rows = Array.isArray(snapshot?.data?.rows) ? snapshot.data.rows : null;
+      if (!rows || !snapshot.date) return;
+      book.published = { date: snapshot.date, messageId: String(snapshot.htmlSource || '').match(/\/([a-f0-9]{16})-message-body/)?.[1] || null,
+        rows: rows.filter(item => item?.ticker && ['Long', 'Short'].includes(item.side))
+          .map(item => ({ ticker: String(item.ticker).toUpperCase(), side: item.side, etf: item.etf || null, dateAdded: item.dateAdded || null })) };
+    }));
+    return books;
+  });
   const securities = loadSecurities || (async symbols => {
     const batches = [];
     for (let offset = 0; offset < symbols.length; offset += SECURITY_BATCH) batches.push(symbols.slice(offset, offset + SECURITY_BATCH));
@@ -138,8 +152,8 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
       // lets the evaluation fold the journal it is given.
       Promise.all([stanceBook([...retained, ...events], startedAt).catch(() => undefined),
         request('/internal/workspace/attention-context', { method: 'POST', body: { events: [...retained, ...events] }, timeoutMs: 75_000 }),
-        alphaCodeWatch(startedAt).catch(() => null)])
-        .then(async ([book, context, alphaCodes]) => {
+        alphaCodeWatch(startedAt).catch(() => null), accountBooks().catch(() => ({}))])
+        .then(async ([book, context, alphaCodes, books]) => {
           // Holdings freshness is judged when the context arrived, not after the name read.
           const at = now();
           const { foldStanceEvents, symbolOf } = require('./stanceBook.cjs');
@@ -155,7 +169,7 @@ function createAttentionWorkflow({ call: workspaceCall, request, now = () => new
           // A book that could not be read is folded from today's journal alone; the
           // evaluation still uses it, but the record reports the book unavailable.
           scoredStanceBook = book ? { book: scored, scoredAt: at.toISOString() } : { book: null, scoredAt: at.toISOString(), reason: 'stance-book-unreadable' };
-          return (evaluateResearch || require('./attentionResearch.cjs').evaluateResearchAttention)({ ...context, stanceBook: scored, securities: records,
+          return (evaluateResearch || require('./attentionResearch.cjs').evaluateResearchAttention)({ ...context, accountBooks: books || {}, stanceBook: scored, securities: records,
             ...(alphaCodes ? { alphaCodeWatch: alphaCodes } : {}), ...(riskRanges ? { riskRangeWatch: riskRanges } : {}) }, at);
         }),
     ]);

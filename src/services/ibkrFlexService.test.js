@@ -7,6 +7,7 @@ const {
   fetchFlexStatement,
   getReconciliation,
   publicConfigStatus,
+  readAccountPositions,
   previewPredictionPnlBackfill,
   previewStoredPredictionPnlBackfill,
   readFlexActivityTrades,
@@ -79,6 +80,24 @@ describe('IBKR Flex service', () => {
     jest.useRealTimers();
     process.env = { ...originalEnv };
     fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  test('reads one account\'s positions from the newest statement, summed by symbol', () => {
+    const write = (name, toDate, positions) => {
+      fs.mkdirSync(path.join(dataDir, 'snapshots'), { recursive: true });
+      fs.writeFileSync(path.join(dataDir, 'snapshots', name), JSON.stringify({ fromDate: toDate, toDate, fetchedAt: `${toDate}T22:00:00.000Z`,
+        accounts: [{ accountId: 'U1', reportDate: toDate, positions: [{ symbol: 'SPY', quantity: 1, marketValue: 700 }] },
+          { accountId: 'U2', reportDate: toDate, positions }] }));
+    };
+    expect(readAccountPositions('U2')).toBeNull();
+    write('2026-11-16.json', '2026-11-16', [{ symbol: 'LVHI', quantity: 50, marketValue: 2200 }]);
+    expect(readAccountPositions('U2').positions).toEqual([{ symbol: 'LVHI', quantity: 50, marketValue: 2200, assetCategory: null }]);
+    // A newer statement replaces the cached one; lots add up and a closed symbol drops out.
+    write('2026-11-17.json', '2026-11-17', [{ symbol: 'RSP', quantity: 10, marketValue: 2200 }, { symbol: 'rsp', quantity: 10, marketValue: 2210 },
+      { symbol: 'LVHI', quantity: 0, marketValue: 0 }]);
+    expect(readAccountPositions('U2')).toEqual({ accountId: 'U2', asOf: '2026-11-17', fetchedAt: '2026-11-17T22:00:00.000Z',
+      positions: [{ symbol: 'RSP', quantity: 20, marketValue: 4410, assetCategory: null }] });
+    expect(readAccountPositions('U3')).toBeNull();
   });
 
   test('publishes Flex configuration status without exposing the token', () => {

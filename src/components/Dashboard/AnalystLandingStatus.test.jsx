@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import AnalystLandingStatus, { landingDate, landingQuads, usQuad } from './AnalystLandingStatus';
+import AnalystLandingStatus, { closeProblem, landingDate, landingQuads, usQuad } from './AnalystLandingStatus';
 import { useGlobalQuads } from '../../hooks/useGlobalQuads';
 
 jest.mock('../../hooks/useGlobalQuads', () => ({ useGlobalQuads: jest.fn() }));
@@ -59,4 +59,21 @@ test('the status line shows the game, holdings, the verified close, and the thre
   expect(global.fetch).toHaveBeenCalledTimes(2);
   window.localStorage.clear();
   jest.useRealTimers();
+});
+
+test('holdings show longs in green and shorts in red', async () => {
+  useGlobalQuads.mockReturnValue(quads(2));
+  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({}) }));
+  render(<AnalystLandingStatus holdingsCount={69} holdingsSides={{ long: 24, short: 45 }} />);
+  const status = screen.getByRole('group', { name: 'Portfolio status' });
+  await waitFor(() => expect(status).toHaveTextContent('HOLDINGS 69 (24/45)'));
+  expect(screen.getByText('24')).toHaveClass('is-long');
+  expect(screen.getByText('45')).toHaveClass('is-short');
+  expect(screen.getByText('HOLDINGS')).toHaveAttribute('title', '24 long, 45 short');
+});
+
+test('a close that failed on the Gateway names the Gateway', () => {
+  expect(closeProblem({ status: 'failed', reason: 'review_failed', errorCode: 'IBKR_GATEWAY_API_UNRESPONSIVE' })).toBe(
+    'Live holdings were never read: IB Gateway was not responding at every try from the 4:05pm ET capture until the 4:00am ET pre-market open.');
+  expect(closeProblem({ status: 'failed', reason: 'review_failed' })).toMatch(/usually IB Gateway was not responding/);
 });

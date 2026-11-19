@@ -1854,6 +1854,36 @@ function buildSecurityIntelligence({
     });
   }
 
+  // Each artifact in a day's product manifest names the email it came from; a reference keyed by that artifact
+  // carries the email id, so its Source can open the original email (user-asked 2026-11-18).
+  // A reference without its artifact falls back to the day's product, but only when that day has a single email.
+  const messageIdByArtifact = new Map();
+  const messageIdsByProductDay = new Map();
+  filteredManifests.forEach((manifest) => asArray(manifest?.artifacts).forEach((artifact) => {
+    const messageId = String(artifact?.sourceMessageId || '');
+    if (!/^[0-9a-f]{12,32}$/i.test(messageId) || String(artifact?.stage || '') !== 'indexed') return;
+    [artifact?.artifactId, artifact?.contentSha256].filter(Boolean).forEach((key) => messageIdByArtifact.set(String(key), messageId));
+    const day = `${manifest?.marketDate}\u0000${manifestProductId(manifest)}`;
+    messageIdsByProductDay.set(day, new Set([...(messageIdsByProductDay.get(day) || []), messageId]));
+  }));
+  // A stored publication names both its web report and its email, so an exact report link identifies the email too.
+  const messageIdByFeedUrl = new Map();
+  filteredSnapshots.forEach((snapshot) => {
+    const messageId = String(snapshot?.gmailMessageId || snapshot?.sourceMessageId || '');
+    const feedUrl = String(snapshot?.article?.feedUrl || '');
+    if (/^[0-9a-f]{12,32}$/i.test(messageId) && /^https:\/\/app\.hedgeye\.com\/feed_items\/\d+$/.test(feedUrl)) messageIdByFeedUrl.set(feedUrl, messageId);
+  });
+  dates.forEach((date) => requestedSymbols.forEach((symbol) => ['direct', 'inferred'].forEach((kind) => {
+    buckets[symbol][date][kind].forEach((reference) => {
+      if (reference.sourceMessageId) return;
+      const byArtifact = (reference.sourceEventId ? messageIdByArtifact.get(String(reference.sourceEventId)) : null)
+        || messageIdByFeedUrl.get(String(reference.sourceUrl || '').replace(/\/$/, ''));
+      const sameDay = messageIdsByProductDay.get(`${reference.marketDate}\u0000${reference.productId}`);
+      const messageId = byArtifact || (sameDay?.size === 1 ? [...sameDay][0] : null);
+      if (messageId) reference.sourceMessageId = messageId;
+    });
+  })));
+
   let totalCurrentReferences = 0;
   const bySymbol = {};
   requestedSymbols.forEach((symbol) => {

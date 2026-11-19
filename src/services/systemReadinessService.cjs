@@ -1071,7 +1071,7 @@ function buildPortfolioCloseCheck({ result, now }) {
     impact: ready ? null : 'Portfolio Review cannot show previous-close exposure or interest.',
     recovery: ready ? null : {
       kind: 'manual',
-      label: 'Keep the Hermes "Portfolio close capture (4:30pm ET)" job enabled and IB Gateway connected at 4:30 PM ET.',
+      label: 'Keep IB Gateway connected from 4:05 PM ET (1:05 PM PT); the capture retries every 10 minutes until the 4:00 AM ET open.',
     },
   });
 }

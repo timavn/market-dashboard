@@ -139,6 +139,8 @@ test('every review section dates its captured inputs without refreshing old rese
   render(<AnalystPortfolioBrief message={data} onCitation={jest.fn()} />);
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   within(report).getAllByRole('heading', { level: 2 }).forEach(heading => {
+    // An empty section has no date line (no lone dash under its title).
+    if (heading.closest('section').querySelector('.portfolio-review-section-status')) return;
     expect(heading.nextElementSibling).toHaveClass('portfolio-review-dateline');
   });
   expect(within(screen.getByRole('region', { name: 'Exposure and risk' })).getByText(wholeText('Sep 4, 2026 13:05 PDT'))).toBeVisible();
@@ -365,7 +367,7 @@ test('position tables show dated product calls beside Review and open all of tha
   expect(call.querySelector('time.portfolio-position-product-date')).toHaveAttribute('dateTime', '2026-09-04');
   expect(within(cells[5]).getByRole('button', { name: 'Sep 4 ETF Pro: Sell some · View source' })).toHaveTextContent('Sep 4 ETF Pro: Sell some');
   fireEvent.click(call);
-  expect(onCitation).toHaveBeenCalledWith(first, { relatedSources: [first, confirmed] });
+  expect(onCitation).toHaveBeenCalledWith(first, { relatedSources: [first, confirmed], anchor: expect.any(HTMLElement) });
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -729,7 +731,7 @@ test('unsupported comparisons and factor totals stay out of the report', () => {
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toHaveTextContent('Previous close unavailable');
   expect(screen.queryByText('$2')).not.toBeInTheDocument();
-  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Unavailable');
+  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Pending');
   expect(screen.queryByText('Growth')).not.toBeInTheDocument();
 });
 
@@ -741,7 +743,7 @@ test('omits the redundant asset exposure table even when the saved report includ
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Action required' })).toBeInTheDocument();
   expect(screen.getByRole('region', { name: 'Corrections' })).toBeInTheDocument();
-  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Unavailable');
+  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Pending');
   expect(screen.queryByText('Growth')).not.toBeInTheDocument();
 });
 
@@ -899,7 +901,7 @@ test('the launch and deferred-history placeholder keeps the full report without 
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveClass('analyst-captured-report-placeholder', 'analyst-historical-report');
   expect(report).toHaveAttribute('data-message-id', 'deferred-post');
-  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(14);
+  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(13);
   expect(report).not.toHaveTextContent('$');
   expect(screen.getByRole('table', { name: 'Portfolio exposure' })).toBeVisible();
   expect(screen.getByRole('table', { name: 'Action required' })).toHaveTextContent('Loading…');
@@ -930,6 +932,8 @@ test('Portfolio Review sections use content height and centered titles with date
         expect(window.getComputedStyle(section).alignItems).toBe('center');
         expect(window.getComputedStyle(section).overflow).toBe('visible');
         const dates = section.querySelector('.portfolio-review-dateline');
+        // An empty section has no date line (no lone dash under its title).
+        if (!dates && section.querySelector('.portfolio-review-section-status')) return;
         expect(window.getComputedStyle(dates).textAlign).toBe('center');
         expect(dates.previousElementSibling.tagName).toBe('H2');
         expect(window.getComputedStyle(dates).height).not.toBe('18px');

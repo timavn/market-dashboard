@@ -78,8 +78,7 @@ test.each(['Report: Sep 28, 2026', 'Published Sep 28, 2026 · Data as of Sep 25,
     expect(screen.getByRole('columnheader', { name: 'Data as of' })).toBeVisible();
     expect(screen.getAllByRole('cell', { name: 'Sep 25, 2026' })).toHaveLength(2);
     expect(screen.getByRole('cell', { name: '6.82' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: /Source: Market Situation Report/ }));
-    expect(onCitation).toHaveBeenCalledWith(citation, expect.objectContaining({ highlightTexts: expect.arrayContaining(['6.82', 'Sep 25, 2026']) }));
+    expect(screen.queryByText(/^Sources:/)).not.toBeInTheDocument();
     expect(JSON.stringify(data)).toBe(captured);
   },
 );
@@ -207,8 +206,7 @@ test('HedgAI keeps six active rows above a closed 47-security disclosure with bo
   expect(disclosure.querySelectorAll('tbody tr')).toHaveLength(47);
   expect(disclosure).toHaveTextContent('Top');
   expect(disclosure).toHaveTextContent('Need more data');
-  fireEvent.click(within(region).getByRole('button', { name: 'Source: Reviewed HedgAI publication · Sep 28, 2026' }));
-  expect(onCitation).toHaveBeenCalledWith(citation, expect.objectContaining({ highlightTexts: expect.arrayContaining(['SPY', 'QQQ']) }));
+  expect(screen.queryByText(/^Sources:/)).not.toBeInTheDocument();
   expect(JSON.stringify(data)).toBe(original);
 });
 const rollup = () => ({ version: 1, citations: [source], sections: [{
@@ -270,11 +268,7 @@ test.each([
   ['SPY', 'CORN', 'TLT', 'XLF'].forEach(ticker => {
     within(region).getAllByText(ticker).forEach(node => expect(node).toHaveClass('analyst-process--ticker'));
   });
-  expect(region.lastChild).toHaveTextContent('Sources: Macro Show');
-  fireEvent.click(within(region).getByRole('button', { name: 'Source: Daily Macro Show · Sep 21, 2026' }));
-  expect(onCitation).toHaveBeenCalledWith(macroSource, expect.objectContaining({ highlightTexts: expect.arrayContaining([
-    'Rates are the focus this morning.', 'TLT', 'iShares 20+ Year Treasury Bond ETF', 'Long', 'Short', 'Neutral',
-  ]) }));
+  expect(screen.queryByText(/^Sources:/)).not.toBeInTheDocument();
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -323,9 +317,7 @@ test.each([
     expect(within(region).getByText(ticker)).toHaveClass('analyst-process--ticker');
     expect(within(region).getByTitle(security)).toHaveTextContent(ticker);
   });
-  expect(region.lastChild).toHaveTextContent('Sources: Macro Show');
-  fireEvent.click(within(region).getByRole('button', { name: 'Source: Daily Macro Show · Sep 21, 2026' }));
-  expect(onCitation).toHaveBeenCalledWith(macroSource, expect.objectContaining({ highlightTexts: expect.arrayContaining(changes.flat()) }));
+  expect(screen.queryByText(/^Sources:/)).not.toBeInTheDocument();
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -445,8 +437,7 @@ test.each(['metadata', 'legacy'])('%s sector captions occupy their own headings 
   ['PG', 'MAR', 'HELE', 'DECK', 'UNH'].forEach(ticker => expect(within(section).getByText(ticker)).toHaveClass('analyst-process--ticker'));
   expect(within(section).queryByText('short-term', { selector: '.analyst-process--negative' })).not.toBeInTheDocument();
   expect(section.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
-  fireEvent.click(within(section).getByRole('button', { name: /Source: The Great Finding Out/ }));
-  expect(onCitation).toHaveBeenCalledWith(source, expect.objectContaining({ highlightTexts: expect.arrayContaining(blocks.map(block => block.text)) }));
+  expect(screen.queryByText(/^Sources:/)).not.toBeInTheDocument();
   expect(JSON.stringify(data)).toBe(captured);
 });
 
@@ -478,108 +469,37 @@ test('research paragraphs and table cells keep directional and Quad semantics', 
   expect(section.querySelector('p:not(.portfolio-review-dateline)')).toHaveTextContent('short-term growth');
 });
 
-test('exact evidence from paragraphs and rows is consolidated into source buttons below the section', () => {
+test('no section carries a Sources footer because its title already names the product', () => {
   const onCitation = jest.fn();
-  render(<AnalystDailyRollup rollup={rollup()} onCitation={onCitation} />);
-  const button = screen.getByRole('button', { name: 'Source: The Great Finding Out · Sep 18, 2026' });
-  expect(button).toHaveTextContent('Early Look');
-  expect(button.closest('section').lastChild).toContainElement(button);
-  expect(button.closest('section').lastChild).toHaveTextContent('Sources: Early Look');
-  expect(screen.getAllByRole('button')).toHaveLength(1);
-  fireEvent.click(button);
-  expect(onCitation).toHaveBeenCalledWith(source, { highlightTexts: [rollup().sections[0].blocks[0].text, 'SPX', 'Bullish', 'Bearish', 'SPX Bullish Bearish'] });
+  const { container } = render(<AnalystDailyRollup rollup={rollup()} onCitation={onCitation} />);
+  expect(container.querySelector('.analyst-daily-rollup-citations')).toBeNull();
+  expect(screen.queryByText(/^Sources:/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Source:/ })).not.toBeInTheDocument();
 });
 
-test('source tooltips prefer known 24-hour Pacific publication times and preserve date-only imports', () => {
-  const data = rollup();
-  data.citations = [{ ...source, publishedAt: '2026-09-18T17:05:00Z' }];
-  const { rerender } = render(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
-  expect(screen.getByRole('button')).toHaveAttribute('title', 'The Great Finding Out · Sep 18, 2026 10:05 PDT');
-  data.citations = [{ ...source, publishedAt: '2026-09-18T00:00:00Z' }];
-  rerender(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
-  expect(screen.getByRole('button')).toHaveAttribute('title', 'The Great Finding Out · Sep 18, 2026');
-});
-
-test('timestamp-only source dates use the Pacific calendar day and never assume a missing timezone', () => {
-  const data = rollup(); data.citations = [{ ...source, publicationDate: null, publishedAt: '2026-09-19T02:15:00Z' }];
-  const { rerender } = render(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
-  expect(screen.getByRole('button')).toHaveAttribute('title', 'The Great Finding Out · Sep 18, 2026 19:15 PDT');
-  data.citations = [{ ...source, publishedAt: '2026-09-18T13:05:00' }];
-  rerender(<AnalystDailyRollup rollup={data} onCitation={jest.fn()} />);
-  expect(screen.getByRole('button')).toHaveAttribute('title', 'The Great Finding Out · Sep 18, 2026');
-});
-
-test('message citations can supply source IDs and unknown IDs never create broken controls', () => {
-  const data = rollup(); data.citations = []; data.sections[0].citationIds = ['early', 'missing'];
-  render(<AnalystDailyRollup rollup={data} citations={[source]} onCitation={jest.fn()} />);
-  expect(screen.getAllByRole('button')).toHaveLength(1);
-  expect(screen.queryByText('missing')).not.toBeInTheDocument();
-});
-
-test('full captured citations retain publication time and excerpt after summary deduplication', () => {
-  const data = rollup();
-  const fullSource = { ...source, publishedAt: '2026-09-18T17:05:00Z', excerpt: 'The full captured source context.' };
-  data.citations = [fullSource];
-  const onCitation = jest.fn();
-  render(<AnalystDailyRollup rollup={data} citations={[source]} onCitation={onCitation} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Source: The Great Finding Out · Sep 18, 2026 10:05 PDT' }));
-  expect(onCitation).toHaveBeenCalledWith(fullSource, expect.objectContaining({ highlightTexts: expect.arrayContaining([data.sections[0].blocks[0].text]) }));
-});
-
-test('a readable comma-separated Sources footer passes only context attributed to the clicked source', () => {
-  const top = { id: 'top', productLabel: 'Top 3 Things', title: 'Rates, Europe, VIX', publicationDate: '2026-09-18' };
-  const rate = 'Rates — Front-end yields fell sharply as growth slowed.';
-  const europe = 'Europe — European cyclical shares weakened into the close.';
-  const data = { version: 1, citations: [top, source], sections: [{ id: 'drivers', title: 'Today’s market drivers', citationIds: ['top', 'early'], blocks: [
-    { type: 'paragraph', text: rate, citationIds: ['top'] },
-    { type: 'paragraph', text: europe, citationIds: ['early'] },
-    { type: 'table', columns: ['Security', 'Context'], rows: [
-      { cells: ['DURATION', 'Front-end yields fell sharply as growth slowed.'], citationIds: ['top'] },
-      { cells: ['EUROPE', 'European cyclical shares weakened into the close.'], citationIds: ['early'] },
+test('Signal Strength reads as Changes then Current holdings with a signed Return', () => {
+  const data = { version: 1, sections: [{ id: 'signal-strength', title: 'Signal Strength', blocks: [
+    { type: 'table', columns: ['Ticker', 'Security', 'Change'], rows: [
+      { cells: ['CP', 'Canadian Pacific Kansas City Limited', 'Added'] },
+      { cells: ['BTI', 'British American Tobacco p.l.c.', 'Removed'] },
+    ] },
+    { type: 'table', columns: ['Ticker', 'Security', 'Days on', 'Since signal'], rows: [
+      { cells: ['ELF', 'e.l.f. Beauty Inc.', '134', '52.18%'] },
+      { cells: ['XYZ', 'Example Corp', '12', '-3.40%'] },
+      { cells: ['FLAT', 'Flat Corp', '2', '0.00%'] },
     ] },
   ] }] };
-  const onCitation = jest.fn();
-  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
-  expect(screen.getByRole('region', { name: 'Today’s market drivers' }).lastChild).toHaveTextContent('Sources: Top 3 Things, Early Look');
-  fireEvent.click(screen.getByRole('button', { name: 'Source: Rates, Europe, VIX · Sep 18, 2026' }));
-  const [clickedSource, context] = onCitation.mock.calls[0];
-  expect(clickedSource).toEqual(top);
-  expect(context.highlightTexts).toContain(rate);
-  expect(context.highlightTexts).toContain('Front-end yields fell sharply as growth slowed.');
-  expect(context.highlightTexts).not.toContain(europe);
-  expect(context.highlightTexts).not.toContain('European cyclical shares weakened into the close.');
-  expect(context.highlightTexts).not.toContain('Today’s market drivers');
-});
-
-test('a section citation without attributed block text opens the source without inventing highlight context', () => {
-  const data = rollup(); data.sections[0].blocks = [{ type: 'paragraph', text: 'An uncited paragraph must not become attributed source context.' }];
-  const onCitation = jest.fn();
-  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
-  fireEvent.click(screen.getByRole('button'));
-  expect(onCitation).toHaveBeenCalledWith(source, { highlightTexts: [] });
-});
-
-test('each product has one source link while both comparison publications keep their evidence', () => {
-  const current = { id: 'risk-current', product: 'risk-ranges', productLabel: 'Risk Ranges', title: 'Current Risk Ranges', publicationDate: '2026-09-18', excerpt: 'Current report evidence.' };
-  const prior = { id: 'risk-prior', product: 'risk-ranges', title: 'Prior Risk Ranges', publicationDate: '2026-09-17', excerpt: 'Prior report evidence.' };
-  const currentText = 'The current report changed the published range.';
-  const priorText = 'The prior report records the original range.';
-  const data = { version: 1, citations: [current, prior, source], sections: [{ title: 'Trend & range changes', citationIds: [current.id, prior.id, current.id, source.id], blocks: [
-    { type: 'paragraph', text: currentText, citationIds: [current.id] },
-    { type: 'paragraph', text: priorText, citationIds: [prior.id] },
-  ] }] };
   const original = JSON.stringify(data);
-  const onCitation = jest.fn();
-  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
-  const section = screen.getByRole('region', { name: 'Trend/Ranges/Coverage/Outbucket' });
-  expect(section.lastChild).toHaveTextContent('Sources: Risk Ranges, Early Look');
-  expect(within(section).getAllByRole('button')).toHaveLength(2);
-  const button = screen.getByRole('button', { name: 'Source: Risk Ranges', exact: true });
-  expect(button).toHaveAttribute('title', 'Current Risk Ranges · Sep 18, 2026; Prior Risk Ranges · Sep 17, 2026');
-  fireEvent.click(button);
-  expect(onCitation).toHaveBeenCalledWith(current, { highlightTexts: [currentText], relatedSources: [
-    { ...current, highlightTexts: [currentText] }, { ...prior, highlightTexts: [priorText] },
-  ] });
+  render(<AnalystDailyRollup rollup={data} />);
+  const [changes, holdings] = within(screen.getByRole('region', { name: 'Signal Strength' })).getAllByRole('table');
+  expect(changes.caption).toHaveTextContent('Changes');
+  expect(within(changes).getByText('Added')).toHaveClass('analyst-process--positive');
+  expect(within(changes).getByText('Removed')).toHaveClass('analyst-process--negative');
+  expect(holdings.caption).toHaveTextContent('Current holdings');
+  expect(within(holdings).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Ticker', 'Security', 'Days on', 'Return']);
+  expect(within(holdings).getByText('52.18%')).toHaveClass('analyst-process--positive');
+  expect(within(holdings).getByText('-3.40%')).toHaveClass('analyst-process--negative');
+  expect(within(holdings).getByText('0.00%')).not.toHaveClass('analyst-process--positive');
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -652,14 +572,11 @@ test('ticker and security precede unchanged signals and ranges with source evide
   expect(screen.getByText('Bearish')).toHaveClass('analyst-process--negative');
   expect(screen.getByText('Bullish')).toHaveClass('analyst-process--positive');
   const section = screen.getByRole('region', { name: 'Trend/Ranges/Coverage/Outbucket' });
-  expect(section.lastChild).toHaveTextContent('Sources: Risk Ranges');
-  expect(screen.getAllByRole('button')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button'));
-  expect(onCitation).toHaveBeenCalledWith(risk, expect.objectContaining({ highlightTexts: expect.arrayContaining(['VIX', 'Volatility Index', 'BRENT', security]) }));
+  expect(within(section).queryByRole('button')).not.toBeInTheDocument();
   expect(JSON.stringify(data)).toBe(original);
 });
 
-test('Research list is omitted from every table while row citation links remain available', () => {
+test('Research list is omitted from every table', () => {
   const data = rollup();
   data.sections[0].blocks = [{ type: 'table', columns: ['Security', 'Research list', 'Reading'],
     rows: [{ cells: ['VIX', 'Internal research classification', 'Bearish'], citationIds: ['early'] }] }];
@@ -667,7 +584,6 @@ test('Research list is omitted from every table while row citation links remain 
   expect(screen.queryByText('Research list')).not.toBeInTheDocument();
   expect(screen.queryByText('Internal research classification')).not.toBeInTheDocument();
   expect(screen.getByRole('row', { name: 'VIX Bearish' })).toBeVisible();
-  expect(screen.getByRole('button')).toHaveTextContent('Early Look');
 });
 
 test('coverage changes use compact product additions and removals in saved and new reviews', () => {
@@ -682,8 +598,7 @@ test('coverage changes use compact product additions and removals in saved and n
   expect(rows.map(row => within(row).getAllByRole('cell')[2].textContent)).toEqual([
     '+ Risk Ranges', '- Risk Ranges', '+ OutBucket', '- Risk Ranges', '+ Signal Strength', '- Risk Ranges',
   ]);
-  fireEvent.click(screen.getByRole('button'));
-  expect(onCitation).toHaveBeenCalledWith(source, expect.any(Object));
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -713,8 +628,7 @@ test('LOW and HIGH show independent published-boundary changes with aligned comp
   for (const label of ['Lower low', 'Lower high']) for (const node of within(tables[1]).getAllByText(label)) expect(node).toHaveClass('analyst-process--negative');
   for (const label of ['Unchanged', '—']) expect(within(tables[1]).getByText(label)).toHaveClass('analyst-process--muted');
   expect(within(tables[1]).getAllByText('Bearish')[0]).toHaveClass('analyst-process--negative');
-  fireEvent.click(within(section).getByRole('button'));
-  expect(onCitation).toHaveBeenCalledWith(risk, expect.objectContaining({ highlightTexts: expect.arrayContaining(['321–345', '322–345']) }));
+  expect(within(section).queryByRole('button')).not.toBeInTheDocument();
 });
 
 test('source content is rendered as plain text without HTML execution', () => {
@@ -740,25 +654,26 @@ test('empty and unsupported block types do not leave empty report headings', () 
 
 test('Portfolio Review keeps each research section through absent, partial, ready and unavailable captures without reserved heights', () => {
   const titles = ['PCA risk', 'Factor exposure', "Today's market drivers", 'Tick', 'Trend/Ranges/Coverage/Outbucket',
-    'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Signal Strength Shorts', 'Market structure & flows'];
+    'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Market structure & flows'];
   const ids = ['pca-risk', 'factor-exposure', 'market-drivers', 'hedgai-signals', 'risk-ranges',
-    'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'signal-strength-shorts', 'market-structure'];
+    'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'market-structure'];
   const { rerender } = render(<AnalystDailyRollup stableLayout loading />);
   const cards = screen.getAllByRole('region');
-  const datelines = cards.map(card => card.querySelector('.portfolio-review-dateline'));
   const bodies = cards.map(card => card.querySelector('.portfolio-review-section-body'));
   const assertUnchangedLayout = () => {
     expect(screen.getAllByRole('region').map(card => card.getAttribute('aria-label'))).toEqual(titles);
     screen.getAllByRole('region').forEach((card, index) => {
       expect(card).toBe(cards[index]);
       expect(card).toHaveClass('portfolio-review-section');
-      expect(card.querySelector('.portfolio-review-dateline')).toBe(datelines[index]);
+      // An empty section has no date line (no lone dash under its title); one with content dates it.
+      const dateline = card.querySelector('.portfolio-review-dateline');
+      expect(card.querySelector('.portfolio-review-section-status') ? dateline : null).toBeNull();
       expect(card.querySelector('.portfolio-review-section-body')).toBe(bodies[index]);
       expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
     });
   };
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(11);
+  expect(screen.getAllByText('Loading…')).toHaveLength(10);
   cards.forEach(card => {
     expect(card).toHaveAttribute('aria-busy', 'true');
     expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
@@ -771,13 +686,11 @@ test('Portfolio Review keeps each research section through absent, partial, read
   const onCitation = jest.fn();
   rerender(<AnalystDailyRollup stableLayout loading rollup={partial} onCitation={onCitation} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(10);
+  expect(screen.getAllByText('Loading…')).toHaveLength(9);
   const drivers = screen.getByRole('region', { name: "Today's market drivers" });
   expect(drivers).not.toHaveAttribute('aria-busy');
   expect(within(drivers.querySelector('.portfolio-review-section-body')).getByText('Captured market reading.')).toBeVisible();
-  const citation = within(drivers.querySelector('.portfolio-review-section-body')).getByRole('button', { name: /Source: The Great Finding Out/ });
-  fireEvent.click(citation);
-  expect(onCitation).toHaveBeenCalledWith(source, expect.objectContaining({ highlightTexts: ['Captured market reading.'] }));
+  expect(within(drivers).queryByText(/^Sources:/)).not.toBeInTheDocument();
   expect(JSON.stringify(partial)).toBe(savedPartial);
 
   const ready = { version: 1, sections: ids.map((id, index) => ({ id, title: titles[index],
@@ -793,7 +706,9 @@ test('Portfolio Review keeps each research section through absent, partial, read
 
   rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [] }} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Unavailable')).toHaveLength(11);
+  // PCA risk and Factor exposure read Pending; the other eight read Unavailable.
+  expect(screen.getAllByText('Unavailable')).toHaveLength(8);
+  expect(screen.getAllByText('Pending')).toHaveLength(2);
   expect(screen.queryByText(/Captured reading|Captured market reading/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });
@@ -832,11 +747,12 @@ test('a paused PCA section keeps its slot with a compact Pending state while oth
   rerender(<AnalystDailyRollup stableLayout rollup={pending} />);
   expect(screen.getAllByRole('region').map(card => card.getAttribute('aria-label'))).toEqual(titles);
   expect(within(screen.getByRole('region', { name: 'PCA risk' })).getByText('Pending')).toBeVisible();
-  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Unavailable');
+  // Factor exposure reads Pending, not Unavailable, once loading ends with nothing.
+  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Pending');
   rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [{ ...pending.sections[0],
     status: 'ready', blocks: [{ type: 'paragraph', text: 'Captured PCA reading.' }] }] }} />);
   expect(screen.getByText('Captured PCA reading.')).toBeVisible();
-  expect(screen.queryByText('Pending')).not.toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: 'PCA risk' })).queryByText('Pending')).not.toBeInTheDocument();
   expect(JSON.stringify(pending)).toBe(saved);
 });
 

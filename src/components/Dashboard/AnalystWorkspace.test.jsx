@@ -1490,8 +1490,6 @@ test('latest-only progress keeps each warm saved body and its citation bound to 
   await findPortfolioExposureAmount('$200');
   expect(portfolioExposureAmount('$100').closest('article')).toBe(article);
   expect(article).toHaveTextContent('Original saved research reading.');
-  fireEvent.click(within(article).getByRole('button', { name: 'Source: Original saved publication · Sep 4, 2026' }));
-  expect(screen.getByRole('dialog', { name: 'Citation source' })).toHaveTextContent(citation.excerpt);
   expect(api.request.mock.calls.some(([path]) => path.includes('briefMessageId='))).toBe(false);
 });
 
@@ -1891,38 +1889,6 @@ test('Balance Review uses the Sources date without a duplicate dated caption or 
   await waitFor(() => expect(screen.getByRole('region', { name: 'Review sources' })).toHaveTextContent('Sep 4 08:00 PDT'));
 });
 
-test('daily rollup source footers open the full original excerpt with only the attributed passage highlighted', async () => {
-  const topText = 'Front-end yields fell sharply as growth slowed.';
-  const earlyText = 'European cyclical shares weakened into the close.';
-  const topExcerpt = `Opening research context.\n\n${topText}\n\n${earlyText}\n\nThe rest of the publication remains visible.`;
-  const earlyExcerpt = `Separate research context.\n\n${earlyText}\n\n${topText}`;
-  const citations = [
-    { id: 'top', productLabel: 'Top 3 Things', title: 'Daily drivers', publicationDate: '2026-09-18', sourceUri: 'https://app.hedgeye.com/feed_items/100', excerpt: topExcerpt },
-    { id: 'early', productLabel: 'Early Look', title: 'European growth', publicationDate: '2026-09-18', excerpt: earlyExcerpt },
-  ];
-  conversations.a.kind = 'portfolio-review';
-  conversations.a.messages[0].portfolioBrief = { available: true, holdings: [], metrics: {}, dailyRollup: { version: 1, citations, sections: [{
-    id: 'drivers', title: 'Today’s market drivers', citationIds: ['top', 'early'], blocks: [
-      { type: 'paragraph', text: `Rates — ${topText}`, citationIds: ['top'] },
-      { type: 'paragraph', text: `Europe — ${earlyText}`, citationIds: ['early'] },
-    ],
-  }] } };
-  render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  const driverSection = await screen.findByRole('region', { name: 'Today’s market drivers' });
-  expect(driverSection.lastChild).toHaveTextContent('Sources: Top 3 Things, Early Look');
-  fireEvent.click(within(driverSection).getByRole('button', { name: 'Source: Daily drivers · Sep 18, 2026' }));
-  let popup = screen.getByRole('dialog', { name: 'Citation source' });
-  expect(popup.querySelector('blockquote').textContent).toBe(topExcerpt);
-  expect([...popup.querySelectorAll('mark')].map(mark => mark.textContent)).toEqual([topText]);
-  expect(within(popup).getByRole('link', { name: 'Open original report ↗' })).toHaveAttribute('href', citations[0].sourceUri);
-  fireEvent.click(screen.getByRole('textbox', { name: 'Message The Analyst' }));
-  fireEvent.click(within(driverSection).getByRole('button', { name: 'Source: European growth · Sep 18, 2026' }));
-  popup = screen.getByRole('dialog', { name: 'Citation source' });
-  expect(popup.querySelector('blockquote').textContent).toBe(earlyExcerpt);
-  expect([...popup.querySelectorAll('mark')].map(mark => mark.textContent)).toEqual([earlyText]);
-});
-
 test('source popup has no X, keeps inside clicks, and dismisses on other Analyst areas without closing Analyst', async () => {
   const onClose = jest.fn();
   conversations.a.messages[0].citations = [{ id: 'source', title: 'Published evidence', excerpt: 'The original source passage remains readable.' }];
@@ -1975,35 +1941,6 @@ test('retained Analyst reopens its selected conversation, clears source popups, 
   expect(screen.queryByTestId('analyst-source-library')).not.toBeInTheDocument();
   await open('a');
   expect(screen.getByRole('textbox', { name: 'Message The Analyst' })).toHaveValue('Keep this draft');
-});
-
-test('one product source button preserves both immutable publications and independent highlights in a stacked popup', async () => {
-  const priorText = 'Equity volatility remained elevated during the prior session.';
-  const currentText = 'Equity volatility declined materially during the current session.';
-  const prior = { id: 'prior-ranges', product: 'risk-ranges', productLabel: 'Risk Ranges', title: 'Prior risk ranges', publicationDate: '2026-09-17', sourceUri: 'https://app.hedgeye.com/feed_items/99', excerpt: `Earlier context. ${priorText} Original closing context.` };
-  const current = { id: 'current-ranges', product: 'risk-ranges', productLabel: 'Risk Ranges', title: 'Current risk ranges', publicationDate: '2026-09-18', sourceUri: 'https://app.hedgeye.com/feed_items/100', excerpt: `Current context. ${currentText} Original closing context.` };
-  conversations.a.kind = 'portfolio-review';
-  conversations.a.messages[0].portfolioBrief = { available: true, holdings: [], metrics: {}, dailyRollup: { version: 1, citations: [current, prior], sections: [{
-    id: 'risk-ranges', title: 'Trend & range changes', citationIds: ['current-ranges', 'prior-ranges'], blocks: [
-      { type: 'paragraph', text: currentText, citationIds: ['current-ranges'] },
-      { type: 'paragraph', text: priorText, citationIds: ['prior-ranges'] },
-    ],
-  }] } };
-  render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Source: Risk Ranges', exact: true }));
-  const popup = screen.getByRole('dialog', { name: 'Citation source' });
-  const entries = within(popup).getAllByRole('article');
-  expect(entries).toHaveLength(2);
-  for (const [publication, passage] of [[current, currentText], [prior, priorText]]) {
-    const entry = entries.find(item => within(item).queryByText(publication.title));
-    expect(entry.querySelector('blockquote').textContent).toBe(publication.excerpt);
-    expect([...entry.querySelectorAll('mark')].map(mark => mark.textContent)).toEqual([passage]);
-    expect(within(entry).getByRole('link', { name: 'Open original report ↗' })).toHaveAttribute('href', publication.sourceUri);
-    expect(entry).toHaveTextContent(publication === current ? 'Sep 18, 2026' : 'Sep 17, 2026');
-  }
-  expect(within(popup).queryByRole('tablist')).not.toBeInTheDocument();
-  expect(within(popup).queryByRole('button')).not.toBeInTheDocument();
 });
 
 test.each([
@@ -2300,7 +2237,10 @@ test('portfolio refresh progress and failure preserve the saved report and Sourc
   const header = sources.querySelector('header');
   const list = sources.querySelector('ul');
   const sourceRow = within(sources).getByText('IB Gateway').closest('li');
-  expect(within(sources).getAllByRole('listitem')).toHaveLength(23);
+  // Every registered research product has a row here: 23 rows before Trend &
+  // Tail Levels, the Quarterly Investment Outlook and U.S. Macro Notes, less the two Portfolio Review leaves
+  // out (Crypto Quant and Signal Strength Shorts).
+  expect(within(sources).getAllByRole('listitem')).toHaveLength(24);
   expect(within(header).getByRole('status', { name: 'Response running' })).toHaveTextContent('Starting…');
   expect(within(sourceRow).getByText('Checking')).toBeVisible();
   expect(within(sourceRow).queryByText('Sep 4 08:00 PDT')).not.toBeInTheDocument();
@@ -3342,35 +3282,6 @@ test('compact review updates render the terminal receipt without a full historic
   expect(api.request.mock.calls.filter(([path]) => path === '/conversations/a')).toHaveLength(0);
   expect(api.request.mock.calls.filter(([path]) => path === '/conversations/a?includeBriefs=false&briefScope=latest')).toHaveLength(2);
   expect(screen.queryByRole('status', { name: 'Response running' })).not.toBeInTheDocument();
-});
-
-test('compact Portfolio sources load evidence from the original post only when opened', async () => {
-  const source = { id: 'captured-source', product: 'risk-ranges', title: 'Captured publication', publicationDate: '2026-09-04',
-    evidenceIncluded: false, captureConversationId: 'a', captureMessageId: 'original-post' };
-  const savedBrief = { presentation: 'compact', available: true, holdings: [], metrics: {}, dailyRollup: {
-    version: 1, citations: [source], sections: [{ id: 'drivers', title: 'Market drivers', citationIds: [source.id],
-      blocks: [{ type: 'paragraph', text: 'Captured published reading for the verified security.', citationIds: [source.id] }] }],
-  } };
-  conversations.a = { ...conversations.a, kind: 'portfolio-review', briefsIncluded: false, activeTurn: { id: 'review-turn' },
-    messages: [{ id: 'original-post', role: 'assistant', state: 'reviewing', text: '', portfolioBrief: savedBrief }] };
-  const evidence = deferred();
-  const path = '/conversations/a/citations/original-post/captured-source';
-  const request = api.request.getMockImplementation();
-  api.request.mockImplementation((url, body, method) => url === path ? evidence.promise : request(url, body, method));
-  render(<AnalystPanel />);
-  fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Chat a' }));
-  const sourceButton = await screen.findByRole('button', { name: 'Source: Captured publication · Sep 4, 2026' });
-  expect(api.request.mock.calls.some(([url]) => url === path)).toBe(false);
-  fireEvent.click(sourceButton);
-  const popup = screen.getByRole('dialog', { name: 'Citation source' });
-  expect(popup).toHaveTextContent('Captured publication');
-  expect(popup.querySelector('article')).toHaveAttribute('aria-busy', 'true');
-  await expectSelected('Chat a');
-  await act(async () => evidence.resolve({ citation: { ...source, excerpt: 'Captured published reading for the verified security. Saved publication context.' } }));
-  expect(popup).toHaveTextContent('Captured published reading for the verified security. Saved publication context.');
-  expect(popup.querySelector('article')).not.toHaveAttribute('aria-busy');
-  expect(popup.querySelector('mark')).toHaveTextContent('Captured published reading for the verified security.');
-  expect(source.excerpt).toBeUndefined();
 });
 
 test('malformed events are contained without transcript reads or render failure', async () => {

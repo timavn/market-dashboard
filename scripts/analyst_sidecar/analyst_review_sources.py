@@ -206,6 +206,11 @@ def _prediction_failure_code(row, venue):
     return None
 
 
+# Registered products the Portfolio Review Sources list leaves out (user-specified 2026-11-18): Crypto Quant is the
+# subject of the daily Bitcoin email, which is parsed and listed as Bitcoin Tracker, so its own row only aged; Signal
+# Strength Shorts was a trial that ended. The registry keeps both so the ingestor still routes and reads old emails.
+RETIRED_REVIEW_SOURCES = frozenset({"crypto-quant", "signal-strength-shorts"})
+
 # Captures before the setup board recorded these dependencies; they keep their original Sources.
 _LEGACY_PREDICTION_DEPENDENCIES = {"predictionUniverse", "predictionResearch", "portfolio", "balance", "ibGateway", "alphaCodes"}
 # Setup board inputs, in display order (analystReviewSourceCatalog.cjs).
@@ -469,6 +474,8 @@ def _review_sources(run, store, research_products, prediction_universe):
         daily = accepted_snapshots(read("dailyResearch"), as_of=_object(dependencies.get("dailyResearch")).get("asOf") or run.get("createdAt")) if "dailyResearch" in dependencies else {}
         for product in research_products:
             product_id = product["id"]
+            if product_id in RETIRED_REVIEW_SOURCES:
+                continue
             if product_id == "hedgai-signals":
                 # HedgAI is an optional captured overlay below. Registry
                 # discovery must not duplicate it or add it to older reviews.

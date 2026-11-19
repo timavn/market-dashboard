@@ -492,8 +492,14 @@ function awaitingHoldingsCheck(context) {
   }
   return awaiting;
 }
+// A product followed in one account is checked against that account's own book (from the
+// IBKR activity statement, dated), never the live Gateway book of another account.
+function accountState(book, symbol) {
+  const quantity = (book.positions || []).filter(position => symbolOf(position.symbol) === symbol).reduce((sum, position) => sum + position.quantity, 0);
+  return { holdingsVerified: true, holdingsVerifiedAt: book.fetchedAt || book.asOf, quantity, currentHolding: null, account: book.account };
+}
+const shortDate = value => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${String(value).slice(0, 10)}T12:00:00Z`));
 function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
-  if (!verified) return [];
   const awaiting = awaitingHoldingsCheck(context);
   // The latest instruction per security and product decides; a later re-add
   // from the same product supersedes its earlier removal.
@@ -517,8 +523,29 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
   const output = [];
   for (const { symbol, event, evidence, exit, change, actionKey } of latest.values()) {
     // Only a red Trade/Trend break replaces a source instruction; a sizing review never hides one.
-    if (conflicts.some(item => item.symbol === symbol && item.severity === ACTION_REQUIRED)) continue;
-    const state = holdingState(context.holdings, symbol, true, now);
+    const scoped = PRODUCT_ACCOUNTS[event.productKey];
+    const accountBook = scoped ? context.accountBooks?.[event.productKey] : null;
+    // An account-scoped product waits for that account's book; every other product for the live book.
+    if (scoped ? !(accountBook && Array.isArray(accountBook.positions) && accountBook.asOf) : !verified) continue;
+    if (!scoped && conflicts.some(item => item.symbol === symbol && item.severity === ACTION_REQUIRED)) continue;
+    const state = scoped ? accountState(accountBook, symbol) : holdingState(context.holdings, symbol, true, now);
+    // An account that follows the product mirrors its adds too: a blue Action to open the position
+    // until that account's statement shows it held on the published side.
+    if (scoped && change?.action === 'OPEN' && change.side && Math.sign(state.quantity) !== (change.side === 'Long' ? 1 : -1)) {
+      const product = event.productLabel || 'The source';
+      const openRows = [row('Action', `${product} added ${symbol} (${change.side}) → buy ${change.side}`), row('Account', scoped),
+        row('Account position', state.quantity ? `${state.quantity > 0 ? 'Long' : 'Short'} (as of ${shortDate(accountBook.asOf)})` : `Not held (as of ${shortDate(accountBook.asOf)})`)];
+      const range = publishedRange(event);
+      if (range) openRows.push(row('Published range', range));
+      openRows.push(...durationRows(context, symbol, now));
+      const citation = { id: evidence.report?.citationId || `cite_${hash(event.sourceMessageId).slice(0, 24)}`, title: evidence.report?.title || event.productLabel,
+        product: event.productKey, publicationDate: event.marketDate, sourceUri: event.sourceUrl || `gmail://message/${event.sourceMessageId}`,
+        excerpt: evidence.report?.bodyText || event.excerpt, ...emailClip(event.sourceMessageId, symbol) };
+      output.push(finding({ key: [symbol, 'source-action', event.productKey, actionKey], material: [actionKey, change.side, range, accountBook.asOf],
+        symbol, kind: 'opportunity', priority: 1, action: 'add', publishedAt: event.publishedAt, rows: openRows,
+        sourceLinks: [{ label: event.productLabel || 'Source', citation }], state: { ...state, event } }));
+      continue;
+    }
     if (!state.quantity) continue;
     const held = state.quantity > 0 ? 'Long' : 'Short';
     if (exit ? exit[0] !== held : !contradicts(change, held)) continue;
@@ -533,7 +560,10 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
         : `${product} went ${change.side} vs your ${held} → review`;
     const range = publishedRange(event);
     const headline = text(event.excerpt).startsWith('{') ? '' : text(event.excerpt);
-    const rows = [...positionRows(state), row('Action', actionText)];
+    // Go-Anywhere is followed only in the Roth IRA, so its cards name that account first, under Ticker.
+    // The account's position is dated: its statement runs a business day or two behind.
+    const rows = [...(scoped ? [row('Account', scoped), row('Account position', `${held} (as of ${shortDate(accountBook.asOf)})`)] : positionRows(state)),
+      row('Action', actionText)];
     if (range) rows.push(row('Published range', range));
     if (contextLines.length || headline) rows.push(row('Context', contextLines.length ? contextLines.join(' ') : headline));
     rows.push(...durationRows(context, symbol, now));
@@ -545,8 +575,41 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
       symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: exit ? evidence.action.toLowerCase() : change.action === 'REMOVE' ? 'remove' : 'opposing position',
       publishedAt: event.publishedAt, rows, sourceLinks: [{ label: event.productLabel || 'Source', citation }], state: { ...state, event } }));
   }
+  output.push(...publishedBookFindings(context, now, new Set(output.map(item => `${item.event?.productKey}\u0000${item.symbol}`))));
   return output;
 }
+// The account follows the product's whole published list, not only the day's changes: every
+// listed ETF the account does not hold on its side is a blue Action to buy it. Today's adds
+// already have their own card. A held ETF the list no longer names is left alone (it may be cash).
+function publishedBookFindings(context, now, covered) {
+  const output = [];
+  for (const [productKey, account] of Object.entries(PRODUCT_ACCOUNTS)) {
+    const book = context.accountBooks?.[productKey];
+    if (!book?.published?.rows || !Array.isArray(book.positions) || !book.asOf) continue;
+    const label = context.productLabels?.[productKey] || PRODUCT_LABELS[productKey] || productKey;
+    for (const listed of book.published.rows) {
+      const symbol = symbolOf(listed.ticker);
+      if (!symbol || covered.has(`${productKey}\u0000${symbol}`)) continue;
+      const state = accountState(book, symbol);
+      if (Math.sign(state.quantity) === (listed.side === 'Long' ? 1 : -1)) continue;
+      const rows = [row('Action', `${label} holds ${symbol} (${listed.side}) → buy ${listed.side}`), row('Account', account),
+        row('Account position', state.quantity ? `${state.quantity > 0 ? 'Long' : 'Short'} (as of ${shortDate(book.asOf)})` : `Not held (as of ${shortDate(book.asOf)})`),
+        ...(listed.dateAdded ? [row('In the book since', shortDate(listed.dateAdded))] : []), ...durationRows(context, symbol, now)];
+      const messageId = book.published.messageId;
+      const citation = { id: `cite_${hash([productKey, book.published.date, symbol]).slice(0, 24)}`, title: label, product: productKey,
+        publicationDate: book.published.date, sourceUri: messageId ? `gmail://message/${messageId}` : null, excerpt: `${listed.etf || symbol} · ${listed.side}`,
+        ...(messageId ? emailClip(messageId, symbol) : {}) };
+      const event = { productKey, productLabel: label, marketDate: book.published.date, publishedAt: `${book.published.date}T12:00:00Z`, sourceMessageId: messageId };
+      output.push(finding({ key: [symbol, 'published-book', productKey, listed.side], material: [listed.side, book.published.date, book.asOf, state.quantity],
+        symbol, kind: 'opportunity', priority: 1, action: 'add', publishedAt: event.publishedAt, rows,
+        sourceLinks: [{ label, citation }], state: { ...state, event } }));
+    }
+  }
+  return output;
+}
+const PRODUCT_LABELS = { 'go-anywhere': 'Go-Anywhere Portfolio' };
+// Products whose calls apply to one account only.
+const PRODUCT_ACCOUNTS = { 'go-anywhere': 'Roth IRA' };
 // Without verified holdings, today's exits and removals cannot be matched to the
 // book. An Alert needs a position the Analyst confirmed, so this is only a
 // notice that the check is waiting; the user is never asked to confirm holdings.

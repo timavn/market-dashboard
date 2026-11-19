@@ -9,6 +9,14 @@ const { publicationIssues } = require('../../utils/researchSourceQuality.cjs');
 const SNAPSHOT_TABLE = 'HedgeyeDailySnapshot';
 const MAX_SCAN_PAGES = 1000;
 const SCAN_DEADLINE_MS = 25000;
+// Portfolio Review reads the last RESEARCH_WINDOW_DAYS of research; older commentary, trends and ranks are out of date.
+// A position action is the exception: an add, removal, buy, sell or cover stands until a later action reverses it, so
+// the products that publish actions keep their whole history, reduced to those actions and complete books.
+const RESEARCH_WINDOW_DAYS = 30;
+const ACTION_PRODUCTS = new Set(['investing-ideas', 'etf-pro', 'real-time-alert']);
+const ACTION_KINDS = new Set(['etf_pro_change', 'position_change', 'investing_idea_position', 'real_time_alert', 'source_action']);
+const windowStart = marketDate => new Date(Date.parse(`${marketDate}T12:00:00Z`) - (RESEARCH_WINDOW_DAYS - 1) * 86_400_000)
+  .toISOString().slice(0, 10);
 const BAD_FLAGS = ['mock', 'isMock', 'seed', 'seeded', 'isSeed', 'isSeeded', 'fixture', 'synthetic', 'inferred', 'modelOnly', 'portfolioDerived', 'costBasisDerived', 'fallback',
   'cacheOnly', 'cache_only', 'cachedOnly', 'fromCache', 'from_cache', 'stale', 'isStale', 'offline', 'disconnected', 'refreshFailed'];
 const BAD_STATES = /(?:^|[\s_-])(?:failed|error|unavailable|unverified|rejected|quarantined|mock|seed(?:ed)?|synthetic|inferred|cache|cached|offline|disconnected|stale)(?:$|[\s_-])/i;
@@ -262,7 +270,11 @@ function rosterPublications(snapshot, productId, contentHash, asOf, diagnostics)
 }
 
 async function scanPage(dynamodb, params, remaining) {
-  const request = dynamodb.scan(params);
+  return requestPage(dynamodb, 'scan', params, remaining);
+}
+
+async function requestPage(dynamodb, operation, params, remaining) {
+  const request = dynamodb[operation](params);
   let timer;
   try {
     return await Promise.race([request.promise(), new Promise((_, reject) => {
@@ -274,17 +286,9 @@ async function scanPage(dynamodb, params, remaining) {
   } finally { clearTimeout(timer); }
 }
 
-async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, asOf,
-  tableName = SNAPSHOT_TABLE, maxPages = MAX_SCAN_PAGES, deadlineMs = SCAN_DEADLINE_MS, now = Date.now } = {}) {
-  const request = validatePortfolioRefreshRequest({ symbols, marketDate, asOf });
-  // Archive captures retain only direct/alias references. Prepare their exact
-  // narrative patterns once and avoid constructing discarded exposure rows.
-  const referenceOptions = { skipExposureMentions: true,
-    preparedNarrativeMatchers: prepareNarrativeReferenceMatchers(request.symbols),
-    preparedStructuredMatchers: prepareStructuredReferenceMatchers(request.symbols) };
-  const started = now();
+// One strongly consistent pass over the whole archive table.
+async function scanArchive(dynamodb, { tableName, maxPages, deadlineMs, now, started }) {
   const reasons = [];
-  const diagnostics = [];
   const rows = new Map();
   const ambiguous = new Set();
   const cursors = new Set();
@@ -292,6 +296,7 @@ async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, 
   let pages = 0;
   let scanComplete = false;
   let evaluatedRows = 0;
+  let invalidRows = 0;
   while (pages < maxPages) {
     const remaining = deadlineMs - (now() - started);
     if (remaining <= 0) { reasons.push('archive-scan-deadline'); break; }
@@ -307,7 +312,7 @@ async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, 
     if (!page || !Array.isArray(page.Items)) { reasons.push('archive-page-invalid'); break; }
     evaluatedRows += page.ScannedCount ?? page.Items.length;
     for (const snapshot of page.Items) {
-      if (!snapshot || typeof snapshot !== 'object') { diagnostics.push({ code: 'invalid-source-row' }); continue; }
+      if (!snapshot || typeof snapshot !== 'object') { invalidRows += 1; continue; }
       const id = identity(snapshot);
       if (rows.has(id) && hash(rows.get(id)) !== hash(snapshot)) ambiguous.add(id);
       else rows.set(id, snapshot);
@@ -319,6 +324,78 @@ async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, 
     lastKey = page.LastEvaluatedKey;
   }
   if (!scanComplete && pages >= maxPages) reasons.push('archive-page-limit');
+  return { rows, ambiguous, scanComplete, reasons, pages, evaluatedRows, invalidRows };
+}
+
+// The archive is read once in full, then kept in this process (user-asked 2026-11-18: the full read took about 4 s
+// and 5,600 read units of each 10 s Portfolio Review). Each later capture re-reads only the latest
+// ARCHIVE_RECENT_DAYS dates, which is where new and corrected publications land, and the whole table is read again
+// after ARCHIVE_FULL_RESCAN_MS (or on any error), so an older date replayed by hand is picked up within hours.
+const ARCHIVE_RECENT_DAYS = 7;
+const ARCHIVE_FULL_RESCAN_MS = 6 * 60 * 60_000;
+const archiveCaches = new WeakMap();
+const recentDates = marketDate => Array.from({ length: ARCHIVE_RECENT_DAYS }, (_, index) =>
+  new Date(Date.parse(`${marketDate}T12:00:00Z`) - index * 86_400_000).toISOString().slice(0, 10));
+
+async function refreshRecent(dynamodb, cached, { tableName, deadlineMs, now, started, marketDate }) {
+  const rows = new Map(cached.rows);
+  const ambiguous = new Set(cached.ambiguous);
+  for (const date of recentDates(marketDate)) {
+    for (const id of [...rows.keys()]) if (id.startsWith(`${date}:`)) { rows.delete(id); ambiguous.delete(id); }
+    let lastKey;
+    do {
+      const remaining = deadlineMs - (now() - started);
+      if (remaining <= 0) throw new Error('Archive refresh deadline reached.');
+      const page = await requestPage(dynamodb, 'query', { TableName: tableName, ConsistentRead: true,
+        KeyConditionExpression: '#date = :date', ExpressionAttributeNames: { '#date': 'date' },
+        ExpressionAttributeValues: { ':date': date }, ...(lastKey ? { ExclusiveStartKey: lastKey } : {}) }, remaining);
+      if (!page || !Array.isArray(page.Items)) throw new Error('Archive refresh page invalid.');
+      for (const snapshot of page.Items) {
+        if (!snapshot || typeof snapshot !== 'object') { cached.invalidRows += 1; continue; }
+        const id = identity(snapshot);
+        if (rows.has(id) && hash(rows.get(id)) !== hash(snapshot)) ambiguous.add(id);
+        else rows.set(id, snapshot);
+      }
+      lastKey = page.LastEvaluatedKey && Object.keys(page.LastEvaluatedKey).length ? page.LastEvaluatedKey : null;
+    } while (lastKey);
+  }
+  return { rows, ambiguous };
+}
+
+async function readArchive(dynamodb, options) {
+  const { tableName, now, cache } = options;
+  const byTable = cache ? archiveCaches.get(dynamodb) || new Map() : null;
+  if (cache) archiveCaches.set(dynamodb, byTable);
+  const cached = byTable?.get(tableName);
+  if (cached && now() - cached.fullScanAt < ARCHIVE_FULL_RESCAN_MS) {
+    try {
+      const { rows, ambiguous } = await refreshRecent(dynamodb, cached, options);
+      Object.assign(cached, { rows, ambiguous });
+      return { rows, ambiguous, scanComplete: true, reasons: [], pages: cached.pages, evaluatedRows: cached.evaluatedRows,
+        invalidRows: cached.invalidRows };
+    } catch { byTable.delete(tableName); }
+  }
+  const full = await scanArchive(dynamodb, options);
+  if (byTable && full.scanComplete && !full.reasons.length) {
+    byTable.set(tableName, { rows: full.rows, ambiguous: full.ambiguous, fullScanAt: now(),
+      pages: full.pages, evaluatedRows: full.evaluatedRows, invalidRows: full.invalidRows });
+  }
+  return full;
+}
+
+async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, asOf,
+  tableName = SNAPSHOT_TABLE, maxPages = MAX_SCAN_PAGES, deadlineMs = SCAN_DEADLINE_MS, now = Date.now, cacheArchive = false } = {}) {
+  const request = validatePortfolioRefreshRequest({ symbols, marketDate, asOf });
+  // Archive captures retain only direct/alias references. Prepare their exact
+  // narrative patterns once and avoid constructing discarded exposure rows.
+  const referenceOptions = { skipExposureMentions: true,
+    preparedNarrativeMatchers: prepareNarrativeReferenceMatchers(request.symbols),
+    preparedStructuredMatchers: prepareStructuredReferenceMatchers(request.symbols) };
+  const started = now();
+  const diagnostics = [];
+  const { rows, ambiguous, scanComplete, reasons, pages, evaluatedRows, invalidRows } = await readArchive(dynamodb,
+    { tableName, maxPages, deadlineMs, now, started, marketDate: request.marketDate, cache: cacheArchive });
+  for (let index = 0; index < invalidRows; index += 1) diagnostics.push({ code: 'invalid-source-row' });
   const products = new Map([...RESEARCH_PRODUCTS, { id: 'inflation-nowcast', label: 'Inflation Nowcast' }]
     .map(product => [product.id, { id: product.id, label: product.label, documentCount: 0, dates: [], reasons: [] }]));
   const bySymbol = Object.fromEntries(request.symbols.map(symbol => [symbol, { references: [], checkedProducts: [] }]));
@@ -326,6 +403,8 @@ async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, 
   const documentHashes = [];
   const dates = [];
   let nonPublicationRows = 0;
+  let olderRowsSkipped = 0;
+  const earliestDate = windowStart(request.marketDate);
   for (const snapshot of [...rows.values()].sort((a, b) => identity(a).localeCompare(identity(b)))) {
     const productId = productFor(snapshot);
     const coverage = products.get(productId);
@@ -337,6 +416,11 @@ async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, 
       diagnostics.push({ code: isValidMarketDate(snapshot.date) ? 'unregistered-source-product' : 'non-publication-source-row',
         productId: productId || null, snapshotType: snapshot.snapshotType || null,
         storageDate: snapshot.date || null, sourceSnapshotId: identity(snapshot) });
+      continue;
+    }
+    const older = isValidMarketDate(snapshot.date) && snapshot.date < earliestDate;
+    if (older && !ACTION_PRODUCTS.has(productId)) {
+      olderRowsSkipped += 1;
       continue;
     }
     const rejection = ambiguous.has(identity(snapshot)) ? 'ambiguous-source-revision' : eligible(snapshot, marketDate, asOf);
@@ -354,7 +438,9 @@ async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, 
     const diagnosticStart = diagnostics.length;
     try {
       publications.push(...rosterPublications(snapshot, productId, contentHash, asOf, diagnostics));
-      for (const { symbol, reference } of extractArchiveReferences(snapshot, request.symbols, diagnostics, asOf, referenceOptions, contentHash)) bySymbol[symbol].references.push(reference);
+      for (const { symbol, reference } of extractArchiveReferences(snapshot, request.symbols, diagnostics, asOf, referenceOptions, contentHash)) {
+        if (!older || ACTION_KINDS.has(reference.kind)) bySymbol[symbol].references.push(reference);
+      }
     } catch {
       diagnostics.push({ code: 'source-extraction-unavailable', productId, marketDate: snapshot.date, sourceSnapshotId: identity(snapshot) });
     }
@@ -378,8 +464,9 @@ async function capturePortfolioRefreshResearch({ dynamodb, symbols, marketDate, 
     coverage: { products: productRows, reasons: unique(reasons) }, bySymbol, publications, diagnostics,
     manifest: { source: tableName, documentCount: documentHashes.length, earliestDate: dates[0] || null,
       latestDate: dates.at(-1) || null, pages, evaluatedRows, hash: hash(documentHashes),
-      nonPublicationRows,
+      nonPublicationRows, windowStart: earliestDate, windowDays: RESEARCH_WINDOW_DAYS, olderRowsSkipped,
       publicationScope: 'Registered source publication snapshots; operational and unregistered rows remain diagnostics. Delivery and overwritten same-day publications are not proven complete.' } };
 }
 
-module.exports = { capturePortfolioRefreshResearch, validatePortfolioRefreshRequest, MAX_SCAN_PAGES, SCAN_DEADLINE_MS };
+module.exports = { capturePortfolioRefreshResearch, validatePortfolioRefreshRequest, MAX_SCAN_PAGES, SCAN_DEADLINE_MS,
+  ARCHIVE_RECENT_DAYS, ARCHIVE_FULL_RESCAN_MS, RESEARCH_WINDOW_DAYS };

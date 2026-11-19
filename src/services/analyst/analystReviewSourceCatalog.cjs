@@ -8,6 +8,10 @@ const predictionBoardSources = [['risk-ranges', 'Risk Ranges'], ['crypto-quant',
   ['hedgai-signals', 'HedgAI Signals'], ['tradeResearch', 'Trade research'], ['inflation-nowcast', 'Monthly Inflation Nowcast'],
   ['marketPrices', 'Market prices'], ['volatilityIndices', 'Volatility indices'],
   ['usdCorrelations', 'USD correlations'], ['kalshiContracts', 'Kalshi contracts']];
+// Registered products Portfolio Review leaves out, while loading and once loaded (user-specified 2026-11-18;
+// mirrors analyst_review_sources.RETIRED_REVIEW_SOURCES): Crypto Quant is the daily Bitcoin email, listed as Bitcoin
+// Tracker, and Signal Strength Shorts was a trial that ended.
+const RETIRED_REVIEW_SOURCES = new Set(['crypto-quant', 'signal-strength-shorts']);
 const source = (id, label, status) => ({ id, label, status, observedAt: null,
   ...(gatewayDependencies.has(id) ? { requiresIbGateway: true } : {}),
 });
@@ -21,11 +25,11 @@ function pendingReviewSourceItems(kind, status = 'checking') {
   if (kind === 'portfolio-review') items.push(source('portfolioBalance', 'IBKR account exposure', status),
     source('portfolioOpenOrders', 'IBKR open orders', status),
     source('portfolioRefreshResearch', 'Portfolio research archive', status),
-    ...registry.products.map(row => source(row.id, row.label, status)), source('inflation-nowcast', 'Monthly Inflation Nowcast', status),
+    ...registry.products.filter(row => !RETIRED_REVIEW_SOURCES.has(row.id)).map(row => source(row.id, row.label, status)), source('inflation-nowcast', 'Monthly Inflation Nowcast', status),
     source('marketSituation', 'Market data', status));
   if (kind === 'balance-review') items.unshift(source('balance', 'IBKR balances', status));
   if (kind === 'balance-review') items.push(source('interestStatus', 'Interest accruals', status), source('history', 'Interest history', status));
   return items;
 }
 
-module.exports = { pendingReviewSourceItems };
+module.exports = { pendingReviewSourceItems, RETIRED_REVIEW_SOURCES };

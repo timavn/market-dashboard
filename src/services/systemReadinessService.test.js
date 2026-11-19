@@ -190,7 +190,7 @@ describe('portfolio close baseline check', () => {
       expect(check.blocking).toBe(false);
       expect(check.errorCode).toBe('PORTFOLIO_CLOSE_BASELINE_MISSING');
       expect(check.summary).toBe(summary);
-      expect(check.recovery.label).toMatch(/Portfolio close capture \(4:30pm ET\)/);
+      expect(check.recovery.label).toMatch(/connected from 4:05 PM ET \(1:05 PM PT\)/);
     }
   });
 });

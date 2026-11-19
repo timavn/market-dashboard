@@ -215,7 +215,10 @@ function citationPublications(source, context) {
   return publications;
 }
 
-export default function AnalystWorkspace({ onClose, holdingsCount }) {
+// "gmail://message/<id>" or ".../hedgeye-email/messages/<date>/<product>/<id>-message-body…": the email's Gmail id.
+const sourceEmailId = uri => String(uri || '').match(/(?:^gmail:\/\/message\/|hedgeye-email\/messages\/[^/]+\/[^/]+\/)([0-9a-f]{12,32})(?:$|[^0-9a-f])/i)?.[1] || null;
+
+export default function AnalystWorkspace({ onClose, holdingsCount, holdingsSides }) {
   const active = useSurfaceActivity();
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -285,6 +288,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     setCitationPage(0);
     const generation = ++citationGeneration.current;
     const publications = citationPublications(source, context).map(publication => ({ ...publication,
+      ...(!publication.sourceMessageId && sourceEmailId(publication.sourceUri) ? { sourceMessageId: sourceEmailId(publication.sourceUri) } : {}),
       ...(publication.evidenceIncluded === false ? { evidenceLoading: true } : {}) }));
     setCitation(publications);
     void hydrateAnalystCapturedCitations(publications, {
@@ -301,16 +305,20 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
     if (!citation || !citationAnchor || !surface) return undefined;
     const card = citationAnchor.closest('.analyst-inbox-finding');
     card?.setAttribute('data-cited', '');
-    // A docked popover sits centered beside the Analyst window, no taller than it, and ignores scrolling.
+    // A docked popover sits centered beside the Analyst window, no taller than it, and ignores scrolling:
+    // to its right when there is room (user-specified 2026-11-18), else to its left.
     const dock = () => {
       const analyst = surface.parentElement.getBoundingClientRect();
       const gap = 12;
       const margin = 8;
-      const width = Math.min(DOCKED_SOURCE_WIDTH, analyst.left - gap - margin);
+      const right = Math.min(DOCKED_SOURCE_WIDTH, window.innerWidth - analyst.right - gap - margin);
+      const left = Math.min(DOCKED_SOURCE_WIDTH, analyst.left - gap - margin);
+      const onRight = right >= DOCKED_SOURCE_MIN_WIDTH;
+      const width = onRight ? right : left;
       if (width < DOCKED_SOURCE_MIN_WIDTH) return false;
       surface.classList.add('is-docked');
       surface.style.width = `${width}px`;
-      surface.style.left = `${analyst.left - gap - width}px`;
+      surface.style.left = `${onRight ? analyst.right + gap : analyst.left - gap - width}px`;
       surface.style.maxHeight = `${analyst.height}px`;
       surface.style.top = `${analyst.top + (analyst.height - surface.offsetHeight) / 2}px`;
       return true;
@@ -1426,7 +1434,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
             {launchingReview.kind === 'portfolio-review' && <PortfolioReviewPlaceholder />}</div>
             : !selected && !selectedSend ? <header className="analyst-landing">
               <div className="analyst-landing-title"><h1>The Analyst</h1></div>
-              <AnalystLandingStatus holdingsCount={holdingsCount} />
+              <AnalystLandingStatus holdingsCount={holdingsCount} holdingsSides={holdingsSides} />
             </header>
               : <div className="analyst-message-list">
                 {refreshable && <div className="analyst-review-refresh">
@@ -1520,7 +1528,8 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
         const title = source.title || source.product;
         const href = source.sourceUri && source.product !== 'dashboard-health' ? safeResearchUrl(source.sourceUri) : null;
         // An emailed publication shows the original, clipped around its ticker, with the report link under it.
-        const email = citationAnchor && source.sourceMessageId;
+        // Older saved captures name the email only in its stored path, so the id is read from there.
+        const email = citationAnchor && (source.sourceMessageId || sourceEmailId(source.sourceUri));
         return <article className="analyst-source-publication-entry" key={source.id || index} aria-busy={source.evidenceLoading || undefined}>
         {/* The anchored popover is just the publication, its date and the excerpt; its title opens the report. */}
         <strong>{citationAnchor && href && !email ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">{title} ↗</a> : title}</strong>
@@ -1528,7 +1537,7 @@ export default function AnalystWorkspace({ onClose, holdingsCount }) {
         {!citationAnchor && source.sourceUri && source.product !== 'dashboard-health' && <p>{href ? <a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a> : source.sourceUri}</p>}
         {email ? <>
           {source.sourceImageUrl && <img className="analyst-source-image" src={source.sourceImageUrl} alt={`${title}, as published`} />}
-          <AnalystSourceEmail messageId={source.sourceMessageId} ticker={source.clipTicker} quote={source.clipTicker ? undefined : source.excerpt} title={title} excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
+          <AnalystSourceEmail messageId={email} ticker={source.clipTicker} quote={source.clipTicker ? undefined : source.excerpt} title={title} excerpt={source.excerpt} highlightTexts={source.highlightTexts} />
           {href && <p className="analyst-source-email-link"><a className="analyst-source-publication" href={href} target="_blank" rel="noopener noreferrer">Open original report ↗</a></p>}
         </> : <AnalystSourceExcerpt excerpt={source.excerpt} highlightTexts={source.highlightTexts} />}
         {source.evidenceError && <p>Source evidence unavailable.</p>}

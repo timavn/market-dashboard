@@ -44,7 +44,7 @@ function fixture({ date = '2026-09-17T20:30:00Z', recordStartedAt, startFails = 
     setRequestFails: value => { requestFails = value; } };
 }
 
-test('starts at 16:30 ET, forces fresh acquisition, and deduplicates concurrent and repeated calls', async () => {
+test('starts at 16:05 ET, forces fresh acquisition, and deduplicates concurrent and repeated calls', async () => {
   const f = fixture();
   assert.equal((await f.service.status()).status, 'pending');
   const results = await Promise.all([f.service.start(), f.service.start()]);
@@ -54,7 +54,7 @@ test('starts at 16:30 ET, forces fresh acquisition, and deduplicates concurrent 
   f.complete();
   const result = await f.service.start();
   assert.equal(result.status, 'ready');
-  assert.equal(result.scheduledTime, '16:30');
+  assert.equal(result.scheduledTime, '16:05');
   assert.equal(result.timeZone, 'America/New_York');
   assert.equal(result.asOf, '2026-09-17T20:30:00.000Z');
   assert.equal(result.capturedAt, result.asOf);
@@ -64,8 +64,8 @@ test('starts at 16:30 ET, forces fresh acquisition, and deduplicates concurrent 
   assert.ok(f.settings.has('hermes-portfolio-close:2026-09-17'));
 });
 
-test('before the close-plus-30-minute window and after the next pre-market open no review is acquired', async () => {
-  for (const date of ['2026-09-17T19:59:00Z', '2026-09-17T20:00:00Z', '2026-09-17T20:29:59Z', '2026-09-18T08:00:00Z']) {
+test('before the close-plus-5-minute window and after the next pre-market open no review is acquired', async () => {
+  for (const date of ['2026-09-17T19:59:00Z', '2026-09-17T20:00:00Z', '2026-09-17T20:04:59Z', '2026-09-18T08:00:00Z']) {
     const f = fixture({ date });
     assert.equal((await f.service.start()).status, 'scheduled');
     assert.equal(f.starts(), 0);
@@ -104,13 +104,13 @@ test('a failed Friday capture retried on Saturday becomes Monday\'s verified bas
   assert.equal(baseline.capturedAt, '2026-10-17T13:30:00.000Z');
 });
 
-test('early-close sessions capture at 13:30 ET and normal winter sessions at 16:30 ET', async () => {
-  const early = fixture({ date: '2026-11-27T18:29:59Z' });
+test('early-close sessions capture at 13:05 ET and normal winter sessions at 16:05 ET', async () => {
+  const early = fixture({ date: '2026-11-27T18:04:59Z' });
   assert.equal((await early.service.start()).reason, 'before_capture_time');
   early.advance(1000);
   assert.equal((await early.service.start()).status, 'running');
   early.complete();
-  assert.equal((await early.service.status()).scheduledTime, '13:30');
+  assert.equal((await early.service.status()).scheduledTime, '13:05');
   assert.equal((await early.service.status()).status, 'ready');
   const winter = fixture({ date: '2026-12-01T21:30:00Z' });
   await winter.service.start(); winter.complete();
@@ -254,4 +254,17 @@ test('a session without a saved close capture reports a missing baseline', async
   assert.equal(result.sessionDate, '2026-10-13');
   assert.equal(result.status, 'pending');
   assert.equal(result.reason, 'not_started');
+});
+
+test('a winter retry at 3:55am ET is judged as that close, and a Gateway failure says so', async () => {
+  // 2026-11-17's last retry ran at 08:55Z (3:55am EST); the baseline used to be read at 02:59 EST and call it unverified.
+  const f = fixture({ date: '2026-11-18T08:55:00Z' });
+  const started = await f.service.start();
+  assert.equal(started.date, '2026-11-17');
+  Object.assign(f.run, { state: 'failed', errorCode: 'IBKR_GATEWAY_API_UNRESPONSIVE' });
+  f.advance(6 * 60 * 60_000);
+  const baseline = await f.make().baseline();
+  assert.equal(baseline.sessionDate, '2026-11-17');
+  assert.equal(baseline.reason, 'review_failed');
+  assert.equal(baseline.errorCode, 'IBKR_GATEWAY_API_UNRESPONSIVE');
 });

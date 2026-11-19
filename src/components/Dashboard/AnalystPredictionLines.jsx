@@ -99,6 +99,11 @@ const padTo = (text, digits) => {
 };
 // Spot's own precision: none from 10,000, one from 100, else two.
 const spotDigits = spot => (spot.unit === '%' ? 2 : Math.abs(spot.price) >= 10000 ? 0 : Math.abs(spot.price) >= 100 ? 1 : 2);
+// The level a line's row shows ("5.48% or above" → 5.48), else its strike.
+const shownLevel = line => {
+  const value = Number.parseFloat(lineParts(line)[1].replace(/[,%]/g, ''));
+  return Number.isFinite(value) ? value : line.strike;
+};
 // One count for a market's book: the most any of its lines (or spot) carries.
 const bookDigits = (lines, spot) => Math.max(0, ...lines.map(line => decimalsOf(lineParts(line)[1])),
   isNum(spot?.price) ? spotDigits(spot) : 0);
@@ -116,7 +121,8 @@ const LineCell = ({ line, title, digits }) => {
 function withSpot(visible, spot, columns, renderLine, digits = spotDigits(spot)) {
   const out = visible.map(renderLine);
   if (!isNum(spot.price) || !visible.some(line => isNum(line.strike))) return out;
-  const at = visible.findIndex(line => isNum(line.strike) && line.strike > spot.price);
+  // Placed by the number the row shows, not the strike: Kalshi's "5.48% or above" line carries strike 5.47.
+  const at = visible.findIndex(line => isNum(line.strike) && shownLevel(line) > spot.price);
   const grouped = visible.some(line => lineParts(line)[1].includes(','));
   const number = spot.unit === '%' ? `${spot.price.toFixed(digits)}%`
     : spot.price.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: grouped });

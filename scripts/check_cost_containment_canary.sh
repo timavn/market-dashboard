@@ -101,9 +101,17 @@ ANOMALY_THRESHOLDS="$(aws ce get-anomaly-subscriptions \
   --query 'AnomalySubscriptions[?SubscriptionName==`Default-Services-Subscription`]|[0].ThresholdExpression' \
   --output json)"
 
-# DynamoDB read units were 303,000 on 17 November 2026, the first full day
-# after the archive and Inbox-scan trims (about 196,000 on the daily snapshot
-# table and 87,000 on the event ledger). The limit sits about 25% above that.
+# Each limit sits about 25% above the level measured in November 2026, so an
+# ordinary day passes and a regression fails. Release and backfill days can
+# exceed the S3 limit; that is expected.
+# - DynamoDB read units: 303,000 on 17 November, the first full day after the
+#   archive and Inbox-scan trims (about 196,000 on the daily snapshot table
+#   and 87,000 on the event ledger).
+# - Gmail runs: 216 on a weekday, 96 from the 15-minute schedule plus 120 from
+#   the Macro Show window (every minute, 10:00 to 11:59 Eastern, weekdays).
+# - S3 reads: about 1,400 a day since 25 October, when the Analyst began
+#   re-reading the last 21 days of email bodies every six hours to reconcile
+#   its index; the busiest ordinary day was 1,848.
 PASS="$(jq -n \
   --argjson s3 "$S3_TIER2_REQUESTS" \
   --argjson ddb "$DDB_READ_UNITS" \
@@ -114,7 +122,7 @@ PASS="$(jq -n \
   --argjson costRoute "$COST_ROUTE_CONFORMS" \
   --arg schedulerState "$GMAIL_SCHEDULER_STATE" \
   --arg guardianState "$GUARDIAN_STATE" \
-  '$s3 < 500 and $ddb < 380000 and $invocations <= 100 and $errors == 0 and $retries == 0 and ($schedulerState == "ENABLED" or $schedulerState == "DISABLED") and $guardianState == "Active" and $budget == [25,45,50] and $costRoute')"
+  '$s3 < 2300 and $ddb < 380000 and $invocations <= 270 and $errors == 0 and $retries == 0 and ($schedulerState == "ENABLED" or $schedulerState == "DISABLED") and $guardianState == "Active" and $budget == [25,45,50] and $costRoute')"
 
 jq -n \
   --arg date "$TARGET_DATE" \
@@ -133,9 +141,9 @@ jq -n \
   '{
     date: $date,
     acceptance: {
-      s3Tier2Requests: {actual: $s3Tier2Requests, target: "<500"},
+      s3Tier2Requests: {actual: $s3Tier2Requests, target: "<2300"},
       dynamodbConsumedReadUnits: {actual: $ddbConsumedReadUnits, target: "<380000"},
-      gmailLambdaInvocations: {actual: $gmailInvocations, target: "<=100"},
+      gmailLambdaInvocations: {actual: $gmailInvocations, target: "<=270"},
       gmailLambdaErrors: {actual: $gmailErrors, target: 0},
       scheduledMaximumRetryAttempts: {actual: $gmailMaximumRetryAttempts, target: 0},
       gmailSchedulerState: {actual: $gmailSchedulerState, target: "ENABLED or intentional DISABLED"},

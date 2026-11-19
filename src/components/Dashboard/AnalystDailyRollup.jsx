@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatAnalystReportDate, presentAnalystReportDates } from '../../utils/analystReportDates';
+import { presentAnalystReportDates } from '../../utils/analystReportDates';
 import AnalystSemanticText from './AnalystSemanticText';
 import PortfolioReviewDateline from './PortfolioReviewDateline';
 import { PortfolioReviewTextProvider } from './PortfolioReviewTextContext';
@@ -25,6 +25,7 @@ const isRangeSection = section => section.id === 'risk-ranges'
   || /^(?:Trend\s*(?:&|and)\s*range(?:s| changes)|Trend\/Ranges\/Coverage\/Outbucket)$/i.test(text(section.title));
 const sectionTitle = section => section.id === 'hedgai-signals' ? 'Tick' : isRangeSection(section) ? rangeSectionTitle : section.title;
 const tableCaption = (section, block) => {
+  if (isSignalStrength(section)) return signalStrengthCaption(block);
   if (!isRangeSection(section)) return text(block.title);
   if (block.columns.includes('OutBucket Trend')) return 'Outbucket';
   if (block.columns.includes('Coverage change')) return 'Coverage';
@@ -49,10 +50,11 @@ const isFactorTable = (section, block) => section.id === 'factor-exposure' && bl
 // The full-book refresh sections (and their older position-alignment names)
 // restated dated publisher actions with no current call; saved captures keep
 // the facts, but Portfolio Review no longer shows them.
+// Signal Strength Shorts was a trial subscription that ended (user-specified 2026-11-18).
 const retiredSectionIds = new Set(['refresh-realignment', 'refresh-watch-list', 'refresh-aligned', 'refresh-sequence',
-  'position-confirmations', 'position-contradictions']);
+  'position-confirmations', 'position-contradictions', 'signal-strength-shorts']);
 const retiredSectionTitles = new Set(['highest-priority realignment', 'watch list', 'what is already aligned', 'recommended sequence',
-  'position confirmations', 'position contradictions']);
+  'position confirmations', 'position contradictions', 'signal strength shorts']);
 const isRetiredSection = section => retiredSectionIds.has(section?.id)
   || retiredSectionTitles.has(text(section?.title).toLowerCase());
 const capturedSecurityName = value => /^(?:—|-|unavailable|unknown)$/i.test(text(value)) ? '' : text(value);
@@ -71,6 +73,14 @@ const comparisonColumnClass = (column, index) => index === 0 ? 'analyst-ticker-c
       : index === 3 ? 'analyst-current-column'
         : ['LOW', 'HIGH'].includes(column) ? 'analyst-boundary-column' : 'analyst-context-column';
 const boundaryTone = value => /^Higher\b/.test(value) ? 'positive' : /^Lower\b/.test(value) ? 'negative' : 'muted';
+// Signal Strength reads as Changes (Added green, Removed red) then Current holdings with a signed Return
+// (user-specified 2026-11-18).
+const isSignalStrength = section => section.id === 'signal-strength' || /^Signal Strength$/i.test(text(section.title));
+const signalStrengthCaption = block => block.columns.includes('Change') ? 'Changes'
+  : block.columns.includes('Since signal') ? 'Current holdings' : text(block.title);
+const signalStrengthTone = (column, value) => column === 'Change'
+  ? (/^Added\b/i.test(value) ? 'positive' : /^Removed\b/i.test(value) ? 'negative' : '')
+  : column === 'Since signal' ? (/^-|^−/.test(value) ? 'negative' : /^\+?\d*\.?\d*[1-9]/.test(value) ? 'positive' : '') : '';
 const coverageChangeLabel = value => {
   const label = text(value);
   if (/^No longer in published range table[.]?$/i.test(label)) return '- Risk Ranges';
@@ -93,15 +103,6 @@ const displayTable = block => {
         cellCitationIds: legacyComparison ? [[], ...cellCitationIds] : cellCitationIds };
     }),
   };
-};
-const sourceName = source => text(source.productLabel) || (text(source.product) ? source.product.replace(/-/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase()) : text(source.title) || 'Source');
-const sourceGroupKey = source => sourceName(source).toLowerCase().replace(/[\s_-]+/g, '');
-const sourceDate = source => {
-  const publishedAt = text(source.publishedAt);
-  const dateOnly = /^\d{4}-\d{2}-\d{2}T00:00:00(?:\.0+)?(?:Z|\+00:00)$/.test(publishedAt)
-    && publishedAt.slice(0, 10) === source.publicationDate;
-  const date = formatAnalystReportDate(dateOnly ? source.publicationDate : publishedAt || source.publicationDate);
-  return date === '—' ? '' : date;
 };
 // Clarify dates in saved captures without rewriting their evidence or values.
 const marketStructureDates = (section, blocks) => {
@@ -142,7 +143,6 @@ const dailySectionSlots = [
   { id: 'macro-show', title: 'Macro Show' },
   { id: 'company-catalysts', title: 'Company catalysts & sector research' },
   { id: 'signal-strength', title: 'Signal Strength' },
-  { id: 'signal-strength-shorts', title: 'Signal Strength Shorts' },
   { id: 'market-structure', title: 'Market structure & flows' },
 ];
 const modelSectionSlots = [
@@ -165,41 +165,11 @@ const stableDailySections = rollup => {
   ];
 };
 
-function highlightTextsFor(section, sourceId) {
-  const matches = ids => array(ids).includes(sourceId);
-  return blocksFor(section).flatMap(block => {
-    if (block.type === 'paragraph') return matches(block.citationIds) ? [block.text] : [];
-    return array(block.rows).flatMap(row => matches(row?.citationIds?.length ? row.citationIds : block.citationIds)
-      ? [...array(row?.cells).map(text).filter(Boolean), array(row?.cells).map(text).filter(Boolean).join(' ')] : []);
-  });
-}
-
-function Citations({ ids, section, sources, onCitation }) {
-  if (!onCitation || !Array.isArray(ids)) return null;
-  const groups = new Map();
-  [...new Set(ids)].map(id => sources.get(id)).filter(Boolean).forEach(source => {
-    const key = sourceGroupKey(source);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(source);
-  });
-  if (!groups.size) return null;
-  return <div className="analyst-daily-rollup-citations"><span>Sources: </span>{[...groups.entries()].map(([key, group], index) => {
-    const source = group[0];
-    const name = sourceName(source);
-    const detail = group.map(item => [item.title || name, sourceDate(item)].filter(Boolean).join(' · ')).join('; ');
-    return <React.Fragment key={key}>{index > 0 && ', '}<button type="button" title={detail} aria-label={`Source: ${group.length > 1 ? name : detail}`}
-      onClick={() => {
-        const relatedSources = group.map(item => ({ ...item, highlightTexts: [...new Set(highlightTextsFor(section, item.id))] }));
-        onCitation(source, { highlightTexts: relatedSources[0].highlightTexts, ...(group.length > 1 ? { relatedSources } : {}) });
-      }}>{name}</button></React.Fragment>;
-  })}</div>;
-}
-
 function ReportParagraph({ block }) {
   const title = portfolioTopicTitle(block.text, block.title) || text(block.title);
-  if (!title) return <p><AnalystSemanticText>{block.text}</AnalystSemanticText></p>;
+  if (!title) return <p className="analyst-report-prose"><AnalystSemanticText>{block.text}</AnalystSemanticText></p>;
   const body = block.text.startsWith(`${title} — `) ? block.text.slice(title.length + 3) : block.text;
-  return <div className="analyst-portfolio-topic-block">
+  return <div className="analyst-portfolio-topic-block analyst-report-prose">
     <h3 className="analyst-portfolio-topic analyst-process--title"><AnalystSemanticText>{title}</AnalystSemanticText></h3>
     <p><AnalystSemanticText>{body}</AnalystSemanticText></p>
   </div>;
@@ -257,6 +227,8 @@ function TableDisclosure({ block, children }) {
     : children();
 }
 
+const PENDING_WHEN_EMPTY = new Set(['pca-risk', 'factor-exposure']);
+
 export default function AnalystDailyRollup({ rollup, citations = [], onCitation, holdingsAsOf, stableLayout = false, loading = false }) {
   const sections = stableLayout ? stableDailySections(rollup) : dailyRollupSections(rollup);
   const securityNames = usePortfolioSecurityNames(sections.flatMap(section =>
@@ -271,11 +243,13 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
     const blocks = blocksFor(section);
     const dates = rollupDateline(section, blocks, sources, holdingsAsOf);
     const contentBlocks = blocks.filter(block => block !== dates.consumed);
-    // A source the user paused keeps its slot with a compact Pending state.
+    // A source the user paused keeps its slot with a compact Pending state; PCA risk and Factor exposure
+    // read Pending, not Unavailable, once loading ends with nothing (user-specified 2026-11-18).
     const paused = section.status === 'pending' && !contentBlocks.length;
+    const idle = paused || PENDING_WHEN_EMPTY.has(section.id) ? 'Pending' : 'Unavailable';
     const shownBlocks = contentBlocks.map(block => block.type === 'table' ? trendShiftTable(block) : block);
     const content = <>
-      {stableLayout && !contentBlocks.length && <p className="portfolio-review-section-status">{paused ? 'Pending' : loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Unavailable'}</p>}
+      {stableLayout && !contentBlocks.length && <p className="portfolio-review-section-status">{paused ? 'Pending' : loading ? <LoadingIndicator label="Loading…" size="sm" /> : idle}</p>}
       {shownBlocks.map((block, blockIndex) => block.type === 'paragraph'
         ? <ReportParagraph key={blockIndex} block={block} />
         : isResearchPositioning(section, block) ? <PositioningList key={blockIndex} block={block} />
@@ -285,7 +259,7 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
             {tableCaption(section, block) && <caption>{tableCaption(section, block)}</caption>}
             {isSecurityTable(block.columns) && <colgroup>{block.columns.map((column, index) => <col key={index}
               className={isSecurityComparison(block.columns) || index < 2 ? comparisonColumnClass(column, index) : undefined} />)}</colgroup>}
-            <thead><tr>{block.columns.map((column, index) => <th key={index} scope="col"><AnalystSemanticText>{columnLabel(column)}</AnalystSemanticText></th>)}</tr></thead>
+            <thead><tr>{block.columns.map((column, index) => <th key={index} scope="col"><AnalystSemanticText>{isSignalStrength(section) && column === 'Since signal' ? 'Return' : columnLabel(column)}</AnalystSemanticText></th>)}</tr></thead>
             <tbody>{block.rows.filter(row => Array.isArray(row?.cells) && row.cells.some(text)).map((row, rowIndex, rows) =>
               <React.Fragment key={rowIndex}>
               {block.groupRows && text(row.group) && row.group !== rows[rowIndex - 1]?.group && <tr className="analyst-research-group"><th scope="rowgroup" colSpan={block.columns.length}><AnalystSemanticText>{row.group}</AnalystSemanticText></th></tr>}
@@ -298,6 +272,8 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
                     ? <TickReading row={row} cellIndex={cellIndex} column={column} />
                   : block.trendShift && cellIndex === 2
                     ? <span className="analyst-trend-shift-value"><AnalystSemanticText context="Prior Trend">{row.trendShift[0]}</AnalystSemanticText>{' → '}<AnalystSemanticText context="Trend">{row.trendShift[1]}</AnalystSemanticText></span>
+                  : isSignalStrength(section) && signalStrengthTone(column, text(row.cells[cellIndex]))
+                    ? <span className={`analyst-process--${signalStrengthTone(column, text(row.cells[cellIndex]))}`}>{text(row.cells[cellIndex])}</span>
                   : hasRangeBoundaries(block.columns) && ['LOW', 'HIGH'].includes(column)
                     ? <span className={`analyst-range-boundary analyst-process--${boundaryTone(text(row.cells[cellIndex]))}`}>{text(row.cells[cellIndex]) || '—'}</span>
                   : <AnalystSemanticText context={section.id === 'hedgai-signals' && cellIndex > 1 ? `Position ${text(column)}` : text(column)}>{text(row.cells[cellIndex]) || '—'}</AnalystSemanticText>}
@@ -305,9 +281,7 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
               </React.Fragment>)}</tbody>
           </table>
         </div>}</TableDisclosure>)}
-      <Citations ids={[...array(section.citationIds), ...blocksFor(section).flatMap(block => [
-        ...array(block.citationIds), ...array(block.rows).flatMap(row => array(row?.citationIds)),
-      ])]} section={section} sources={sources} onCitation={onCitation} />
+      {/* No Sources footer: the section title already names the product (user-specified 2026-11-18). */}
       {section.supplemental?.length > 0 && <AnalystDailyRollup rollup={{ version: 1, sections: section.supplemental }}
         citations={[...sources.values()]} onCitation={onCitation} holdingsAsOf={holdingsAsOf} />}
     </>;
@@ -315,7 +289,8 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
       aria-busy={stableLayout && !contentBlocks.length && loading && !paused ? true : undefined}
       className={['portfolio-review-section', section.id === 'hedgai-signals' && 'analyst-hedgai-section', blocks.some(block => block.type === 'table' && hasRangeBoundaries(block.columns)) && 'has-range-boundaries'].filter(Boolean).join(' ')}>
       <h2 className="analyst-portfolio-title"><AnalystSemanticText>{sectionTitle(section)}</AnalystSemanticText></h2>
-      <PortfolioReviewDateline text={dates.text} period={dates.period} />
+      {/* An empty section has no dates to show, so no lone dash under its title. */}
+      {(contentBlocks.length > 0 || !stableLayout) && <PortfolioReviewDateline text={dates.text} period={dates.period} />}
       {stableLayout ? <div className="portfolio-review-section-body">{content}</div> : content}
     </section>;
   })}</div></PortfolioReviewTextProvider>;

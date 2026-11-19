@@ -50,6 +50,12 @@ import DashboardCallPanel from './workspace/DashboardCallPanel';
 import DashboardSystemPanel from './workspace/DashboardSystemPanel';
 import DashboardWorkflowPanel from './workspace/DashboardWorkflowPanel';
 
+// Long and short position counts for the Analyst status line, by the sign of the quantity.
+const holdingSides = holdings => (Array.isArray(holdings) && holdings.length ? {
+  long: holdings.filter(holding => Number(holding?.quantity) > 0).length,
+  short: holdings.filter(holding => Number(holding?.quantity) < 0).length,
+} : null);
+
 const loadReactMarkdownModule = () => import('react-markdown');
 const loadSystemReadinessModule = () => import('./SystemReadinessPanel');
 const loadWorkflowStatusModule = () => import('./WorkflowStatus');
@@ -1135,7 +1141,8 @@ const PortfolioDashboard = ({
         setShowAnalyst={setShowAnalyst}
       >
         <Suspense fallback={<AnalystLoading />}>
-              <AnalystPanel onClose={() => closeSidebarPanel('analyst', setShowAnalyst)} holdingsCount={portfolioData?.holdings?.length} />
+              <AnalystPanel onClose={() => closeSidebarPanel('analyst', setShowAnalyst)} holdingsCount={portfolioData?.holdings?.length}
+                holdingsSides={holdingSides(portfolioData?.holdings)} />
             </Suspense>
       </DashboardAnalystPanel>
 

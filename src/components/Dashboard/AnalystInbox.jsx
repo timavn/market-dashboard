@@ -120,6 +120,9 @@ function attentionContent(finding, now) {
       if (row.label === 'Current position' && !freshHoldings && finding.holdingsStale) return { ...row, text: staleHoldingLabel(payload) };
       if (row.label === 'Current position') return { ...row, text: !freshHoldings ? 'Unavailable' : holding.currentPosition.label === 'Closed' ? 'Not held' : holding.currentPosition.label };
       if (row.label === 'Position size') return { ...row, text: freshHoldings && holding.currentHolding?.label || 'Unavailable' };
+      // Another account's dated position ("Long (as of Nov 17)") reads in its side's color, like Current position.
+      const accountSide = row.label === 'Account position' && row.text.match(/^(Long|Short) (.+)$/);
+      if (accountSide) return { ...row, text: accountSide[2], side: accountSide[1] };
       return row;
     })
     // The position reads as its weight alone, colored by side ("1.97%" in green for Long);
@@ -135,7 +138,7 @@ function attentionContent(finding, now) {
   // A security card names its publications at a glance, right under the position.
   const sources = [...new Set((presentation.sourceLinks || []).filter(publishedSource).map(sourceName).filter(Boolean))];
   if (TICKER_KINDS.has(payload.kind) && sources.length && !rows.some(row => row.label === 'Source')) {
-    const at = rows.findIndex(row => row.label === 'Current position') + 1;
+    const at = rows.findIndex(row => row.label === 'Current position' || row.label === 'Account position') + 1;
     rows.splice(at, 0, { label: 'Source', text: sources.join(', ') });
   }
   return { ...presentation, rows: leadWithAction(rows), publicationDate: presentation.date || payload.publicationTime,

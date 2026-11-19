@@ -347,6 +347,8 @@ const safeSnapshot = (item) => {
     },
     article: item.article,
     htmlSource: item.htmlSource,
+    // The publication's email, so a citation from it can open the original (user-asked 2026-11-18).
+    gmailMessageId: item.gmailMessageId || item.sourceMessageId,
     reportType: item.reportType,
     warnings: item.warnings,
     sourceProduct: item.sourceProduct,

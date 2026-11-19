@@ -166,6 +166,21 @@ class ReviewSourcesTests(unittest.TestCase):
             self.assertTrue(items[product]["verifiedFromCapture"])
         self.assertEqual(evidence, original)
 
+    def test_portfolio_review_sources_leave_out_crypto_quant_and_signal_strength_shorts(self):
+        # Crypto Quant is the daily Bitcoin email, listed as Bitcoin Tracker; Signal Strength Shorts was a trial.
+        evidence = {"dailyResearch": {"date": "2026-10-07", "snapshots": {}}}
+        captured_at = "2026-10-07T14:30:24Z"
+        record = run("portfolio-review", {"dailyResearch": checkpoint("ready", asOf=captured_at)},
+                     createdAt=captured_at, updatedAt=captured_at)
+        products = [{"id": "crypto-quant", "label": "Crypto Quant"}, {"id": "bitcoin-trend-tracker", "label": "Bitcoin Tracker"},
+                    {"id": "signal-strength-shorts", "label": "Signal Strength Shorts"},
+                    {"id": "signal-strength", "label": "Signal Strength"}]
+        ids = [row["id"] for row in review_sources(record, Store(evidence), research_products=products)["items"]]
+        self.assertNotIn("crypto-quant", ids)
+        self.assertNotIn("signal-strength-shorts", ids)
+        self.assertIn("bitcoin-trend-tracker", ids)
+        self.assertIn("signal-strength", ids)
+
     def test_saved_portfolio_sources_recover_its_own_prior_signal_strength_without_newer_research(self):
         prior = {"date": "2026-10-06", "snapshotType": "signal-strength",
                  "publishedAt": "2026-10-06T00:00:00+00:00", "scrapedAt": "2026-10-06T15:32:52Z",

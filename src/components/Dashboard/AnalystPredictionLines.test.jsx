@@ -311,3 +311,16 @@ describe('settlement grid under the held lines', () => {
     expect(settlementGrid({ ...eth, held: [] })).toBeNull();
   });
 });
+
+test('spot sits by the level each row shows, not the strike Kalshi files it under', () => {
+  // Kalshi files "5.48% or above" under strike 5.47; spot 5.474 is below 5.48, so it goes above that row.
+  const line = (strike, shown) => ({ ticker: `T${strike}`, strike, subtitle: `${shown}% or above`, kalshiOdds: 0.5, sigmas: 0,
+    yes: { ask: 0.5, depth: 500 }, no: { ask: 0.5, depth: 500 } });
+  const market = { ...ust30, summary: { ...ust30.summary, price: 5.474 },
+    lines: { side: null, illiquid: 0, lines: [line(5.46, '5.47'), line(5.47, '5.48'), line(5.48, '5.49')] } };
+  render(<AnalystPredictionLines lines={parsePredictionLines(JSON.stringify({ markets: [market] }))} />);
+  fireEvent.click(screen.getByRole('button', { name: 'UST 30Y order book' }));
+  const ladder = screen.getByRole('table', { name: 'UST 30Y Kalshi lines' });
+  expect(within(ladder).getAllByRole('row').slice(1).map(row => row.cells[0].textContent))
+    .toEqual(['Above5.47%', 'Spot5.47%', 'Above5.48%', 'Above5.49%']);
+});

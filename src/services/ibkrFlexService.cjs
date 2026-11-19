@@ -131,6 +131,42 @@ function latestSnapshot(config) {
   }
 }
 
+// One account's open positions from the newest stored statement, summed by symbol
+// (the statement lists one row per lot). The statement is tens of megabytes, so the
+// parsed result is kept until a newer statement file appears.
+let accountPositionsCache = null;
+function readAccountPositions(accountId, config = getConfig()) {
+  const dir = path.join(config.dataDir, 'snapshots');
+  let signature = '';
+  try {
+    signature = fs.readdirSync(dir).filter((name) => SNAPSHOT_FILE_PATTERN.test(name))
+      .map((name) => `${name}:${fs.statSync(path.join(dir, name)).mtimeMs}`).sort().at(-1) || '';
+  } catch { return null; }
+  if (!accountPositionsCache || accountPositionsCache.signature !== signature || accountPositionsCache.dir !== dir) {
+    const snapshot = latestSnapshot(config);
+    const accounts = new Map((snapshot?.accounts || []).map((account) => {
+      const bySymbol = new Map();
+      for (const position of account.positions || []) {
+        const symbol = String(position.symbol || '').trim().toUpperCase();
+        const quantity = Number(position.quantity);
+        if (!symbol || !Number.isFinite(quantity)) continue;
+        const held = bySymbol.get(symbol) || { symbol, quantity: 0, marketValue: 0, assetCategory: position.assetCategory || null };
+        held.quantity += quantity;
+        held.marketValue += Number(position.marketValue) || 0;
+        bySymbol.set(symbol, held);
+      }
+      return [account.accountId, {
+        accountId: account.accountId,
+        asOf: flexStatementDate(account.reportDate || account.toDate || snapshot.toDate),
+        fetchedAt: snapshot.fetchedAt || null,
+        positions: [...bySymbol.values()].filter((position) => position.quantity !== 0),
+      }];
+    }));
+    accountPositionsCache = { signature, dir, accounts };
+  }
+  return accountPositionsCache.accounts.get(accountId) || null;
+}
+
 // History checks compare executions across every stored statement, and each
 // daily statement repeats almost a year of them. Holding every statement whole
 // grows without limit. For history, drop the sections no check reads, share
@@ -1271,11 +1307,13 @@ function commitPredictionPnlBackfill(previewHash) {
 }
 
 let activityTimer = null;
+let activityRetryTimer = null;
 function startFlexActivitySync({
   onSnapshot = null, logger = console, intervalMs = 24 * 60 * 60 * 1000,
-  startupMinIntervalMs = 6 * 60 * 60 * 1000, now = Date.now,
+  startupMinIntervalMs = 6 * 60 * 60 * 1000, now = Date.now, retries = 3, retryMs = 60 * 60 * 1000,
 } = {}) {
   if (activityTimer) return;
+  let retriesLeft = retries;
   const tick = async () => {
     const config = getConfig();
     if (!config.enabled || !config.configured) return;
@@ -1283,9 +1321,20 @@ function startFlexActivitySync({
     if (state?.authoritativeEnabled !== true) return;
     try {
       const result = await syncFlexActivity();
+      retriesLeft = retries;
       if (result.status === 'synced' && typeof onSnapshot === 'function') await onSnapshot(result);
     } catch (error) {
       logger.warn?.(`[IBKR Flex] automatic activity sync paused: ${scrubFlexError(error).message}`);
+      // One failed request used to cost a whole day of statements. Try again a few
+      // times, an hour apart, before leaving it to the next daily run.
+      if (retriesLeft > 0) {
+        retriesLeft -= 1;
+        clearTimeout(activityRetryTimer);
+        activityRetryTimer = setTimeout(tick, retryMs);
+        activityRetryTimer.unref?.();
+      } else {
+        retriesLeft = retries;
+      }
     }
   };
   // A restart soon after a successful sync has nothing new to fetch, and every
@@ -1303,6 +1352,8 @@ function startFlexActivitySync({
 function stopFlexActivitySync() {
   if (activityTimer) clearInterval(activityTimer);
   activityTimer = null;
+  clearTimeout(activityRetryTimer);
+  activityRetryTimer = null;
 }
 
 function getReconciliation({ date = todayLocal() } = {}) {
@@ -1364,6 +1415,7 @@ module.exports = {
   getConfig,
   getReconciliation,
   publicConfigStatus,
+  readAccountPositions,
   previewPredictionPnlBackfill,
   previewStoredPredictionPnlBackfill,
   readFlexActivityTrades,

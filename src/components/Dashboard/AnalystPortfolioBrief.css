@@ -70,6 +70,9 @@
 .portfolio-position-review small { color: var(--analyst-muted, #667085); font-size: 9px; }
 .portfolio-brief .portfolio-position-product { display: block; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
 .portfolio-position-product + .portfolio-position-product { margin-top: 2px; }
+/* Hover underlines the product and its call, never the date (user-specified 2026-11-18). */
+.portfolio-brief button.portfolio-position-product:hover { text-decoration: none; cursor: pointer; }
+.portfolio-brief button.portfolio-position-product:hover .portfolio-position-product-name { text-decoration: underline; }
 /* A wrapped call stays beside its date, so the dates read as one column. */
 .portfolio-position-product-call { display: flex; align-items: baseline; gap: 4px; }
 /* Fixed width fits the widest month ("May 31"), so every product name starts at the same x. */

@@ -18,8 +18,11 @@ export async function hydrateAnalystCapturedCitations(sources, { request, isCurr
       try {
         const payload = await request(`/conversations/${parts[0]}/citations/${parts[1]}/${parts[2]}`);
         if (!payload.citation || payload.citation.id !== source.id) throw new Error('Captured source unavailable.');
+        // The saved post may name the email only in the compact copy's stored path; keep that id when the
+        // full citation points at the web report instead.
+        const sourceMessageId = payload.citation.sourceMessageId || source.sourceMessageId;
         resolved = { ...source, ...payload.citation, highlightTexts: source.highlightTexts,
-          evidenceIncluded: true, evidenceLoading: false };
+          ...(sourceMessageId ? { sourceMessageId } : {}), evidenceIncluded: true, evidenceLoading: false };
       } catch {
         resolved = { ...source, evidenceLoading: false, evidenceError: true };
       }
