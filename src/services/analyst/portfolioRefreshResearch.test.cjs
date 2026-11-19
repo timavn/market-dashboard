@@ -257,7 +257,7 @@ test('rejects only unverified structured rows and makes their product coverage p
 });
 
 test('Crypto Quant retains its explicit product identity and shares only the published tracker field schema', async () => {
-  const source = snapshot('bitcoin-trend-tracker', '2026-08-12', {
+  const source = snapshot('bitcoin-trend-tracker', '2026-09-12', {
     stocks: { TLT: { ticker: 'TLT', trend: 'Bearish', buyTrade: 85, sellTrade: 95 } },
   }, { reportType: 'crypto-quant' });
   const result = await capture(paged([{ Items: [source] }]));
@@ -270,8 +270,8 @@ test('Crypto Quant retains its explicit product identity and shares only the pub
 });
 
 test('recognizes an archived original PDF as source provenance without requiring a Gmail HTML artifact', async () => {
-  const source = { snapshotType: 'bitcoin-trend-tracker', date: '2026-08-12', source: 'textract',
-    pdfSource: 'hedgeye-pdfs/2026-08-12/bitcoin-tracker-2026-08-12-123400.pdf',
+  const source = { snapshotType: 'bitcoin-trend-tracker', date: '2026-09-12', source: 'textract',
+    pdfSource: 'hedgeye-pdfs/2026-09-12/bitcoin-tracker-2026-09-12-123400.pdf',
     data: { stocks: { TLT: { ticker: 'TLT', trend: 'Bearish' } } } };
   const result = await capture(paged([{ Items: [source] }]));
   assert.equal(result.manifest.documentCount, 1);
@@ -280,7 +280,7 @@ test('recognizes an archived original PDF as source provenance without requiring
 });
 
 test('recognizes the source messages of a multi-email history backfill as provenance, but not an empty list', async () => {
-  const backfill = { snapshotType: 'inflation-nowcast', reportType: 'inflation-nowcast', date: '2026-08-09',
+  const backfill = { snapshotType: 'inflation-nowcast', reportType: 'inflation-nowcast', date: '2026-09-09',
     source: 'canonical-history-backfill', sourceKind: 'manual-history-backfill',
     sourceMessageIds: ['1987515dc62fdf60', '19933d8124065424'], data: { forecasts: [] } };
   const result = await capture(paged([{ Items: [backfill] }]));
@@ -388,4 +388,64 @@ test('validates capture scope and retains every symbol from books exceeding the 
   const result = await capture(paged([{ Items: [] }]), { symbols });
   assert.equal(result.requestedSymbols.length, 250);
   assert.equal(Object.keys(result.bySymbol).length, 250);
+});
+
+test('a cached archive re-reads only the latest week, then the whole table again after six hours or a failed read', async () => {
+  const { ARCHIVE_RECENT_DAYS, ARCHIVE_FULL_RESCAN_MS } = require('./portfolioRefreshResearch.cjs');
+  const old = snapshot('risk-ranges', '2026-09-10', { SPY: { ticker: 'SPY', lrr: 500, hrr: 520, trend: 'Bullish', trade: 'Bullish' } });
+  const recent = snapshot('risk-ranges', '2026-09-30', { SPY: { ticker: 'SPY', lrr: 590, hrr: 610, trend: 'Bullish', trade: 'Bearish' } });
+  const added = snapshot('the-macro-show', '2026-09-29', { notes: ['TLT came up on the show.'] });
+  let clock = Date.parse('2026-09-30T21:00:00Z');
+  let byDate = { '2026-09-30': [recent] };
+  let queryFails = false;
+  const calls = { scan: 0, query: [] };
+  const db = {
+    scan: () => { calls.scan += 1; return { promise: async () => ({ Items: [old, recent], ScannedCount: 2 }) }; },
+    query: params => { calls.query.push(params.ExpressionAttributeValues[':date']);
+      return { promise: async () => { if (queryFails) throw new Error('throttled'); return { Items: byDate[params.ExpressionAttributeValues[':date']] || [] }; } }; },
+  };
+  const run = () => capture(db, { cacheArchive: true, now: () => clock });
+  const first = await run();
+  assert.equal(calls.scan, 1);
+  assert.equal(first.manifest.documentCount, 2);
+  // A later capture reads the latest week by date and picks up a new publication; the older one stays from the cache.
+  byDate = { '2026-09-30': [recent], '2026-09-29': [added] };
+  clock += 60_000;
+  const second = await run();
+  assert.equal(calls.scan, 1);
+  assert.equal(calls.query.length, ARCHIVE_RECENT_DAYS);
+  assert.deepEqual(calls.query.slice(0, 2), ['2026-09-30', '2026-09-29']);
+  assert.equal(second.manifest.documentCount, 3);
+  assert.equal(second.scanComplete, true);
+  // A failed date read falls back to a full scan; so does a cache older than six hours.
+  queryFails = true;
+  await run();
+  assert.equal(calls.scan, 2);
+  queryFails = false;
+  clock += ARCHIVE_FULL_RESCAN_MS;
+  await run();
+  assert.equal(calls.scan, 3);
+  // Without the flag nothing is cached.
+  const plain = { ...db, scan: () => ({ promise: async () => ({ Items: [old], ScannedCount: 1 }) }) };
+  assert.equal((await capture(plain)).manifest.documentCount, 1);
+  assert.equal((await capture(plain)).manifest.documentCount, 1);
+});
+
+test('reviews the last 30 days of research, but keeps position actions from any date until reversed', async () => {
+  const { RESEARCH_WINDOW_DAYS } = require('./portfolioRefreshResearch.cjs');
+  assert.equal(RESEARCH_WINDOW_DAYS, 30);
+  const removed = { ticker: 'TLT', action: 'REMOVE', side: 'Long' };
+  const sources = [
+    snapshot('momo-tracker', '2026-08-31', { TLT: { trend: 'Bearish' } }),
+    snapshot('momo-tracker', '2026-09-01', { TLT: { trend: 'Bullish' } }),
+    snapshot('etf-pro', '2026-03-02', { changes: [removed], summary: 'TLT came up in the notes.' }),
+    snapshot('the-macro-show', '2026-04-02', { notes: ['TLT came up on the show.'] }),
+  ];
+  const result = await capture(paged([{ Items: sources }]));
+  const refs = result.bySymbol.TLT.references;
+  assert.deepEqual(refs.filter(ref => ref.productId === 'momo-tracker').map(ref => ref.marketDate), ['2026-09-01']);
+  assert.deepEqual(refs.filter(ref => ref.productId === 'etf-pro').map(ref => [ref.marketDate, ref.kind]), [['2026-03-02', 'etf_pro_change']]);
+  assert.equal(result.manifest.windowStart, '2026-09-01');
+  assert.equal(result.manifest.olderRowsSkipped, 2);
+  assert.equal(result.manifest.documentCount, 2);
 });

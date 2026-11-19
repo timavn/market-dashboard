@@ -654,25 +654,26 @@ test('empty and unsupported block types do not leave empty report headings', () 
 
 test('Portfolio Review keeps each research section through absent, partial, ready and unavailable captures without reserved heights', () => {
   const titles = ['PCA risk', 'Factor exposure', "Today's market drivers", 'Tick', 'Trend/Ranges/Coverage/Outbucket',
-    'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Signal Strength Shorts', 'Market structure & flows'];
+    'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Market structure & flows'];
   const ids = ['pca-risk', 'factor-exposure', 'market-drivers', 'hedgai-signals', 'risk-ranges',
-    'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'signal-strength-shorts', 'market-structure'];
+    'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'market-structure'];
   const { rerender } = render(<AnalystDailyRollup stableLayout loading />);
   const cards = screen.getAllByRole('region');
-  const datelines = cards.map(card => card.querySelector('.portfolio-review-dateline'));
   const bodies = cards.map(card => card.querySelector('.portfolio-review-section-body'));
   const assertUnchangedLayout = () => {
     expect(screen.getAllByRole('region').map(card => card.getAttribute('aria-label'))).toEqual(titles);
     screen.getAllByRole('region').forEach((card, index) => {
       expect(card).toBe(cards[index]);
       expect(card).toHaveClass('portfolio-review-section');
-      expect(card.querySelector('.portfolio-review-dateline')).toBe(datelines[index]);
+      // An empty section has no date line (no lone dash under its title); one with content dates it.
+      const dateline = card.querySelector('.portfolio-review-dateline');
+      expect(card.querySelector('.portfolio-review-section-status') ? dateline : null).toBeNull();
       expect(card.querySelector('.portfolio-review-section-body')).toBe(bodies[index]);
       expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
     });
   };
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(11);
+  expect(screen.getAllByText('Loading…')).toHaveLength(10);
   cards.forEach(card => {
     expect(card).toHaveAttribute('aria-busy', 'true');
     expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
@@ -685,7 +686,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
   const onCitation = jest.fn();
   rerender(<AnalystDailyRollup stableLayout loading rollup={partial} onCitation={onCitation} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(10);
+  expect(screen.getAllByText('Loading…')).toHaveLength(9);
   const drivers = screen.getByRole('region', { name: "Today's market drivers" });
   expect(drivers).not.toHaveAttribute('aria-busy');
   expect(within(drivers.querySelector('.portfolio-review-section-body')).getByText('Captured market reading.')).toBeVisible();
@@ -705,7 +706,9 @@ test('Portfolio Review keeps each research section through absent, partial, read
 
   rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [] }} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Unavailable')).toHaveLength(11);
+  // PCA risk and Factor exposure read Pending; the other eight read Unavailable.
+  expect(screen.getAllByText('Unavailable')).toHaveLength(8);
+  expect(screen.getAllByText('Pending')).toHaveLength(2);
   expect(screen.queryByText(/Captured reading|Captured market reading/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });
@@ -744,11 +747,12 @@ test('a paused PCA section keeps its slot with a compact Pending state while oth
   rerender(<AnalystDailyRollup stableLayout rollup={pending} />);
   expect(screen.getAllByRole('region').map(card => card.getAttribute('aria-label'))).toEqual(titles);
   expect(within(screen.getByRole('region', { name: 'PCA risk' })).getByText('Pending')).toBeVisible();
-  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Unavailable');
+  // Factor exposure reads Pending, not Unavailable, once loading ends with nothing.
+  expect(screen.getByRole('region', { name: 'Factor exposure' })).toHaveTextContent('Pending');
   rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [{ ...pending.sections[0],
     status: 'ready', blocks: [{ type: 'paragraph', text: 'Captured PCA reading.' }] }] }} />);
   expect(screen.getByText('Captured PCA reading.')).toBeVisible();
-  expect(screen.queryByText('Pending')).not.toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: 'PCA risk' })).queryByText('Pending')).not.toBeInTheDocument();
   expect(JSON.stringify(pending)).toBe(saved);
 });
 

@@ -9,7 +9,8 @@ const dynamodb = new DynamoDB.DocumentClient({ region: workerData.region || proc
 parentPort.on('message', async message => {
   if (message?.type !== 'capture' || !Number.isSafeInteger(message.id) || message.id < 1) return;
   try {
-    const value = await capturePortfolioRefreshResearch({ ...message.input, dynamodb });
+    // The worker lives across captures, so it keeps the archive read between Portfolio Reviews.
+    const value = await capturePortfolioRefreshResearch({ ...message.input, dynamodb, cacheArchive: true });
     parentPort.postMessage({ type: 'result', id: message.id, value });
   } catch {
     parentPort.postMessage({ type: 'failure', id: message.id });

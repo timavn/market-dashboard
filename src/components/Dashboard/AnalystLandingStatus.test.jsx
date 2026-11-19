@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import AnalystLandingStatus, { landingDate, landingQuads, usQuad } from './AnalystLandingStatus';
+import AnalystLandingStatus, { closeProblem, landingDate, landingQuads, usQuad } from './AnalystLandingStatus';
 import { useGlobalQuads } from '../../hooks/useGlobalQuads';
 
 jest.mock('../../hooks/useGlobalQuads', () => ({ useGlobalQuads: jest.fn() }));
@@ -51,7 +51,7 @@ test('the status line shows the game, holdings, the verified close, and the thre
     : { status: 'ready', sessionDate: '2026-10-15', capturedAt: '2026-10-15T20:31:00Z' }) }));
   render(<AnalystLandingStatus holdingsCount={42} />);
   const status = screen.getByRole('group', { name: 'Portfolio status' });
-  await waitFor(() => expect(status).toHaveTextContent("Friday, October 16th, '26SEASON 2026GAME 199/251HOLDINGS 42CLOSE 10/15 VERIFIEDGLOBAL QUAD Q3QUARTERLY QUAD Q2MONTHLY QUAD Q2'));
+  await waitFor(() => expect(status).toHaveTextContent("Friday, October 16th, '26SEASON 2026GAME 199/251HOLDINGS 42CLOSE 10/15 VERIFIEDGLOBAL QUAD Q3QUARTERLY QUAD Q2MONTHLY QUAD Q2"));
   expect(screen.getByText('10/15 VERIFIED')).toHaveClass('is-positive');
   expect(screen.getByText('Q3')).toHaveClass('is-q3');
   expect(screen.getAllByText('Q2').map(node => node.className)).toEqual(['is-q2', 'is-q2']);
@@ -59,4 +59,21 @@ test('the status line shows the game, holdings, the verified close, and the thre
   expect(global.fetch).toHaveBeenCalledTimes(2);
   window.localStorage.clear();
   jest.useRealTimers();
+});
+
+test('holdings show longs in green and shorts in red', async () => {
+  useGlobalQuads.mockReturnValue(quads(2));
+  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({}) }));
+  render(<AnalystLandingStatus holdingsCount={69} holdingsSides={{ long: 24, short: 45 }} />);
+  const status = screen.getByRole('group', { name: 'Portfolio status' });
+  await waitFor(() => expect(status).toHaveTextContent('HOLDINGS 69 (24/45)'));
+  expect(screen.getByText('24')).toHaveClass('is-long');
+  expect(screen.getByText('45')).toHaveClass('is-short');
+  expect(screen.getByText('HOLDINGS')).toHaveAttribute('title', '24 long, 45 short');
+});
+
+test('a close that failed on the Gateway names the Gateway', () => {
+  expect(closeProblem({ status: 'failed', reason: 'review_failed', errorCode: 'IBKR_GATEWAY_API_UNRESPONSIVE' })).toBe(
+    'Live holdings were never read: IB Gateway was not responding at every try from the 4:05pm ET capture until the 4:00am ET pre-market open.');
+  expect(closeProblem({ status: 'failed', reason: 'review_failed' })).toMatch(/usually IB Gateway was not responding/);
 });

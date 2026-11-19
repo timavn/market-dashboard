@@ -33,13 +33,27 @@ const clockLabel = now => {
 };
 // Why the post-close holdings capture did not verify, in plain words.
 const CLOSE_PROBLEMS = {
-  review_failed: 'The 4:30pm ET holdings capture ran but could not verify holdings (usually IB Gateway was not responding).',
-  review_start_failed: 'The 4:30pm ET holdings capture could not start.',
-  not_started: 'The 4:30pm ET holdings capture never started.',
-  current_holdings_unavailable: 'Live holdings were unavailable at the 4:30pm ET capture.',
-  historical_holdings_only: 'Only saved, not live, holdings were available at the 4:30pm ET capture.',
+  review_failed: 'The 4:05pm ET holdings capture ran but could not verify holdings (usually IB Gateway was not responding).',
+  review_start_failed: 'The 4:05pm ET holdings capture could not start.',
+  not_started: 'The 4:05pm ET holdings capture never started.',
+  current_holdings_unavailable: 'Live holdings were unavailable at the 4:05pm ET capture.',
+  historical_holdings_only: 'Only saved, not live, holdings were available at the 4:05pm ET capture.',
+  capture_start_unverified: 'The 4:05pm ET holdings capture could not be matched to that close.',
 };
-const closeProblem = close => close?.reason && (CLOSE_PROBLEMS[close.reason] || `The 4:30pm ET holdings capture did not verify (${close.reason}).`);
+// Named by the broker error when the run carries one: an unresponsive Gateway is the usual cause.
+const GATEWAY_ERRORS = {
+  IBKR_GATEWAY_API_UNRESPONSIVE: 'IB Gateway was not responding',
+  IBKR_GATEWAY_NOT_AUTHENTICATED: 'IB Gateway was not signed in',
+  IBKR_SERVICE_UNAVAILABLE: 'the IBKR service was down',
+};
+export const closeProblem = close => {
+  if (!close?.reason) return undefined;
+  const gateway = GATEWAY_ERRORS[close.errorCode];
+  if (close.reason === 'review_failed' && gateway) {
+    return `Live holdings were never read: ${gateway} at every try from the 4:05pm ET capture until the 4:00am ET pre-market open.`;
+  }
+  return CLOSE_PROBLEMS[close.reason] || `The 4:05pm ET holdings capture did not verify (${close.reason}).`;
+};
 // Holdings cannot change before the next pre-market open, so a later read is that close's holdings.
 const closeVerifiedNote = close => {
   const read = close.capturedAt ? clockLabel(new Date(close.capturedAt)) : null;
@@ -94,7 +108,10 @@ export function landingDate(date) {
 
 const QuadItem = ({ label, value, missing }) => <Item label={label} title={value?.title || missing} tone={value && `q${value.quad}`}>{value ? `Q${value.quad}` : '—'}</Item>;
 
-export default function AnalystLandingStatus({ holdingsCount }) {
+// "69 (24/45)": the count, then longs in green and shorts in red (user-specified 2026-11-18).
+const Sides = ({ sides }) => (sides ? <> (<span className="is-long">{sides.long}</span>/<span className="is-short">{sides.short}</span>)</> : null);
+
+export default function AnalystLandingStatus({ holdingsCount, holdingsSides }) {
   const snapshot = useGlobalQuads();
   const baseline = useLoaded(loadBaseline);
   const published = usePublishedQuadReadings();
@@ -107,7 +124,8 @@ export default function AnalystLandingStatus({ holdingsCount }) {
     <span className="analyst-landing-stat analyst-landing-date">{landingDate(today)}</span>
     <Item label="SEASON">{game.year}</Item>
     <Item label="GAME">{game.game}/{game.totalGames}</Item>
-    <Item label="HOLDINGS">{Number.isInteger(holdingsCount) ? holdingsCount : '—'}</Item>
+    <Item label="HOLDINGS" title={holdingsSides ? `${holdingsSides.long} long, ${holdingsSides.short} short` : undefined}>
+      {Number.isInteger(holdingsCount) ? <>{holdingsCount}<Sides sides={holdingsSides} /></> : '—'}</Item>
     <Item label="CLOSE" tone={verified ? 'positive' : close?.sessionDate ? 'warning' : undefined}
       title={verified ? closeVerifiedNote(close) : closeProblem(close)}>
       {close?.sessionDate ? `${sessionLabel(close.sessionDate)} ${verified ? 'VERIFIED' : 'UNVERIFIED'}` : '—'}

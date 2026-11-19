@@ -463,9 +463,12 @@
 .analyst-review-actions .analyst-quick-action--gm:disabled { flex-direction: column; gap: 2px; }
 .analyst-review-actions .analyst-quick-action--gm:disabled small { max-width: 150px; color: #8793a0; font-size: 5px; font-weight: 620; letter-spacing: 0; line-height: 1.25; }
 .analyst-message { max-width: 1080px; margin: 0 auto 28px; }
-.analyst-message--user { width: fit-content; max-width: min(680px, 86%); margin-right: 0; padding: 11px 15px; background: #e9eff5; border-radius: 14px 14px 3px 14px; }
+/* The user's message: a tight bubble, no "You" label (user-specified 2026-11-18). */
+.analyst-message--user { width: fit-content; max-width: min(680px, 86%); margin-right: 0; padding: 5px 10px; background: #e9eff5; border-radius: 9px 9px 2px 9px; }
+.analyst-message--user .analyst-markdown { line-height: 1.45; }
+.analyst-message--user .analyst-markdown p { margin: 0; }
 .analyst-message-role { display: block; margin-bottom: 7px; color: #6f7b8e; font-size: 6px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
-.analyst-message--assistant .analyst-message-role { display: none; }
+.analyst-message--assistant .analyst-message-role, .analyst-message--user .analyst-message-role { display: none; }
 .analyst-markdown { color: #253248; font-size: 9px; line-height: 1.7; }
 .analyst-markdown > :first-child { margin-top: 0; }
 .analyst-markdown > :last-child { margin-bottom: 0; }
@@ -895,6 +898,8 @@
 .analyst-landing-stat > span { color: var(--landing-ink); }
 .analyst-landing-stat > .is-positive { color: #1f7a4d; }
 .analyst-landing-stat > .is-warning { color: #9a5b00; }
+.analyst-landing-stat .is-long { color: #1f7a4d; }
+.analyst-landing-stat .is-short { color: #b42318; }
 .analyst-landing-stat > [class^="is-q"] { padding: 0 4px; border-radius: 2px; }
 .analyst-landing-stat > .is-q1 { background: var(--dashboard-quad-1, #059669); color: #fff; }
 .analyst-landing-stat > .is-q2 { background: var(--dashboard-quad-2, #78b33d); color: #18350d; }

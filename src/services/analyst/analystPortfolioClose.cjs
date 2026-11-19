@@ -1,4 +1,4 @@
-const { portfolioCaptureSession, easternDate } = require('./analystPolicy.cjs');
+const { portfolioCaptureSession, easternDate, easternMinutes } = require('./analystPolicy.cjs');
 const { nextTradingDateKey, previousTradingDateKey } = require('../../utils/usEquityMarketCalendar.cjs');
 
 const REVIEW_KIND = 'portfolio-review';
@@ -46,7 +46,10 @@ function createPortfolioCloseReview({ workspace, request, now = () => new Date()
     catch { return { ...result, ...identity, status: 'failed', reason: 'review_status_unavailable', retryAt: retryAt(saved) }; }
     const run = response.run || response;
     if (run.runId !== saved.runId || run.reviewKind !== REVIEW_KIND) return blocked('review_identity_unverified');
-    if (['failed', 'cancelled', 'interrupted'].includes(run.state)) return { ...result, ...identity, status: 'failed', reason: 'review_failed', retryAt: retryAt(saved) };
+    if (['failed', 'cancelled', 'interrupted'].includes(run.state)) {
+      const errorCode = run.errorCode || run.error?.code;
+      return { ...result, ...identity, status: 'failed', reason: 'review_failed', ...(errorCode ? { errorCode } : {}), retryAt: retryAt(saved) };
+    }
     if (run.state !== 'succeeded') return { ...result, ...identity, status: 'running' };
     const portfolio = run.dependencies?.portfolio;
     if (!['ready', 'partial'].includes(run.outcome) || !['ready', 'partial'].includes(portfolio?.status)
@@ -97,11 +100,15 @@ function createPortfolioCloseReview({ workspace, request, now = () => new Date()
 
   // The capture today's "Since previous close" compares against: the
   // preceding exchange session (Friday on a Monday; holidays skipped). It is
-  // evaluated as of 03:59 New York time before the next session (02:59 in
-  // winter), the end of that close's capture span.
+  // evaluated as of 03:59 New York time before the next session, the end of
+  // that close's capture span, in summer and winter alike: a fixed -04:00 made
+  // it 02:59 in winter, so a 3am retry read as starting in the future.
   async function baseline() {
     const sessionDate = previousTradingDateKey(easternDate(now()));
-    const result = await status({ at: new Date(`${nextTradingDateKey(sessionDate)}T03:59:00-04:00`) });
+    const next = nextTradingDateKey(sessionDate);
+    const at = ['-05:00', '-04:00'].map(offset => new Date(`${next}T03:59:00${offset}`))
+      .find(instant => easternMinutes(instant) === 239 && easternDate(instant) === next);
+    const result = await status({ at });
     return { ...result, sessionDate };
   }
 

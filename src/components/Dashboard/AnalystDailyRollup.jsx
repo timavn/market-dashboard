@@ -50,10 +50,11 @@ const isFactorTable = (section, block) => section.id === 'factor-exposure' && bl
 // The full-book refresh sections (and their older position-alignment names)
 // restated dated publisher actions with no current call; saved captures keep
 // the facts, but Portfolio Review no longer shows them.
+// Signal Strength Shorts was a trial subscription that ended (user-specified 2026-11-18).
 const retiredSectionIds = new Set(['refresh-realignment', 'refresh-watch-list', 'refresh-aligned', 'refresh-sequence',
-  'position-confirmations', 'position-contradictions']);
+  'position-confirmations', 'position-contradictions', 'signal-strength-shorts']);
 const retiredSectionTitles = new Set(['highest-priority realignment', 'watch list', 'what is already aligned', 'recommended sequence',
-  'position confirmations', 'position contradictions']);
+  'position confirmations', 'position contradictions', 'signal strength shorts']);
 const isRetiredSection = section => retiredSectionIds.has(section?.id)
   || retiredSectionTitles.has(text(section?.title).toLowerCase());
 const capturedSecurityName = value => /^(?:—|-|unavailable|unknown)$/i.test(text(value)) ? '' : text(value);
@@ -142,7 +143,6 @@ const dailySectionSlots = [
   { id: 'macro-show', title: 'Macro Show' },
   { id: 'company-catalysts', title: 'Company catalysts & sector research' },
   { id: 'signal-strength', title: 'Signal Strength' },
-  { id: 'signal-strength-shorts', title: 'Signal Strength Shorts' },
   { id: 'market-structure', title: 'Market structure & flows' },
 ];
 const modelSectionSlots = [
@@ -227,6 +227,8 @@ function TableDisclosure({ block, children }) {
     : children();
 }
 
+const PENDING_WHEN_EMPTY = new Set(['pca-risk', 'factor-exposure']);
+
 export default function AnalystDailyRollup({ rollup, citations = [], onCitation, holdingsAsOf, stableLayout = false, loading = false }) {
   const sections = stableLayout ? stableDailySections(rollup) : dailyRollupSections(rollup);
   const securityNames = usePortfolioSecurityNames(sections.flatMap(section =>
@@ -241,11 +243,13 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
     const blocks = blocksFor(section);
     const dates = rollupDateline(section, blocks, sources, holdingsAsOf);
     const contentBlocks = blocks.filter(block => block !== dates.consumed);
-    // A source the user paused keeps its slot with a compact Pending state.
+    // A source the user paused keeps its slot with a compact Pending state; PCA risk and Factor exposure
+    // read Pending, not Unavailable, once loading ends with nothing (user-specified 2026-11-18).
     const paused = section.status === 'pending' && !contentBlocks.length;
+    const idle = paused || PENDING_WHEN_EMPTY.has(section.id) ? 'Pending' : 'Unavailable';
     const shownBlocks = contentBlocks.map(block => block.type === 'table' ? trendShiftTable(block) : block);
     const content = <>
-      {stableLayout && !contentBlocks.length && <p className="portfolio-review-section-status">{paused ? 'Pending' : loading ? <LoadingIndicator label="Loading…" size="sm" /> : 'Unavailable'}</p>}
+      {stableLayout && !contentBlocks.length && <p className="portfolio-review-section-status">{paused ? 'Pending' : loading ? <LoadingIndicator label="Loading…" size="sm" /> : idle}</p>}
       {shownBlocks.map((block, blockIndex) => block.type === 'paragraph'
         ? <ReportParagraph key={blockIndex} block={block} />
         : isResearchPositioning(section, block) ? <PositioningList key={blockIndex} block={block} />
@@ -285,7 +289,8 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
       aria-busy={stableLayout && !contentBlocks.length && loading && !paused ? true : undefined}
       className={['portfolio-review-section', section.id === 'hedgai-signals' && 'analyst-hedgai-section', blocks.some(block => block.type === 'table' && hasRangeBoundaries(block.columns)) && 'has-range-boundaries'].filter(Boolean).join(' ')}>
       <h2 className="analyst-portfolio-title"><AnalystSemanticText>{sectionTitle(section)}</AnalystSemanticText></h2>
-      <PortfolioReviewDateline text={dates.text} period={dates.period} />
+      {/* An empty section has no dates to show, so no lone dash under its title. */}
+      {(contentBlocks.length > 0 || !stableLayout) && <PortfolioReviewDateline text={dates.text} period={dates.period} />}
       {stableLayout ? <div className="portfolio-review-section-body">{content}</div> : content}
     </section>;
   })}</div></PortfolioReviewTextProvider>;

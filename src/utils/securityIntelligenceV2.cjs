@@ -181,6 +181,8 @@ function provenance(reference, productId, marketDate) {
     publishedAt: reference?.publishedAt || null,
     sourceUrl: reference?.sourceUrl || null,
     sourceEventId: reference?.sourceEventId || null,
+    // The email the reading came from, so its Source can open the original (user-asked 2026-11-18).
+    ...(reference?.sourceMessageId ? { sourceMessageId: reference.sourceMessageId } : {}),
     qualityStatus: reference?.qualityStatus || null,
     referenceOnly: reference?.marketDate !== marketDate,
     executable: false,

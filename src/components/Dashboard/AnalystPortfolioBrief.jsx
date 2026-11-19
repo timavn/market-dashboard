@@ -160,11 +160,11 @@ function PositionProducts({ row, brief, onCitation }) {
     // Each call is its own line, led by the day its product published it.
     const content = product.readings.map((reading, index) => <span key={index} className="portfolio-position-product-call">
       <time className="portfolio-position-product-date" dateTime={reading.date}>{readingDay(reading.date)}</time>{' '}
-      <span><AnalystSemanticText context="Source position">{`${product.productLabel}: ${readingText(reading)}`}</AnalystSemanticText></span>
+      <span className="portfolio-position-product-name"><AnalystSemanticText context="Source position">{`${product.productLabel}: ${readingText(reading)}`}</AnalystSemanticText></span>
     </span>);
     const [citation] = product.citations;
     return citation && onCitation
-      ? <button type="button" key={product.product} className="portfolio-position-product" title={title} aria-label={`${text} · View source`} onClick={() => onCitation(citation, ...(product.citations.length > 1 ? [{ relatedSources: product.citations }] : []))}>{content}</button>
+      ? <button type="button" key={product.product} className="portfolio-position-product" title={title} aria-label={`${text} · View source`} onClick={event => onCitation(citation, { ...(product.citations.length > 1 ? { relatedSources: product.citations } : {}), anchor: event.currentTarget })}>{content}</button>
       : <span key={product.product} className="portfolio-position-product" title={title}>{content}</span>;
   });
 }
