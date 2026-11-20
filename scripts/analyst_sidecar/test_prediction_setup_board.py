@@ -3,7 +3,7 @@ import json
 import unittest
 
 from analyst_review_sources import review_sources
-from prediction_setup_board import render_setup_board, research_by_section
+from prediction_setup_board import _market_days_old, render_setup_board, research_by_section
 from review_runs_v2 import ReviewRunError, render_prediction_review
 
 AT = "2026-10-10T17:00:00Z"
@@ -79,12 +79,15 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertEqual(report.count("REF(US Dollar;DXY)"), 5)
         # Bias cells hold only the word; dates and products move to As of.
         self.assertIn("| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | RR(4100;4224;4216;0;) | "
-                      "ASOF(Oct 10 10:00;Sep 28,HedgAI;,;Oct 9,Risk Ranges) |", report)
+                      "ASOF(Oct 10 10:00;Sep 28,HedgAI;,;Oct 9,Risk Ranges;100) |", report)
+        # Sep 28 is nine market days before the Oct 10 board, so its Tick is flagged (;100); Oct 6 is four and is not.
+        self.assertEqual([_market_days_old(day, "2026-11-20") for day in ("2026-11-20", "2026-11-16", "2026-11-14", "2026-11-13", "bad")],
+                         [0, 4, 5, 5, None])
         self.assertIn("| WTI | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(87.14;93.03;91.85;2;) | ASOF(N/A;,;,;,Risk Ranges) |", report)
         self.assertIn("| MKT(Nasdaq-100;COMPQ range) |", report)
         # HedgAI's SHY Buy is a yield-down reading: shown as Bearish, never Buy or Wait.
         self.assertIn("| UST 2Y | BIAS(Bearish;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(4.73;4.96;4.75;2;%) | "
-                      "ASOF(Oct 8;Sep 28,HedgAI SHY;,;,Risk Ranges) |", report)
+                      "ASOF(Oct 8;Sep 28,HedgAI SHY;,;,Risk Ranges;100) |", report)
         self.assertNotIn("Wait", report)
         self.assertNotIn("Buy", report)
         self.assertIn("| Ethereum | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(2406;2825;2300;0;) | ASOF(N/A;,;,;,Crypto Quant) |", report)
@@ -97,7 +100,7 @@ class SetupBoardRenderTests(unittest.TestCase):
                                setup={"side": None, "reason": "No comparable range position"})
         report = render_setup_board(data)
         self.assertIn("| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | RR(4100;4224;;0;) | "
-                      "ASOF(N/A;Sep 28,HedgAI;,;Oct 9,Risk Ranges) |", report)
+                      "ASOF(N/A;Sep 28,HedgAI;,;Oct 9,Risk Ranges;100) |", report)
         self.assertIn("Gold price withheld: GC=F returned 41.5, inconsistent with its Risk Range.", report)
 
     def test_morning_research_adds_alpha_code_column_and_research_block(self):

@@ -185,16 +185,36 @@ def _bias_cell(direction: Any) -> str:
     return f"BIAS({DIRECTION.get(direction) or NA};;)"
 
 
-def _as_of_cell(observed: Any, readings: list[tuple[Any, Any]]) -> str:
+# A reading this many market days old may no longer hold: the report marks its date so it is
+# checked again before it carries a large position (user-specified 2026-11-20).
+AGING_MARKET_DAYS = 5
+
+
+def _market_days_old(date: Any, market_date: Any) -> int | None:
+    """Weekdays from a reading's publication day to the board's market day; holidays are not known here."""
+    try:
+        start, end = (datetime.fromisoformat(str(value)[:10]).date() for value in (date, market_date))
+    except ValueError:
+        return None
+    if end <= start:
+        return 0
+    whole_weeks, rest = divmod((end - start).days, 7)
+    return whole_weeks * 5 + sum(1 for offset in range(1, rest + 1) if (start.weekday() + offset) % 7 < 5)
+
+
+def _as_of_cell(observed: Any, readings: list[tuple[Any, Any]], market_date: Any = None) -> str:
     """Token the report UI stacks as pull time, then Tick/Trade/Trend publication date and product.
 
-    ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct)
+    ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct[;aging])
+    aging is one digit per reading, 1 when it is AGING_MARKET_DAYS or more market days old; it is
+    left out when none is.
     """
     clean = lambda value: re.sub(r"[;,()|]", " ", str(value or "")).strip()
     pulled = _pacific(observed)
     parts = [clean(pulled if pulled != DASH else NA)]
     parts += [f"{clean(_short_date(date) if date else '')},{clean(product)}" for date, product in readings]
-    return f"ASOF({';'.join(parts)})"
+    aging = "".join("1" if (_market_days_old(date, market_date) or 0) >= AGING_MARKET_DAYS else "0" for date, _ in readings)
+    return f"ASOF({';'.join(parts + ([aging] if '1' in aging else []))})"
 
 
 def _market_cell(row: dict[str, Any]) -> str:
@@ -472,6 +492,8 @@ def render_setup_board(board: dict[str, Any]) -> str:
     # Boards captured with ETF volume add it after Trend; the report draws it under Tick, Trade and Trend.
     with_volume = isinstance(board.get("volumeWindows"), dict)
     research_blocks = research_by_section(board) if with_research else {}
+    # Saved boards without a market day fall back to the day they were captured.
+    market_date = board.get("marketDate") or str(board.get("asOf") or "")[:10]
     lines = []
     for section_id, label, members in _section_rows(board, rows):
         if not members:
@@ -514,7 +536,8 @@ def render_setup_board(board: dict[str, Any]) -> str:
                           _as_of_cell(price.get("asOf"), [
                               (tick.get("date"), f"HedgAI {tick.get('ticker') or ''}".strip() if tick else None),
                               (trade.get("date"), trade.get("source")),
-                              (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)])])
+                              (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)],
+                              market_date)])
         lines += _table(["Market", "Tick", "Trade", "Trend", *(["Volume"] if with_volume else []), "Price and Risk Range",
                          *(["Structure"] if sessions else []), "Status"], table)
         notes = []

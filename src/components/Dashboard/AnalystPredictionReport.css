@@ -209,6 +209,9 @@
 .analyst-prediction-as-of-line { display: flex; align-items: baseline; gap: 4px; }
 .analyst-prediction-as-of-line__product { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .analyst-prediction-as-of-line__date { flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
+/* A reading five or more market days old: its date turns amber, nothing else changes
+   (user-specified 2026-11-20). */
+.analyst-prediction-as-of-line.is-aging .analyst-prediction-as-of-line__date { color: var(--analyst-caution, #925b0a); }
 /* The US Dollar reference row sits first in each market table, set apart by a thin money-green outline. */
 .analyst-panel-v2 .analyst-prediction-report .is-range-board tr:has(.analyst-prediction-reference-cell) {
   outline: 1px solid var(--analyst-money-green, #2e7d32);

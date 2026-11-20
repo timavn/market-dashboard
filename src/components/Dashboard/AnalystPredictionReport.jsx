@@ -19,8 +19,10 @@ const shortReading = /^(?:Last known\s+)?(?:Long|Short|Buy|Wait|Watch|Bullish|Be
 // the 20-session Z-score as a third field, and NAME(name;;z) carries it for a market with no sub-label.
 const BIAS_TOKEN = /^BIAS\((Bullish|Bearish|Neutral|N\/A);([^;()]*);([^;()]*)\)$/;
 const MARKET_TOKEN = /^(MKT|REF)\(([^;()]+);([^;()]+)\)$|^(MKT|REF|NAME)\(([^;()]+);([^;()]*);([-+]\d+(?:\.\d+)?)?\)$/;
-// ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct)
-const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*)\)$/;
+// ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct[;aging])
+// aging: one digit per reading, 1 when it is five or more market days old.
+const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*)(?:;([01]{3}))?\)$/;
+const AGING_NOTE = '5+ market days old · re-check before sizing';
 // ALPHA(trade;trend;tradeRel;trendRel;unit;approximate;product): this morning's Alpha Code with the price above or below each level.
 const ALPHA_TOKEN = /^ALPHA\(([^;()]*);([^;()]*);(above|below|at|);(above|below|at|);(%?);([01]);([^;()]*)\)$/;
 // STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone[;direction]]): the Risk Range
@@ -200,11 +202,13 @@ function cellFor({ node, children }) {
   const asOf = text.match(AS_OF_TOKEN);
   if (asOf) {
     const [, pulled, ...rest] = asOf;
-    const lines = [['Ti', rest[0], rest[1]], ['Ta', rest[2], rest[3]], ['Te', rest[4], rest[5]]];
-    const label = [pulled, ...lines.map(([key, date, product]) => `${key} ${date ? `${date} ${product}`.trim() : 'N/A'}`)].join(' · ');
+    const aging = index => Boolean(rest[index * 2]) && rest[6]?.[index] === '1';
+    const lines = [['Ti', rest[0], rest[1], aging(0)], ['Ta', rest[2], rest[3], aging(1)], ['Te', rest[4], rest[5], aging(2)]];
+    const label = [pulled, ...lines.map(([key, date, product, old]) => `${key} ${date ? `${date} ${product}`.trim() : 'N/A'}${old ? ' (5+ market days old)' : ''}`)].join(' · ');
     return <td className="analyst-prediction-as-of-cell" title={label}>
       <span className="analyst-prediction-stack analyst-process--key analyst-prediction-as-of-pulled">{pulled}</span>
-      {lines.map(([key, date, product]) => <span key={key} className="analyst-prediction-stack analyst-prediction-as-of-line">
+      {lines.map(([key, date, product, old]) => <span key={key} className={`analyst-prediction-stack analyst-prediction-as-of-line${old ? ' is-aging' : ''}`}
+        title={old ? AGING_NOTE : undefined}>
         <span className="analyst-prediction-stack__key">{key}</span>{' '}
         <span className="analyst-prediction-as-of-line__product analyst-prediction-stack--muted">{date ? product : ''}</span>{date && product ? ' ' : ''}
         <span className={`analyst-prediction-as-of-line__date${date ? '' : ' analyst-prediction-stack--muted'}`}>{date ? padDay(date) : 'N/A'}</span>

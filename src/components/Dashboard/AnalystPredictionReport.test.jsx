@@ -230,6 +230,13 @@ test('the Dollar reference row and As of cells stack pull time with each signal 
   expect([...bias.children].map(span => span.textContent)).toEqual(['Bullish']);
   expect([...asOf.children].map(span => span.textContent))
     .toEqual(['Oct 13 06:41', 'Ti HedgAI GLD Sep 09', 'Ta N/A', 'Te Risk Ranges Oct 13']);
+  expect(container.querySelector('.is-aging')).toBeNull();
+  // A reading five or more market days old is flagged: only that line's date turns amber.
+  const aged = render(<table><tbody><tr>{cell('ASOF(Nov 20 06:41;Oct 20,HedgAI CPER;Oct 14,Macro Show;Nov 20,Risk Ranges;110)')}</tr></tbody></table>).container;
+  expect([...aged.querySelectorAll('.analyst-prediction-as-of-line')].map(line => line.classList.contains('is-aging'))).toEqual([true, true, false]);
+  expect(aged.querySelector('.is-aging')).toHaveAttribute('title', '5+ market days old · re-check before sizing');
+  expect([...aged.querySelector('td').children].map(span => span.textContent))
+    .toEqual(['Nov 20 06:41', 'Ti HedgAI CPER Oct 20', 'Ta Macro Show Oct 14', 'Te Risk Ranges Nov 20']);
   expect(container).not.toHaveTextContent(/ASOF\(|REF\(/);
 });
 
