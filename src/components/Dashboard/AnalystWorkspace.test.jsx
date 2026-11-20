@@ -3501,7 +3501,9 @@ test('a Predictive review refreshes in place from the bar above Sources, dated b
     ? Promise.resolve({ conversation: { ...saved, activeTurn: { id: 'refresh-turn', state: 'running' } } }) : request(path, body, method));
   render(<AnalystPanel />);
   fireEvent.click(await historyRows().findByRole('button', { name: 'Open conversation: Predictive Markets Review' }));
+  // The bar holds its place, disabled, until the saved review loads.
   const refresh = await screen.findByRole('button', { name: 'Refresh Predictive Markets Review' });
+  await waitFor(() => expect(refresh).toBeEnabled());
   const time = refresh.parentElement.querySelector('time');
   expect(time).toHaveAttribute('dateTime', '2026-10-28T16:46:00Z');
   expect(time).toHaveTextContent(/Oct 28.* 09:46 PDT/);

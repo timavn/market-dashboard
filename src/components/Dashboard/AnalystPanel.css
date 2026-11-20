@@ -1123,6 +1123,9 @@
 .analyst-chat-title::before { content: '/'; margin-right: 10px; color: #a3adbb; font-weight: 400; }
 .analyst-panel-v2 .analyst-message-list {
   display: grid;
+  /* One column exactly as wide as the list: a wide table inside one message never widens the Sources menu and the
+     rest of the report past the panel's edge. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   width: 100%;
   max-width: 820px;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { analystWorkspaceApi } from '../services/analyst/analystClient';
 import { reuseAnalystEvidence } from '../services/analyst/analystEvidenceIdentity';
-import { pendingReviewSourceItems } from '../services/analyst/analystReviewSourceCatalog.cjs';
+import { loadingReviewSourceItems } from '../services/analyst/analystReviewSourceRoster';
 
 const sameCapturedReview = (entry, conversationId, turnId, captureId, running) => entry?.turnId === turnId
   && (entry?.running === running || (entry?.running && !running))
@@ -32,7 +32,7 @@ const pendingRoster = (items, reviewKind) => Array.isArray(items) && items.lengt
   ? items.map(({ id, label, requiresIbGateway, status, diagnostic, detail }) => (status === 'pending'
     ? { id, label, status, observedAt: null, ...(diagnostic ? { diagnostic } : {}), ...(detail ? { detail } : {}) }
     : { id, label, status: 'checking', observedAt: null, ...(requiresIbGateway ? { requiresIbGateway: true } : {}) }))
-  : pendingReviewSourceItems(reviewKind);
+  : loadingReviewSourceItems(reviewKind);
 
 export default function useAnalystReviewSources({ conversationId, turnId, captureId, reviewKind, active = true, running = false, refreshing = false, revalidationKey = 0 }) {
   // Sources belong to the saved review. Keep them in workspace memory, just

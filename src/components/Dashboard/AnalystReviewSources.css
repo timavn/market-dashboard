@@ -11,6 +11,8 @@
   font-variant-numeric: tabular-nums;
 }
 .analyst-review-refresh time { color: var(--analyst-ink, #172033); }
+/* Holds the As of line's height before the review's time is known. */
+.analyst-review-refresh .analyst-review-refresh-reserved { visibility: hidden; }
 .analyst-review-refresh-button {
   display: inline-flex;
   align-items: center;
