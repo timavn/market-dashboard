@@ -54,6 +54,9 @@
 }
 
 /* A Predictive Markets board with Structure needs about 845px of table; the window grows to fit it, never shrinks. */
+/* A Predictive Markets Review takes that width from its first loading frame, so the window and its Sources
+   menu never jump when the board arrives (user-specified 2026-11-19). */
+.dashboard-workspace-window--analyst:has(.analyst-transcript-v2.is-prediction-review),
 .dashboard-workspace-window--analyst:has(.is-range-board.has-structure.has-z) {
   --dashboard-window-width: max(var(--analyst-panel-width, 440px), 900px);
 }

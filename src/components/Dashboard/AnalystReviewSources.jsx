@@ -6,6 +6,7 @@ import { useSurfaceActivity } from '../common/PersistentSurface';
 import { verificationSourceDate } from './analystVerificationSources';
 import { pendingReviewSourceItems } from '../../services/analyst/analystReviewSourceCatalog.cjs';
 import { reviewSourceDisplayItems } from '../../services/analyst/analystReviewSourcePresentation.cjs';
+import { loadingReviewSourceItems, rememberReviewSourceRoster } from '../../services/analyst/analystReviewSourceRoster';
 import AnalystSpinner from './AnalystSpinner';
 import LoadingIndicator from '../common/LoadingIndicator';
 import './AnalystReviewSources.css';
@@ -144,15 +145,22 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
   // its unfinished rows into a terminal Unavailable (AGENTS.md).
   const settled = settledStates.has(sources?.state);
   const acquiring = !settled && !readFailed && (loading || activeStates.has(sources?.state) || sources?.basis === 'pending');
-  const pendingItems = reviewSourceDisplayItems(pendingReviewSourceItems(reviewKind));
+  // The loading rows are the last loaded review's rows, so the menu keeps its rows and size when it settles.
+  const pendingItems = reviewSourceDisplayItems(loadingReviewSourceItems(reviewKind));
   // A queued or partial acquisition may publish no rows yet. Keep the same
   // reserved source slots until each captured result arrives, without changing
   // any explicit failure or adding evidence to a settled historical capture.
   // Without rows, only a settled capture says its sources were not checked; a
   // failed read leaves them unchecked, never Unavailable (AGENTS.md).
+  // Until the first result arrives, a loading list is only a reservation, and it can name rows the loaded
+  // review never shows. The reserved rows stand in for it, so those rows never flash in and out.
+  const reserved = new Set(pendingItems.map(item => item.id));
+  const reservation = acquiring && reserved.size > 0 && Array.isArray(sources?.items)
+    && sources.items.every(item => item?.status === 'checking');
   const suppliedItems = Array.isArray(sources?.items)
-    ? [...(acquiring ? pendingItems : []), ...reviewSourceDisplayItems(sources.items)]
-    : reviewSourceDisplayItems(pendingReviewSourceItems(reviewKind, settled ? 'missing' : 'checking'));
+    ? [...(acquiring ? pendingItems : []), ...reviewSourceDisplayItems(sources.items)
+      .filter(item => !reservation || reserved.has(item.id))]
+    : settled ? reviewSourceDisplayItems(pendingReviewSourceItems(reviewKind, 'missing')) : pendingItems;
   const sourceOrder = new Map(pendingItems.map((item, index) => [item.id, index]));
   const items = [...new Map(suppliedItems
     .filter(item => item?.id && item?.label).map(item => [item.id, item])).values()]
@@ -184,6 +192,13 @@ export default function AnalystReviewSources({ sources, loading = false, readFai
   useEffect(() => {
     if (!openItem) closeExplanation();
   }, [openItem, closeExplanation]);
+
+  // A loaded review's rows become the next load's reserved rows.
+  const loadedRoster = settled && Array.isArray(sources?.items) ? JSON.stringify(items.map(({ id, label }) => ({ id, label }))) : '';
+  useEffect(() => {
+    if (loadedRoster) rememberReviewSourceRoster(reviewKind, sources, JSON.parse(loadedRoster));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the roster string and capture identify the loaded review.
+  }, [loadedRoster, reviewKind, captureKey, sources?.state, sources?.capturedAt]);
 
   return (
     <section className="analyst-review-sources" aria-label="Review sources" aria-busy={checking} title={presentAnalystReportDates(sources?.detail) || undefined}>

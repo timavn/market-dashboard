@@ -17,6 +17,8 @@
 /* "As of" reads black; its date is blue like every other date in the review. */
 .analyst-review-refresh > span { color: var(--analyst-ink, #172033); }
 .analyst-review-refresh time { color: var(--portfolio-review-blue, #2563eb); }
+/* Holds the As of line's height before the review's time is known. */
+.analyst-review-refresh .analyst-review-refresh-reserved { visibility: hidden; }
 .analyst-review-refresh-button {
   display: inline-flex;
   align-items: center;

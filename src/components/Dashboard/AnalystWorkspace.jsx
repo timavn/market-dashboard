@@ -1429,18 +1429,27 @@ export default function AnalystWorkspace({ onClose, holdingsCount, holdingsSides
           <button type="button" className="analyst-chat-back" aria-label="Back to The Analyst" onClick={() => choose(null)}><ArrowLeft size={14} /><span>The Analyst</span></button>
           {selectedTitle && <span className="analyst-chat-title">{selectedTitle}</span>}
         </header>}
-        <div ref={transcript} onScroll={e => { const node = e.currentTarget; followReply.current = !sourcesAnchoredReview(selectedKind) && responsePending && node.scrollHeight - node.scrollTop - node.clientHeight < 80; scrolls.current[selected || 'landing'] = node.scrollTop; clearTimeout(scrollSaveTimer.current); scrollSaveTimer.current = setTimeout(() => save('scrolls', scrolls.current), 150); }} className={`analyst-transcript analyst-transcript-v2${selected || selectedSend || launchingReview ? '' : ' is-landing'}${sourcesAnchoredReview(launchingReview?.kind || selectedKind) ? ' is-composer-width' : ''}`} role="log" aria-label="Conversation" aria-live="polite">
-          {launchingReview ? <div className="analyst-message-list"><AnalystReviewSources reviewKind={launchingReview.kind} loading phase="Starting…" />
+        <div ref={transcript} onScroll={e => { const node = e.currentTarget; followReply.current = !sourcesAnchoredReview(selectedKind) && responsePending && node.scrollHeight - node.scrollTop - node.clientHeight < 80; scrolls.current[selected || 'landing'] = node.scrollTop; clearTimeout(scrollSaveTimer.current); scrollSaveTimer.current = setTimeout(() => save('scrolls', scrolls.current), 150); }} className={`analyst-transcript analyst-transcript-v2${selected || selectedSend || launchingReview ? '' : ' is-landing'}${sourcesAnchoredReview(launchingReview?.kind || selectedKind) ? ' is-composer-width' : ''}${(launchingReview?.kind || selectedKind) === 'prediction-markets-review' ? ' is-prediction-review' : ''}`} role="log" aria-label="Conversation" aria-live="polite">
+          {launchingReview ? <div className="analyst-message-list">
+            {/* The Refresh stack holds its place from the first frame, so Sources never drops when the review opens. */}
+            {sourcesAnchoredReview(launchingReview.kind) && <div className="analyst-review-refresh">
+              <span className="analyst-review-refresh-reserved" aria-hidden="true">As of —</span>
+              <button type="button" className="analyst-review-refresh-button" aria-label={`Refresh ${selectedTitle}`} title="Refresh" disabled>
+                <RefreshCw size={12} aria-hidden="true" />
+              </button>
+            </div>}
+            <AnalystReviewSources reviewKind={launchingReview.kind} loading phase="Starting…" />
             {launchingReview.kind === 'portfolio-review' && <PortfolioReviewPlaceholder />}</div>
             : !selected && !selectedSend ? <header className="analyst-landing">
               <div className="analyst-landing-title"><h1>The Analyst</h1></div>
               <AnalystLandingStatus holdingsCount={holdingsCount} holdingsSides={holdingsSides} />
             </header>
               : <div className="analyst-message-list">
-                {refreshable && <div className="analyst-review-refresh">
-                  {snapshotAt && <span>As of <time dateTime={snapshotAt}>{formatAnalystReportDate(snapshotAt, { year: false })}</time></span>}
+                {sourcesAnchoredReview(selectedKind) && <div className="analyst-review-refresh">
+                  {snapshotAt ? <span>As of <time dateTime={snapshotAt}>{formatAnalystReportDate(snapshotAt, { year: false })}</time></span>
+                    : <span className="analyst-review-refresh-reserved" aria-hidden="true">As of —</span>}
                   <button type="button" className="analyst-review-refresh-button" aria-label={`Refresh ${selectedTitle}`}
-                    title="Refresh" disabled={running || refreshingIds.includes(selected)} onClick={() => refreshReview(conversation)}>
+                    title="Refresh" disabled={!refreshable || running || refreshingIds.includes(selected)} onClick={() => refreshReview(conversation)}>
                     <RefreshCw size={12} aria-hidden="true" />
                   </button>
                 </div>}
