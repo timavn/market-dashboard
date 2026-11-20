@@ -752,9 +752,9 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: market-dashboard-gmail-v2-macro-show-window
-      Description: Gmail history poll every minute while The Macro Show summary email is due.
+      Description: Gmail history poll every minute 09:00-16:59 New York on weekdays (Real-Time Alerts and The Macro Show).
       State: !Ref GmailScheduleState
-      ScheduleExpression: cron(* 10-11 ? * MON-FRI *)
+      ScheduleExpression: cron(* 9-16 ? * MON-FRI *)
       ScheduleExpressionTimezone: America/New_York
       FlexibleTimeWindow:
         Mode: 'OFF'

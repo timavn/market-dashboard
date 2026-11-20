@@ -2425,39 +2425,47 @@ def _extract_etf_pro_full_book(text: str) -> Optional[Dict[str, Any]]:
     }
 
 
+# "SPX Refreshed Risk Range = 6899-7367" (also "refreshed SPX Risk Range"): a Real-Time Alert can
+# republish a ticker's range intraday. Any ticker is read; the ingestor applies it as a revision of that
+# ticker's current Risk Ranges row (apply_refreshed_risk_ranges), never as a new publication.
+_REFRESHED_RANGE_NUMBER = r"\$?([\d,]+(?:\.\d+)?)\s*[-–—]\s*\$?([\d,]+(?:\.\d+)?)"
+_REFRESHED_RANGE_PATTERNS = (
+    re.compile(r"\b([A-Z][A-Z0-9/^.]{0,9})\s+refreshed\s+risk\s+range\s*(?:=|:|is|of)?\s*" + _REFRESHED_RANGE_NUMBER, re.IGNORECASE),
+    re.compile(r"\brefreshed\s+([A-Z][A-Z0-9/^.]{0,9})\s+risk\s+range\s*(?:=|:|is|of)?\s*" + _REFRESHED_RANGE_NUMBER, re.IGNORECASE),
+)
+
+
+def _extract_refreshed_risk_ranges(text: str) -> List[Dict[str, Any]]:
+    found: Dict[str, Dict[str, Any]] = {}
+    for pattern in _REFRESHED_RANGE_PATTERNS:
+        for match in pattern.finditer(text or ""):
+            ticker = match.group(1).upper()
+            if ticker in {"THE", "A", "AN", "NEW", "OUR", "MY"}:
+                continue
+            low = float(match.group(2).replace(",", ""))
+            high = float(match.group(3).replace(",", ""))
+            if low <= 0 or high <= 0 or low >= high:
+                continue
+            found.setdefault(ticker, {
+                "ticker": ticker,
+                "lrr": low,
+                "hrr": high,
+                "label": f"{ticker} Refreshed Risk Range",
+            })
+    return list(found.values())
+
+
 def _extract_refreshed_spx_risk_range(text: str) -> Optional[Dict[str, Any]]:
-    if not text or not re.search(
-        r"(?:SPX\s+refreshed\s+risk\s+range|refreshed\s+SPX\s+risk\s+range)",
-        text,
-        re.IGNORECASE,
-    ):
-        return None
-
-    match = re.search(
-        r"(?:SPX\s+refreshed\s+risk\s+range|refreshed\s+SPX\s+risk\s+range)"
-        r"\s*(?:=|:|is|of)?\s*\$?([\d,]+(?:\.\d+)?)\s*[-–—]\s*\$?([\d,]+(?:\.\d+)?)",
-        text,
-        re.IGNORECASE,
-    )
-    if not match:
-        return None
-
-    low = float(match.group(1).replace(",", ""))
-    high = float(match.group(2).replace(",", ""))
-    if low <= 0 or high <= 0 or low >= high:
-        return None
-    return {
-        "ticker": "SPX",
-        "lrr": low,
-        "hrr": high,
-        "label": "SPX Refreshed Risk Range",
-    }
+    return next((row for row in _extract_refreshed_risk_ranges(text) if row["ticker"] == "SPX"), None)
 
 
 def _with_refreshed_spx_risk_range(alert: Dict[str, Any], text: str) -> Dict[str, Any]:
-    refreshed_range = _extract_refreshed_spx_risk_range(text)
-    if refreshed_range:
-        alert["refreshedRiskRange"] = refreshed_range
+    refreshed = _extract_refreshed_risk_ranges(text)
+    spx = next((row for row in refreshed if row["ticker"] == "SPX"), None)
+    if spx:
+        alert["refreshedRiskRange"] = spx
+    if refreshed:
+        alert["refreshedRiskRanges"] = refreshed
     return alert
 
 

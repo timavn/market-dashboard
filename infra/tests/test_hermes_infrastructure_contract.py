@@ -760,7 +760,7 @@ class HermesInfrastructureContractTests(unittest.TestCase):
 
         window = resources["GmailMacroShowWindowSchedule"]["Properties"]
         self.assertEqual(window["Name"], gmail_ingestor.GMAIL_MACRO_SHOW_SCHEDULE_ID)
-        self.assertEqual(window["ScheduleExpression"], "cron(* 10-11 ? * MON-FRI *)")
+        self.assertEqual(window["ScheduleExpression"], "cron(* 9-16 ? * MON-FRI *)")
         self.assertEqual(window["ScheduleExpressionTimezone"], "America/New_York")
         self.assertEqual(window["State"], schedule["State"])
         self.assertEqual(json.loads(window["Target"]["Input"])["scheduleId"], window["Name"])
