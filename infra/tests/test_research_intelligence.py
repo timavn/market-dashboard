@@ -293,6 +293,80 @@ class ResearchIntelligenceTests(unittest.TestCase):
         # The Shorts subject also contains "signal strength"; it must match first.
         self.assertLess(rules.index("signal-strength-shorts"), rules.index("signal-strength"))
 
+    def test_level_table_outlook_and_macro_notes_are_catalog_products_without_authority(self):
+        for product_id, label in [
+            ("trend-tail-levels", "Trend & Tail Levels"),
+            ("quarterly-investment-outlook", "Quarterly Investment Outlook"),
+            ("us-macro-notes", "U.S. Macro Notes"),
+        ]:
+            definition = intelligence.product_definition(product_id)
+            self.assertEqual(definition["label"], label)
+            self.assertEqual(definition["cadence"], "event_driven")
+            self.assertEqual(definition["parserModes"], ["html"])
+            self.assertFalse(any(definition["authorities"].values()), product_id)
+
+    def test_macro_notes_are_matched_by_byline_and_never_by_subject(self):
+        self.assertEqual(intelligence.byline_rules(), [("us-macro-notes", ("christian drake",))])
+        self.assertNotIn("us-macro-notes", [product_id for product_id, _ in intelligence.report_rules()])
+
+    def test_trend_tail_rows_are_level_references_not_signals(self):
+        levels = snapshot(
+            "trend-tail-levels",
+            "levels-1",
+            {
+                "headline": "Trend & Tail Levels | Monthly Dashboard",
+                "closeDate": "2026-11-01",
+                "rows": [
+                    {
+                        "ticker": "UUP",
+                        "name": "US Dollar Bullish",
+                        "close": Decimal("29.00"),
+                        "trendLevel": Decimal("28.10"),
+                        "trendStatus": "above",
+                        "trendStatusChanged": False,
+                        "tailLevel": Decimal("27.75"),
+                        "tailStatus": "above",
+                        "tailStatusChanged": False,
+                    },
+                    {
+                        "ticker": "FXE",
+                        "name": "Euro",
+                        "close": Decimal("103.11"),
+                        "trendLevel": Decimal("106.00"),
+                        "trendStatus": "below",
+                        "trendStatusChanged": True,
+                        "tailLevel": Decimal("106.00"),
+                        "tailStatus": "below",
+                        "tailStatusChanged": False,
+                    },
+                ],
+            },
+            article={
+                "headline": "Trend & Tail Levels | Monthly Dashboard",
+                "bodyText": "UUP (US Dollar Bullish): close 29.00\nFXE (Euro): close 103.11\nSPY and QQQ follow.",
+            },
+        )
+
+        references = intelligence.extract_entity_references(levels)
+
+        # One reference per table row: the body text repeats the table and
+        # must not add SPY, QQQ or a second UUP.
+        self.assertEqual([row["entityId"] for row in references], ["UUP", "FXE"])
+        for reference in references:
+            self.assertEqual(reference["eventType"], "trend_tail_level")
+            self.assertEqual(reference["matchType"], "structured_membership")
+            # "US Dollar Bullish" is a fund name, not a call.
+            self.assertIsNone(reference["direction"])
+            self.assertNotIn("value", reference)
+        self.assertEqual(
+            references[0]["excerpt"],
+            "UUP: close 29.00 on 2026-11-01; TREND level 28.10 (above); TAIL level 27.75 (above)",
+        )
+        events = intelligence.build_entity_events(levels, content_sha256="c" * 64)
+        self.assertEqual({event["eventType"] for event in events}, {"trend_tail_level"})
+        self.assertTrue(all("signalValue" not in event for event in events))
+        self.assertTrue(all(event["direction"] is None for event in events))
+
     def test_same_day_publications_are_immutable_and_manifested_separately(self):
         database = FakeDynamoDb()
         first = snapshot(

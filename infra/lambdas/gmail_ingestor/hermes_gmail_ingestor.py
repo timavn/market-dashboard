@@ -45,6 +45,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from parse_hedgeye_email_html import (
+    extract_byline_names,
     is_position_change_subject,
     parse_html_snapshot,
     save_snapshot_to_dynamodb,
@@ -55,6 +56,7 @@ from hedgai_signals import is_publication_subject as is_hedgai_publication_subje
 from research_intelligence import (
     PARSER_VERSION as SECURITY_INTELLIGENCE_PARSER_VERSION,
     UNSUPPORTED_PRODUCT_KEY,
+    byline_rules,
     finalize_snapshot_intelligence,
     persist_snapshot_failure,
     persist_snapshot_intelligence,
@@ -295,6 +297,7 @@ class ImmutableArtifactDriftError(RuntimeError):
 
 
 REPORT_RULES = report_rules()
+BYLINE_RULES = byline_rules()
 
 
 def utc_now() -> datetime:
@@ -1190,9 +1193,31 @@ def is_market_structure_webcast_subject(subject: str) -> bool:
     )
 
 
-def link_only_notice_reason(subject: str) -> Optional[str]:
-    """Name a Hedgeye email whose body only links to research hosted elsewhere.
+# A subject segment that ends by saying when a webcast airs: "Wednesday at
+# 11AM ET", "TODAY @ 12:00PM ET", "Wednesday, October 14 @ 10AM". The day and
+# the clock time must both be present and must close the segment.
+EVENT_SCHEDULE_SEGMENT_RE = re.compile(
+    r"\b(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|today|tomorrow)"
+    r"(?:,? [a-z]{3,9}\.? \d{1,2}(?:st|nd|rd|th)?(?:, \d{4})?)?"
+    r",? (?:at|@) ?\d{1,2}(?::\d{2})? ?[ap]m(?: e[sd]?t)?$"
+)
 
+
+# Account mail about a subscription: "Your Signal Strength Stocks subscription
+# renews on December 18, 2026", "Your subscription has been updated", "Your
+# trial has been activated", "Quick Start Guide for your Market Situation
+# Report Subscription".
+ACCOUNT_NOTICE_RE = re.compile(
+    r"(?:your (?:[^|]{1,80} )?subscriptions? (?:renews\b|(?:has|have) been updated\b)"
+    r"|your trial has been activated\b"
+    r"|quick start guide for your [^|]{1,80} subscription\b)"
+)
+
+
+def link_only_notice_reason(subject: str) -> Optional[str]:
+    """Name a Hedgeye email that carries no research of its own.
+
+    Its body only links to research hosted elsewhere, or it is account mail.
     These carry no parseable research, so they are ignored from metadata
     instead of being filed as unsupported publications.
     """
@@ -1215,6 +1240,36 @@ def link_only_notice_reason(subject: str) -> Optional[str]:
     # download link, with no positions or levels in the body.
     if normalized.startswith("l1 watch"):
         return "chart-book-link"
+    # A renewal reminder names the product it bills for, so a product rule
+    # would claim it and the parser would fail on it until it was quarantined.
+    if ACCOUNT_NOTICE_RE.match(normalized):
+        return "account-notice"
+    # The rules below read looser wording, so they never take an email from a
+    # registered product: "CALL REPLAY | Q4 2026 MACRO THEMES MID-QUARTER
+    # UPDATE" stays a Global Quads source and "MARKET SITUATION REPORT: FLASH
+    # EVENT TODAY @ 12:00PM ET | ..." stays a Market Situation Report.
+    if registered_report_type("", str(subject or "")) != "unknown" or is_position_change_subject(subject):
+        return None
+    # "Call Replay | Q4 2026 / 1H 2027 US Housing Update & Outlook" describes
+    # the call and links to its video and materials.
+    if re.match(r"call replay\s*\|", normalized):
+        return "event-notice"
+    # An invite names the webcast and when it airs, in either order:
+    # "The Midterms Are Finally Over → ... | Wednesday at 11AM ET",
+    # "FLASH EVENT TODAY @ 12:00PM ET | Tier1 Alpha: ...".
+    if any(
+        EVENT_SCHEDULE_SEGMENT_RE.search(segment.strip())
+        for segment in normalized.split("|")
+    ):
+        return "event-notice"
+    # "The Big Theme | AI Bubble | November 1, 2026 Update" and "The AI Bubble
+    # Tracker | November 1, 2026 Update" carry one welcome line and a link to
+    # the week's slide deck; the deck itself is never in the email.
+    if re.match(
+        r"(?:the big theme|the ai bubble tracker)\s*[|:].*\b20\d{2} update$",
+        normalized,
+    ):
+        return "slide-deck-link"
     return None
 
 
@@ -1234,6 +1289,14 @@ def infer_report_type(filename: str, subject: str) -> str:
     # metadata before Gmail's full MIME body is fetched.
     if link_only_notice_reason(subject):
         return "unknown"
+    return registered_report_type(filename, subject)
+
+
+def registered_report_type(filename: str, subject: str) -> str:
+    """Name the registered product a filename and subject belong to.
+
+    Notice rules are not applied here; "unknown" means no product claims them.
+    """
     # Real-Time Alerts can mention a refreshed SPX Risk Range in the subject.
     # Classify the alert before the broader Risk Range matcher so the RTA
     # parser persists the alert and its refreshed range together.
@@ -1248,6 +1311,49 @@ def infer_report_type(filename: str, subject: str) -> str:
         if any(needle in haystack for needle in needles):
             return report_type
     return "unknown"
+
+
+def byline_report_type(html_body: str) -> str:
+    """Name the product whose author is the email's only byline, else "unknown".
+
+    Some research has no fixed subject wording (a macro data note is titled
+    "NFP | Rearview Report?" one month and "ISM | That Which Cannot Continue"
+    the next), so the author named in the body is the only stable mark. An
+    email several analysts sign, such as a sector call replay, is not claimed.
+    """
+    authors = list(dict.fromkeys(
+        re.sub(r"\s+", " ", name).strip().casefold()
+        for name in extract_byline_names(html_body)
+    ))
+    if len(authors) != 1:
+        return "unknown"
+    for report_type, bylines in BYLINE_RULES:
+        if authors[0] in bylines:
+            return report_type
+    return "unknown"
+
+
+def body_report_type(attachment: Dict[str, Any], subject: str) -> str:
+    """Classify a message body whose subject names no product.
+
+    Only the email's own HTML body is read. A notice stays a notice and an
+    Investing Ideas position change stays with the parser that reads it from
+    the subject.
+    """
+    if (
+        not str(attachment.get("attachmentId") or "").startswith("message-body-")
+        or str(attachment.get("mimeType") or "").lower() != "text/html"
+        or not attachment.get("inlineData")
+        or link_only_notice_reason(subject)
+        or is_position_change_subject(subject)
+    ):
+        return "unknown"
+    try:
+        html_body = decode_base64url(attachment["inlineData"]).decode("utf-8", errors="replace")
+    except (ValueError, TypeError):
+        # The upload below decodes the same data and records the failure.
+        return "unknown"
+    return byline_report_type(html_body)
 
 
 def build_s3_key(
@@ -3223,6 +3329,8 @@ def upload_attachment(
     subject = headers.get("subject", "")
     report_type = infer_report_type(filename, subject)
     mime_type = attachment["mimeType"]
+    if report_type == "unknown":
+        report_type = body_report_type(attachment, subject)
 
     if not claim_attachment(
         table,
@@ -3555,6 +3663,24 @@ def process_message(
             "stored": [],
             "skipped": [],
         }
+        notice_reason = link_only_notice_reason(str(representative.get("subject") or ""))
+        if notice_reason:
+            # An email stored before its notice rule existed has no research to
+            # replay. Record the same terminal decision a new copy would get,
+            # so a quarantined notice leaves the queue instead of failing the
+            # replay and staying quarantined.
+            mark_message_ignored(
+                table,
+                message_id=message_id,
+                headers={
+                    "subject": representative.get("subject", ""),
+                    "from": representative.get("sender", ""),
+                },
+                reason=notice_reason,
+            )
+            result["ignored"] = True
+            result["skipped"].append({"filename": "", "detail": notice_reason})
+            return result
         for item in attachment_items:
             require_work_budget()
             filename = str(item.get("filename") or "")

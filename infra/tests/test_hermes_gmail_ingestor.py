@@ -33,6 +33,40 @@ import research_intelligence
 GMAIL_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "gmail"
 
 
+def research_email_html(*, headline, body_html, bylines=(), stamp="11/06/2026 12:12 PM EST"):
+    """A Hedgeye research email in the layout the stored ones share."""
+    escaped = headline.replace("&", "&amp;")
+    byline_html = "".join(
+        '<table align="left" class="byline"><tr>'
+        '<td class="headshot"><img src="https://hedgeye.s3.amazonaws.com/attachments/headshot.png" /></td>'
+        f'<td class="details"><div class="full-name"><p>{name}</p></div>'
+        f'<div class="twitter-handle"><p>{handle}</p></div></td>'
+        "</tr></table>"
+        for name, handle in bylines
+    )
+    return (
+        f'<html><head><meta type="hedgeye-headline" content="{escaped}" />'
+        f'<meta type="hedgeye-teaser" content="{escaped}" /></head><body>'
+        "<p>This research was prepared exclusively for reader@example.com as a subscriber "
+        "of Hedgeye Risk Management.</p><p>Having trouble viewing this email?</p>"
+        f'<p>{stamp}</p><div class="headline">{escaped}</div>{byline_html}{body_html}'
+        '<p>Please visit <a href="https://app.hedgeye.com/feed_items/189609">'
+        "https://app.hedgeye.com/feed_items/189609</a> for more information.</p>"
+        "<p>© 2026 Hedgeye Risk Management LLC, all rights reserved.</p></body></html>"
+    )
+
+
+def parse_research_email(report_type, html_body, subject):
+    return email_parser.parse_html_snapshot(
+        report_type=report_type,
+        html_body=html_body,
+        received_at=datetime(2026, 11, 6, 17, 13, tzinfo=timezone.utc),
+        s3_key=f"hedgeye-email/messages/2026-11-06/{report_type}/gmail-1-message-body.html",
+        message_id="gmail-1",
+        subject=subject,
+    )
+
+
 def market_situation_signal_png(
     selections=(2, 2, 1, 0),
     *,
@@ -5428,6 +5462,542 @@ class HermesGmailIngestorTests(unittest.TestCase):
             "Real-Time Alert: Selling SPY",
         ]:
             self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+
+    def test_call_replays_and_dated_invites_are_event_notices(self):
+        for subject in [
+            # Filed as unknown between 27 Oct and 16 Nov 2026.
+            "Call Replay | Q4 2026 / 1H 2027 US Housing Update & Outlook",
+            "FLASH EVENT TODAY @ 12:00PM ET | Tier1 Alpha: From Hedge Unwind to Mechanical Deleveraging",
+            "The Midterms Are Finally Over → Our Quick Take At The Terrain Ahead | Wednesday at 11AM ET",
+            # Earlier invites that state the day and time the same way.
+            "EVENT TOMORROW | Wednesday, October 14 @ 10AM | MID-TERM MANIA: UPDATE ON THE MIDTERM ELECTION WITH NEIL HOWE and JT TAYLOR",
+            "Geopolitics Call Wednesday at 10AM ET | Spanning the Globe w/ JT Taylor & Col. McCausland",
+            "Geopolitical Event Thursday at 10AM ET | Spanning the Globe w/ JT Taylor & Col. Jeff McCausland",
+            "Call Tomorrow at 10AM ET | Will Trump's Sec. 301 Forced Labor Tariffs Survive Legal Challenge?",
+            "TODAY AT 10AM ET | Geopolitical Risk Update w/ JT Taylor, Fernando Valle & Col. Jeff McCausland",
+            "Hedgeye Policy Investing Themes - Thursday, July 9, 2026 at 12:30PM",
+        ]:
+            self.assertEqual(ingestor.link_only_notice_reason(subject), "event-notice", subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown", subject)
+
+    def test_weekly_theme_deck_links_are_link_only_notices(self):
+        for subject in [
+            "The Big Theme | AI Bubble | November 1, 2026 Update",
+            "The Big Theme | AI Bubble | November 15, 2026 Update",
+            "The AI Bubble Tracker | November 1, 2026 Update",
+            "The Big Theme: October 18, 2026 Update",
+        ]:
+            self.assertEqual(ingestor.link_only_notice_reason(subject), "slide-deck-link", subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown", subject)
+        # The launch note is not a dated weekly update.
+        self.assertIsNone(ingestor.link_only_notice_reason("The Big Theme, Q4 2026: The AI Bubble"))
+
+    def test_research_subjects_are_not_link_only_notices(self):
+        # These carry levels, position changes or analysis in the email body,
+        # so no notice rule may hide them, registered or not.
+        for subject in [
+            "Trend & Tail Levels | Monthly Dashboard",
+            "Hedgeye QIO | 4Q 2026 Mid-Quarter Update",
+            "Digital Assets Position Monitor",
+            "NFP | Rearview Report?",
+            "ISM | That Which Cannot Continue",
+            'WAGE ACCELERATION? | ECI RAISES "PROVE IT" BAR',
+            # A clock time without a day, or a day without a clock time, is
+            # not a closing day-and-time.
+            "CPI at 8:30AM ET | What To Watch",
+            "Retail Sales | What Changed Today",
+            "Chart Check | Friday at the Fed",
+        ]:
+            self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+
+    def test_notice_wording_never_takes_an_email_from_a_registered_product(self):
+        for subject, report_type in [
+            ("CALL REPLAY | Q4 2026 MACRO THEMES MID-QUARTER UPDATE", "global-quads"),
+            ("CALL TODAY @ 11AM | Q4 2026 MACRO THEMES PRESENTATION", "global-quads"),
+            (
+                "MARKET SITUATION REPORT: FLASH EVENT TODAY @ 12:00PM ET | "
+                "Tier1 Alpha: From Hedge Unwind to Mechanical Deleveraging",
+                "market-structure",
+            ),
+            ("Early Look: Fed Day | Wednesday at 2PM ET", "early-look"),
+        ]:
+            self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), report_type, subject)
+        self.assertIsNone(ingestor.link_only_notice_reason("Add Airbnb Inc. (ABNB) to LONG Side | Today at 9AM ET"))
+
+    def test_registered_report_type_names_the_product_before_notice_rules(self):
+        webcast = "MARKET SITUATION REPORT: VIDEO | Market Situation Report Webcast | August 10, 2026"
+        self.assertEqual(ingestor.registered_report_type("message-body.html", webcast), "market-structure")
+        self.assertEqual(ingestor.infer_report_type("message-body.html", webcast), "unknown")
+        self.assertEqual(
+            ingestor.registered_report_type("", "The Big Theme | AI Bubble | November 1, 2026 Update"),
+            "unknown",
+        )
+
+    def test_new_link_only_notices_are_ignored_from_metadata_without_fetching_body(self):
+        for message_id, subject, reason in [
+            ("gmail-big-theme", "The Big Theme | AI Bubble | November 15, 2026 Update", "slide-deck-link"),
+            ("gmail-call-replay", "Call Replay | Q4 2026 / 1H 2027 US Housing Update & Outlook", "event-notice"),
+            (
+                "gmail-flash-event",
+                "FLASH EVENT TODAY @ 12:00PM ET | Tier1 Alpha: From Hedge Unwind to Mechanical Deleveraging",
+                "event-notice",
+            ),
+            (
+                "gmail-day-ahead-invite",
+                "The Midterms Are Finally Over → Our Quick Take At The Terrain Ahead | Wednesday at 11AM ET",
+                "event-notice",
+            ),
+            (
+                "gmail-renewal-reminder",
+                "Your Signal Strength Stocks subscription renews on December 18, 2026",
+                "account-notice",
+            ),
+        ]:
+            with self.subTest(subject=subject):
+                table = FakeLedgerTable()
+                metadata = {
+                    "internalDate": "1794744170000",
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": subject},
+                            {"name": "From", "value": "Hedgeye <info@hedgeye.com>"},
+                            {"name": "Date", "value": "Sun, 15 Nov 2026 07:02:50 -0500"},
+                        ]
+                    },
+                }
+
+                with patch.object(
+                    ingestor, "get_message_metadata", return_value=metadata
+                ), patch.object(ingestor, "get_message") as get_message, patch.object(
+                    ingestor, "s3"
+                ) as s3_client:
+                    result = ingestor.process_message("token", "me", message_id, table)
+
+                get_message.assert_not_called()
+                s3_client.put_object.assert_not_called()
+                self.assertTrue(result["ignored"])
+                self.assertEqual(result["skipped"][0]["detail"], reason)
+                sentinel = table.items[(message_id, ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]
+                self.assertEqual(sentinel["status"], "MESSAGE_IGNORED")
+                self.assertEqual(sentinel["ignoredReason"], reason)
+                self.assertFalse(sentinel["bodyFetched"])
+
+    def test_trend_tail_and_outlook_subjects_are_registered_products(self):
+        for subject, report_type in [
+            ("Trend & Tail Levels | Monthly Dashboard", "trend-tail-levels"),
+            ("Hedgeye QIO | 4Q 2026 Mid-Quarter Update", "quarterly-investment-outlook"),
+            ("Quarterly Investment Outlook | 4Q 2026", "quarterly-investment-outlook"),
+            # Macro Themes call notices keep feeding Global Quads.
+            ("CALL REPLAY | Q4 2026 MACRO THEMES MID-QUARTER UPDATE", "global-quads"),
+            # A macro data note has no subject wording to match.
+            ("NFP | Rearview Report?", "unknown"),
+        ]:
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), report_type, subject)
+            self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+
+    def test_trend_tail_levels_table_is_read_row_by_row(self):
+        subject = "Trend & Tail Levels | Monthly Dashboard"
+        html_body = research_email_html(
+            headline=subject,
+            stamp="11/01/2026 02:56 PM EST",
+            body_html="""
+            <div class="takeaway"><p><strong>Takeaway:</strong> Signal data refreshed with
+            readings as of Nov 01, 2026 02:56 PM EST.</p>
+            <p>(Previous signal data was as of Oct 04, 2026 06:44 PM EDT).</p></div>
+            <table><tr><td>
+            <table>
+              <thead><tr><th>Ticker Description</th><th>Ticker</th><th>Closing<br />Price as of<br />11/01/2026</th>
+                <th>Trend<br />Level</th><th>Current<br />Status</th><th>Tail<br />Level</th><th>Current<br />Status</th></tr></thead>
+              <tbody>
+                <tr><td>US Dollar Bullish</td><td>UUP</td><td><span>▲</span> 29.00</td><td>28.10</td><td>Above</td><td>27.75</td><td>Above</td></tr>
+                <tr><td>Japanese Yen</td><td>FXY</td><td>▲ 58.19</td><td>57.74</td><td>Above <span>▲</span></td><td>58.24</td><td>Below</td></tr>
+                <tr><th colspan="7">Commodities</th></tr>
+                <tr><td>Gold</td><td>GLD</td><td>▼ 355.78</td><td>391.00</td><td>Below</td><td>392.00</td><td>Below ▼</td></tr>
+                <tr><td>Bitcoin</td><td>IBIT</td><td>61.02</td><td>1,065.50</td><td>Below</td><td>70.00</td><td>Below</td></tr>
+                <tr><td>No levels yet</td><td>NEW</td><td>10.00</td><td>n/a</td><td>Above</td><td>9.00</td><td>Above</td></tr>
+                <tr><td>Gold again</td><td>GLD</td><td>1.00</td><td>1.00</td><td>Above</td><td>1.00</td><td>Above</td></tr>
+              </tbody>
+            </table>
+            </td></tr></table>
+            <p>Questions are welcome.</p>
+            """,
+        )
+
+        snapshot = parse_research_email("trend-tail-levels", html_body, subject)
+
+        self.assertEqual(snapshot["snapshotType"], "trend-tail-levels")
+        self.assertEqual(snapshot["date"], "2026-11-01")
+        self.assertEqual(snapshot["itemCount"], 4)
+        data = snapshot["data"]
+        self.assertEqual(data["closeDate"], "2026-11-01")
+        self.assertEqual(data["asOf"], "Nov 01, 2026 02:56 PM EST")
+        self.assertEqual(data["previousAsOf"], "Oct 04, 2026 06:44 PM EDT")
+        self.assertEqual([row["ticker"] for row in data["rows"]], ["UUP", "FXY", "GLD", "IBIT"])
+        self.assertEqual(
+            data["rows"][0],
+            {
+                "ticker": "UUP",
+                "name": "US Dollar Bullish",
+                "close": Decimal("29.00"),
+                "closeDirection": "up",
+                "trendLevel": Decimal("28.10"),
+                "trendStatus": "above",
+                "trendStatusChanged": False,
+                "tailLevel": Decimal("27.75"),
+                "tailStatus": "above",
+                "tailStatusChanged": False,
+            },
+        )
+        # An arrow beside a status marks one that changed since the last edition.
+        self.assertTrue(data["rows"][1]["trendStatusChanged"])
+        self.assertFalse(data["rows"][1]["tailStatusChanged"])
+        self.assertEqual(data["rows"][2]["group"], "Commodities")
+        self.assertEqual(data["rows"][2]["closeDirection"], "down")
+        self.assertTrue(data["rows"][2]["tailStatusChanged"])
+        self.assertNotIn("closeDirection", data["rows"][3])
+        self.assertEqual(data["rows"][3]["trendLevel"], Decimal("1065.50"))
+        body = snapshot["article"]["bodyText"]
+        self.assertIn("UUP (US Dollar Bullish): close 29.00 on 2026-11-01; above its Trend level 28.10; above its Tail level 27.75", body)
+        self.assertNotIn("reader@example.com", json.dumps(snapshot, default=str))
+
+    def test_trend_tail_edition_without_the_table_does_not_materialize(self):
+        subject = "Trend & Tail Levels | Monthly Dashboard"
+        html_body = research_email_html(
+            headline=subject,
+            body_html='<p>Takeaway: refreshed.</p><img src="https://example.com/dashboard.png" /><p>To view this in PDF form, click HERE.</p>',
+        )
+
+        self.assertIsNone(parse_research_email("trend-tail-levels", html_body, subject))
+
+    def test_quarterly_investment_outlook_keeps_each_theme(self):
+        subject = "Hedgeye QIO | 4Q 2026 Mid-Quarter Update"
+        html_body = research_email_html(
+            headline=subject,
+            stamp="11/12/2026 03:11 PM EST",
+            body_html="""
+            <p>Dear Hedgeye Subscriber,</p><p>The mid-quarter update is below.</p>
+            <p><a href="https://example.com/video"><img src="https://d1yhils6iwh5l5.cloudfront.net/charts/QIO.jpg?src=email&amp;email=reader%40example.com" /><br /><small>VIEW LINK</small></a></p>
+            <ul>
+              <li><span><strong>#Quad2 in Q4, Then #Quad4: </strong></span>Growth and inflation accelerate into year end before both slow in the first half.</li>
+              <li><strong>The AI Bubble: </strong>The framework separates how stretched the complex is from how likely a break is.</li>
+              <li><ul><li><p><b><span>Dollar Up, Rates Breaking Down!</span></b>: The long end turns lower first while the front end still prices a hike.</p></li></ul></li>
+              <li>A short bullet without a title is not a theme.</li>
+            </ul>
+            """,
+        )
+
+        snapshot = parse_research_email("quarterly-investment-outlook", html_body, subject)
+
+        self.assertEqual(snapshot["snapshotType"], "quarterly-investment-outlook")
+        self.assertEqual(snapshot["date"], "2026-11-12")
+        self.assertEqual(snapshot["data"]["quarter"], "4Q 2026")
+        self.assertEqual(snapshot["data"]["edition"], "mid-quarter-update")
+        self.assertEqual(
+            [theme["title"] for theme in snapshot["data"]["themes"]],
+            ["#Quad2 in Q4, Then #Quad4", "The AI Bubble", "Dollar Up, Rates Breaking Down!"],
+        )
+        self.assertEqual(
+            snapshot["data"]["themes"][1]["text"],
+            "The framework separates how stretched the complex is from how likely a break is.",
+        )
+        self.assertEqual(snapshot["itemCount"], 3)
+        body = snapshot["article"]["bodyText"]
+        self.assertTrue(body.startswith("Dear Hedgeye Subscriber,"))
+        self.assertNotIn("VIEW LINK", body)
+        self.assertNotIn("Please visit", body)
+        # Image links lose the query string that names the subscriber.
+        self.assertEqual(
+            snapshot["article"]["imageUrls"],
+            ["https://d1yhils6iwh5l5.cloudfront.net/charts/QIO.jpg"],
+        )
+        self.assertNotIn("reader", json.dumps(snapshot, default=str))
+        outlook = parse_research_email(
+            "quarterly-investment-outlook",
+            research_email_html(headline="Quarterly Investment Outlook | 4Q 2026", body_html="<p>Dear Hedgeye Subscriber,</p>"),
+            "Quarterly Investment Outlook | 4Q 2026",
+        )
+        self.assertEqual(outlook["data"]["edition"], "quarterly-outlook")
+        self.assertEqual(outlook["data"]["themes"], [])
+
+    def test_macro_note_is_recognised_by_its_sole_byline(self):
+        drake = ("Christian Drake", "@hedgeyeusa")
+        steiner = ("Josh Steiner, CFA", "@hedgeyefig")
+        note = research_email_html(headline="NFP | Rearview Report?", bylines=[drake], body_html="<p>Payrolls rose.</p>")
+        self.assertEqual(ingestor.byline_report_type(note), "us-macro-notes")
+        for other in [
+            # A sector piece several analysts sign.
+            research_email_html(headline="L1 Watch | Weekly Update", bylines=[steiner, drake], body_html="<p>Charts.</p>"),
+            research_email_html(headline="Why I sold", bylines=[("Keith McCullough", "@KeithMcCullough")], body_html="<p>Text.</p>"),
+            research_email_html(headline="No byline", body_html="<p>Christian Drake is named in the text only.</p>"),
+            "",
+        ]:
+            self.assertEqual(ingestor.byline_report_type(other), "unknown")
+
+    def test_macro_note_keeps_its_prose_without_subscriber_lines(self):
+        subject = "NFP | Rearview Report?"
+        html_body = research_email_html(
+            headline=subject,
+            bylines=[("Christian Drake", "@hedgeyeusa")],
+            body_html="""
+            <p>Payrolls rose and the jobless rate fell.</p>
+            <p><strong>THE DATA</strong></p>
+            <ul><li>Headline: higher.</li><li>Revisions: higher.</li></ul>
+            <p><a href="https://example.com/chart-1"><img src="https://d1yhils6iwh5l5.cloudfront.net/charts/nfp.png?src=email&amp;email=reader%40example.com" /><br />(VIEW LARGER IMAGE)</a></p>
+            <p><a href="https://example.com/chart-2"><img src="https://d1yhils6iwh5l5.cloudfront.net/charts/hours.png" /><br />(VIEW LARGER IMAGE)</a></p>
+            """,
+        )
+
+        snapshot = parse_research_email("us-macro-notes", html_body, subject)
+
+        self.assertEqual(snapshot["snapshotType"], "us-macro-notes")
+        self.assertEqual(snapshot["reportType"], "us-macro-notes")
+        self.assertEqual(snapshot["date"], "2026-11-06")
+        self.assertEqual(snapshot["article"]["headline"], subject)
+        self.assertEqual(snapshot["article"]["feedUrl"], "https://app.hedgeye.com/feed_items/189609")
+        self.assertEqual(
+            snapshot["article"]["bodyText"],
+            "Payrolls rose and the jobless rate fell.\nTHE DATA\nHeadline: higher.\nRevisions: higher.",
+        )
+        self.assertEqual(snapshot["data"], {"headline": subject, "author": "Christian Drake", "chartCount": 2})
+        self.assertNotIn("reader", json.dumps(snapshot, default=str))
+
+    def test_macro_note_is_filed_under_its_product_from_the_first_upload(self):
+        subject = "ISM | That Which Cannot Continue"
+        html_body = research_email_html(
+            headline=subject,
+            stamp="11/02/2026 02:59 PM EST",
+            bylines=[("Christian Drake", "@hedgeyeusa")],
+            body_html="<p>The headline index rose to 52.0.</p>",
+        )
+        table = FakeLedgerTable()
+        with patch.object(
+            ingestor, "put_immutable_s3_object", return_value=True
+        ) as put_object, patch.object(
+            ingestor, "persist_research_event_ledger", return_value=0
+        ), patch.object(
+            ingestor, "persist_snapshot_intelligence", return_value=1
+        ) as persist_intelligence, patch.object(
+            ingestor, "materialize_email_snapshot", return_value=({}, True)
+        ), patch.object(
+            ingestor, "finalize_snapshot_intelligence"
+        ) as finalize:
+            result = ingestor.upload_attachment(
+                access_token="token",
+                user_id="me",
+                message_id="1a19dd92b68f1521",
+                attachment={
+                    "attachmentId": "message-body-html-1",
+                    "filename": "message-body.html",
+                    "mimeType": "text/html",
+                    "inlineData": base64.urlsafe_b64encode(html_body.encode("utf-8")).decode("ascii"),
+                },
+                headers={"subject": subject, "from": "research@hedgeye.com"},
+                received_at=datetime(2026, 11, 2, 20, 0, 16, tzinfo=timezone.utc),
+                table=table,
+            )
+
+        self.assertEqual(result[0], "stored")
+        ledger_row = table.items[("1a19dd92b68f1521", "message-body-html-1")]
+        self.assertEqual(ledger_row["reportType"], "us-macro-notes")
+        self.assertEqual(ledger_row["snapshotType"], "us-macro-notes")
+        self.assertEqual(ledger_row["materializationStatus"], "INDEXED")
+        self.assertIn("/2026-11-02/us-macro-notes/", put_object.call_args.kwargs["key"])
+        self.assertEqual(put_object.call_args.kwargs["metadata"]["report-type"], "us-macro-notes")
+        snapshot = persist_intelligence.call_args.args[0]
+        self.assertEqual(snapshot["snapshotType"], "us-macro-notes")
+        self.assertEqual(snapshot["data"]["author"], "Christian Drake")
+        finalize.assert_called_once()
+
+    def test_body_classification_leaves_notices_position_changes_and_attachments_alone(self):
+        note = research_email_html(
+            headline="Any subject",
+            bylines=[("Christian Drake", "@hedgeyeusa")],
+            body_html="<p>Text.</p>",
+        )
+        body = {
+            "attachmentId": "message-body-html-1",
+            "filename": "message-body.html",
+            "mimeType": "text/html",
+            "inlineData": base64.urlsafe_b64encode(note.encode("utf-8")).decode("ascii"),
+        }
+        self.assertEqual(ingestor.body_report_type(body, "NFP | Rearview Report?"), "us-macro-notes")
+        for attachment, subject in [
+            # A notice is ignored before its body is ever read.
+            (body, "HAPPENING NOW | U.S. Macro Update With Christian Drake"),
+            (body, "Call Replay | U.S. Macro Update"),
+            # An Investing Ideas change is read from its subject.
+            (body, "Remove Long Airbnb Inc. (ABNB)"),
+            ({**body, "attachmentId": "att-1", "filename": "note.html"}, "NFP | Rearview Report?"),
+            ({**body, "mimeType": "text/plain"}, "NFP | Rearview Report?"),
+            ({**body, "inlineData": None}, "NFP | Rearview Report?"),
+        ]:
+            self.assertEqual(ingestor.body_report_type(attachment, subject), "unknown", subject)
+
+    RENEWAL_SUBJECT = "Your Signal Strength Stocks subscription renews on December 18, 2026"
+    RENEWAL_LEDGER_ROW = {
+        "messageId": "1a1ee52a3bf0f168",
+        "attachmentId": "message-body-html-1",
+        "status": "ERROR",
+        "filename": "message-body.html",
+        "mimeType": "text/html",
+        "reportType": "signal-strength",
+        "subject": RENEWAL_SUBJECT,
+        "sender": "Hedgeye <info@hedgeye.com>",
+        "s3Bucket": "test-bucket",
+        "s3Key": "hedgeye-email/messages/2026-11-18/signal-strength/1a1ee52a3bf0f168-message-body-html-1-message-body.html",
+        "contentSha256": "e" * 64,
+        "receivedAt": "2026-11-18T11:02:34+00:00",
+        "error": "Research parser returned no signal-strength snapshot",
+        "errorCode": "GMAIL_RESEARCH_MATERIALIZATION_ERROR",
+        "parseError": "Research parser returned no signal-strength snapshot",
+        "retryable": True,
+        "materializationStatus": "ERROR",
+    }
+
+    def test_account_mail_is_a_notice_even_when_it_names_a_product(self):
+        for subject in [
+            self.RENEWAL_SUBJECT,
+            "Your ETF Pro subscription renews on January 3, 2027",
+            "Your subscription has been updated",
+            "Your subscriptions have been updated",
+            "Your trial has been activated",
+            "Quick Start Guide for your Market Situation Report Subscription",
+            "Quick Start Guide for your Elite Macro Subscription",
+        ]:
+            self.assertEqual(ingestor.link_only_notice_reason(subject), "account-notice", subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), "unknown", subject)
+        # The renewal reminder would otherwise be typed by the product it names.
+        self.assertEqual(
+            ingestor.registered_report_type("message-body.html", self.RENEWAL_SUBJECT),
+            "signal-strength",
+        )
+        for subject, report_type in [
+            ("Signal Strength Stocks: 51 Stocks (0 added, 3 removed)", "signal-strength"),
+            ("Early Look: Your Subscription To Volatility", "early-look"),
+            ("Your New “Macro Week Summary Notes” Starts Today", "unknown"),
+            ("Welcome To Macro Pro", "unknown"),
+        ]:
+            self.assertIsNone(ingestor.link_only_notice_reason(subject), subject)
+            self.assertEqual(ingestor.infer_report_type("message-body.html", subject), report_type, subject)
+
+    def test_operator_replay_of_a_stored_notice_records_the_ignore_decision(self):
+        row = dict(self.RENEWAL_LEDGER_ROW)
+        table = FakeLedgerTable([row])
+
+        with patch.object(ingestor, "backfill_html_snapshot") as backfill, patch.object(
+            ingestor, "get_message_metadata"
+        ) as get_metadata, patch.object(ingestor, "get_message") as get_message, patch.object(
+            ingestor, "s3"
+        ) as s3_client:
+            result = ingestor.process_message("token", "me", row["messageId"], table, allow_version_backfill=True)
+
+        # Nothing is fetched, read or parsed for a notice.
+        backfill.assert_not_called()
+        get_metadata.assert_not_called()
+        get_message.assert_not_called()
+        s3_client.get_object.assert_not_called()
+        self.assertTrue(result["ignored"])
+        self.assertEqual(result["stored"], [])
+        self.assertEqual(result["skipped"], [{"filename": "", "detail": "account-notice"}])
+        sentinel = table.items[(row["messageId"], ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]
+        self.assertEqual(sentinel["status"], "MESSAGE_IGNORED")
+        self.assertEqual(sentinel["ignoredReason"], "account-notice")
+        self.assertEqual(sentinel["subject"], self.RENEWAL_SUBJECT)
+        self.assertTrue(ingestor.message_is_fully_processed(table.items.values()))
+        # The stored artifact row is left as the audit of what happened.
+        self.assertEqual(table.items[(row["messageId"], row["attachmentId"])]["status"], "ERROR")
+
+    def test_operator_replay_of_a_quarantined_notice_clears_the_quarantine(self):
+        row = dict(self.RENEWAL_LEDGER_ROW)
+        state_key = (ingestor.RUNTIME_STATE_MESSAGE_ID, ingestor.HISTORY_CURSOR_ATTACHMENT_ID)
+        ledger = FakeLedgerTable(
+            [
+                {
+                    "messageId": ingestor.RUNTIME_STATE_MESSAGE_ID,
+                    "attachmentId": ingestor.HISTORY_CURSOR_ATTACHMENT_ID,
+                    "status": "WARNING",
+                    "historyId": "125",
+                    "quarantinedCount": 1,
+                    "quarantinedMessages": [
+                        {
+                            "messageId": row["messageId"],
+                            "errorCode": "GMAIL_RESEARCH_MATERIALIZATION_ERROR",
+                            "quarantinedAt": "2026-11-18T11:42:50+00:00",
+                            "attemptCount": 3,
+                        }
+                    ],
+                    "createdAt": "2026-11-18T11:00:00+00:00",
+                    "updatedAt": "2026-11-18T11:42:50+00:00",
+                },
+                row,
+            ]
+        )
+        database = FakeRuntimeDynamoDb(ledger)
+        secret = {
+            "client_id": "client",
+            "client_secret": "secret",
+            "refresh_token": "refresh",
+            "user_id": "me",
+            "_secret_version": "version-replay",
+        }
+
+        with patch.object(ingestor, "dynamodb", database), patch.object(
+            ingestor, "cloudwatch", MagicMock()
+        ), patch.object(
+            ingestor, "load_oauth_secret", return_value=secret
+        ), patch.object(
+            ingestor, "refresh_access_token", return_value="access"
+        ), patch.object(
+            ingestor, "get_profile_history_id", return_value="125"
+        ), patch.object(
+            ingestor, "resolve_label_id", return_value="Label_1"
+        ), patch.object(
+            ingestor, "list_history_message_ids", return_value=[]
+        ), patch.object(
+            ingestor, "list_message_ids"
+        ) as list_messages, patch.object(
+            ingestor, "get_message_metadata"
+        ) as get_metadata, patch.object(
+            ingestor, "get_message"
+        ) as get_message:
+            response = ingestor.lambda_handler(
+                {
+                    "source": ingestor.OPERATOR_REPLAY_SOURCE,
+                    "messageIds": [row["messageId"]],
+                    "forceBackfill": True,
+                    "materializationVersion": ingestor.MATERIALIZED_DATA_VERSION,
+                },
+                None,
+            )
+
+        body = json.loads(response["body"])
+        self.assertEqual(body["status"], "SUCCESS")
+        self.assertIsNone(body.get("errorCode"))
+        final_state = ledger.items[state_key]
+        self.assertEqual(final_state["status"], "READY")
+        self.assertEqual(final_state["quarantinedCount"], 0)
+        self.assertEqual(final_state["quarantinedMessages"], [])
+        self.assertEqual(database.heartbeat.writes[-1]["status"], "success")
+        self.assertNotIn("errorCode", database.heartbeat.writes[-1])
+        self.assertEqual(
+            ledger.items[(row["messageId"], ingestor.MESSAGE_LEDGER_ATTACHMENT_ID)]["ignoredReason"],
+            "account-notice",
+        )
+        # The replay decides from the stored subject alone.
+        get_metadata.assert_not_called()
+        get_message.assert_not_called()
+        list_messages.assert_not_called()
+
+    def test_operator_replay_still_fails_when_a_stored_research_email_has_nothing_to_replay(self):
+        row = dict(self.RENEWAL_LEDGER_ROW, subject="Signal Strength Stocks: 51 Stocks (0 added, 3 removed)")
+        table = FakeLedgerTable([row])
+
+        with patch.object(ingestor, "backfill_html_snapshot", return_value=False):
+            with self.assertRaises(ingestor.GmailOperatorReplayError):
+                ingestor.process_message("token", "me", row["messageId"], table, allow_version_backfill=True)
+
+        self.assertNotIn((row["messageId"], ingestor.MESSAGE_LEDGER_ATTACHMENT_ID), table.items)
 
     def test_single_investing_ideas_add_takes_its_side_from_the_subject(self):
         subject = "Add Airbnb Inc. (ABNB) to LONG Side"
