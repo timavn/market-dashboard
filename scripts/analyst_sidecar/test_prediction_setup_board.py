@@ -4,7 +4,7 @@ import re
 import unittest
 
 from analyst_review_sources import review_sources
-from prediction_setup_board import _curve_levels, _product_key, render_setup_board, research_by_section
+from prediction_setup_board import _curve_levels, _market_days_old, _product_key, render_setup_board, research_by_section
 from review_runs_v2 import ReviewRunError, render_prediction_review
 
 AT = "2026-10-10T17:00:00Z"
@@ -80,12 +80,15 @@ class SetupBoardRenderTests(unittest.TestCase):
         self.assertEqual(report.count("REF(US Dollar;DXY)"), 5)
         # Bias cells hold only the word; dates and products move to As of.
         self.assertIn("| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | RR(4100;4224;4216;0;) | "
-                      "ASOF(Oct 10 10:00;Sep 28,HedgAI;,;Oct 9,Risk Ranges) |", report)
+                      "ASOF(Oct 10 10:00;Sep 28,HedgAI;,;Oct 9,Risk Ranges;100) |", report)
+        # Sep 28 is nine market days before the Oct 10 board, so its Tick is flagged (;100); Oct 6 is four and is not.
+        self.assertEqual([_market_days_old(day, "2026-11-20") for day in ("2026-11-20", "2026-11-16", "2026-11-14", "2026-11-13", "bad")],
+                         [0, 4, 5, 5, None])
         self.assertIn("| WTI | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(87.14;93.03;91.85;2;) | ASOF(N/A;,;,;,Risk Ranges) |", report)
         self.assertIn("| MKT(Nasdaq-100;COMPQ range) |", report)
         # HedgAI's SHY Buy is a yield-down reading: shown as Bearish, never Buy or Wait.
         self.assertIn("| UST 2Y | BIAS(Bearish;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(4.73;4.96;4.75;2;%) | "
-                      "ASOF(Oct 8;Sep 28,HedgAI SHY;,;,Risk Ranges) |", report)
+                      "ASOF(Oct 8;Sep 28,HedgAI SHY;,;,Risk Ranges;100) |", report)
         self.assertNotIn("Wait", report)
         self.assertNotIn("Buy", report)
         self.assertIn("| Ethereum | BIAS(N/A;;) | BIAS(N/A;;) | BIAS(Bullish;;) | RR(2406;2825;2300;0;) | ASOF(N/A;,;,;,Crypto Quant) |", report)
@@ -203,7 +206,7 @@ class SetupBoardRenderTests(unittest.TestCase):
                                setup={"side": None, "reason": "No comparable range position"})
         report = render_setup_board(data)
         self.assertIn("| Gold | BIAS(Neutral;;) | BIAS(N/A;;) | BIAS(Bearish;;) | RR(4100;4224;;0;) | "
-                      "ASOF(N/A;Sep 28,HedgAI;,;Oct 9,Risk Ranges) |", report)
+                      "ASOF(N/A;Sep 28,HedgAI;,;Oct 9,Risk Ranges;100) |", report)
         self.assertIn("Gold price withheld: GC=F returned 41.5, inconsistent with its Risk Range.", report)
 
     def test_morning_research_adds_alpha_code_column_and_research_block(self):
@@ -342,9 +345,9 @@ class SetupBoardRenderTests(unittest.TestCase):
                  "publishedAt": "2026-10-06T11:48:50+00:00", "eventTicker": "KXCPIYOY-26SEP"},
                 {"reportMonth": "2026-10", "available": True, "lower": 3.69, "base": 3.8, "upper": 3.91,
                  "publishedAt": "2026-10-06T11:48:50+00:00", "eventTicker": None}]}]})
-        self.assertIn("| Market | Kalshi | Low | Base | High | Published |", report)
-        self.assertIn("| CPI YoY · Sep 2026 | Sep | 3.63% | 3.74% | 3.85% | Oct 6 04:48 PDT |", report)
-        self.assertIn("| CPI YoY · Oct 2026 | N/A | 3.69% | 3.80% | 3.91% | Oct 6 04:48 PDT |", report)
+        self.assertIn("| Market | Period | Kalshi | Low | Base | High | Published |", report)
+        self.assertIn("| CPI YoY | Sep 2026 | Sep | 3.63% | 3.74% | 3.85% | Oct 6 04:48 PDT |", report)
+        self.assertIn("| CPI YoY | Oct 2026 | N/A | 3.69% | 3.80% | 3.91% | Oct 6 04:48 PDT |", report)
         self.assertIn("Sources: HedgAI Signals, Cboe volatility indices, Kalshi", report)
 
     def test_cpi_with_survey_consensus_shows_it_in_place_of_the_kalshi_contract(self):
@@ -354,10 +357,34 @@ class SetupBoardRenderTests(unittest.TestCase):
                  "publishedAt": "2026-10-16T20:11:55+00:00", "eventTicker": None, "consensus": 3.7},
                 {"reportMonth": "2026-11", "available": False, "eventTicker": "KXCPIYOY-26NOV", "consensus": None}]}],
             "sources": {"cpiConsensus": "2026-10-26T17:26:10.000Z"}})
-        self.assertIn("| Market | Consensus | Low | Base | High | Published |", report)
-        self.assertIn("| CPI YoY · Oct 2026 | 3.70% | 3.77% | 3.88% | 3.99% | Oct 16 13:11 PDT |", report)
-        self.assertIn("| CPI YoY · Nov 2026 | N/A | N/A | N/A | N/A | N/A |", report)
+        self.assertIn("| Market | Period | Consensus | Low | Base | High | Published |", report)
+        self.assertIn("| CPI YoY | Oct 2026 | 3.70% | 3.77% | 3.88% | 3.99% | Oct 16 13:11 PDT |", report)
+        self.assertIn("| CPI YoY | Nov 2026 | N/A | N/A | N/A | N/A | N/A |", report)
         self.assertIn("Trading Economics CPI consensus Oct 26 10:26 PDT", report)
+
+    def test_gdp_has_its_own_section_under_cpi_with_the_quarter_as_the_period(self):
+        report = render_setup_board({"rows": [
+            {"id": "cpi", "label": "CPI YoY", "group": "inflation", "events": [{"eventTicker": "KXCPIYOY-26NOV"}], "forecasts": [
+                {"reportMonth": "2026-11", "available": True, "lower": 3.62, "base": 3.73, "upper": 3.84,
+                 "publishedAt": "2026-11-10T20:31:00+00:00", "eventTicker": "KXCPIYOY-26NOV", "consensus": None}]},
+            {"id": "gdp", "label": "GDP QoQ", "group": "growth", "events": [{"eventTicker": "KXGDP-27JAN28"}], "forecasts": [
+                {"reportQuarter": "2026-Q4", "available": True, "base": 2.62, "publishedAt": "2026-11-12",
+                 "eventTicker": "KXGDP-27JAN28", "consensus": 2.12},
+                {"reportQuarter": "2027-Q1", "available": False, "eventTicker": "KXGDP-27APR29", "consensus": None}]}],
+            "sections": [{"id": "inflation", "label": "CPI"}, {"id": "growth", "label": "GDP"}],
+            "sources": {"gdpOutlook": "2026-11-12", "gdpOutlookLabel": "Q4 2026 Macro Themes Mid-Quarter Update"}})
+        self.assertIn("| CPI YoY | Nov 2026 | N/A | 3.62% | 3.73% | 3.84% | Nov 10 12:31 PST |\n\n## GDP\n", report)
+        self.assertIn("\n".join([
+            "## GDP", "",
+            "| Market | Period | Consensus | Low | Base | High | Published |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| GDP QoQ | Q4 2026 | 2.12% | N/A | 2.62% | N/A | Nov 12 |",
+            "| GDP QoQ | Q1 2027 | N/A | N/A | N/A | N/A | N/A |"]), report)
+        self.assertIn("Q4 2026 Macro Themes Mid-Quarter Update Nov 12", report)
+        # A GDP row with nothing listed adds no line, and never joins the priced boards.
+        empty = render_setup_board({"rows": [{"id": "gdp", "label": "GDP QoQ", "group": "growth", "events": [], "forecasts": []}],
+                                     "sections": [{"id": "growth", "label": "GDP"}]})
+        self.assertNotIn("GDP", empty)
 
     def test_boards_with_price_history_add_the_z_score_to_the_market_cell(self):
         data = board()

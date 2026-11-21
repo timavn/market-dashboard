@@ -18,6 +18,8 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 EASTERN = ZoneInfo("America/New_York")
 DEFAULT_SECTIONS = ({"id": "metals", "label": "Metals"}, {"id": "crypto", "label": "Crypto"}, {"id": "oil", "label": "Oil"},
                     {"id": "indices", "label": "Indices"}, {"id": "rates", "label": "Rates"}, {"id": "inflation", "label": "CPI"})
+# Sections read against a published forecast (CPI, GDP), with no price, range or setup.
+FORECAST_SECTIONS = {"inflation", "growth"}
 # Captures before the sectioned board grouped WTI as energy.
 GROUP_ALIASES = {"energy": "oil"}
 
@@ -266,16 +268,36 @@ def _bias_cell(direction: Any, broken: dict[str, Any] | None = None, name: str =
     return f"BIAS({word};;;{clean(' '.join(note.split()))})"
 
 
-def _as_of_cell(observed: Any, readings: list[tuple[Any, Any]]) -> str:
+# A reading this many market days old may no longer hold: the report marks its date so it is
+# checked again before it carries a large position (user-specified 2026-11-20).
+AGING_MARKET_DAYS = 5
+
+
+def _market_days_old(date: Any, market_date: Any) -> int | None:
+    """Weekdays from a reading's publication day to the board's market day; holidays are not known here."""
+    try:
+        start, end = (datetime.fromisoformat(str(value)[:10]).date() for value in (date, market_date))
+    except ValueError:
+        return None
+    if end <= start:
+        return 0
+    whole_weeks, rest = divmod((end - start).days, 7)
+    return whole_weeks * 5 + sum(1 for offset in range(1, rest + 1) if (start.weekday() + offset) % 7 < 5)
+
+
+def _as_of_cell(observed: Any, readings: list[tuple[Any, Any]], market_date: Any = None) -> str:
     """Token the report UI stacks as pull time, then Tick/Trade/Trend publication date and product.
 
-    ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct)
+    ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct[;aging])
+    aging is one digit per reading, 1 when it is AGING_MARKET_DAYS or more market days old; it is
+    left out when none is.
     """
     clean = lambda value: re.sub(r"[;,()|]", " ", str(value or "")).strip()
     pulled = _pacific(observed)
     parts = [clean(pulled if pulled != DASH else NA)]
     parts += [f"{clean(_short_date(date) if date else '')},{clean(product)}" for date, product in readings]
-    return f"ASOF({';'.join(parts)})"
+    aging = "".join("1" if (_market_days_old(date, market_date) or 0) >= AGING_MARKET_DAYS else "0" for date, _ in readings)
+    return f"ASOF({';'.join(parts + ([aging] if '1' in aging else []))})"
 
 
 def _market_cell(row: dict[str, Any]) -> str:
@@ -517,6 +539,11 @@ def _dollar_row(usd: dict[str, Any] | None) -> dict[str, Any] | None:
             **({"zScore": usd.get("zScore")} if "zScore" in usd else {})}
 
 
+def _forecast_row(row: dict[str, Any]) -> bool:
+    """CPI and GDP: read against a published forecast, with no price, range or setup."""
+    return row.get("id") in {"cpi", "gdp"}
+
+
 def _section_rows(board: dict[str, Any], rows: list[dict[str, Any]]) -> list[tuple[str, str, list[dict[str, Any]]]]:
     sections = board.get("sections") or DEFAULT_SECTIONS
     group = lambda row: GROUP_ALIASES.get(row.get("group"), row.get("group"))
@@ -530,11 +557,11 @@ def research_by_section(board: dict[str, Any]) -> dict[str, dict[str, Any]]:
     research = board.get("research")
     if not isinstance(research, dict):
         return {}
-    rows = [row for row in board.get("rows") or [] if isinstance(row, dict) and row.get("id") != "cpi"]
+    rows = [row for row in board.get("rows") or [] if isinstance(row, dict) and not _forecast_row(row)]
     dollar = _dollar_row(board.get("usd"))
     blocks: dict[str, dict[str, Any]] = {}
     for section_id, _label, members in _section_rows(board, rows):
-        if not members or section_id == "inflation":
+        if not members or section_id in FORECAST_SECTIONS:
             continue
         block = _research_block(board, ([dollar] if dollar and not blocks else []) + members)
         if block:
@@ -634,10 +661,10 @@ def _cited(board: dict[str, Any]) -> _CitedProducts:
     """What the rendered review draws on: every market row it lays out (the US Dollar first in each section) and
     every research entry it prints. The report's Sources line and the Sources panel both read this."""
     cited = _CitedProducts(board)
-    rows = [row for row in board.get("rows") or [] if isinstance(row, dict) and row.get("id") != "cpi"]
+    rows = [row for row in board.get("rows") or [] if isinstance(row, dict) and not _forecast_row(row)]
     dollar = _dollar_row(board.get("usd"))
     for section_id, _label, members in _section_rows(board, rows):
-        if members and section_id != "inflation":
+        if members and section_id not in FORECAST_SECTIONS:
             for row in ([dollar] if dollar else []) + members:
                 _cite_row(cited, row)
     if isinstance(board.get("research"), dict):
@@ -693,7 +720,7 @@ def _fenced(kind: str, value: dict[str, Any]) -> list[str]:
 def render_setup_board(board: dict[str, Any]) -> str:
     rows = [row for row in board.get("rows") or [] if isinstance(row, dict)]
     cited = _cited(board)
-    priced = [row for row in rows if row.get("id") != "cpi"]
+    priced = [row for row in rows if not _forecast_row(row)]
     sources = board.get("sources") or {}
     # Boards captured with the morning's products carry Alpha Codes in the range cell and a research block.
     with_research = isinstance(board.get("research"), dict)
@@ -702,33 +729,41 @@ def render_setup_board(board: dict[str, Any]) -> str:
     # Boards captured with ETF volume add it after Trend; the report draws it under Tick, Trade and Trend.
     with_volume = isinstance(board.get("volumeWindows"), dict)
     research_blocks = research_by_section(board) if with_research else {}
+    # Saved boards without a market day fall back to the day they were captured.
+    market_date = board.get("marketDate") or str(board.get("asOf") or "")[:10]
     lines = []
     for section_id, label, members in _section_rows(board, rows):
-        if not members:
+        # GDP with no quarter listed has nothing to show, so its section is left out.
+        if not members or (section_id == "growth" and not any(member.get("forecasts") for member in members)):
             continue
         lines += [f"## {label}", ""]
-        if section_id == "inflation":
-            for cpi in members:
-                # Every published nowcast month from the current release on; older captures carry one forecast.
-                forecasts = cpi.get("forecasts") or [{**(cpi.get("forecast") or {}),
-                                                      "eventTicker": ((cpi.get("events") or [{}])[0]).get("eventTicker")}]
-                with_consensus = any("consensus" in forecast for forecast in forecasts)
-                rows = []
+        if section_id in FORECAST_SECTIONS:
+            # CPI and GDP each get their own table: the market, then the month or quarter the forecast tracks.
+            with_consensus = any("consensus" in forecast for member in members for forecast in member.get("forecasts") or [])
+            rows = []
+            for member in members:
+                # Every published forecast period from the current release on; older captures carry one CPI forecast.
+                forecasts = member.get("forecasts") or ([] if member.get("id") == "gdp" else [
+                    {**(member.get("forecast") or {}), "eventTicker": ((member.get("events") or [{}])[0]).get("eventTicker")}])
                 for forecast in forecasts:
+                    quarter = re.match(r"^(\d{4})-Q([1-4])$", str(forecast.get("reportQuarter") or ""))
                     month = re.match(r"^(\d{4})-(\d{2})$", str(forecast.get("reportMonth") or ""))
                     coded = re.search(r"-(\d{2})([A-Z]{3})$", str(forecast.get("eventTicker") or ""))
-                    label = (f"{MONTHS[int(month[2]) - 1]} {month[1]}" if month
-                             else f"{MONTHS[MONTH_CODES[coded[2]] - 1]} 20{coded[1]}" if coded and coded[2] in MONTH_CODES else NA)
+                    period = (f"Q{quarter[2]} {quarter[1]}" if quarter else f"{MONTHS[int(month[2]) - 1]} {month[1]}" if month
+                              else f"{MONTHS[MONTH_CODES[coded[2]] - 1]} 20{coded[1]}" if coded and coded[2] in MONTH_CODES else NA)
                     published = _pacific_zoned(forecast.get("publishedAt"))
                     # Boards captured with the survey consensus show it where older ones named the Kalshi contract.
                     second = (_number(forecast.get("consensus"), percent=True) if isinstance(forecast.get("consensus"), (int, float)) else NA
                               ) if with_consensus else (
                         _event_label({"eventTicker": forecast.get("eventTicker")}) if forecast.get("eventTicker") else NA)
-                    rows.append([f"{cpi.get('label') or 'CPI YoY'} · {label}", second,
-                                 *(_number(forecast.get(key), percent=True) if forecast.get("available") else NA
+                    # GDP prints one figure per quarter, so its Low and High read N/A.
+                    rows.append([str(member.get("label") or "CPI YoY"), period, second,
+                                 *(_number(forecast.get(key), percent=True)
+                                   if forecast.get("available") and isinstance(forecast.get(key), (int, float)) else NA
                                    for key in ("lower", "base", "upper")),
                                  published if published != DASH else NA])
-                lines += _table(["Market", "Consensus" if with_consensus else "Kalshi", "Low", "Base", "High", "Published"], rows)
+            if rows:
+                lines += _table(["Market", "Period", "Consensus" if with_consensus else "Kalshi", "Low", "Base", "High", "Published"], rows)
             if held := _lines_block(members):
                 lines += _fenced("analyst-lines", held)
             continue
@@ -749,7 +784,8 @@ def render_setup_board(board: dict[str, Any]) -> str:
                               (tick.get("date"), f"HedgAI {tick.get('ticker') or ''}".strip() if tick else None),
                               (trade.get("date"), trade.get("source")),
                               (_eastern_date(trend_break.get("since")), f"Alpha Code {_number(trend_break.get('level'))}") if trend_break
-                              else (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)])])
+                              else (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)],
+                              market_date)])
         lines += _table(["Market", "Tick", "Trade", "Trend", *(["Volume"] if with_volume else []), "Price and Risk Range",
                          *(["Structure"] if sessions else []), "Status"], table)
         # Only a withheld price is noted under the table; the explanatory proxy, inverse-Tick and
@@ -784,7 +820,8 @@ def render_setup_board(board: dict[str, Any]) -> str:
         lines += [f"Paper tickets: {result}" + (f"; {opened} open." if opened else "."), ""]
     # Hedgeye products as the body cites them, then the CPI publications and the market data feeds.
     dated = [(label, _pacific_zoned(sources.get(key))) for key, label in (
-        ("inflationNowcast", "Inflation Nowcast"), ("cpiConsensus", "Trading Economics CPI consensus"))]
+        ("inflationNowcast", "Inflation Nowcast"), ("cpiConsensus", "Trading Economics CPI consensus"),
+        ("gdpOutlook", str(sources.get("gdpOutlookLabel") or "Hedgeye GDP outlook")))]
     named = (cited.named() + [f"{label} {date}" for label, date in dated if date != DASH]
              + ["HedgAI Signals", "Cboe volatility indices", "Kalshi"])
     lines += ["Sources: " + ", ".join(named), ""]

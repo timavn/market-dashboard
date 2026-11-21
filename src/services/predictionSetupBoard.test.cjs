@@ -123,7 +123,7 @@ test('attaches each market group volatility gauge with its Hedgeye range when pu
     monthChangePct: 25.24, availability: 'reference', freshness: 'refresh-delayed', asOf: '2026-10-16T20:17:30.000Z' } } });
   assert.deepEqual(delayed.rows.find((item) => item.id === 'ust10y').volatility, { symbol: 'MOVE', label: 'ICE BofA MOVE Index',
     value: 101.103, changePct: -1.35, d15: -3.32, m1: 25.24, asOf: '2026-10-16T20:17:30.000Z', regimeKey: 'MOVE' });
-  assert.deepEqual(board.sections.map((section) => section.label), ['Metals', 'Crypto', 'Oil', 'Indices', 'Rates', 'CPI']);
+  assert.deepEqual(board.sections.map((section) => section.label), ['Metals', 'Crypto', 'Oil', 'Indices', 'Rates', 'CPI', 'GDP']);
 });
 
 test('a price from a different instrument than its range is withheld, never positioned', () => {
@@ -763,4 +763,26 @@ test('the loader reads order books for lines near even odds and prices each mark
     { now: new Date('2026-11-11T16:00:00Z') });
   assert.equal(failed.sourceStatus.kalshiOrderbooks, 'failed');
   assert.equal(failed.rows.find((item) => item.id === 'gold').kalshiLines.lines.bet, null);
+});
+
+test('GDP lists each quarter Kalshi has an event for with the published figure and consensus, N/A without one', () => {
+  const { gdpEventQuarter } = require('./predictionSetupBoard.cjs');
+  assert.equal(gdpEventQuarter({ event_ticker: 'KXGDP-27JAN28' }), '2026-Q4');
+  assert.equal(gdpEventQuarter({ event_ticker: 'KXGDP-27APR29', title: 'US real GDP growth in Q1 2027?' }), '2027-Q1');
+  const board = buildSetupBoard({ asOf: '2026-11-20T18:00:00.000Z',
+    eventsBySeries: { KXGDP: [{ event_ticker: 'KXGDP-27APR29' }, { event_ticker: 'KXGDP-27JAN28' }] },
+    gdpOutlook: { publishedAt: '2026-11-12', source: { label: 'Mid-Quarter Update' },
+      quarters: [{ quarter: '2026-Q4', base: 2.62, consensus: 2.12 }] } });
+  const gdp = board.rows.find((row) => row.id === 'gdp');
+  assert.equal(gdp.group, 'growth');
+  assert.deepEqual(board.sections.slice(-2).map((section) => section.label), ['CPI', 'GDP']);
+  assert.equal(gdp.events[0].eventTicker, 'KXGDP-27JAN28');
+  assert.deepEqual(gdp.forecasts, [
+    { reportQuarter: '2026-Q4', eventTicker: 'KXGDP-27JAN28', available: true, base: 2.62, publishedAt: '2026-11-12', consensus: 2.12 },
+    { reportQuarter: '2027-Q1', eventTicker: 'KXGDP-27APR29', available: false, consensus: null }]);
+  assert.equal(board.sources.gdpOutlook, '2026-11-12');
+  // Without the outlook the row stays, empty, and Sources does not name it.
+  const bare = buildSetupBoard({ asOf: '2026-11-20T18:00:00.000Z' });
+  assert.deepEqual(bare.rows.find((row) => row.id === 'gdp').forecasts, []);
+  assert.equal('gdpOutlook' in bare.sources, false);
 });

@@ -650,6 +650,42 @@
       "notes": "No price range applies; the bias is the Hedgeye nowcast versus each strike."
     },
     {
+      "id": "gdp",
+      "label": "GDP QoQ",
+      "group": "growth",
+      "cadence": "quarterly",
+      "kalshi": {
+        "series": "KXGDP",
+        "title": "US GDP growth",
+        "settlementSources": [
+          {
+            "name": "Bureau of Economic Analysis",
+            "url": "https://www.bea.gov/data/gdp/gross-domestic-product"
+          }
+        ],
+        "feeType": "quadratic_with_maker_fees",
+        "exampleEvent": "KXGDP-27JAN28",
+        "exampleRule": "If real GDP (as measured by the BEA's seasonally adjusted and annualized Advance Estimate) increases by more than 2.5, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "next advance release",
+        "underlying": "BEA real GDP, advance estimate, QoQ SAAR, one decimal",
+        "comparator": ">"
+      },
+      "hedgeye": {
+        "forecast": {
+          "product": "gdp-outlook",
+          "fields": [
+            "base"
+          ]
+        },
+        "riskRange": null,
+        "trend": null,
+        "trade": null,
+        "tick": null
+      },
+      "notes": "No price range applies; the bias is Hedgeye's published quarterly path versus each strike. Hedgeye prints one figure per quarter, no low or high."
+    },
+    {
       "id": "ust2y",
       "label": "UST 2Y",
       "group": "rates",
@@ -998,6 +1034,10 @@
     {
       "id": "inflation",
       "label": "CPI"
+    },
+    {
+      "id": "growth",
+      "label": "GDP"
     }
   ],
   "volatilityGaps": "No volatility index is available in the dashboard feeds for copper or Ethereum.",

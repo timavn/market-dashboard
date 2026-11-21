@@ -251,6 +251,13 @@ test('the Dollar reference row and As of cells stack pull time with each signal 
   expect([...bias.children].map(span => span.textContent)).toEqual(['Bullish']);
   expect([...asOf.children].map(span => span.textContent))
     .toEqual(['Oct 13 06:41', 'Ti HedgAI GLD Sep 09', 'Ta N/A', 'Te Risk Ranges Oct 13']);
+  expect(container.querySelector('.is-aging')).toBeNull();
+  // A reading five or more market days old is flagged: only that line's date turns amber.
+  const aged = render(<table><tbody><tr>{cell('ASOF(Nov 20 06:41;Oct 20,HedgAI CPER;Oct 14,Macro Show;Nov 20,Risk Ranges;110)')}</tr></tbody></table>).container;
+  expect([...aged.querySelectorAll('.analyst-prediction-as-of-line')].map(line => line.classList.contains('is-aging'))).toEqual([true, true, false]);
+  expect(aged.querySelector('.is-aging')).toHaveAttribute('title', '5+ market days old · re-check before sizing');
+  expect([...aged.querySelector('td').children].map(span => span.textContent))
+    .toEqual(['Nov 20 06:41', 'Ti HedgAI CPER Oct 20', 'Ta Macro Show Oct 14', 'Te Risk Ranges Nov 20']);
   expect(container).not.toHaveTextContent(/ASOF\(|REF\(/);
 });
 
@@ -443,10 +450,12 @@ test('CPI nowcast reads Low · Base · High, Low red and High green on the value
   ReactMarkdown.renderSpy.mockClear();
   render(<AnalystPredictionReport markdown={markdown} />);
   // Saved reports titled the first column "Nowcast low".
-  expect(ReactMarkdown.renderSpy.mock.calls[0][0].children).toContain('| Market | Kalshi | Low | Base | High | Published |');
+  // Saved reports also named the month after the market; it now has its own Period column.
+  expect(ReactMarkdown.renderSpy.mock.calls[0][0].children).toContain(['| Market | Period | Kalshi | Low | Base | High | Published |',
+    '| --- | --- | --- | --- | --- | --- | --- |', '| CPI YoY | Oct 2026 | N/A | 3.77% | 3.88% | 3.99% | Oct 16 13:11 PDT |'].join('\n'));
   const { td: Cell, table: Table } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
   const cell = value => <Cell node={{ children: [{ type: 'text', value }] }}>{value}</Cell>;
-  const headers = ['Market', 'Kalshi', 'Low', 'Base', 'High', 'Published'];
+  const headers = ['Market', 'Period', 'Kalshi', 'Low', 'Base', 'High', 'Published'];
   const node = { children: [{ tagName: 'thead', children: [{ tagName: 'tr', children: headers.map(value => ({ tagName: 'th', children: [{ type: 'text', value }] })) }] }] };
   const { container } = render(<Table node={node}><tbody><tr>{cell('CPI')}{cell('N/A')}{cell('3.77%')}</tr></tbody></Table>);
   expect(container.querySelector('.analyst-table-frame')).toHaveClass('is-nowcast');

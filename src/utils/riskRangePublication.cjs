@@ -104,6 +104,39 @@ function strictFiniteNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+// A Real-Time Alert's "<ticker> Refreshed Risk Range" is stored beside the published row as `revision`
+// (the Gmail ingestor's apply_refreshed_risk_ranges). The published values stay in the row and in the
+// manifest checksum; readers get the revised range, with the published one kept as `published`
+// (user-specified 2026-11-20).
+function rangeRevision(revision) {
+  if (!revision || typeof revision !== 'object') return null;
+  const lrr = strictFiniteNumber(revision.lrr);
+  const hrr = strictFiniteNumber(revision.hrr);
+  const eventTime = typeof revision.eventTime === 'string' && Number.isFinite(Date.parse(revision.eventTime))
+    ? revision.eventTime : null;
+  if (lrr === null || hrr === null || lrr >= hrr || !eventTime) return null;
+  return {
+    lrr, hrr, eventTime,
+    sourceMessageId: typeof revision.sourceMessageId === 'string' ? revision.sourceMessageId : null,
+    label: typeof revision.label === 'string' ? revision.label : null,
+    headline: typeof revision.headline === 'string' ? revision.headline : null,
+    source: 'real-time-alert',
+  };
+}
+
+function revisedRangeValue(item) {
+  if (!item.revision) return item.value;
+  const { lrr, hrr, ...revision } = item.revision;
+  return {
+    ...item.value,
+    lrr,
+    hrr,
+    published: { lrr: item.value.lrr, hrr: item.value.hrr, timestamp: item.value.timestamp },
+    revision: { ...revision, lrr, hrr },
+    timestamp: revision.eventTime,
+  };
+}
+
 function normalizeRiskRangeItem(item = {}) {
   const ticker = normalizeTicker(item.ticker);
   const originalName = [item.originalName, item.name]
@@ -129,11 +162,13 @@ function normalizeRiskRangeItem(item = {}) {
       reasons,
     };
   }
+  const revision = sourceClass === 'primary' ? rangeRevision(item.revision) : null;
   return {
     valid: true,
     ticker,
     date,
     sourceClass,
+    ...(revision ? { revision } : {}),
     value: {
       lrr,
       hrr,
@@ -298,7 +333,7 @@ function buildRiskRangeEnvelope(items, {
   const canonicalRanges = Object.fromEntries(
     [...primaryByTicker.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([ticker, item]) => [ticker, item.value]),
+      .map(([ticker, item]) => [ticker, revisedRangeValue(item)]),
   );
   const canonicalSupplementalRanges = Object.fromEntries(
     [...supplementalOnly.entries()]
@@ -352,6 +387,7 @@ module.exports = {
   classifyRiskRangeSource,
   expectedRiskRangePublication,
   normalizeRiskRangeItem,
+  rangeRevision,
   riskRangeManifestChecksum,
   strictFiniteNumber,
 };

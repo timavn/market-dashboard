@@ -213,6 +213,9 @@
 .analyst-prediction-as-of-line { display: flex; align-items: baseline; gap: 4px; }
 .analyst-prediction-as-of-line__product { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .analyst-prediction-as-of-line__date { flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
+/* A reading five or more market days old: its date turns amber, nothing else changes
+   (user-specified 2026-11-20). */
+.analyst-prediction-as-of-line.is-aging .analyst-prediction-as-of-line__date { color: var(--analyst-caution, #925b0a); }
 /* The US Dollar reference row sits first in each market table, set apart by a thin money-green outline. */
 .analyst-panel-v2 .analyst-prediction-report .is-range-board tr:has(.analyst-prediction-reference-cell) {
   outline: 1px solid var(--analyst-money-green, #2e7d32);
@@ -411,8 +414,11 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
   content: ''; position: absolute; left: -12px; right: -12px; bottom: 100%; height: 64px; background: var(--analyst-surface, #fff);
 }
 /* CPI nowcast values (not headings): Low red, Base as is, High green. */
-.analyst-panel-v2 .analyst-prediction-report .is-nowcast td:nth-child(3):not(.is-na) { color: var(--dashboard-negative, #dc2626); }
-.analyst-panel-v2 .analyst-prediction-report .is-nowcast td:nth-child(5):not(.is-na) { color: var(--dashboard-positive, #059669); }
+.analyst-panel-v2 .analyst-prediction-report .is-nowcast td:nth-child(4):not(.is-na) { color: var(--dashboard-negative, #dc2626); }
+.analyst-panel-v2 .analyst-prediction-report .is-nowcast td:nth-child(6):not(.is-na) { color: var(--dashboard-positive, #059669); }
+/* CPI and GDP rows: the market's name sits over its Book | Curve switch. */
+.analyst-prediction-report .is-nowcast .analyst-board-market__body { flex-direction: column; justify-content: center; gap: 4px; }
+.analyst-prediction-report .is-nowcast .analyst-board-market__name { order: -1; text-align: center; }
 
 /* Kalshi line monitor: one foldable row per market under its section's table. */
 .analyst-lines { margin: 4px 0 8px; overflow-x: auto; }

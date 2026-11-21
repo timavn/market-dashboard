@@ -490,3 +490,13 @@ test('a newer intraday Tick replaces an older same-date publication independentl
   expect(mergeDashboardResearchReadings({ XLF: later }, { XLF: first }).XLF.tick).toBe('BEARISH');
   expect(mergeDashboardResearchReadings({ XLF: first }, { XLF: later }).XLF.tickEvidence.publishedAt).toBe(`${DATE}T15:00:00Z`);
 });
+
+test('a Real-Time Alert revision shows the refreshed range and credits that alert, keeping the sheet as the Trend source', () => {
+  const reading = primary(envelope({ SPX: row({ lrr: 6899, hrr: 7367, trend: 'BEARISH', originalName: 'S&P 500',
+    published: { lrr: 7106, hrr: 7518 },
+    revision: { lrr: 6899, hrr: 7367, eventTime: '2026-09-25T19:22:00+00:00', sourceMessageId: '1a1fa6a6a05e2a56', source: 'real-time-alert' } }) })).SPX;
+  expect(reading).toMatchObject({ lrr: 6899, hrr: 7367, trend: 'BEARISH' });
+  expect(reading.rangeEvidence).toMatchObject({ source: 'Real-Time Alert', sourceType: 'revision', sourceUrl: 'gmail://message/1a1fa6a6a05e2a56',
+    sourceMessageId: '1a1fa6a6a05e2a56', publishedAt: '2026-09-25T19:22:00+00:00', published: { lrr: 7106, hrr: 7518 } });
+  expect(reading.trendEvidence).toMatchObject({ source: 'Risk Ranges', sourceType: 'primary' });
+});

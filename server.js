@@ -6625,6 +6625,18 @@ app.get('/api/hedgeye/changelog', async (req, res) => {
 const { createPublishedTradeArchiveWorkerService } = require('./src/services/publishedTradeArchiveWorkerService.cjs');
 const publishedTradeArchive = createPublishedTradeArchiveWorkerService();
 const securityIntelligenceInputCache = createAsyncTtlCache({ ttlMs: FIVE_MINUTES_MS, maxEntries: 12 });
+// A Real-Time Alert can refresh a Risk Range intraday; when the current ranges change, every cache built
+// from them is dropped, so the dashboard, Security Intelligence (Portfolio Review, range lines) and the
+// prediction board all read the revised range on their next request (user-specified 2026-11-20).
+const riskRangeRevisionWatch = require('./src/services/riskRangeRevisionWatch.cjs').createRiskRangeRevisionWatch({
+  load: ({ now }) => loadRiskRangePublicationEnvelope({ now }),
+  onChange: () => {
+    riskRangesCache.clear();
+    securityIntelligenceInputCache.clear();
+    predictionResearchBoards.clear();
+  },
+  log: (message) => console.log(message),
+});
 const securityIntelligenceProjection = createSecurityIntelligenceWorkerService();
 
 // All security surfaces consume the same dated Trade evidence, including sparse
@@ -8984,6 +8996,7 @@ const server = app.listen(PORT, HOST, async () => {
   }
 
   if (process.env.NODE_ENV !== 'test') pcaRiskService.start();
+  if (process.env.NODE_ENV !== 'test') riskRangeRevisionWatch.start();
 
   loginStatusService.start().catch((error) => {
     console.warn('[Login status] Initial collection failed:', error.message);

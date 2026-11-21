@@ -44,6 +44,24 @@ test('the printed instrument wins: an ETF code after an index or commodity name 
   }
 });
 
+// Published 2026-11-10 to 2026-11-13; each was once read as the direction it names.
+test('a signal named as missing, required, wanted or almost there states no direction', () => {
+  for (const text of [
+    'Gold had failed to establish the conditions he requires for a bottom: a higher low in its risk range and a bullish TRADE signal.',
+    'WTI remained unable to regain bullish trade and trend, reinforcing Keith’s patience in building bond exposure.',
+    'The two-year yield signal returned to bullish trade and trend about two weeks ago, ahead of CPI.',
+    'Gold has no bullish TRADE signal.', 'Gold still has no confirmed Bearish TREND.', 'Gold lacks a bullish TRADE signal.',
+    'Copper is without a bullish TREND signal.', 'Gold has yet to signal bullish TRADE.', 'Silver is far from bullish TREND.',
+    'Gold requires a bullish TRADE signal first.', 'Copper is struggling to hold bullish TREND.', 'SPX is trying to get back to bullish TRADE.',
+    'Keith wants Gold bullish TRADE first.', 'Gold is neither bullish TRADE.', 'Gold is almost bullish TRADE and TREND.',
+  ]) assert.deepEqual(read(text), [], text);
+  // The stated half of a sentence survives its unstated half; words after the claim do not void it.
+  assert.deepEqual(read('ONON is signal-strength long, with the stock back to bullish trade and almost bullish trend; the approach is to build'), ['ONON.trade=BULLISH']);
+  assert.deepEqual(read('Copper remained bullish on trade and trend, without announcing a copper purchase.'), ['ref:COPPER.trade=BULLISH', 'ref:COPPER.trend=BULLISH']);
+  assert.deepEqual(read('Bitcoin’s Alpha Code was roughly 83 / 79 , leaving it bearish trade and barely bullish trend .').filter((item) => /trade|trend/.test(item) && !/\//.test(item)),
+    ['BTC.trade=BEARISH', 'BTC.trend=BULLISH']);
+});
+
 test('conditional, negated, approaching, attributed, past and superseded statements state no signal', () => {
   for (const text of [
     'If SPY is Bearish TRADE and TREND', 'SPX is not BULLISH TRADE.', 'SPX may be BULLISH TRADE.', 'SPX was previously BULLISH TRADE.',

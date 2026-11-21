@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const UNIVERSE = require('../constants/predictionMarketUniverse.json');
 const { canonicalTradeResearch } = require('../utils/canonicalTradeResearch.cjs');
 const { selectLatestPublishedTrade } = require('../utils/publishedResearchSignals.cjs');
@@ -406,6 +408,33 @@ function cpiForecasts(nowcast, currentEvent, eventsBySeries, asOf, cpiConsensus)
     eventTicker: listed.get(month) || null, ...consensus(month) }));
 }
 
+/** The quarter a Kalshi GDP event settles on: named in its title, else the quarter before its release month. */
+function gdpEventQuarter(event) {
+  const named = `${event?.title || ''} ${event?.sub_title || ''}`.match(/\bQ([1-4]) (\d{4})\b/);
+  if (named) return `${named[2]}-Q${named[1]}`;
+  const key = eventSortKey(event?.event_ticker);
+  if (!key) return null;
+  const ended = new Date(Date.UTC(2000 + Number(key.slice(0, 2)), Number(key.slice(2, 4)) - 2, 1));
+  return `${ended.getUTCFullYear()}-Q${Math.floor(ended.getUTCMonth() / 3) + 1}`;
+}
+
+/**
+ * One row per quarter Kalshi lists a GDP event for, earliest first, each with Hedgeye's published figure and
+ * the consensus printed beside it. Hedgeye prints one figure per quarter, so there is no low or high.
+ */
+function gdpForecasts(outlook, eventsBySeries) {
+  const published = new Map((outlook?.quarters || []).map((row) => [row?.quarter, row]));
+  return (eventsBySeries?.KXGDP || []).filter((event) => event?.event_ticker && eventSortKey(event.event_ticker))
+    .sort((left, right) => eventSortKey(left.event_ticker).localeCompare(eventSortKey(right.event_ticker)))
+    .map((event) => {
+      const reportQuarter = gdpEventQuarter(event);
+      const base = finite(published.get(reportQuarter)?.base);
+      return { reportQuarter, eventTicker: event.event_ticker, available: base !== null,
+        ...(base === null ? {} : { base, publishedAt: outlook.publishedAt || null }),
+        consensus: finite(published.get(reportQuarter)?.consensus) };
+    }).filter((row) => row.reportQuarter);
+}
+
 /**
  * What the market date's Hedgeye products say about each market, checked
  * against the live prices on this board. Saved boards without morning
@@ -443,7 +472,7 @@ const allTimeHighSymbol = (market) => market.hedgeye.riskRange?.priceSymbol || m
 
 function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations,
   usdPeriods, eventsBySeries, morningSnapshots, latestEditions, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory,
-  priceHistory, cpiConsensus, publishedStatements, alphaCodeWatch, marketDate, asOf = new Date().toISOString() } = {}) {
+  priceHistory, cpiConsensus, gdpOutlook, publishedStatements, alphaCodeWatch, marketDate, asOf = new Date().toISOString() } = {}) {
   // Saved boards from before volume keep their original shape.
   // Bond ETFs (SHY, IEF, TLT) move opposite to the yield their Trend describes.
   const volumeFor = ({ symbol, inverse } = {}, trend) => {
@@ -463,6 +492,10 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       return { id: market.id, label: market.label, group: market.group, cadence: market.cadence,
         events, forecast: cpiForecast(nowcast, events[0]),
         forecasts: cpiForecasts(nowcast, events[0], eventsBySeries, asOf, cpiConsensus) };
+    }
+    if (market.id === 'gdp') {
+      return { id: market.id, label: market.label, group: market.group, cadence: market.cadence,
+        events, forecasts: gdpForecasts(gdpOutlook, eventsBySeries) };
     }
     const range = riskRangeReading(market, { riskRanges, cryptoQuant });
     const price = priceReading(market.price.symbol, market.price.label, market.price.fit, quotes);
@@ -530,8 +563,20 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       hedgai: hedgai?.asOf || null,
       inflationNowcast: nowcast?.publishedAt || nowcast?.date || null,
       ...(cpiConsensus ? { cpiConsensus: cpiConsensus.observedAt || null } : {}),
+      ...(gdpOutlook ? { gdpOutlook: gdpOutlook.publishedAt || null, gdpOutlookLabel: gdpOutlook.source?.label || null } : {}),
     },
     rows };
+}
+
+/** Hedgeye's quarterly GDP path as last transcribed, read fresh so a replaced file shows on the next board. */
+const GDP_OUTLOOK_PATH = path.join(__dirname, '../../data/research/gdp/hedgeye-outlook-v1.json');
+function readGdpOutlook() {
+  try {
+    const outlook = JSON.parse(fs.readFileSync(GDP_OUTLOOK_PATH, 'utf8'));
+    return Array.isArray(outlook?.quarters) ? outlook : null;
+  } catch {
+    return null;
+  }
 }
 
 const seriesNames = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
@@ -555,7 +600,7 @@ const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.h
 function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, loadSecurityIntelligence,
   loadNowcast, loadQuotes, loadVolatility, loadUsdCorrelations, loadPeriodReturns, loadKalshiEvents, loadMorningProducts, loadLatestEditions,
   loadRiskRangeHistory, loadCryptoQuantHistory, loadAllTimeHighs, loadVolumeHistory, loadPriceHistory, loadCpiConsensus,
-  loadPublishedStatements, loadAlphaCodeWatch, loadKalshiMarkets, loadKalshiBalance, loadKalshiPositions, loadKalshiOrderbook,
+  loadGdpOutlook = readGdpOutlook, loadPublishedStatements, loadAlphaCodeWatch, loadKalshiMarkets, loadKalshiBalance, loadKalshiPositions, loadKalshiOrderbook,
   marketDateFor, orderbookTtlMs = 30_000 }) {
   // Order books read in the last orderbookTtlMs, by line ticker, so back-to-back board reads do not re-read them.
   const bookCache = new Map();
@@ -588,7 +633,7 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
     const loadedMorning = settle(loadMorningProducts ? loadMorningProducts({ marketDate, products }) : Promise.resolve(null));
     const [riskRanges, cryptoQuant, hedgai, securityIntelligence, nowcast, quotes, volatility, usdCorrelations, usdPeriods,
       events, morning, latestEditions, riskRangeHistory, cryptoQuantHistory, allTimeHighs, volumeHistory, priceHistory, cpiConsensus,
-      publishedStatements] = await Promise.all([
+      publishedStatements, gdpOutlook] = await Promise.all([
       loadedRanges,
       settle(loadCryptoQuant()),
       settle(full(() => loadHedgai({ now }))),
@@ -613,6 +658,8 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       optional(loadCpiConsensus),
       // The day's archived statements: spot-reference Trade for the metals.
       optional(loadPublishedStatements, { date: marketDate }),
+      // Hedgeye's quarterly GDP path, for the GDP row beside CPI.
+      optional(loadGdpOutlook),
     ]);
     if (researchDate && morning.value) morning.value = { 'crypto-quant': {}, ...morning.value };
     const board = buildSetupBoard({
@@ -630,6 +677,7 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       // A failed load still yields a board whose Z-scores and CPI consensus read unavailable.
       ...(priceHistory ? { priceHistory: priceHistory.value || {} } : {}),
       ...(cpiConsensus ? { cpiConsensus: cpiConsensus.value || { releases: [] } } : {}),
+      ...(gdpOutlook?.value ? { gdpOutlook: gdpOutlook.value } : {}),
       ...(publishedStatements?.value ? { publishedStatements: publishedStatements.value } : {}),
       // Today's board reads the live Alpha Code watch; an earlier day's research never does.
       ...(loadAlphaCodeWatch && !researchDate ? { alphaCodeWatch: await Promise.resolve().then(loadAlphaCodeWatch).catch(() => null) } : {}),
@@ -688,5 +736,5 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
 const extraCboeSeries = () => UNIVERSE.markets.map((market) => market.volatility)
   .filter((spec) => spec?.cboeSymbol).map((spec) => ({ name: spec.key, symbol: spec.cboeSymbol }));
 
-module.exports = { allTimeHighSymbols, alphaCodeBreaks, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents, selectWeeklyEvent,
+module.exports = { gdpEventQuarter, gdpForecasts, readGdpOutlook, allTimeHighSymbols, alphaCodeBreaks, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents, selectWeeklyEvent,
   priceSymbols, seriesNames, tradeTickers };

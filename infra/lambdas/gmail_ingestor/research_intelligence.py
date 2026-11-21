@@ -145,6 +145,26 @@ def report_rules() -> List[Tuple[str, Tuple[str, ...]]]:
     ]
 
 
+def byline_rules() -> List[Tuple[str, Tuple[str, ...]]]:
+    """Products recognised by the author named in the email body.
+
+    Their subject lines have no fixed wording, so `matchTerms` cannot find
+    them. A product claims an email only when one of its `matchBylines` is the
+    email's sole author.
+    """
+    return [
+        (
+            product["id"],
+            tuple(
+                re.sub(r"\s+", " ", str(name)).strip().casefold()
+                for name in product.get("matchBylines", [])
+            ),
+        )
+        for product in PRODUCT_REGISTRY.get("products", [])
+        if product.get("matchBylines")
+    ]
+
+
 def product_definition(product_id: str) -> Dict[str, Any]:
     return PRODUCTS_BY_ID.get(
         str(product_id or ""),
@@ -363,6 +383,10 @@ def _event_kind(product_id: str, path: str) -> str:
         return "investing_idea_position"
     if product_id in {"real-time-alert", "etf-pro", "go-anywhere"}:
         return "position_change"
+    if product_id == "trend-tail-levels":
+        # A monthly table of levels, not a call. Its own kind keeps every
+        # Trend consumer from reading a weeks-old row as a live signal.
+        return "trend_tail_level"
     return "mention"
 
 
@@ -412,6 +436,17 @@ def _reference(
     return reference
 
 
+def _trend_tail_level_excerpt(ticker: str, row: Dict[str, Any], close_date: Any) -> str:
+    parts = [f"close {row.get('close')}" + (f" on {close_date}" if close_date else "")]
+    for label, level_key, status_key in (
+        ("TREND", "trendLevel", "trendStatus"),
+        ("TAIL", "tailLevel", "tailStatus"),
+    ):
+        if row.get(level_key) is not None:
+            parts.append(f"{label} level {row[level_key]} ({row.get(status_key) or 'status not stated'})")
+    return f"{ticker}: " + "; ".join(parts)
+
+
 def _structured_ticker_references(
     snapshot: Dict[str, Any],
     product_id: str,
@@ -442,6 +477,26 @@ def _structured_ticker_references(
                     product_id=product_id,
                     direction=direction,
                 ))
+        return references
+
+    if product_id == "trend-tail-levels":
+        # One typed reference per table row. A row states where the close sat
+        # against two levels; it carries no direction and no signal value, so
+        # a fund name such as "US Dollar Bullish" cannot read as a call.
+        rows = data.get("rows") if isinstance(data, dict) else None
+        for index, row in enumerate(rows if isinstance(rows, list) else []):
+            ticker = canonical_ticker(row, allow_structured_only=True)
+            if not ticker:
+                continue
+            references.append(_reference(
+                entity_type="ticker",
+                entity_id=ticker,
+                match_type="structured_membership",
+                matched_text=ticker,
+                excerpt=_trend_tail_level_excerpt(ticker, row, data.get("closeDate")),
+                field_path=f"data.rows[{index}]",
+                product_id=product_id,
+            ))
         return references
 
     if product_id == "bitcoin-trend-tracker":
@@ -771,6 +826,10 @@ def extract_entity_references(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
             if _is_authoritative_tracker_reference(reference)
         )
     searchable_data = snapshot.get("data") or {}
+    if product_id == "trend-tail-levels" and isinstance(searchable_data, dict) and searchable_data.get("rows"):
+        # The body is the same table as text. Walking it would re-emit every
+        # ticker and read fund names as direction.
+        return references
     if product_id in SIGNAL_STRENGTH_PRODUCTS and _has_signal_strength_book(searchable_data):
         # The email body repeats the published table. Its typed rows are the
         # only authority, and a short-list body must not read as membership.

@@ -276,7 +276,7 @@ function marketMonitor(row, { lines = null, ladder = null, held = [], quotedAt =
   const shown = lines || ladder;
   return { id: row.id, market: row.label, event: row.events?.[0]?.eventTicker || null,
     shade: side, ...(row.setup?.reason && !side ? { shadeReason: row.setup.reason } : {}),
-    summary: { price, centre: ladder?.centre ?? null, position: finite(row.position), unit: group === 'rates' || group === 'inflation' ? '%' : null,
+    summary: { price, centre: ladder?.centre ?? null, position: finite(row.position), unit: ['rates', 'inflation', 'growth'].includes(group) ? '%' : null,
       fillable: ladder?.fillable ?? lines?.fillable ?? null,
       total: ladder?.total ?? lines?.total ?? null, closeTime: shown?.closeTime || null },
     ...(shown ? { lines: shown } : {}), held, ...(top && top.state !== 'HOLD' ? { worst: { state: top.state, tone: top.tone } } : {}),

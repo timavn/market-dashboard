@@ -6,6 +6,10 @@
 // name and the claim names another instrument or someone else's view, and
 // neither the lead-in, the words right after the claim, nor a neighbouring
 // clause makes it conditional, negated, approaching, past or superseded.
+// A signal named as missing, required, wanted or almost there ("failed to
+// establish … a bullish TRADE", "unable to regain bullish trade and trend",
+// "almost bullish trend") states no direction at all: not that one, and not its
+// opposite (user-specified 2026-11-20).
 // Everything else (methodology, hypotheticals, another market's signal) yields
 // nothing: a missed statement is a gap, a wrong one becomes a false signal.
 
@@ -21,7 +25,7 @@ const WEEKDAYS = 'monday|tuesday|wednesday|thursday|friday|saturday|sunday';
 const FORBIDDEN = new RegExp(grammar.forbidden, 'i');
 const CLAIMS = grammar.claims.map((claim) => ({ ...claim, regex: new RegExp(claim.pattern, 'gi') }));
 // Words right after a claim that make it conditional or past.
-const QUALIFIED_TAIL = new RegExp(String.raw`^(?:\s+(?:signals?|durations?|breakouts?|signal\s+breakout))?[\s,;:(—–…-]*(?:if|unless|provided|as\s+long\s+as|so\s+long\s+as|assuming|barring|should|but\s+only|only\s+if|until|once|when|whenever|prior\s+to|as\s+recently\s+as|for\s+most\s+of|through\s+(?:${MONTHS})|in\s+Q[1-4]|in\s+20\d\d|on\s+(?:${MONTHS})\s+\d|as\s+of\s+(?:last|${WEEKDAYS})|then\s+(?:flipped|moved|went|turned|broke|fell|reversed)|(?:late\s+|early\s+)?last\s+(?:week|month|year|quarter|session|${WEEKDAYS})|this\s+past\s+(?:week|${WEEKDAYS})|on\s+(?:${WEEKDAYS})|yesterday|previously|before|earlier|(?:a|an|one|two|three|four|five|six|several|few|\d+)\s+(?:days?|weeks?|months?|sessions?|years?)\s+ago|ago|versus|vs\.?|back\s+in|during\s+(?!this\b)|at\s+the\s+(?:time|start|end)|intraday|together\s+(?:late\s+|early\s+)?last|in\s+(?:early|late|mid)?-?\s*(?:${MONTHS}))\b`, 'i');
+const QUALIFIED_TAIL = new RegExp(String.raw`^(?:\s+(?:signals?|durations?|breakouts?|signal\s+breakout))?[\s,;:(—–…-]*(?:if|unless|provided|as\s+long\s+as|so\s+long\s+as|assuming|barring|should|but\s+only|only\s+if|until|once|when|whenever|prior\s+to|as\s+recently\s+as|for\s+most\s+of|through\s+(?:${MONTHS})|in\s+Q[1-4]|in\s+20\d\d|on\s+(?:${MONTHS})\s+\d|as\s+of\s+(?:last|${WEEKDAYS})|then\s+(?:flipped|moved|went|turned|broke|fell|reversed)|(?:late\s+|early\s+)?last\s+(?:week|month|year|quarter|session|${WEEKDAYS})|this\s+past\s+(?:week|${WEEKDAYS})|on\s+(?:${WEEKDAYS})|yesterday|previously|before|earlier|(?:(?:about|roughly|around|nearly|almost|some|over|more\s+than)\s+)?(?:a|an|one|two|three|four|five|six|several|few|\d+)\s+(?:days?|weeks?|months?|sessions?|years?)\s+ago|ago|versus|vs\.?|back\s+in|during\s+(?!this\b)|at\s+the\s+(?:time|start|end)|intraday|together\s+(?:late\s+|early\s+)?last|in\s+(?:early|late|mid)?-?\s*(?:${MONTHS}))\b`, 'i');
 // "… signal was invalidated / lost": the claim names a state that ended.
 const ENDED_TAIL = /^\s+(?:signals?\s+)?(?:(?:was|were|has\s+been|had\s+been|got|is|has)\s+)?(?:invalidated|broken|lost|snapped|negated|reversed|ended|expired|failed|over)\b/i;
 // A claim that is the state being left ("moved from bearish TREND", "lost its
@@ -30,6 +34,8 @@ const LEFT_BEFORE = /\b(?:from|lost|losing|loses|left|leaving|gave\s+up|giving\s
 // A single-duration claim read as a noun phrase ("a bullish trade idea", "its
 // bearish trend", "our favorite bullish trade") is not a signal.
 const NOUN_AFTER = /^\s+(?:ideas?|setups?|opportunit(?:y|ies)|candidates?|targets?|levels?|lines?|ranges?|positions?|entr(?:y|ies)|exits?|triggers?|confirmations?|cross(?:es)?|tests?|support|resistance|headlines?|news|data|deals?|wars?|talks|polic(?:y|ies)|tensions|tariffs?|negotiations|desks?|flows?|balance|deficit)\b/i;
+// "no bullish TRADE signal", "no confirmed Bearish TREND": the signal is named as missing.
+const NEGATED_BEFORE = /\bno\s+(?:[a-z-]+\s+)?$/i;
 const DETERMINER_BEFORE = /\b(?:a|an|its|our|your|their|his|her|the|favou?rite|best)\s+(?:[a-z-]+\s+)?$/i;
 const SIGNAL_AFTER = /^\s+(?:(?:and\s+trend\s+)?signals?)\b/i;
 const VERB_BEFORE = /\bto\s+$/i;
@@ -366,7 +372,7 @@ function acceptable(body, claim, subjects) {
   const before = body.slice(0, claim.start);
   const after = body.slice(claim.end);
   const fields = Object.keys(claim.fields);
-  if (QUALIFIED_TAIL.test(after) || ENDED_TAIL.test(after) || LEFT_BEFORE.test(before) || BREADTH_BEFORE.test(before)) return false;
+  if (QUALIFIED_TAIL.test(after) || ENDED_TAIL.test(after) || LEFT_BEFORE.test(before) || NEGATED_BEFORE.test(before) || BREADTH_BEFORE.test(before)) return false;
   if (fields.some((field) => MISMATCHED_DURATION[field].test(before))) return false;
   if (PAIRED_BEFORE.test(before) || PAIRED_AFTER.test(after)) return false;
   const single = fields.length === 1;

@@ -654,7 +654,7 @@ class PortfolioReviewCoordinatorIntegrationTests(unittest.IsolatedAsyncioTestCas
         self.assertIn("| Bitcoin | BIAS(Bullish;;) | BIAS(Bullish;;) | BIAS(Bullish;;) | "
                       "RR(81450;87366;82627;0;) | ASOF(Oct 10 09:45;Sep 29,HedgAI IBIT;Sep 10,;,Risk Ranges) |",
                       prediction_run["reportMarkdown"])
-        self.assertIn("| CPI YoY · Sep 2026 | Sep | 3.63% | 3.74% | 3.85% | Oct 6 04:48 PDT |", prediction_run["reportMarkdown"])
+        self.assertIn("| CPI YoY | Sep 2026 | Sep | 3.63% | 3.74% | 3.85% | Oct 6 04:48 PDT |", prediction_run["reportMarkdown"])
         self.assertEqual(prediction_run["dependencies"]["predictionBoard"]["status"], "ready")
         self.assertIn("**Gross leverage:** 0.900×", balance_run["reportMarkdown"])
         self.assertIn(

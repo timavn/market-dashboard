@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "metric": "U.S. real GDP, QoQ SAAR (%)",
+  "note": "Hedgeye's published quarterly path and the consensus charted beside it. Transcribed by hand from each publication; replace the whole file when a newer one prints the path.",
+  "publishedAt": "2026-11-12",
+  "source": { "label": "Q4 2026 Macro Themes Mid-Quarter Update", "document": "HE_4Q26_MidQuarter_Update.pdf", "page": 17 },
+  "quarters": [
+    { "quarter": "2026-Q4", "base": 2.62, "consensus": 2.12, "model": "Nowcast" },
+    { "quarter": "2027-Q1", "base": 1.41, "consensus": 2.14, "model": "Enhanced Comparative Base Effects" },
+    { "quarter": "2027-Q2", "base": 2.01, "consensus": 2.15, "model": "Enhanced Comparative Base Effects" },
+    { "quarter": "2027-Q3", "base": 3.09, "consensus": 2.18, "model": "Enhanced Comparative Base Effects" }
+  ]
+}

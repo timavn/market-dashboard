@@ -24,8 +24,10 @@ const shortReading = /^(?:Last known\s+)?(?:Long|Short|Buy|Wait|Watch|Bullish|Be
 // An optional fourth field explains a Neutral read from a broken Alpha Code line (tooltip only).
 const BIAS_TOKEN = /^BIAS\((Bullish|Bearish|Neutral|N\/A);([^;()]*);([^;()]*)(?:;([^;()]*))?\)$/;
 const MARKET_TOKEN = /^(MKT|REF)\(([^;()]+);([^;()]+)\)$|^(MKT|REF|NAME)\(([^;()]+);([^;()]*);([-+]\d+(?:\.\d+)?)?\)$/;
-// ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct)
-const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*)\)$/;
+// ASOF(pulled;tickDate,tickProduct;tradeDate,tradeProduct;trendDate,trendProduct[;aging])
+// aging: one digit per reading, 1 when it is five or more market days old.
+const AS_OF_TOKEN = /^ASOF\(([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*);([^;()]*),([^;()]*)(?:;([01]{3}))?\)$/;
+const AGING_NOTE = '5+ market days old · re-check before sizing';
 // ALPHA(trade;trend;tradeRel;trendRel;unit;approximate;product): this morning's Alpha Code with the price above or below each level.
 const ALPHA_TOKEN = /^ALPHA\(([^;()]*);([^;()]*);(above|below|at|);(above|below|at|);(%?);([01]);([^;()]*)\)$/;
 // STRUCT(lowSteps;lowRun;highSteps;highRun;ath;athDate;athPct;topAbove;unit[;volume;tone[;direction]]): the Risk Range
@@ -201,11 +203,13 @@ function cellFor({ node, children }) {
   const asOf = text.match(AS_OF_TOKEN);
   if (asOf) {
     const [, pulled, ...rest] = asOf;
-    const lines = [['Ti', rest[0], rest[1]], ['Ta', rest[2], rest[3]], ['Te', rest[4], rest[5]]];
-    const label = [pulled, ...lines.map(([key, date, product]) => `${key} ${date ? `${date} ${product}`.trim() : 'N/A'}`)].join(' · ');
+    const aging = index => Boolean(rest[index * 2]) && rest[6]?.[index] === '1';
+    const lines = [['Ti', rest[0], rest[1], aging(0)], ['Ta', rest[2], rest[3], aging(1)], ['Te', rest[4], rest[5], aging(2)]];
+    const label = [pulled, ...lines.map(([key, date, product, old]) => `${key} ${date ? `${date} ${product}`.trim() : 'N/A'}${old ? ' (5+ market days old)' : ''}`)].join(' · ');
     return <td className="analyst-prediction-as-of-cell" title={label}>
       <span className="analyst-prediction-stack analyst-process--key analyst-prediction-as-of-pulled">{pulled}</span>
-      {lines.map(([key, date, product]) => <span key={key} className="analyst-prediction-stack analyst-prediction-as-of-line">
+      {lines.map(([key, date, product, old]) => <span key={key} className={`analyst-prediction-stack analyst-prediction-as-of-line${old ? ' is-aging' : ''}`}
+        title={old ? AGING_NOTE : undefined}>
         <span className="analyst-prediction-stack__key">{key}</span>{' '}
         <span className="analyst-prediction-as-of-line__product analyst-prediction-stack--muted">{date ? product : ''}</span>{date && product ? ' ' : ''}
         <span className={`analyst-prediction-as-of-line__date${date ? '' : ' analyst-prediction-stack--muted'}`}>{date ? padDay(date) : 'N/A'}</span>
@@ -319,7 +323,7 @@ const MarkdownTable = ({ children, node }) => {
   const setupBoard = rangeBoard || (headings.some(label => /^Setup$/i.test(label.trim()))
     && headings.some(label => /^In range$/i.test(label.trim())));
   // CPI nowcast: Low in red, Base as is, High in green.
-  const nowcast = /^(?:Nowcast low|Low)\|Base\|High$/i.test(headings.slice(2, 5).map(label => label.trim()).join('|'));
+  const nowcast = /(?:^|\|)(?:Nowcast low|Low)\|Base\|High(?:\||$)/i.test(headings.map(label => label.trim()).join('|'));
   // The single US Dollar row pinned above the sections stays in view while the report scrolls.
   const bodyRows = node?.children?.find(child => child.tagName === 'tbody')?.children?.filter(child => child.tagName === 'tr') || [];
   const board = useContext(BoardLinesContext);
@@ -411,6 +415,10 @@ const AnalystPredictionReport = memo(function AnalystPredictionReport({ messageI
     // Saved reports titled the CPI nowcast's first column "Nowcast low".
     return { ...sourced, markdown: attachCurveLevels(onceAcrossPredictionResearch(pinPredictionDollar(splitPredictionZScore(foldPredictionAlphaCode(predictionReportTables(sourced.markdown))))))
       .replace(/^(\| Market \| Kalshi \| )Nowcast low( \| Base \| High \|)/gm, '$1Low$2')
+      // Reports saved before the Period column named the month after the market: "CPI YoY · Nov 2026".
+      .replace(/^\| Market \| (Consensus|Kalshi) \| Low \| Base \| High \| Published \|\n\|(?: --- \|){6}\n(?:\|.*\|\n?)+/gm, table => table.split('\n')
+        .map((line, index) => (index === 0 ? line.replace('| Market |', '| Market | Period |') : index === 1 ? `${line} --- |`
+          : line.replace(/^\| ([^|]*?)(?: · ([^|]*?))? \|/, (cell, name, period) => `| ${name} | ${period || 'N/A'} |`))).join('\n'))
       // Setup boards saved before Status was named for their publication times.
       .replace(/^(\| Market \| (?:Z \| )?Tick \|.*\| )As of \(PT\)( \|)$/gm, '$1Status$2')
       // Boards saved while Structure carried its session count in the title.

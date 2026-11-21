@@ -5,9 +5,12 @@ import { DASHBOARD_RESEARCH_SYMBOLS, dashboardResearchMarketDate, normalizeDashb
 import { startVisibilityAwarePolling } from '../utils/visibilityAwarePolling';
 
 export const DASHBOARD_RESEARCH_REFRESH_MS = 5 * 60 * 1000;
+// Risk Ranges alone are re-read every minute: a Real-Time Alert can refresh a range intraday, and the
+// server keeps that read cheap (user-specified 2026-11-20).
+export const DASHBOARD_RISK_RANGE_REFRESH_MS = 60 * 1000;
 
 /** Mounted once by the front dashboard and shared by all of its asset tables. */
-export default function useDashboardResearch() {
+export default function useDashboardResearch({ riskRangeRefreshMs = DASHBOARD_RISK_RANGE_REFRESH_MS } = {}) {
   const [state, setState] = useState({ readings: {}, status: 'loading', loading: true, error: null });
 
   useEffect(() => {
@@ -74,9 +77,25 @@ export default function useDashboardResearch() {
       const error = results.find((result) => result.status === 'rejected')?.reason || null;
       setState({ readings, status: Object.keys(readings).length ? 'available' : 'unavailable', loading: false, error });
     };
+    const pollRanges = async () => {
+      const date = todayInNewYork();
+      if (retainedMarketDate !== dashboardResearchMarketDate(date)) return;
+      let value;
+      try {
+        value = await MarketDataService.getRiskRanges(null, { envelope: true });
+      } catch {
+        return;
+      }
+      if (disposed || date !== todayInNewYork() || value?.manifest?.dataVersion === sources.riskRanges?.manifest?.dataVersion) return;
+      sources.riskRanges = value;
+      const readings = normalizeDashboardResearch(sources, { date, asOf: new Date().toISOString() });
+      setState((current) => ({ ...current, readings, status: Object.keys(readings).length ? 'available' : current.status }));
+    };
     const stop = startVisibilityAwarePolling({ poll, intervalMs: DASHBOARD_RESEARCH_REFRESH_MS, pollOnStart: true });
-    return () => { disposed = true; stop(); };
-  }, []);
+    const stopRanges = riskRangeRefreshMs > 0
+      ? startVisibilityAwarePolling({ poll: pollRanges, intervalMs: riskRangeRefreshMs, pollOnStart: false }) : () => {};
+    return () => { disposed = true; stop(); stopRanges(); };
+  }, [riskRangeRefreshMs]);
 
   return state;
 }
