@@ -79,6 +79,14 @@ function normalizeRow(row, evidence, issues = []) {
     && typeof row.lrr === 'number' && Number.isFinite(row.lrr)
     && typeof row.hrr === 'number' && Number.isFinite(row.hrr) && row.lrr < row.hrr;
   if (!trend && !validRange) return null;
+  // A Real-Time Alert's refreshed range replaces the sheet's for the rest of the day; its evidence is that alert.
+  const revision = validRange && isRecord(row.revision) && typeof row.revision.sourceMessageId === 'string'
+    && /^[0-9a-f]{12,32}$/i.test(row.revision.sourceMessageId) ? row.revision : null;
+  const rangeEvidence = revision ? {
+    ...evidence, source: 'Real-Time Alert', sourceType: 'revision', sourceUrl: `gmail://message/${revision.sourceMessageId}`,
+    sourceMessageId: revision.sourceMessageId, publishedAt: revision.eventTime || null,
+    published: isRecord(row.published) ? { lrr: row.published.lrr, hrr: row.published.hrr } : null,
+  } : evidence;
   return {
     ...evidence,
     trend,
@@ -86,7 +94,7 @@ function normalizeRow(row, evidence, issues = []) {
     hrr: validRange ? row.hrr : null,
     verified: true,
     trendEvidence: trend ? evidence : null,
-    rangeEvidence: validRange ? evidence : null,
+    rangeEvidence: validRange ? rangeEvidence : null,
   };
 }
 

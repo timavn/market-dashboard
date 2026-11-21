@@ -204,6 +204,38 @@ describe('risk range publication envelope', () => {
     expect(gated.supplementalRanges.UST10Y).toMatchObject({ decisionEligible: false });
   });
 
+  test('a Real-Time Alert revision replaces the range shown and leaves the published checksum verified', () => {
+    const revision = { lrr: 6899, hrr: 7367, eventTime: '2026-07-21T18:22:00+00:00', sourceMessageId: '1a1fa6a6a05e2a56',
+      label: 'SPX Refreshed Risk Range', source: 'real-time-alert', publishedLrr: 100, publishedHrr: 110 };
+    const published = [primary('SPX', '2026-07-21')];
+    const rows = [primary('SPX', '2026-07-21', { revision })];
+    const manifest = {
+      publicationDate: '2026-07-21', manifestType: 'primary', completionState: 'complete', count: 1,
+      checksum: riskRangeManifestChecksum(published, '2026-07-21'), parserVersion: 'risk-range-email-v2',
+    };
+    expect(riskRangeManifestChecksum(rows, '2026-07-21')).toBe(manifest.checksum);
+    const gated = applyPersistedManifestGate(
+      buildRiskRangeEnvelope(rows, { now: new Date('2026-07-21T19:00:00Z'), minPrimaryCount: 1 }),
+      rows, manifest, { expectedDate: '2026-07-21', pendingDate: null, afterDeadline: true },
+    );
+    expect(gated.available).toBe(true);
+    expect(gated.ranges.SPX).toMatchObject({
+      lrr: 6899, hrr: 7367, trend: 'BULLISH', timestamp: revision.eventTime,
+      published: { lrr: 100, hrr: 110, timestamp: '2026-07-21T11:13:53Z' },
+      revision: { lrr: 6899, hrr: 7367, sourceMessageId: '1a1fa6a6a05e2a56', source: 'real-time-alert' },
+    });
+    const unrevised = buildRiskRangeEnvelope(published, { now: new Date('2026-07-21T19:00:00Z'), minPrimaryCount: 1 });
+    expect(gated.manifest.dataVersion).toMatch(/^risk-range-envelope-v2:/);
+    expect(gated.manifest.dataVersion).not.toBe(unrevised.manifest.dataVersion);
+  });
+
+  test('an invalid or inverted revision is ignored', () => {
+    const rows = [primary('SPX', '2026-07-21', { revision: { lrr: 120, hrr: 110, eventTime: '2026-07-21T18:22:00Z' } })];
+    const envelope = buildRiskRangeEnvelope(rows, { now: new Date('2026-07-21T19:00:00Z'), minPrimaryCount: 1 });
+    expect(envelope.ranges.SPX).toMatchObject({ lrr: 100, hrr: 110 });
+    expect(envelope.ranges.SPX.revision).toBeUndefined();
+  });
+
   test('accepts the equivalent parser-v3 checksum after DynamoDB normalizes integral decimals', () => {
     const rows = [
       primary('SPX', '2026-07-21', { lrr: 6000, hrr: 6100 }),

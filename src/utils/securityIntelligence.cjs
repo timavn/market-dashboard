@@ -734,7 +734,7 @@ function makeReference(input) {
     sourceEventId: input.sourceEventId || null,
   };
   if (input.value !== undefined) reference.value = input.value;
-  ['signalProvenance', 'sourceTicker', 'fieldPath', 'sourceText'].forEach((field) => {
+  ['signalProvenance', 'sourceTicker', 'fieldPath', 'sourceText', 'sourceMessageId'].forEach((field) => {
     if (input[field] != null) reference[field] = input[field];
   });
   // Optional source-match metadata is additive and lets the UI highlight
@@ -1342,6 +1342,8 @@ function decisionInputs({
         sourceLabel: RESEARCH_PRODUCT_BY_ID['risk-ranges'].label,
         sourceDate: marketDate,
         publishedAt: value.timestamp || riskRangeEnvelope.manifest.latestUpdatedAt || null,
+        ...(value.revision ? { revision: value.revision, published: value.published } : {}),
+        ...(value.revision?.sourceMessageId ? { sourceMessageId: value.revision.sourceMessageId } : {}),
         decisionEligible: true,
         reason: null,
       };
@@ -1353,7 +1355,8 @@ function decisionInputs({
           sourceId: 'risk-ranges',
           sourceLabel: RESEARCH_PRODUCT_BY_ID['risk-ranges'].label,
           sourceDate: marketDate,
-          publishedAt: value.timestamp || riskRangeEnvelope.manifest.latestUpdatedAt || null,
+          // The Trend is the sheet's; only the range was refreshed.
+          publishedAt: value.published?.timestamp || value.timestamp || riskRangeEnvelope.manifest.latestUpdatedAt || null,
           reason: null,
         };
       }
@@ -1837,16 +1840,20 @@ function buildSecurityIntelligence({
       const selected = findRiskRange(riskRangeEnvelope.ranges, symbol);
       if (!selected) return;
       const value = selected.value;
+      // A Real-Time Alert's refreshed range revises the sheet's; it cites that alert's email.
+      const revision = value.revision?.sourceMessageId ? value.revision : null;
       addReference(buckets[symbol][marketDate].direct, makeReference({
         marketDate,
         productId: 'risk-ranges',
         kind: 'primary_risk_range',
         direction: normalizeBias(value.trend),
-        excerpt: `LRR ${value.lrr} – HRR ${value.hrr}${value.trend ? `; Trend ${normalizeBias(value.trend) || value.trend}` : ''}`,
+        excerpt: `${revision ? 'Refreshed by Real-Time Alert: ' : ''}LRR ${value.lrr} – HRR ${value.hrr}${value.trend ? `; Trend ${normalizeBias(value.trend) || value.trend}` : ''}`,
         matchType: normalizeSymbol(selected.key) === normalizeSymbol(symbol) ? 'direct' : 'direct_alias',
         matchedText: selected.key || symbol,
         publishedAt: value.timestamp || riskRangeEnvelope.manifest.latestUpdatedAt || null,
-        sourceUrl: `/api/hedgeye/screenshot/${encodeURIComponent(marketDate)}/content?type=risk-ranges`,
+        ...(revision ? { sourceMessageId: revision.sourceMessageId } : {}),
+        sourceUrl: revision ? `gmail://message/${revision.sourceMessageId}`
+          : `/api/hedgeye/screenshot/${encodeURIComponent(marketDate)}/content?type=risk-ranges`,
         qualityStatus: 'indexed',
         decisionEligible: true,
         value: { lrr: value.lrr, hrr: value.hrr, trend: normalizeBias(value.trend) },

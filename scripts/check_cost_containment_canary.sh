@@ -122,7 +122,7 @@ PASS="$(jq -n \
   --argjson costRoute "$COST_ROUTE_CONFORMS" \
   --arg schedulerState "$GMAIL_SCHEDULER_STATE" \
   --arg guardianState "$GUARDIAN_STATE" \
-  '$s3 < 2300 and $ddb < 380000 and $invocations <= 270 and $errors == 0 and $retries == 0 and ($schedulerState == "ENABLED" or $schedulerState == "DISABLED") and $guardianState == "Active" and $budget == [25,45,50] and $costRoute')"
+  '$s3 < 2300 and $ddb < 380000 and $invocations <= 720 and $errors == 0 and $retries == 0 and ($schedulerState == "ENABLED" or $schedulerState == "DISABLED") and $guardianState == "Active" and $budget == [25,45,50] and $costRoute')"
 
 jq -n \
   --arg date "$TARGET_DATE" \
@@ -143,7 +143,7 @@ jq -n \
     acceptance: {
       s3Tier2Requests: {actual: $s3Tier2Requests, target: "<2300"},
       dynamodbConsumedReadUnits: {actual: $ddbConsumedReadUnits, target: "<380000"},
-      gmailLambdaInvocations: {actual: $gmailInvocations, target: "<=270"},
+      gmailLambdaInvocations: {actual: $gmailInvocations, target: "<=720"},
       gmailLambdaErrors: {actual: $gmailErrors, target: 0},
       scheduledMaximumRetryAttempts: {actual: $gmailMaximumRetryAttempts, target: 0},
       gmailSchedulerState: {actual: $gmailSchedulerState, target: "ENABLED or intentional DISABLED"},

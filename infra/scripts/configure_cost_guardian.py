@@ -53,7 +53,7 @@ STATE_PARAMETER = "/market-dashboard/cost-guard/state"
 WATCHDOG_RULE = "market-dashboard-hermes-cloud-watchdog-v1"
 SCHEDULES = (
     "market-dashboard-gmail-v2-every-15m",
-    # Every minute, 10:00-11:59 New York time on weekdays; it invokes the same
+    # Every minute, 09:00-16:59 New York time on weekdays; it invokes the same
     # Gmail function, so a pause must stop it as well.
     "market-dashboard-gmail-v2-macro-show-window",
     "market-dashboard-hermes-quant-analyst-v2",

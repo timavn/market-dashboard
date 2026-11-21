@@ -59,7 +59,7 @@ beforeEach(() => {
 afterEach(() => { jest.useRealTimers(); delete document.hidden; });
 
 test('loads seven shared sources once, polls while visible, and disposes the poller', async () => {
-  const { result, unmount } = renderHook(useDashboardResearch);
+  const { result, unmount } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(MarketDataService.getRiskRanges).toHaveBeenCalledWith(null, { envelope: true });
   expect(MarketDataService.getHedgeyeSnapshot).toHaveBeenCalledWith('early-look', DATE, { throwOnError: true });
@@ -91,7 +91,7 @@ test('exposes the independently published ETH, SOL and XRP research alongside th
     if (product === 'bitcoin-trend-tracker') return cryptoResearch();
     return null;
   });
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(result.current).toMatchObject({
     status: 'available', loading: false, readings: {
@@ -110,7 +110,7 @@ test('retains the latest crypto publication with its original date through later
     if (product === 'bitcoin-trend-tracker') return cryptoResearch();
     return null;
   });
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   const original = result.current.readings.ETH;
   const error = new Error('Transport unavailable');
@@ -131,7 +131,7 @@ test('an explicitly invalid crypto source revokes its own research without remov
   const quant = cryptoResearch({ BTC: { trend: 'BULLISH', buyTrade: 79664, sellTrade: 89001 } }, { snapshotType: 'crypto-quant' });
   const sources = { 'early-look': earlyLook(), 'bitcoin-trend-tracker': cryptoResearch(), 'crypto-quant': quant };
   MarketDataService.getHedgeyeSnapshot.mockImplementation(async (product) => sources[product]);
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(result.current.readings.ETH.verified).toBe(true);
   const original = result.current.readings;
@@ -146,7 +146,7 @@ test('an explicitly invalid crypto source revokes its own research without remov
 });
 
 test('retains each verified current publication during transport errors and revokes explicit invalid evidence', async () => {
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   const error = new Error('Provider disconnected');
   const original = result.current.readings;
@@ -168,14 +168,14 @@ test('retains each verified current publication during transport errors and revo
 test('transport failures before the first verified publication cannot produce retained research', async () => {
   MarketDataService.getRiskRanges.mockRejectedValueOnce(new Error('offline'));
   MarketDataService.getHedgeyeSnapshot.mockRejectedValueOnce(new Error('offline'));
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(result.current).toMatchObject({ status: 'unavailable', readings: {} });
 });
 
 test('does no work until the tab becomes visible', async () => {
   setHidden(true);
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(MarketDataService.getRiskRanges).not.toHaveBeenCalled();
   expect(result.current.readings).toEqual({});
@@ -187,7 +187,7 @@ test('clears yesterday at the new session date while the replacement request is 
   jest.setSystemTime(new Date('2026-09-24T23:59:00-04:00'));
   MarketDataService.getRiskRanges.mockResolvedValueOnce(riskRanges('2026-09-24'));
   MarketDataService.getHedgeyeSnapshot.mockResolvedValue(null);
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(result.current.readings.SPX.date).toBe('2026-09-24');
   const next = pending();
@@ -203,7 +203,7 @@ test('ignores a response crossing midnight and an older request completing last'
   jest.setSystemTime(new Date('2026-09-24T23:59:00-04:00'));
   const crossing = pending();
   MarketDataService.getRiskRanges.mockReturnValueOnce(crossing.promise);
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   jest.setSystemTime(new Date('2026-09-25T00:00:00-04:00'));
   await act(async () => { crossing.resolve(riskRanges('2026-09-24')); });
@@ -220,14 +220,14 @@ test('ignores a response crossing midnight and an older request completing last'
 
 test('uses Friday publication date on weekends and keeps that source date', async () => {
   jest.setSystemTime(new Date('2026-09-26T16:00:00Z'));
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(MarketDataService.getHedgeyeSnapshot).toHaveBeenCalledWith('early-look', DATE, { throwOnError: true });
   expect(result.current.readings.USD.date).toBe(DATE);
 });
 
 test('does not retain the previous publication through an outage on the next market date', async () => {
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   jest.setSystemTime(new Date('2026-09-28T16:00:00Z'));
   MarketDataService.getRiskRanges.mockRejectedValueOnce(new Error('offline'));
@@ -244,7 +244,7 @@ test('shares Trade for all overview securities and retains its original evidence
     signalProvenance: { field: 'trade', method: 'explicit-statement', sourceField: 'article.bodyText', sourceText },
   } } } } };
   MarketDataService.getSecurityIntelligenceV2.mockResolvedValueOnce(intelligence);
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(MarketDataService.getSecurityIntelligenceV2).toHaveBeenCalledWith({
     symbols: expect.arrayContaining(['SPX', 'USD', 'VIX', 'BTC', 'ETH']), date: DATE, historyDays: 5,
@@ -262,7 +262,7 @@ test('shares Trade for all overview securities and retains its original evidence
 test('shows independently ready research while the first Trade archive request is pending', async () => {
   const archive = pending();
   MarketDataService.getSecurityIntelligenceV2.mockReturnValueOnce(archive.promise);
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(result.current.readings.SPX.trend).toBe('BULLISH');
   expect(result.current.readings.USD.lrr).toBe(99.98);
@@ -283,7 +283,7 @@ const hedgai = () => ({
 
 test('shares published Tick and its USD proxy while leaving Trend independent and revokes Tick on a failed refresh', async () => {
   MarketDataService.getHedgaiResearch.mockResolvedValueOnce(hedgai());
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(result.current.readings.UUP).toMatchObject({ tick: 'BEARISH', tickEvidence: { sourceTicker: 'UUP', date: DATE } });
   expect(result.current.readings.USD.trend).toBe('BULLISH');
@@ -305,7 +305,7 @@ test('shares published Tick and its USD proxy while leaving Trend independent an
 test.each([null, { ...hedgai(), mock: true }, { ...hedgai(), sourceQuality: { continuity: 'unknown', issues: [] } }])(
   'an unavailable Tick source keeps independently ready overview research: %p', async (value) => {
     MarketDataService.getHedgaiResearch.mockResolvedValueOnce(value);
-    const { result } = renderHook(useDashboardResearch);
+    const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
     await flush();
     expect(result.current.readings.UUP).toBeUndefined();
     expect(result.current.readings.USD.trend).toBe('BULLISH');
@@ -316,11 +316,28 @@ test.each([null, { ...hedgai(), mock: true }, { ...hedgai(), sourceQuality: { co
 test('renders independently ready research while optional Tick projection is pending', async () => {
   const tick = pending();
   MarketDataService.getHedgaiResearch.mockReturnValueOnce(tick.promise);
-  const { result } = renderHook(useDashboardResearch);
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 0 }));
   await flush();
   expect(result.current.readings.SPX.trend).toBe('BULLISH');
   expect(result.current.readings.USD.lrr).toBe(99.98);
   await act(async () => { tick.resolve(hedgai()); });
   expect(result.current.loading).toBe(false);
   expect(result.current.readings.UUP.tick).toBe('BEARISH');
+});
+
+test('re-reads Risk Ranges alone every minute and shows a Real-Time Alert revision without the other sources', async () => {
+  const { result } = renderHook(() => useDashboardResearch({ riskRangeRefreshMs: 60_000 }));
+  await flush();
+  expect(result.current.readings.SPX).toBeDefined();
+  const first = MarketDataService.getRiskRanges.mock.results[0].value;
+  const current = await first;
+  const revised = { ...current, manifest: { ...current.manifest, dataVersion: 'risk-range-envelope-v2:revised' },
+    ranges: { ...current.ranges, SPX: { ...current.ranges.SPX, lrr: 6899, hrr: 7367,
+      revision: { lrr: 6899, hrr: 7367, eventTime: '2026-09-25T19:22:00+00:00', sourceMessageId: '1a1fa6a6a05e2a56' } } } };
+  MarketDataService.getRiskRanges.mockResolvedValueOnce(revised);
+  await advance(60_000);
+  expect(MarketDataService.getRiskRanges).toHaveBeenCalledTimes(2);
+  expect(MarketDataService.getHedgeyeSnapshot).toHaveBeenCalledTimes(3);
+  expect(result.current.readings.SPX).toMatchObject({ lrr: 6899, hrr: 7367 });
+  expect(result.current.readings.SPX.rangeEvidence).toMatchObject({ source: 'Real-Time Alert' });
 });
