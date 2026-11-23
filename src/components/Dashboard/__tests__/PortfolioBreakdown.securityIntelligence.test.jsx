@@ -25,6 +25,7 @@ jest.mock('../../../services/api/marketDataService', () => ({
     getSecurityRiskMetrics: jest.fn(),
     getVolatilitySnapshot: jest.fn(),
     getUsdCorrelations: jest.fn(),
+    getPortfolioRiskMatrix: jest.fn(),
   },
 }));
 
@@ -440,6 +441,8 @@ beforeEach(() => {
   MarketDataService.getSecurityRiskMetrics.mockReset();
   MarketDataService.getVolatilitySnapshot.mockReset();
   MarketDataService.getUsdCorrelations.mockReset();
+  MarketDataService.getPortfolioRiskMatrix.mockReset();
+  MarketDataService.getPortfolioRiskMatrix.mockResolvedValue({ status: 'available', window: 126, asOf: '2026-09-09', rows: [] });
   MarketDataService.getSecurityIntelligence.mockResolvedValue(currentEnvelope());
   MarketDataService.getLeveragedProductOverlap.mockResolvedValue({
     available: false,
@@ -785,9 +788,7 @@ test('does not render the removed volatility position sizing workspace', () => {
 
   expect(screen.queryByLabelText('Volatility position sizing')).not.toBeInTheDocument();
   expect(screen.queryByRole('table', { name: 'Volatility position sizing suggestions' })).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Factor exposure balance')).toHaveTextContent(
-    'Unavailable',
-  );
+  expect(screen.getByLabelText('Risk matrix')).toHaveTextContent('Unavailable');
 });
 
 const withFactorCloses = snapshot => ({
@@ -800,8 +801,16 @@ const withFactorCloses = snapshot => ({
     referenceCloseObservedAt: new Date().toISOString(),
   })),
 });
+const riskRow = (symbol, assetClass, group, region, beta, riskSharePct) => ({ symbol, assetClass, group, region, beta, riskSharePct });
+const matrixRow = (panel, name) => within(panel).getByRole('rowheader', { name }).closest('tr');
+// Cells after the Holdings column: Pos., Net, Gross, Risk share, Beta, then the three quads.
+const cellsOf = row => within(row).getAllByRole('cell').slice(1).map(cell => cell.textContent);
+const holdingsOf = row => within(row).getAllByRole('cell')[0];
 
-test('shows a verified factor balance and filters both books from a selected factor', () => {
+test('rolls the verified book up by asset class with its labels, risk share and beta', async () => {
+  MarketDataService.getPortfolioRiskMatrix.mockResolvedValue({ status: 'available', window: 126, asOf: '2026-09-09', rows: [
+    riskRow('QQQ', 'Equity', 'Broad', 'US', 1.2, 80), riskRow('GLD', 'Commodity', 'Precious metals', 'Global', 0.1, 20),
+  ] });
   const live = liveSizingPortfolio();
   render(<PortfolioBreakdown portfolioData={withFactorCloses({
     ...live,
@@ -812,20 +821,37 @@ test('shows a verified factor balance and filters both books from a selected fac
     ],
   })} />);
 
-  const panel = screen.getByLabelText('Factor exposure balance');
-  expect(within(panel).queryByRole('tablist')).not.toBeInTheDocument();
-  expect(within(panel).getByRole('button', { name: /Filter by High Beta/ }))
-    .toHaveAttribute('aria-pressed', 'false');
-  expect(within(panel).getByLabelText('Net exposure to High Beta: 2.0% of NAV')).toHaveTextContent('+2.0%');
-  expect(within(panel).getByLabelText('Net exposure to Gold: 1.0% of NAV')).toHaveTextContent('+1.0%');
+  const panel = screen.getByLabelText('Risk matrix');
+  expect(cellsOf(matrixRow(panel, 'Unlabelled')).slice(0, 5)).toEqual(['2', '7.0%', '7.0%', '…', '…']);
+  await waitFor(() => expect(cellsOf(matrixRow(panel, 'Broad · US')).slice(0, 5)).toEqual(['1', '6.0%', '6.0%', '80%', '0.07']));
+  expect(cellsOf(matrixRow(panel, 'Precious metals')).slice(0, 5)).toEqual(['1', '1.0%', '1.0%', '20%', '0.00']);
+  expect(within(panel).queryByRole('rowheader', { name: 'Unlabelled' })).not.toBeInTheDocument();
+  // An exposure the universe offers but the book does not hold still has a row, at zero.
+  expect(cellsOf(matrixRow(panel, 'Utilities')).slice(0, 5)).toEqual(['0', '0.0%', '0.0%', '0%', '0.00']);
+  expect(holdingsOf(matrixRow(panel, 'Utilities'))).toHaveTextContent('');
+  expect(holdingsOf(matrixRow(panel, 'Broad · US'))).toHaveTextContent('QQQ');
+  expect(within(panel).getByRole('columnheader', { name: /^Exposure/ })).toBeInTheDocument();
+  expect(MarketDataService.getPortfolioRiskMatrix).toHaveBeenCalledWith(
+    [{ symbol: 'GLD', weightPct: 1 }, { symbol: 'QQQ', weightPct: 9 }, { symbol: 'QQQ', weightPct: -3 }], expect.anything(),
+  );
+  expect(getLedgerRowBySymbol('GLD')).toBeInTheDocument();
+  expect(getLedgerRowBySymbol('QQQ')).toBeInTheDocument();
+});
 
-  fireEvent.click(within(panel).getByRole('button', { name: /Filter by High Beta/ }));
-  expect(screen.queryByText('GLD')).not.toBeInTheDocument();
-  expect(screen.getAllByText('QQQ')).toHaveLength(2);
-  expect(within(panel).getByRole('button', { name: 'Clear factor filter' })).toBeInTheDocument();
+test('marks each row best or worst for the quad in force and lets a reading be entered', async () => {
+  MarketDataService.getPortfolioRiskMatrix.mockResolvedValue({ status: 'available', window: 126, asOf: '2026-09-09', rows: [
+    riskRow('GLD', 'Fixed income', 'Rates', 'US', 0, 100),
+  ] });
+  render(<PortfolioBreakdown portfolioData={withFactorCloses(liveSizingPortfolio())} />);
+  const panel = screen.getByLabelText('Risk matrix');
+  await waitFor(() => expect(within(panel).getByRole('rowheader', { name: 'Rates' })).toBeInTheDocument());
 
-  fireEvent.click(within(panel).getByRole('button', { name: 'Clear factor filter' }));
-  expect(screen.getByText('GLD')).toBeInTheDocument();
+  fireEvent.change(within(panel).getByLabelText('Global current quad'), { target: { value: '4' } });
+  expect(cellsOf(matrixRow(panel, 'Rates'))[7]).toBe('Best');
+  fireEvent.change(within(panel).getByLabelText('Global current quad'), { target: { value: '2' } });
+  expect(cellsOf(matrixRow(panel, 'Rates'))[7]).toBe('Worst');
+  fireEvent.change(within(panel).getByLabelText('Global current quad'), { target: { value: '' } });
+  expect(cellsOf(matrixRow(panel, 'Rates'))[7]).toBe('—');
 });
 
 test.each([
@@ -841,7 +867,7 @@ test.each([
   ['unverified close', snapshot => ({ ...snapshot, holdings: snapshot.holdings.map(holding => ({ ...holding, referenceCloseSource: 'unknown' })) })],
   ['expired close', snapshot => ({ ...snapshot, holdings: snapshot.holdings.map(holding => ({ ...holding, referenceCloseSessionDate: '2020-01-01' })) })],
   ['mock mark', snapshot => ({ ...snapshot, holdings: snapshot.holdings.map(holding => ({ ...holding, mock: true })) })],
-])('clears factor exposure values when the live portfolio snapshot becomes %s', (_label, invalidate) => {
+])('clears the risk matrix when the live portfolio snapshot becomes %s', (_label, invalidate) => {
   const baseLive = liveSizingPortfolio();
   const live = withFactorCloses({
     ...baseLive,
@@ -854,34 +880,32 @@ test.each([
     }],
   });
   const view = render(<PortfolioBreakdown portfolioData={live} />);
-  const panel = screen.getByLabelText('Factor exposure balance');
-  expect(within(panel).getByRole('button', { name: /Filter by High Beta/ })).toBeInTheDocument();
+  const panel = screen.getByLabelText('Risk matrix');
+  expect(within(panel).getByRole('rowheader', { name: 'Unlabelled' })).toBeInTheDocument();
 
   view.rerender(<PortfolioBreakdown portfolioData={invalidate(live)} />);
   expect(within(panel).getByText('Unavailable')).toBeInTheDocument();
-  expect(within(panel).queryByRole('button', { name: /Filter by High Beta/ })).not.toBeInTheDocument();
-  expect(within(panel).getByLabelText('High Beta exposure unavailable')).toHaveTextContent('N/A');
-  expect(within(panel).getByRole('cell', { name: 'Tech, Quad 2: Best #1' })).toHaveTextContent('1');
+  expect(within(panel).queryAllByRole('rowheader')).toHaveLength(0);
 });
 
-test('uses broker NAV for the new matrix and preserves the existing ledger layout below it', () => {
+test('uses broker NAV for the matrix and keeps the ledger directly below it', () => {
   const live = liveSizingPortfolio();
   render(<PortfolioBreakdown portfolioData={withFactorCloses({
     ...live,
     summary: { totalValue: 500000 },
     holdings: [{ ...live.holdings[0], symbol: 'OIH', marketValue: 4500, quantity: 10, price: 450 }],
   })} />);
-  const panel = screen.getByLabelText('Factor exposure balance');
-  expect(within(panel).getByLabelText('Net exposure to Energy: 4.5% of NAV')).toHaveTextContent('+4.5%');
+  const panel = screen.getByLabelText('Risk matrix');
+  expect(cellsOf(matrixRow(panel, 'Unlabelled')).slice(0, 3)).toEqual(['1', '4.5%', '4.5%']);
   const ledger = screen.getByPlaceholderText('Search ticker or name...').closest('.pcv2-ledger-card');
   expect(within(panel.closest('.pcv2-shell')).queryByRole('heading')).not.toBeInTheDocument();
-  expect(panel.nextElementSibling).toBe(screen.getByLabelText('Hedgeye quad reference'));
-  expect(panel.closest('.pcv2-factor-workspace').nextElementSibling).toBe(ledger);
+  expect(screen.queryByLabelText('Hedgeye quad reference')).not.toBeInTheDocument();
+  expect(panel.nextElementSibling).toBe(ledger);
   expect(ledger.querySelector('.pcv2-ledger-split').children).toHaveLength(2);
   expect(within(getLedgerRowBySymbol('OIH')).getAllByRole('cell')).toHaveLength(11);
 });
 
-test('shows a dated factor valuation without enabling trade sizing from closing prices', () => {
+test('shows a dated closing-price valuation without enabling trade sizing from closing prices', () => {
   const live = liveSizingPortfolio();
   const session = expectedSizingSession();
   const holding = {
@@ -891,24 +915,24 @@ test('shows a dated factor valuation without enabling trade sizing from closing 
     referenceCloseSessionDate: session, referenceCloseObservedAt: new Date().toISOString(),
   };
   render(<PortfolioBreakdown portfolioData={{ ...live, holdings: [holding], dataQuality: { status: 'stale', markState: 'reference' } }} />);
-  const panel = screen.getByLabelText('Factor exposure balance');
-  expect(within(panel).getByLabelText('Net exposure to Energy: 10.0% of NAV')).toHaveTextContent('+10.0%');
+  const panel = screen.getByLabelText('Risk matrix');
+  expect(cellsOf(matrixRow(panel, 'Unlabelled'))[1]).toBe('10.0%');
   expect(within(panel).queryByRole('status')).not.toBeInTheDocument();
-  expect(within(panel).getByRole('columnheader', { name: /Net % NAV/ })).toHaveAttribute('title', expect.stringContaining('Reference only'));
+  expect(within(panel).getByRole('columnheader', { name: 'Net' })).toHaveAttribute('title', expect.stringContaining(`${session} closing prices`));
   expect(screen.getByLabelText('Target weight unavailable for OIH; verified live mark and NAV required')).toHaveTextContent('—');
   expect(within(getLedgerRowBySymbol('OIH')).getByRole('cell', { name: 'Reference only' })).toHaveTextContent('Ref only');
 });
 
-test('keeps factor weights and row order through quote expiry while live sizing expires', () => {
+test('keeps matrix weights and row order through quote expiry while live sizing expires', () => {
   const live = withFactorCloses(liveSizingPortfolio());
   const view = render(<PortfolioBreakdown portfolioData={live} />);
-  const panel = screen.getByLabelText('Factor exposure balance');
+  const panel = screen.getByLabelText('Risk matrix');
   const labels = within(panel).getAllByRole('rowheader').map(row => row.textContent);
   const now = Date.now();
   const clock = jest.spyOn(Date, 'now').mockReturnValue(now + 61_000);
   try {
     view.rerender(<PortfolioBreakdown portfolioData={live} isRefreshing />);
-    expect(within(panel).getByLabelText('Net exposure to Gold: 10.0% of NAV')).toHaveTextContent('+10.0%');
+    expect(cellsOf(matrixRow(panel, 'Unlabelled'))[1]).toBe('10.0%');
     expect(within(panel).getAllByRole('rowheader').map(row => row.textContent)).toEqual(labels);
     expect(within(panel).queryByRole('status')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Target weight unavailable for GLD; verified live mark and NAV required')).toHaveTextContent('—');

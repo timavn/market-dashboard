@@ -86,12 +86,10 @@ test('S3 signing preserves expiration, session credentials and constrained POST 
   assert.equal(signed.fields.key, 'analyst/upload.pdf');
 });
 
-test('actual CSV and PDF upload policies retain their v2 Fields.key when signed by v3', async () => {
-  const { buildPortfolioPresignedPostParams } = require('../../utils/portfolioUploadPolicy.cjs');
+test('the PDF upload policy retains its v2 Fields.key when signed by v3', async () => {
   const { buildPdfUploadPostParams } = require('../../routes/analyst.cjs');
   const s3 = new S3({ region: 'us-west-1', credentials: { accessKeyId: 'test', secretAccessKey: 'test' } });
   const policies = [
-    buildPortfolioPresignedPostParams({ bucket: 'test-bucket', key: 'portfolio-uploads/report.csv', contentType: 'text/csv' }),
     buildPdfUploadPostParams({ bucket: 'test-bucket', key: 'analyst/staging/report.pdf', uploadId: 'test-upload', cleanFilename: 'report.pdf' }),
   ];
   for (const input of policies) {

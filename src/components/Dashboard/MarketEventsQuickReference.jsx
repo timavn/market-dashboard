@@ -257,31 +257,6 @@ function WeekAgenda({ events, days, coverage, onOpen, currentTime, fitContent = 
   );
 }
 
-function SourceFooter({ data, view }) {
-  if (view === 'next') {
-    return (
-      <footer className="market-events-quick-reference__sources">
-        Schedule, consensus &amp; prior: <a href={data.sourceUrl} target="_blank" rel="noreferrer">{data.provider} ↗</a>
-      </footer>
-    );
-  }
-  const actuals = data.actuals;
-  const actualsNote = actuals?.status === 'unavailable'
-    ? ' (temporarily unavailable)'
-    : actuals?.observedAt ? ` · checked ${marketEventTime(actuals.observedAt)}` : '';
-  return (
-    <footer className="market-events-quick-reference__sources">
-      <span>
-        Schedule, consensus &amp; prior: <a href={data.sourceUrl} target="_blank" rel="noreferrer">{data.provider} ↗</a>
-      </span>
-      <span>
-        Actuals: <a href={actuals?.sourceUrl || MARKET_EVENTS_NEXT_SOURCE_URL} target="_blank" rel="noreferrer">
-          {actuals?.provider || MARKET_EVENTS_NEXT_PROVIDER} ↗</a>{actualsNote}
-      </span>
-    </footer>
-  );
-}
-
 function weekDays(todayKey, week) {
   const coverage = currentMarketEventWeek(`${todayKey}T12:00:00Z`, week);
   return Array.from({ length: 5 }, (_, index) => addMarketDateKeyDays(coverage.from, index + 1))
@@ -435,7 +410,6 @@ const MarketEventsQuickReference = ({ now = systemNow, compact = false }) => {
           />
         )}
       </div>
-      {compact && state.status === 'verified' && <SourceFooter data={state.data} view={view} />}
       {active && selectedDay && <MarketEventsBriefingModal day={selectedDay} days={days} state={state}
         provider={sourceProvider} sourceUrl={sourceUrl}
         onDayChange={setSelectedDay} onClose={closeBriefing} onRetry={resource.refresh} />}

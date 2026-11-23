@@ -322,12 +322,6 @@ const {
   normalizeRequestedSymbols,
 } = require('./src/utils/securityIntelligence.cjs');
 const { createSecurityIntelligenceWorkerService } = require('./src/services/securityIntelligenceWorkerService.cjs');
-const {
-  PRESIGNED_POST_TTL_SECONDS,
-  buildPortfolioPresignedPostParams,
-  createPortfolioUploadKey,
-  validatePortfolioUploadRequest,
-} = require('./src/utils/portfolioUploadPolicy.cjs');
 const { createAnalystRoutes } = require('./src/routes/analyst.cjs');
 const { createPortfolioRefreshResearchWorkerService } = require('./src/services/analyst/portfolioRefreshResearchWorkerService.cjs');
 const { createCurrencyPairsHandler } = require('./src/routes/currencyPairsHandler.cjs');
@@ -2631,6 +2625,12 @@ const securityUniverse = createSecurityUniverseService({
 });
 
 app.get('/api/security-universe', createSecurityUniverseHandler({ service: securityUniverse }));
+// Three reviewed labels and risk numbers for the book the Portfolio screen posts (signed % of NAV).
+app.post('/api/portfolio/risk-matrix', require('./src/routes/portfolioRiskMatrix.cjs').createPortfolioRiskMatrixHandler({
+  classification: require('./src/services/securityUniverse/pieces/classification.cjs').createClassificationPiece(),
+  loadHistory: symbol => fetchYahooSizingHistory(symbol),
+  mapConcurrent: mapWithConcurrency,
+}));
 app.get('/api/security-identities', createSecurityIdentitiesHandler({ loadIdentities: symbols => securityUniverse.identities(symbols) }));
 
 function enforceSecurityRiskMetricsCacheCapacity() {
@@ -8896,61 +8896,6 @@ if (process.env.NODE_ENV === 'development') {
     }
   });
 }
-
-// Presigned POST endpoint for bounded CSV uploads.
-app.post('/api/presigned-url', async (req, res) => {
-  try {
-    const { filename, contentType, sizeBytes } = req.body || {};
-    const validation = validatePortfolioUploadRequest({ filename, contentType, sizeBytes });
-    if (!validation.ok) {
-      return res.status(validation.statusCode).json({ error: validation.error });
-    }
-
-    const { cleanFilename, normalizedContentType } = validation;
-    const key = createPortfolioUploadKey(cleanFilename);
-    const expiresAt = new Date(Date.now() + PRESIGNED_POST_TTL_SECONDS * 1000).toISOString();
-
-    console.log(`🔗 Generating bounded presigned POST for: ${cleanFilename}`);
-
-    const params = buildPortfolioPresignedPostParams({
-      bucket: PORTFOLIO_UPLOAD_BUCKET,
-      key,
-      contentType: normalizedContentType,
-    });
-
-    const post = await new Promise((resolve, reject) => {
-      s3.createPresignedPost(params, (err, data) => {
-        if (err) {
-          console.error('❌ S3 createPresignedPost error:', err);
-          reject(err);
-        } else {
-          resolve(data);
-        }
-      });
-    });
-
-    res.json({
-      url: post.url,
-      fields: post.fields,
-      key,
-      expiresAt,
-    });
-
-  } catch (error) {
-    console.error('❌ Error generating presigned URL:', error);
-    console.error('Error details:', {
-      message: error.message,
-      code: error.code,
-      statusCode: error.statusCode
-    });
-
-    res.status(500).json({
-      error: 'Failed to generate presigned URL',
-      details: error.message,
-      code: error.code || 'UNKNOWN_ERROR'
-    });
-  }
-});
 
 // Serve static files only in production
 // In development, React dev server handles frontend (run separately on port 3000)

@@ -38,7 +38,7 @@ test('composes every piece per ticker; a failed piece is unavailable and never b
   assert.deepEqual(dram.instrument, { yahooSymbol: 'DRAM', listingSymbol: 'DRAM' });
   assert.equal(record.status, 'partial');
   assert.deepEqual([record.historicalOnly, record.executable, record.schemaVersion], [true, false, 1]);
-  assert.deepEqual(record.fields, ['identity', 'research', 'stance', 'risk', 'activity']);
+  assert.deepEqual(record.fields, ['identity', 'classification', 'research', 'stance', 'risk', 'activity']);
 });
 
 test('fields load only the pieces asked for, at most 50 tickers', async () => {

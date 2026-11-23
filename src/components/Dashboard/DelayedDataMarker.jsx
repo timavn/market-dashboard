@@ -10,6 +10,7 @@ import {
   addCalendarDays,
   dateKeyToUtcDate,
   isTradingDateKey,
+  usEquityCloseMinutes,
 } from '../../utils/usEquityMarketCalendar.cjs';
 import './DelayedDataMarker.css';
 
@@ -133,6 +134,107 @@ export const getDelayedDataAgeStatus = ({
   return observationDate >= latestOpenedDate ? 'same-session' : 'older-session';
 };
 
+// C replaces D when a price is the final print of its market's latest session and that market is now
+// closed, so it will not move until the next open; D stays on anything still trading or delayed
+// (user-specified 2026-11-22). Only quote values qualify; return and reference cells keep D.
+const CLOSE_ELIGIBLE_STATUSES = new Set(['delayed', 'last-close', 'refresh-delayed', 'historical', 'stale']);
+const CLOSE_PRINT_TOLERANCE_MINUTES = 20;
+const minutesOf = (value) => {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(value || ''));
+  return match && Number(match[1]) < 24 && Number(match[2]) < 60 ? Number(match[1]) * 60 + Number(match[2]) : null;
+};
+const WEEKDAY_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+const weekdayIn = (timestamp, timeZone) => {
+  try {
+    return WEEKDAY_INDEX[new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(new Date(timestamp))];
+  } catch {
+    return undefined;
+  }
+};
+
+export const settledCloseState = ({
+  status,
+  updatedAt,
+  marketSessionDate,
+  observationFrequency,
+  marketTimeZone = 'America/New_York',
+  marketOpenTime = '09:30',
+  marketCloseTime,
+  marketCalendar = 'US',
+  marketHolidays = [],
+  marketSchedule,
+  continuous = false,
+  nowMs = Date.now(),
+} = {}) => {
+  if (continuous || !CLOSE_ELIGIBLE_STATUSES.has(String(status || '').trim().toLowerCase())
+    || observationFrequency === 'monthly') return null;
+  const rawUpdatedAt = String(updatedAt || '').trim();
+  const observationMs = Date.parse(rawUpdatedAt);
+  if (!Number.isFinite(observationMs) || !Number.isFinite(nowMs) || observationMs > nowMs) return null;
+  // A daily value stored at midnight UTC carries only its date, as the timestamp label reads it.
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(rawUpdatedAt)
+    || (['historical', 'reference', 'refresh-delayed'].includes(String(status).trim().toLowerCase())
+      && /T00:00:00(?:\.000)?Z$/i.test(rawUpdatedAt));
+  const current = marketClockParts(nowMs, marketTimeZone);
+  const observed = marketClockParts(observationMs, marketTimeZone);
+  if (!current || !observed) return null;
+
+  if (marketSchedule === 'weekly') {
+    // Closed from Friday 17:00 to Sunday 18:00 New York. Its contracts settle from 14:20 (grains) to 17:00
+    // (FX, energy), so a print from 14:00 is that day's close. Over the weekend Friday's is the latest;
+    // any earlier day's close, then or during the week, is one that stopped updating.
+    if (dateOnly || observed.minutes < 14 * 60) return null;
+    const day = weekdayIn(nowMs, marketTimeZone);
+    const weekendClosed = (day === 5 && current.minutes >= 17 * 60) || day === 6 || (day === 0 && current.minutes < 18 * 60);
+    let previous = addCalendarDays(current.date, -1);
+    while (previous && [0, 6].includes(dateKeyToUtcDate(previous)?.getUTCDay())) previous = addCalendarDays(previous, -1);
+    if (weekendClosed) {
+      const friday = addCalendarDays(current.date, -(day === 5 ? 0 : day === 6 ? 1 : 2));
+      return observed.date === friday ? 'latest' : observed.date < friday ? 'older' : null;
+    }
+    return previous && observed.date < previous ? 'older' : null;
+  }
+
+  const holidayDates = new Set((Array.isArray(marketHolidays) ? marketHolidays : []).map((holiday) => (
+    typeof holiday === 'string' ? holiday : holiday?.date
+  )));
+  const isMarketDate = (dateKey) => {
+    const date = dateKeyToUtcDate(dateKey);
+    if (!date || holidayDates.has(dateKey)) return false;
+    if (marketCalendar === 'US') return isTradingDateKey(dateKey);
+    return date.getUTCDay() !== 0 && date.getUTCDay() !== 6;
+  };
+  const closeMinutesOn = (dateKey) => (marketCalendar === 'US' && !marketCloseTime
+    ? usEquityCloseMinutes(dateKey) : minutesOf(marketCloseTime || '16:00'));
+  const openMinutes = minutesOf(marketOpenTime);
+  if (openMinutes === null) return null;
+
+  // The latest session that has finished; while one is in progress, the one before it.
+  const inProgress = isMarketDate(current.date) && current.minutes >= openMinutes
+    && current.minutes < closeMinutesOn(current.date);
+  let session = current.date;
+  if (inProgress || !isMarketDate(session) || current.minutes < openMinutes) {
+    session = addCalendarDays(session, -1);
+    while (session && !isMarketDate(session)) session = addCalendarDays(session, -1);
+  }
+  if (!session) return null;
+  const observationDate = marketSessionDate
+    || (dateOnly || (observationFrequency === 'daily' && /T00:00:00(?:\.000)?Z$/i.test(rawUpdatedAt))
+      ? rawUpdatedAt.slice(0, 10) : observed.date);
+  if (!isMarketDate(observationDate) || observationDate > session) return null;
+  // A date-only daily close is that session's close; a timed print must be its closing one (or later).
+  const closingPrint = dateOnly || /T00:00:00(?:\.000)?Z$/i.test(rawUpdatedAt) || observed.date > observationDate
+    || (observed.date === observationDate && observed.minutes >= closeMinutesOn(observationDate) - CLOSE_PRINT_TOLERANCE_MINUTES);
+  if (!closingPrint) return null;
+  // Black C: the previous session's close while the market is shut. Red C: a close from any earlier day
+  // (user-specified 2026-11-22: an easy sign that something is not updating).
+  if (observationDate < session) return 'older';
+  return inProgress ? null : 'latest';
+};
+
+// True for any close a C marks, black or red.
+export const isSettledSessionClose = (options) => settledCloseState(options) !== null;
+
 const markerClockSubscribers = new Map();
 let markerClockTimer = null;
 const notifyMarkerClock = () => {
@@ -221,10 +323,14 @@ const DelayedDataMarker = ({
   marketSessionDate,
   marketTimeZone,
   marketOpenTime,
+  marketCloseTime,
   marketCalendar,
   marketHolidays,
+  marketSchedule,
   continuous,
   popoverLabel,
+  // Only a price can be a close (C); day changes, returns and report dates keep D.
+  priceMarker = true,
   className = '',
 }) => {
   const normalizedStatus = String(status || '').trim().toLowerCase();
@@ -243,6 +349,13 @@ const DelayedDataMarker = ({
     updatedAt, observationFrequency, marketSessionDate, marketTimeZone,
     marketOpenTime, marketCalendar, marketHolidays, continuous, nowMs,
   });
+  const closeState = markerVisible && priceMarker ? settledCloseState({
+    status: normalizedStatus, updatedAt, observationFrequency, marketSessionDate, marketTimeZone,
+    marketOpenTime, marketCloseTime, marketCalendar, marketHolidays, marketSchedule, continuous, nowMs,
+  }) : null;
+  const settledClose = closeState !== null;
+  const closeNote = closeState === 'older' ? 'Close from an earlier session, not updating' : 'Close, market closed';
+  const shownLabel = settledClose ? `${displayedLabel} · ${closeNote}` : displayedLabel;
 
   useEffect(() => {
     if (!markerVisible && open) setOpen(false);
@@ -292,7 +405,7 @@ const DelayedDataMarker = ({
       window.removeEventListener('resize', positionPopover);
       window.removeEventListener('scroll', positionPopover, true);
     };
-  }, [open, displayedLabel]);
+  }, [open, shownLabel]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -330,16 +443,18 @@ const DelayedDataMarker = ({
         title=""
         data-data-status={normalizedStatus}
         data-data-age={dataAge}
+        data-settled-close={settledClose ? 'true' : undefined}
+        data-close-age={closeState || undefined}
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
-        aria-label={popoverLabel || `${accessibleLabel}. ${updatedLabel}`}
+        aria-label={`${popoverLabel || `${accessibleLabel}. ${updatedLabel}`}${settledClose ? `. ${closeNote}` : ''}`}
         onClick={(event) => {
           event.stopPropagation();
           setPopoverPosition(INITIAL_POPOVER_POSITION);
           setOpen((current) => !current);
         }}
       >
-        <sub className={`dashboard-delayed-data-marker dashboard-delayed-data-marker--${dataAge}`} aria-hidden="true">D</sub>
+        <sub className={`dashboard-delayed-data-marker dashboard-delayed-data-marker--${closeState === 'older' ? 'close-older' : settledClose ? 'close' : dataAge}`} aria-hidden="true">{settledClose ? 'C' : 'D'}</sub>
       </button>
       {open && typeof document !== 'undefined'
         ? createPortal(
@@ -355,7 +470,7 @@ const DelayedDataMarker = ({
               visibility: popoverPosition.ready ? 'visible' : 'hidden',
             }}
           >
-            {displayedLabel}
+            {shownLabel}
           </span>,
           document.body,
         )

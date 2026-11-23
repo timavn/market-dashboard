@@ -4,6 +4,8 @@ import '@testing-library/jest-dom';
 import DelayedDataMarker, {
   formatDelayedDataTimestamp,
   getDelayedDataAgeStatus,
+  isSettledSessionClose,
+  settledCloseState,
   shouldMarkDataDelayed,
 } from './DelayedDataMarker';
 
@@ -88,10 +90,12 @@ describe('DelayedDataMarker', () => {
     (updatedAt) => {
       render(<DelayedDataMarker status="refresh-delayed" updatedAt={updatedAt} />);
       const marker = screen.getByRole('button', { name: /Refresh delayed; showing last verified data/ });
+      // On Sep 2 a close from Aug 31 is older than the previous session: a red C that says so.
       expect(marker).toHaveAttribute('aria-label',
-        'Refresh delayed; showing last verified data. Updated Aug 31, 2026');
+        'Refresh delayed; showing last verified data. Updated Aug 31, 2026. Close from an earlier session, not updating');
+      expect(marker).toHaveTextContent('C');
       fireEvent.click(marker);
-      expect(screen.getByRole('status')).toHaveTextContent(/^Updated Aug 31, 2026$/);
+      expect(screen.getByRole('status')).toHaveTextContent(/^Updated Aug 31, 2026 · Close from an earlier session, not updating$/);
     },
   );
 
@@ -140,12 +144,14 @@ describe('DelayedDataMarker', () => {
   it('updates a prior session marker at market open without refreshing its evidence', () => {
     jest.setSystemTime(new Date('2026-10-07T13:29:00Z'));
     render(<DelayedDataMarker status="refresh-delayed" updatedAt="2026-10-06T20:00:00Z" />);
-    const marker = screen.getByRole('button', { name: /Refresh delayed/ });
-    const originalLabel = marker.getAttribute('aria-label');
+    const marker = screen.getByRole('button');
+    // Before the open the prior close is final (C); at the open it becomes an older-session D.
+    expect(marker).toHaveTextContent('C');
     expect(marker).toHaveAttribute('data-data-age', 'same-session');
     act(() => { jest.advanceTimersByTime(60 * 1000); });
+    expect(marker).toHaveTextContent('D');
     expect(marker).toHaveAttribute('data-data-age', 'older-session');
-    expect(marker).toHaveAttribute('aria-label', originalLabel);
+    expect(marker).toHaveAccessibleName(/^Refresh delayed/);
     expect(marker).toHaveAttribute('data-data-status', 'refresh-delayed');
   });
 
@@ -181,20 +187,21 @@ describe('DelayedDataMarker', () => {
       .toHaveAttribute('data-data-age', 'older-session');
   });
 
-  it('displays a completed close as D and reveals its original observation only on click', () => {
+  it('displays a completed close as C until the next open and reveals its original observation only on click', () => {
     jest.setSystemTime(new Date('2026-09-02T22:00:00Z'));
     render(<DelayedDataMarker status="last-close" updatedAt="2026-09-02T20:00:00Z" marketSessionDate="2026-09-02" />);
-    const marker = screen.getByRole('button', { name: /Delayed data/ });
-    expect(marker).toHaveTextContent('D');
+    const marker = screen.getByRole('button', { name: /Delayed data.*Close, market closed$/ });
+    expect(marker).toHaveTextContent('C');
     expect(marker).toHaveAttribute('data-data-status', 'last-close');
     expect(marker).toHaveAttribute('data-data-age', 'same-session');
     expect(screen.queryByText('LAST CLOSE')).not.toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     fireEvent.click(marker);
-    expect(screen.getByRole('status')).toHaveTextContent(/Updated Sep 2, 2026/);
+    expect(screen.getByRole('status')).toHaveTextContent(/Updated Sep 2, 2026.* · Close, market closed/);
 
     jest.setSystemTime(new Date('2026-09-03T13:30:00Z'));
     act(() => jest.advanceTimersByTime(60_000));
+    expect(marker).toHaveTextContent('D');
     expect(marker).toHaveAttribute('data-data-age', 'older-session');
     expect(screen.getByRole('status')).toHaveTextContent(/Updated Sep 2, 2026/);
   });
@@ -294,5 +301,68 @@ describe('getDelayedDataAgeStatus', () => {
     { updatedAt: '2026-10-01T00:00:00Z', observationFrequency: 'monthly' },
   ])('keeps uncertain or invalid age evidence conservative: %p', (metadata) => {
     expect(getDelayedDataAgeStatus({ ...metadata, nowMs: onWednesday })).toBe('older-session');
+  });
+});
+
+describe('C marks a closed market\'s final print', () => {
+  const at = (iso) => Date.parse(iso);
+  const SUNDAY = at('2026-11-22T18:00:00Z'); // Sun 13:00 ET
+  const WEDNESDAY_NIGHT = at('2026-11-19T01:00:00Z'); // Wed 20:00 ET
+  const THURSDAY_MIDDAY = at('2026-11-19T17:00:00Z'); // Thu 12:00 ET
+
+  test('a US close stays C through the weekend and evenings, never while the session trades', () => {
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-20T21:00:00Z', nowMs: SUNDAY })).toBe(true);
+    expect(isSettledSessionClose({ status: 'refresh-delayed', updatedAt: '2026-11-20', nowMs: SUNDAY })).toBe(true);
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-18T21:00:00Z', nowMs: WEDNESDAY_NIGHT })).toBe(true);
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-19T16:45:00Z', nowMs: THURSDAY_MIDDAY })).toBe(false);
+  });
+
+  test('a print from before the close or a return cell stays D', () => {
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-20T18:00:00Z', nowMs: SUNDAY })).toBe(false);
+    expect(isSettledSessionClose({ status: 'reference', updatedAt: '2026-11-20T21:00:00Z', nowMs: SUNDAY })).toBe(false);
+  });
+
+  test('the previous session\'s close is black; a close from any earlier day is red, open or closed', () => {
+    expect(settledCloseState({ status: 'delayed', updatedAt: '2026-11-20T21:00:00Z', nowMs: SUNDAY })).toBe('latest');
+    expect(settledCloseState({ status: 'delayed', updatedAt: '2026-11-19T21:00:00Z', nowMs: SUNDAY })).toBe('older');
+    expect(settledCloseState({ status: 'refresh-delayed', updatedAt: '2026-11-17', nowMs: THURSDAY_MIDDAY })).toBe('older');
+    // During the session, yesterday's close is still D; the day before is a red C.
+    expect(settledCloseState({ status: 'delayed', updatedAt: '2026-11-18T21:00:00Z', nowMs: THURSDAY_MIDDAY })).toBe(null);
+    expect(settledCloseState({ status: 'delayed', updatedAt: '2026-11-17T21:00:00Z', nowMs: THURSDAY_MIDDAY })).toBe('older');
+    // FX: Friday's close over the weekend is black, Thursday's is red; on a weekday, a close two days old is red.
+    expect(settledCloseState({ status: 'delayed', updatedAt: '2026-11-20T21:59:00Z', marketSchedule: 'weekly', nowMs: SUNDAY })).toBe('latest');
+    expect(settledCloseState({ status: 'delayed', updatedAt: '2026-11-19T21:59:00Z', marketSchedule: 'weekly', nowMs: SUNDAY })).toBe('older');
+    expect(settledCloseState({ status: 'delayed', updatedAt: '2026-11-17T21:59:00Z', marketSchedule: 'weekly', nowMs: THURSDAY_MIDDAY })).toBe('older');
+    expect(settledCloseState({ status: 'delayed', updatedAt: '2026-11-18T21:59:00Z', marketSchedule: 'weekly', nowMs: THURSDAY_MIDDAY })).toBe(null);
+  });
+
+  test('a red C says the value has stopped updating', () => {
+    jest.useFakeTimers().setSystemTime(SUNDAY);
+    render(<DelayedDataMarker status="delayed" updatedAt="2026-11-18T21:00:00Z" />);
+    const trigger = screen.getByRole('button');
+    expect(trigger).toHaveTextContent('C');
+    expect(trigger).toHaveAttribute('data-close-age', 'older');
+    expect(trigger).toHaveAccessibleName(/\. Close from an earlier session, not updating$/);
+    jest.useRealTimers();
+  });
+
+  test('crypto never closes; FX and futures close only for the weekend', () => {
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-22T17:55:00Z', continuous: true, nowMs: SUNDAY })).toBe(false);
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-20T21:59:58Z', marketSchedule: 'weekly', nowMs: SUNDAY })).toBe(true);
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-18T21:59:58Z', marketSchedule: 'weekly', nowMs: WEDNESDAY_NIGHT })).toBe(false);
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-22T23:30:00Z', marketSchedule: 'weekly', nowMs: at('2026-11-22T23:31:00Z') })).toBe(false);
+    // Grains close at 14:20 New York on Friday; a 12:00 print is not the week's close.
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-20T19:19:00Z', marketSchedule: 'weekly', nowMs: SUNDAY })).toBe(true);
+    expect(isSettledSessionClose({ status: 'delayed', updatedAt: '2026-11-20T17:00:00Z', marketSchedule: 'weekly', nowMs: SUNDAY })).toBe(false);
+  });
+
+  test('the badge reads C, gray, and says the market is closed', () => {
+    jest.useFakeTimers().setSystemTime(SUNDAY);
+    render(<DelayedDataMarker status="delayed" updatedAt="2026-11-20T21:00:00Z" />);
+    const trigger = screen.getByRole('button');
+    expect(trigger).toHaveTextContent('C');
+    expect(trigger).toHaveAttribute('data-settled-close', 'true');
+    expect(trigger).toHaveAccessibleName(/\. Close, market closed$/);
+    jest.useRealTimers();
   });
 });

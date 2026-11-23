@@ -46,7 +46,7 @@ describe('Volatility spreadsheet presentation', () => {
     const row = screen.getByRole('row', { name: /G5RV G5 FX 1M realized vol as of SEP 11/ });
     expect(row).toHaveAttribute('data-status', 'historical');
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent))
-      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%', 'Low<8']);
+      .toEqual(['5.87C', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%', 'Low<8']);
     expect(within(row).getByText('5.87').closest('td')).toHaveAttribute('title', expect.stringContaining('yahoo'));
     expect(within(row).getByRole('button', { name: /Historical reference/ }))
       .toHaveAttribute('aria-label', expect.stringContaining(OBSERVED_AT));
@@ -65,7 +65,7 @@ describe('Volatility spreadsheet presentation', () => {
     const row = screen.getByRole('row', { name: 'G5RV last verified volatility; refresh delayed' });
     expect(row).toHaveAttribute('data-status', 'refresh-delayed');
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent))
-      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%', 'Low<8']);
+      .toEqual(['5.87C', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%', 'Low<8']);
     expect(within(row).getByRole('button', { name: /Refresh delayed/ }))
       .toHaveAccessibleName(expect.stringContaining(OBSERVED_AT));
   });
@@ -74,7 +74,7 @@ describe('Volatility spreadsheet presentation', () => {
     renderSpreadsheet(null, { fxvlSnapshot: { ...G5RV_ROW, month6Ago: null, sixMonthChangePct: null } });
     const row = screen.getByRole('row', { name: /G5RV G5 FX 1M realized vol/ });
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent))
-      .toEqual(['5.87D', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '—', 'Low<8']);
+      .toEqual(['5.87C', '+10.78%', '+12.50%', '-25.07%', '-13.42%', '—', 'Low<8']);
   });
 
   test.each([
@@ -210,7 +210,7 @@ describe('Volatility spreadsheet presentation', () => {
     expect(row).toHaveAttribute('data-status', 'refresh-delayed');
     const cells = within(row).getAllByRole('cell');
     expect(cells.slice(0, 6).map((cell) => cell.textContent))
-      .toEqual([`${display}D`, '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%']);
+      .toEqual([`${display}C`, '+10.78%', '+12.50%', '-25.07%', '-13.42%', '+7.77%']);
     cells.slice(0, 6).forEach((cell) => {
       expect(cell).toHaveAttribute('title', expect.stringContaining(`${source} · refresh-delayed · as of ${OBSERVED_AT}`));
     });

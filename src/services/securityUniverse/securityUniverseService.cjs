@@ -6,8 +6,9 @@ const { emptyIdentity } = require('./pieces/identity.cjs');
 const { emptyResearch } = require('./pieces/research.cjs');
 const { emptyStance } = require('./pieces/stance.cjs');
 const { emptyActivity, emptyRisk } = require('./pieces/marketHistory.cjs');
+const { createClassificationPiece, emptyClassification } = require('./pieces/classification.cjs');
 
-const PIECES = Object.freeze(['identity', 'research', 'stance', 'risk', 'activity']);
+const PIECES = Object.freeze(['identity', 'classification', 'research', 'stance', 'risk', 'activity']);
 const MAX_SYMBOLS = 50;
 const HOUR_MS = 60 * 60_000;
 // Each piece refreshes on its own cadence: names change rarely, research on
@@ -26,7 +27,7 @@ const identityUsable = piece => piece?.status === 'available';
 // decisions, product calls, risk and sizing, and recent activity, each fact with
 // its own source and as-of date. A piece that fails is unavailable with a reason
 // and never holds back the others; nothing falls back to mock, seeded or stale data.
-function createSecurityUniverseService({ resolveInstrument = () => null, identity, research, stance, marketHistory, now = Date.now, ttl = TTL } = {}) {
+function createSecurityUniverseService({ resolveInstrument = () => null, identity, classification = createClassificationPiece(), research, stance, marketHistory, now = Date.now, ttl = TTL } = {}) {
   const identityCache = createPieceCache({ ...ttl.identity, now });
   const researchCache = createPieceCache({ ...ttl.research, now });
 
@@ -44,15 +45,16 @@ function createSecurityUniverseService({ resolveInstrument = () => null, identit
       .filter(symbol => SECURITY_SYMBOL.test(symbol)).slice(0, MAX_SYMBOLS);
     const wanted = PIECES.filter(piece => fields.includes(piece));
     const run = (piece, loader, empty) => (wanted.includes(piece) && symbols.length ? guarded(loader, empty, symbols) : Promise.resolve(null));
-    const [identityRows, researchRows, stanceRows, riskRows, activityRows] = await Promise.all([
+    const [identityRows, classificationRows, researchRows, stanceRows, riskRows, activityRows] = await Promise.all([
       run('identity', () => identities(symbols), emptyIdentity),
+      run('classification', () => classification.loadMany(symbols), emptyClassification),
       run('research', () => cached(researchCache, research, emptyResearch, symbols), emptyResearch),
       run('stance', () => stance.loadMany(symbols), emptyStance),
       run('risk', () => marketHistory.risk(symbols), emptyRisk),
       run('activity', () => marketHistory.activity(symbols), emptyActivity),
     ]);
-    const byPiece = { identity: identityRows, research: researchRows, stance: stanceRows, risk: riskRows, activity: activityRows };
-    const empties = { identity: emptyIdentity, research: emptyResearch, stance: emptyStance, risk: emptyRisk, activity: emptyActivity };
+    const byPiece = { identity: identityRows, classification: classificationRows, research: researchRows, stance: stanceRows, risk: riskRows, activity: activityRows };
+    const empties = { identity: emptyIdentity, classification: emptyClassification, research: emptyResearch, stance: emptyStance, risk: emptyRisk, activity: emptyActivity };
     const rows = {};
     const statuses = [];
     for (const symbol of symbols) {
@@ -74,7 +76,7 @@ function createSecurityUniverseService({ resolveInstrument = () => null, identit
       fields: wanted,
       rows,
       pieces: Object.fromEntries(wanted.map(piece => [piece, {
-        ttlSeconds: { identity: ttl.identity.ttlMs / 1000, research: ttl.research.ttlMs / 1000, stance: null, risk: 3600, activity: 3600 }[piece],
+        ttlSeconds: { identity: ttl.identity.ttlMs / 1000, classification: null, research: ttl.research.ttlMs / 1000, stance: null, risk: 3600, activity: 3600 }[piece],
       }])),
       historicalOnly: true,
       executable: false,

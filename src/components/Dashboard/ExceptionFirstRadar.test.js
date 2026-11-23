@@ -475,7 +475,8 @@ describe('Exception-First header', () => {
     expect(row).toHaveClass('is-refresh-delayed');
     expect(within(row).getByText('21.5')).toBeInTheDocument();
     const marker = within(row).getByRole('button', { name: /Refresh delayed · last verified/i });
-    expect(marker).toHaveTextContent('D');
+    // Its retained close is older than the previous session: a red C.
+    expect(marker).toHaveTextContent('C');
     expect(marker).toHaveAccessibleName(expect.stringContaining(CURRENT_VIX.asOf));
     expect(marker).not.toHaveAccessibleName(expect.stringContaining(lastVerifiedAt));
     expect(within(row).queryByText('NO LIVE SERIES')).not.toBeInTheDocument();
@@ -888,7 +889,7 @@ describe('Exception-First header', () => {
 
     const spxRow = within(usSection).getByRole('row', { name: /S&P 500/ });
     const spxCells = within(spxRow).getAllByRole('cell');
-    ['S&P 500', '7,464D', '1.25%', '2.50%', '3.50%', '9.75%', '12.25%', '0.00%', '22.75%'].forEach((value, index) => {
+    ['S&P 500', '7,464C', '1.25%', '2.50%', '3.50%', '9.75%', '12.25%', '0.00%', '22.75%'].forEach((value, index) => {
       expect(spxCells[index]).toHaveTextContent(value);
     });
     expect(spxCells[2]).toHaveClass('is-positive');
@@ -904,7 +905,7 @@ describe('Exception-First header', () => {
     expect(spxCells[1]).toHaveAttribute('data-quote-status', 'delayed');
     expect(within(spxCells[1]).getByRole('button', {
       name: /Yahoo Finance · Delayed · Jul 16, 2026/,
-    })).toHaveTextContent('D');
+    })).toHaveTextContent('C');
 
     const marketBackdropStatus = onDashboardStatusChange.mock.calls.at(-1)[0]
       .find(({ id }) => id === 'market-backdrop');
@@ -1093,7 +1094,7 @@ describe('Exception-First header', () => {
       .getByRole('row', { name: /2s10s Curve/ });
     const cells = within(row).getAllByRole('cell');
     expect(cells.map((cell) => cell.textContent)).toEqual([
-      '2s10s Curve', '-42.5D', '2.75%D', '8.70%', '11.64%',
+      '2s10s Curve', '-42.5C', '2.75%D', '8.70%', '11.64%',
       '15.51%', '27.25%', '5.13%', '9.57%',
     ]);
     expect(cells[2]).toHaveClass('is-positive');
@@ -1131,7 +1132,7 @@ describe('Exception-First header', () => {
     const row = within(screen.getByRole('region', { name: 'Rates' }))
       .getByRole('row', { name: /Germany 10Y/ });
     expect(within(row).getAllByRole('cell').map((cell) => cell.textContent)).toEqual([
-      'Germany 10Y', '2.970D', '—', '—', '—', '—', '—', '—', '—',
+      'Germany 10Y', '2.970C', '—', '—', '—', '—', '—', '—', '—',
     ]);
   });
 

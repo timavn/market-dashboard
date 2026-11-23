@@ -4,7 +4,6 @@ import {
   Monitor,
   MessageSquare,
   PieChart,
-  Scale,
   Share2,
 } from 'lucide-react';
 import { MarketDataService } from '../../services/api/marketDataService';
@@ -465,10 +464,6 @@ const PortfolioDashboard = ({
     sidebarPanelStack,
   ]);
 
-  const togglePortfolioBalance = useCallback(() => {
-    setShowPortfolioBalance((isVisible) => !isVisible);
-  }, [setShowPortfolioBalance]);
-
   const navigationItems = useMemo(() => [
     {
       id: 'system',
@@ -590,16 +585,7 @@ const PortfolioDashboard = ({
       title: 'Portfolio Breakdown',
       onSelect: () => toggleSidebarPanel('portfolio', setShowPortfolioBreakdown),
     },
-    {
-      id: 'balance',
-      group: 'primary',
-      icon: Scale,
-      label: 'Balance',
-      description: 'Live cash and capacity',
-      title: 'Portfolio balance',
-      onSelect: togglePortfolioBalance,
-    },
-  ].filter(Boolean), [selectedAnalystPanelPosition, setAnalystPanelDock, togglePortfolioBalance, toggleSidebarPanel, setShowSystemReadiness, setShowMorningTldr, setShowAnalyst, isDashboardGuideOpen, isExposureGuideOpen, isProcessOpen, openProcess, onNavigateProcess, onCloseProcess, setShowPortfolioBreakdown]);
+  ].filter(Boolean), [selectedAnalystPanelPosition, setAnalystPanelDock, toggleSidebarPanel, setShowSystemReadiness, setShowMorningTldr, setShowAnalyst, isDashboardGuideOpen, isExposureGuideOpen, isProcessOpen, openProcess, onNavigateProcess, onCloseProcess, setShowPortfolioBreakdown]);
 
 
   const handleSystemReadinessStatus = useCallback((status) => {

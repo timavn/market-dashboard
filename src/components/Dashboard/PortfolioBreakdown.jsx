@@ -45,16 +45,11 @@ import { isCanonicalSecurityIntelligence } from '../../utils/securityIntelligenc
 import { normalizeResearchBias } from '../../utils/researchBias.cjs';
 import { isExplicitTradeProvenance } from '../../utils/publishedResearchSignals.cjs';
 import { useSurfaceActivity } from '../common/PersistentSurface';
-import useQuadResearch from '../../hooks/useQuadResearch';
 import useHedgaiTickResearch from '../../hooks/useHedgaiTickResearch';
 import PortfolioMetricVerificationModal from './portfolio/PortfolioMetricVerificationModal';
-import PortfolioFactorQuadMatrix from './PortfolioFactorQuadMatrix';
-import PortfolioQuadReference from './PortfolioQuadReference';
+import PortfolioRiskMatrix from './PortfolioRiskMatrix';
 import { getPortfolioExposureValuation } from '../../utils/portfolioExposureValuation';
 import { isRefreshDelayedVolatilityRow } from '../../utils/volatilitySnapshotRows';
-import {
-  buildPortfolioQuadExposure,
-} from '../../utils/portfolioFactorExposure';
 import './PortfolioConstructionIdeas.css';
 // Feature overrides must follow the shared portfolio cell styles.
 import './portfolio/LeveragedProducts.css';
@@ -456,7 +451,6 @@ const PortfolioBreakdown = ({
   onRefresh = null,
 }) => {
   const active = useSurfaceActivity();
-  const { estimates: quadResearch } = useQuadResearch({ active });
   const { readings: tickReadings } = useHedgaiTickResearch({ active });
   const holdings = useMemo(() => portfolioData?.holdings || [], [portfolioData?.holdings]);
 
@@ -493,8 +487,6 @@ const PortfolioBreakdown = ({
   const closeMetricVerification = useCallback(() => setMetricVerification(null), []);
   const [leveragedProductModal, setLeveragedProductModal] = useState(null);
   const closeLeveragedProductModal = useCallback(() => setLeveragedProductModal(null), []);
-  const [factorExposureDimension, setFactorExposureDimension] = useState('equityStyleFactors');
-  const [selectedFactorExposureId, setSelectedFactorExposureId] = useState(null);
   const [manualResearchRefreshKey, setManualResearchRefreshKey] = useState(0);
   const researchProductRowsCacheRef = useRef(new WeakMap());
   const researchFallbackPayloadRef = useRef({});
@@ -616,10 +608,6 @@ const PortfolioBreakdown = ({
 
   const factorValuation = getPortfolioExposureValuation(portfolioData, { loading: isLoading });
   const factorExposureAvailable = factorValuation.available;
-  const factorExposure = buildPortfolioQuadExposure(
-    factorValuation.holdings, portfolioData?.accountSummary?.netLiquidation,
-    factorExposureAvailable, factorValuation.unavailableHoldings,
-  );
   useEffect(() => {
     if (!active || !factorValuation.expiresAt) return undefined;
     const timeout = window.setTimeout(() => setLiveEvidenceTick(value => value + 1),
@@ -1392,11 +1380,6 @@ const PortfolioBreakdown = ({
 
   const positions = usePortfolioPositions({
     longs, shorts, totalValue, hasVerifiedPortfolioMarks, canUseHoldingForSizing,
-    factorSelection: {
-      available: factorExposureAvailable,
-      dimension: factorExposureDimension,
-      id: selectedFactorExposureId,
-    },
   });
   const {
     longsBasisPoints, setLongsBasisPoints, longsPercentPortfolio, setLongsPercentPortfolio,
@@ -2321,22 +2304,13 @@ const PortfolioBreakdown = ({
 
 
   const renderFactorExposureBalance = () => (
-    <div className="pcv2-factor-workspace">
-      <PortfolioFactorQuadMatrix
-        rows={factorExposure}
-        estimates={quadResearch}
-        available={factorExposureAvailable}
-        loading={isLoading}
-        valuation={factorValuation}
-        selectedFactorId={factorExposureAvailable ? selectedFactorExposureId : null}
-        onSelectFactor={(row) => {
-          setFactorExposureDimension(row.dimension);
-          setSelectedFactorExposureId(current => current === row.id ? null : row.id);
-        }}
-        onClearFactor={() => setSelectedFactorExposureId(null)}
-      />
-      <PortfolioQuadReference />
-    </div>
+    <PortfolioRiskMatrix
+      holdings={factorValuation.holdings}
+      nav={finiteOptionalNumber(portfolioData?.accountSummary?.netLiquidation)}
+      available={factorExposureAvailable}
+      loading={isLoading}
+      valuation={factorValuation}
+    />
   );
 
   const describeLedgerResearch = (holding, isLongs, index) => {

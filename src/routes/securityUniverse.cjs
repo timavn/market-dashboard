@@ -2,7 +2,7 @@
 
 const { requestedSecuritySymbols } = require('../utils/securitySymbols.cjs');
 
-const PIECES = ['identity', 'research', 'stance', 'risk', 'activity'];
+const PIECES = ['identity', 'classification', 'research', 'stance', 'risk', 'activity'];
 
 function requestedFields(value) {
   if (value === undefined || value === '') return PIECES;
@@ -11,7 +11,7 @@ function requestedFields(value) {
   return fields.length && fields.every(field => PIECES.includes(field)) ? fields : null;
 }
 
-// GET /api/security-universe?symbols=…&fields=identity,research,stance,risk,activity
+// GET /api/security-universe?symbols=…&fields=identity,classification,research,stance,risk,activity
 // The central per-ticker record. Descriptive research only: never a quote,
 // order size or signal of its own.
 function createSecurityUniverseHandler({ service } = {}) {

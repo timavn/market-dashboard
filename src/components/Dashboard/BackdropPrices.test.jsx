@@ -43,7 +43,8 @@ const LIVE_QUOTE = {
 const OFFLINE_PROVIDER = { ibkr: { connected: false, status: 'offline' } };
 const CENTER_CARDS = [
   { id: 'us', label: 'US', asset: 'S&P 500', symbol: 'SPX', price: 6421.35, formatted: '6,421' },
-  { id: 'europe', label: 'Europe', asset: 'STOXX Europe 600 (Europe-wide)', symbol: 'STOXX600', price: 550.27, formatted: '550' },
+  // London has closed by 19:59 London time, so its print is final and reads C.
+  { id: 'europe', label: 'Europe', asset: 'STOXX Europe 600 (Europe-wide)', symbol: 'STOXX600', price: 550.27, formatted: '550', closed: true },
   { id: 'asia', label: 'Asia', asset: 'Nikkei 225 (Japan)', symbol: 'N225', price: 42500.25, formatted: '42,500' },
   { id: 'commodities', label: 'Commodities', asset: 'CRB Index', symbol: 'CRB', price: 309.62, formatted: '310' },
   { id: 'rates', label: 'Rates', asset: 'UST 2Y', symbol: 'UST2Y', price: 3.614, formatted: '3.614' },
@@ -64,11 +65,11 @@ describe('compact market-card prices with provider provenance', () => {
     const firstRow = within(table).getAllByRole('row')[1];
     const cells = within(firstRow).getAllByRole('cell');
     expect(cells.slice(0, 3).map((cell) => cell.textContent))
-      .toEqual([card.asset, `${card.formatted}D`, '1.25%']);
+      .toEqual([card.asset, `${card.formatted}${card.closed ? 'C' : 'D'}`, '1.25%']);
     expect(cells[1]).toHaveAttribute('data-quote-status', 'delayed');
     expect(cells[1]).toHaveAttribute('title', `${card.price} · Yahoo Finance · Delayed · ${OBSERVED_LABEL}`);
-    expect(within(cells[1]).getByRole('button', { name: `Yahoo Finance · Delayed · ${OBSERVED_LABEL}` }))
-      .toHaveTextContent('D');
+    expect(within(cells[1]).getByRole('button', { name: `Yahoo Finance · Delayed · ${OBSERVED_LABEL}${card.closed ? '. Close, market closed' : ''}` }))
+      .toHaveTextContent(card.closed ? 'C' : 'D');
   });
 
   test('keeps a verified overview price and its original time after the provider disconnects', () => {

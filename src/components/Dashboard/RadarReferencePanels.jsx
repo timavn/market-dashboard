@@ -271,7 +271,7 @@ const CftcPreview = ({ data, refreshFailed = false }) => {
   return (
     <table className="efr-mini-table cftc-preview-grid" aria-label="CFTC positioning preview" title={reportTitle}>
       <thead><tr><th>Asset</th><th>Net position</th><th>W/W</th><th>
-        1Y Z-score <DelayedDataMarker status={freshness.referenceOnly ? 'reference' : 'historical'} title={reportTitle}
+        1Y Z-score <DelayedDataMarker status={freshness.referenceOnly ? 'reference' : 'historical'} title={reportTitle} priceMarker={false}
           updatedAt={reportDate} marketSessionDate={reportDate} />
       </th></tr></thead>
       <tbody>

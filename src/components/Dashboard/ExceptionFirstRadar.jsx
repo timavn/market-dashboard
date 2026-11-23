@@ -524,7 +524,7 @@ const BackdropRow = ({ descriptor, row, providerStatus, detailed, research }) =>
               || periodEvidence?.sessionDate || sourceMarketSessionDate(periodAsOf)} />
         )}
         {!isPeriod && canRender && useObservation && (
-          <DelayedDataMarker status="historical" popoverLabel={dayTitle}
+          <DelayedDataMarker status="historical" popoverLabel={dayTitle} priceMarker={false}
             className="efr-backdrop-observation" updatedAt={observation.asOf}
             {...markerMarket} marketSessionDate={observation.sessionDate
               || sourceMarketSessionDate(observation.asOf)} />

@@ -106,8 +106,6 @@ export default defineConfig(async ({ command, mode }) => {
   const define = Object.fromEntries(PUBLIC_SETTINGS.map((name) => [
     `process.env.${name}`, JSON.stringify(env[name]) ?? 'undefined',
   ]));
-  // Legacy optional providers cannot receive server credentials in a bundle.
-  for (const name of ['ALPHA_VANTAGE', 'FINNHUB', 'POLYGON']) define[`process.env.REACT_APP_${name}_KEY`] = 'undefined';
   const proxy = {
     '/api': { target: 'http://127.0.0.1:3001', changeOrigin: true },
     '/ws': { target: 'http://127.0.0.1:3001', changeOrigin: true, ws: true,

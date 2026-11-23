@@ -123,12 +123,13 @@ test('renders ordered formatted volatility readings and marks only the historica
     volatilityReadings,
   })} />);
   const cell = contextGrid().children[2];
-  expect(cell).toHaveTextContent('MOVE 101.00D · VIX 19.23');
+  // Its close is older than the previous session, so it reads as a red C.
+  expect(cell).toHaveTextContent('MOVE 101.00C · VIX 19.23');
   expect(cell).toHaveAttribute('title', 'MOVE / VIX · Sep 9, 2026');
   const markers = within(cell).getAllByRole('button');
   expect(markers).toHaveLength(1);
   expect(markers[0]).toHaveAttribute('data-data-status', 'historical');
-  expect(markers[0]).toHaveAccessibleName('Historical reference · ICE · Sep 9, 2026. Updated Sep 9, 2026');
+  expect(markers[0]).toHaveAccessibleName('Historical reference · ICE · Sep 9, 2026. Updated Sep 9, 2026. Close from an earlier session, not updating');
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
   fireEvent.click(markers[0]);
   expect(screen.getByRole('status')).toHaveTextContent('Updated Sep 9, 2026');
@@ -146,9 +147,9 @@ test('updates a mounted marker to the latest source date and removes the marker 
   })]} />);
   expect(screen.getByRole('status')).toHaveTextContent('Updated Sep 10, 2026');
   expect(screen.getByRole('button', { name: /Historical reference · ICE/ })).toHaveAccessibleName(
-    'Historical reference · ICE · Sep 10, 2026. Updated Sep 10, 2026',
+    'Historical reference · ICE · Sep 10, 2026. Updated Sep 10, 2026. Close from an earlier session, not updating',
   );
-  expect(contextGrid().children[2]).toHaveTextContent('MOVE 102.25D');
+  expect(contextGrid().children[2]).toHaveTextContent('MOVE 102.25C');
   expect(screen.queryByText(/Updated Sep 9, 2026/)).not.toBeInTheDocument();
   view.rerender(<PortfolioMarketContext {...props} volatilityReadings={[historicalReading({
     value: '103.50', marker: { status: 'live', updatedAt: '2026-09-10T18:00:00.000Z' },

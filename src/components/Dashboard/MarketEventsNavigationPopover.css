@@ -259,24 +259,6 @@
   text-decoration: underline;
 }
 
-.market-events-navigation-popover .market-events-quick-reference__sources {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 2px 12px;
-  padding: 6px 12px;
-  border-top: 1px solid #dce1e5;
-  background: #f3f5f7;
-  color: #687583;
-  font-size: 10px;
-  line-height: 14px;
-}
-
-.market-events-navigation-popover .market-events-quick-reference .market-events-quick-reference__sources a {
-  color: #2563eb;
-}
-
 /* A market closure or early close today: the button takes the dock's blue. */
 .dashboard-top-navigation .dashboard-top-navigation__item.market-events-navigation-trigger.has-closure {
   background: #edf6ff;

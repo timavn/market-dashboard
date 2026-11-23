@@ -265,10 +265,10 @@ describe('MarketEventsQuickReference', () => {
     const report = within(calendar).getByTitle(/US BoE Monetary Policy Report/);
     expect(report).not.toHaveTextContent(/Actual|Consensus|Prior|unavailable/i);
     expect(within(calendar).queryByText(/^Source:/)).not.toBeInTheDocument();
-    expect(within(calendar).getByRole('link', { name: 'Forex Factory ↗' }))
-      .toHaveAttribute('href', 'https://www.forexfactory.com/calendar/rss');
-    expect(within(calendar).getByRole('link', { name: 'Trading Economics ↗' }))
-      .toHaveAttribute('href', 'https://tradingeconomics.com/calendar');
+    // No sources footer in the dock popover (user-specified 2026-11-22).
+    expect(within(calendar).queryByText(/Schedule, consensus/)).not.toBeInTheDocument();
+    expect(within(calendar).queryByRole('link', { name: 'Forex Factory ↗' })).not.toBeInTheDocument();
+    expect(within(calendar).queryByRole('link', { name: 'Trading Economics ↗' })).not.toBeInTheDocument();
   });
 
   test('links a released actual to the Trading Economics page it was read from', () => {
@@ -292,7 +292,8 @@ describe('MarketEventsQuickReference', () => {
     expect(cpi).toHaveAttribute('title', expect.stringContaining('Actual source: Trading Economics'));
     const actual = within(cpi).getByRole('link', { name: /Actual\s*2\.9%/ });
     expect(actual).toHaveAttribute('href', 'https://tradingeconomics.com/united-states/inflation-cpi');
-    expect(within(calendar).getByText(/checked 08:58 \(11:58\)/)).toBeInTheDocument();
+    // The sources footer that showed when actuals were last checked is gone from the popover.
+    expect(within(calendar).queryByText(/checked 08:58/)).not.toBeInTheDocument();
   });
 
   test('shows the pending actual, with no highlight, when an event\'s release time passes', () => {

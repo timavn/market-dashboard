@@ -27,6 +27,20 @@
   color: var(--dashboard-delayed-data-color);
 }
 
+/* C: the market is closed and this is its final print; it will not move until the next open. */
+.dashboard-delayed-data-marker-trigger[data-settled-close="true"],
+.dashboard-delayed-data-marker--close {
+  --dashboard-delayed-data-color: #000000;
+  color: var(--dashboard-delayed-data-color);
+}
+
+/* Red C: a close from before the previous session; this value has stopped updating. */
+.dashboard-delayed-data-marker-trigger[data-close-age="older"],
+.dashboard-delayed-data-marker--close-older {
+  --dashboard-delayed-data-color: var(--dashboard-negative, #dc2626);
+  color: var(--dashboard-delayed-data-color);
+}
+
 .dashboard-delayed-data-marker-trigger:focus-visible {
   border-radius: 2px;
   outline: 1px solid currentColor;

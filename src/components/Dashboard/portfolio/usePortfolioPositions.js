@@ -7,7 +7,7 @@ import {
 } from './portfolioPositionsModel';
 
 export function usePortfolioPositions({
-  longs, shorts, totalValue, hasVerifiedPortfolioMarks, canUseHoldingForSizing, factorSelection,
+  longs, shorts, totalValue, hasVerifiedPortfolioMarks, canUseHoldingForSizing, factorSelection = {},
 }) {
   const {
     available: factorExposureAvailable,

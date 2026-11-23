@@ -1,157 +1,76 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repository. Two other files carry the detail and win over this one where they differ:
 
-## Project Overview
+- `AGENTS.md`: working agreements and every user-specified product rule (data integrity, UI, Analyst, prediction markets).
+- `README.md`: local architecture, setup, and data contracts.
 
-A React-based financial market dashboard with AWS serverless backend for automated portfolio tracking. Users upload Schwab CSV exports to S3, which triggers Lambda processing to store portfolio data in DynamoDB. The React dashboard displays real-time portfolio analytics, market data, and options trading interface with Global Quad Matrix visualization.
+## Project overview
 
-## Development Commands
+A local Mac workspace for portfolio monitoring and market research. A Vite + React 18 dashboard talks to a local Express API (`server.js`), which reads live accounts from Interactive Brokers through a Python sidecar, reads Hedgeye research that a Gmail-ingesting Lambda stores in AWS, and hosts The Analyst (a local Hermes research chat with its own sidecar).
+
+```text
+Browser at localhost:3000 (Vite + React)
+    └─ /api and /ws proxy → Express at 127.0.0.1:3001 (server.js)
+          ├─ IBKR sidecar at 127.0.0.1:8765 → local IB Gateway
+          ├─ Market and research providers (src/services/providers)
+          ├─ AWS SDK v3 → S3 and DynamoDB (research ledgers, snapshots, Risk Ranges)
+          └─ The Analyst → local Hermes + sidecar at 127.0.0.1:6951
+
+Hedgeye email → Gmail ingestor Lambda (every 15 min) → S3 artifacts + DynamoDB → Express API → dashboard
+```
+
+Everything local listens on loopback only. AWS never calls the Mac.
+
+## Commands
 
 ```bash
-npm start              # Start React dev server only (localhost:3000)
-npm run server         # Start Express backend server only (localhost:3001)
-npm run dev            # Start both frontend and backend concurrently
-npm run build          # Build production bundle
-npm test               # Run test suite
-npm run lint           # Run ESLint on src/ files
-npm run lint:fix       # Auto-fix ESLint issues
-npm run format         # Format code with Prettier
+npm start                # Start the whole local stack through the supervisor (same as npm run dev)
+npm run dev:status       # What is running and ready
+npm run dev:doctor       # Diagnose the local stack
+npm run dev:restart      # Restart known repository services
+npm run dev:stop
+npm run dev:ui           # Vite only (port 3000)
+npm run dev:api          # Express only (port 3001)
+npm run build            # Vite production build
+npm run lint
+npx jest <test file>     # One Jest suite (browser-side tests, jsdom)
+npm run test:node        # Node test suite (server-side .cjs tests)
+npm run test:analyst     # Analyst Python, Node and UI suites
 ```
 
-## Architecture Overview
+`scripts/dev-stack/cli.js` supervises the stack and restarts it when `server.js` or other service files change, so save such files once rather than in several small edits.
 
-### Full Stack Architecture
-```
-Schwab CSV → S3 Upload → Lambda Process → DynamoDB → Express API → React Dashboard
-                                                    ↘ WebSocket (real-time)
-```
+## Code map
 
-### Frontend Component Structure
-- **Entry Point**: `src/index.js` → `src/App.jsx` → `src/components/Dashboard/PortfolioDashboard.jsx`
-- **Layout**: 12-column CSS Grid (2-col sidebar, 7-col center, 3-col right panel)
-- **Component Directories**:
-  - `components/Dashboard/` - Main dashboard components
-  - `components/CSVUpload.jsx` - S3 presigned URL upload component
-  - `components/Portfolio/` - Portfolio-specific components
-  - `components/Options/` - Options trading UI
-  - `components/Charts/` - Chart visualizations
+- **Frontend**: `index.html` → `src/index.jsx` → `src/App.jsx` → `src/components/Dashboard/PortfolioDashboard.jsx`. Dashboard cards live in `src/components/Dashboard/`; each loads its data through a resource hook in `src/hooks/` (for example `useDashboardPortfolio.js`, `useDashboardOverviewResources.js`, `useVolatilitySnapshot.js`). The browser polls the API; the dashboard has no WebSocket client for market data, although the server still exposes `/ws/market`.
+- **API**: `server.js` plus route modules in `src/routes/` (`analyst.cjs`, `systemReadiness.cjs`, `marketDaily.cjs`, and others). Server-side services are the `.cjs` files in `src/services/` and `src/utils/`.
+- **IBKR**: `scripts/ibkr_sidecar/` (Python, talks to IB Gateway) and `src/services/ibkr/`. Read-only; see `docs/IBKR_READ_ONLY_BOUNDARIES.md`.
+- **The Analyst**: `src/routes/analyst.cjs`, `src/services/analyst/`, `scripts/analyst_sidecar/` (Python), `scripts/analyst/` (Hermes profile), `config/analyst/`. See `docs/THE_ANALYST.md`.
+- **Prediction markets**: `src/services/prediction*.cjs` and `src/services/kalshiClient.js`. Read-only; nothing places orders.
+- **Local operations**: `scripts/dev-stack/`, `scripts/ops/`, `ops/`.
 
-### Backend Architecture (server.js)
-- **Express Server**: Port 3001, serves REST API and WebSocket endpoints
-- **AWS Integration**: S3 presigned URL generation, DynamoDB portfolio data queries
-- **WebSocket Server**: `/ws/market` endpoint with channel-based subscriptions
-- **Portfolio Endpoint**: `/api/portfolio` queries latest DynamoDB snapshot and holdings
+## AWS
 
-### Service Layer
-- **API Service**: `src/services/api/marketDataService.js` - Axios client with 10s timeout, handles both AWS API Gateway and local server formats
-- **CSV Parser**: `src/utils/csvParser.js` - Schwab CSV processing utilities
-- **Portfolio Analytics**: `src/services/portfolioAnalytics.js` - Calculates risk metrics, exposure, concentration, factor analysis
+Region `us-west-1`, stack `market-dashboard-readiness-v2`, defined in `infra/template.yaml`:
 
-### Custom Hooks
-Located in `src/hooks/`. Each dashboard card loads its data through a resource hook, for example:
-- `useDashboardPortfolio.js` - Portfolio and provider status
-- `useDashboardOverviewResources.js` - Market overview tables
-- `useVolatilitySnapshot.js` - Volatility card
+- `market-dashboard-gmail-ingestor-v2` (`infra/lambdas/gmail_ingestor/`): reads Hedgeye email, stores artifacts in S3 and parsed research in DynamoDB.
+- `market-dashboard-hedgeye-pdf-processor-v1`: PDF parsers, built from `aws/lambda/` by its `Makefile`. That folder is still deployed code, and several `scripts/` import its parsers.
+- `market-dashboard-cftc-ingestor-v1` (`infra/lambdas/cftc_ingestor/`): daily at 15:31 Eastern, publishes official CFTC positioning as the `cftc-positioning` snapshot the dashboard reads.
+- `market-dashboard-hermes-cloud-watchdog-v1` (`infra/lambdas/hermes_watchdog/`) and the cost guardian.
+- `market-dashboard-hermes-worker-v2` and the Quant Analyst, Quant Developer and Security schedules are retired and kept disabled. The Analyst is the only active agent; do not restore the others.
 
-The browser polls the API; the dashboard has no WebSocket client for market data.
+Lambda and template changes ship only through the tested release path in `infra/README.md` (`prepare_tested_release.py`, then `infra/scripts/deploy.sh`). Never overlay function code directly.
 
-### API Configuration
-Defined in `src/constants/apiEndpoints.js`:
-- **Backend URL**: `process.env.REACT_APP_BACKEND_URL` or `http://localhost:3001`
-- **External Integrations**: Alpha Vantage, Finnhub, Polygon.io (configured via env vars)
-- **WebSocket**: `/ws/market` path
+The default local AWS profile is restricted and mostly read-only; the admin profile is used only with the user's explicit go-ahead.
 
-## AWS Infrastructure
+## Environment
 
-Located in `aws/` directory:
-- **Lambda**: `csv_processor.lambda_handler` - Processes Schwab CSV files, implements daily portfolio replacement logic
-- **DynamoDB Tables**:
-  - `PortfolioSnapshots` - Portfolio summaries with asset allocation
-  - `Holdings` - Individual holdings per snapshot (composite key: `snapshotId#symbol`)
-  - `ProcessingLogs` - CSV processing logs
-- **S3 Bucket**: `market-dashboard-csv-data` with automatic Lambda trigger on `uploads/*.csv`
-- **IAM**: `CSVProcessorPolicy` grants Lambda permissions for S3 read, DynamoDB write, CloudWatch logging
+Copy `.env.example` to `.env`. It covers the backend URL, Kalshi keys, the IBKR sidecar and Gateway, and Analyst settings. AWS credentials come from the configured profiles, never from browser settings.
 
-See `aws/README.md` for complete infrastructure setup and deployment details.
+## Notes
 
-## CSV Processing
-
-The `parseSchwabCSV()` function in `src/utils/csvParser.js`:
-1. Searches for header line containing "Symbol" and "Description"
-2. Parses comma-separated data with quoted fields (handles commas in quotes)
-3. Converts dollar amounts (removes `$` and `,`) and percentages using `parseDollar()` / `parsePercent()`
-4. Filters out "Account Total" rows and invalid positions
-5. Helper functions: `calculatePortfolioSummary()`, `calculateAssetAllocation()`, `getTopHoldings()`
-
-**Asset Type Mapping**:
-- "ETFs & Closed End Funds" / "Equity" → Equities
-- "Cash and Money Market" → Cash
-- "Fixed Income" → Fixed Income
-- "Options" → Derivatives
-
-## Environment Configuration
-
-Copy `.env.example` to `.env` and configure:
-```bash
-REACT_APP_API_BASE_URL=http://localhost:3001
-REACT_APP_BACKEND_URL=http://localhost:3001    # Express backend URL
-REACT_APP_ALPHA_VANTAGE_KEY=your_key
-REACT_APP_FINNHUB_KEY=your_key
-REACT_APP_POLYGON_KEY=your_key
-REACT_APP_WS_URL=ws://localhost:3001
-
-# Backend AWS credentials (for server.js)
-AWS_REGION=us-west-1
-AWS_ACCESS_KEY_ID=your_key
-AWS_SECRET_ACCESS_KEY=your_secret
-```
-
-Backend falls back to `~/.aws/credentials` if env vars not set.
-
-## Deployment
-
-### AWS S3 
-Automated via GitHub Actions (`.github/workflows/deploy.yml`):
-- Triggers on push to `main` branch
-- Builds production bundle with `npm run build`
-- Syncs `build/` to S3 bucket
-
-**Required GitHub Secrets**:
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `S3_BUCKET_NAME`
-
-
-## Design System
-
-**Color Scheme**:
-- Background: `#F5F5DC` (Beige)
-- Text: `#000080` (Navy)
-- Accents: `#4682B4` (Steel Blue)
-- Borders: `#D3D3D3` (Light Gray)
-- Panel Headers: `#E6E6E6`
-
-**Grid Layout**: Main dashboard uses 12-column grid (Tailwind-style classes)
-
-## Data Flow
-
-### Development Mode (Local)
-1. **Initial Load**: Components mount → resource hooks in `src/hooks/` → `MarketDataService` → Express server
-2. **CSV Upload**: User uploads via `CSVUpload` component → requests presigned URL from `/api/presigned-url` → uploads to S3 → Lambda processes → DynamoDB updated → `portfolioRefresh` event triggers UI refresh
-3. **Updates**: each resource hook polls its endpoint on its own interval; the server's `/ws/market` endpoint has no dashboard client
-
-### Production Mode (AWS)
-1. User uploads Schwab CSV to S3 bucket
-2. S3 trigger invokes Lambda function
-3. Lambda parses CSV, stores in DynamoDB (daily replacement: clears old holdings first)
-4. Frontend fetches from API Gateway (or Express server)
-5. Dashboard displays portfolio analytics
-
-## Key Implementation Notes
-
-- **Portfolio Data Formats**: `MarketDataService.getPortfolio()` handles both AWS API Gateway format (`{snapshot, holdings}`) and local server format (direct object)
-- **Tab Navigation**: 'M' and 'Q' tabs in left sidebar toggle dashboard views
-- **Daily Portfolio Replacement**: Lambda clears old holdings before storing new ones to prevent duplicates
-- **WebSocket Broadcasting**: Disabled by default (set `ENABLE_WS_BROADCAST=true` to enable periodic updates)
-- **Portfolio Refresh Event**: `window.addEventListener('portfolioRefresh')` in `PortfolioDashboard` listens for upload completion
+- Use Node 22 (`.nvmrc`).
+- Portfolio data comes from IBKR only. The Schwab CSV upload path (upload component, presigned-upload endpoint, `csv_processor` Lambda) has been removed from the code.
+- Alpha Vantage, Finnhub and Polygon are not used.
+- Light mode only; UI and formatting rules are in `AGENTS.md`.

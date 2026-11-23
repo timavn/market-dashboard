@@ -22,7 +22,7 @@ test('passes exact tickers and requested pieces to the record, as research-only 
   assert.equal(res.headers['Cache-Control'], 'no-store');
   assert.equal(res.headers['X-Data-Use'], 'historical-research-only');
   await handler({ query: { symbols: 'DRAM' } }, res);
-  assert.deepEqual(received.options.fields, ['identity', 'research', 'stance', 'risk', 'activity']);
+  assert.deepEqual(received.options.fields, ['identity', 'classification', 'research', 'stance', 'risk', 'activity']);
 });
 
 test('rejects malformed tickers, unknown pieces and more than 50 tickers before any read', async () => {

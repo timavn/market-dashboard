@@ -674,6 +674,12 @@ export class MarketDataService {
     return response.data;
   }
 
+  // Three labels and risk numbers for a book of signed % of NAV weights.
+  static async getPortfolioRiskMatrix(positions, { signal } = {}) {
+    const response = await apiClient.post('/api/portfolio/risk-matrix', { positions }, { signal, timeout: 60000 });
+    return response.data;
+  }
+
   static async getRiskRangeChart(symbol, { signal } = {}) {
     const response = await dedupedGet('/api/analyst/risk-range-history', { params: { symbol }, signal, timeout: 30000 });
     return response.data;
