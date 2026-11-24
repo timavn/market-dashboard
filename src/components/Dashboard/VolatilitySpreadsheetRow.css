@@ -139,3 +139,20 @@
   font-size: 9px;
   line-height: 1.35;
 }
+
+.efr-vol-spreadsheet__series {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.efr-vol-spreadsheet__tracks {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--efr-muted, #667085);
+  text-align: right;
+  text-overflow: ellipsis;
+}

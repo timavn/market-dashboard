@@ -32,6 +32,7 @@ const MARKETS = {
   copper: { names: ['Copper', 'Dr\\. Copper', 'Copper Spot Price'], instrument: 'copper' },
   wti: { names: ['WTI', 'WTIC', 'Crude Oil', 'Crude', 'Oil'], instrument: 'wti' },
   brent: { names: ['Brent', 'Brent Crude', 'Brent Crude Oil', 'Brent Oil'], instrument: 'brent' },
+  natgas: { names: ['Natural Gas', 'Nat Gas', 'NatGas', 'NATGAS'], instrument: 'natgas' },
   bitcoin: { names: ['Bitcoin', 'BTC', '₿TC', 'BTC-USD', 'BTCUSD'], instrument: 'bitcoin' },
   ethereum: { names: ['Ethereum', 'Ether', 'ETH', 'ETH-USD', 'ETHUSD'], instrument: 'ethereum' },
   sp500: { names: ['SPX', 'S&P 500', 'S&P500', 'SP500', 'S&P'], instrument: 'sp500' },
@@ -54,15 +55,15 @@ const DOLLAR_PAIRS = ['JPY', 'YEN', 'CAD', 'CHF', 'CNY', 'CNH', 'MXN'].flatMap((
 // ETFs and currency pairs that track a market. Their levels are in their own units, so they are kept
 // with the ticker and never compared with the market's own price.
 const PROXIES = {
-  GLD: 'gold', IAU: 'gold', SLV: 'silver', CPER: 'copper', USO: 'wti', BNO: 'brent', IBIT: 'bitcoin', BITO: 'bitcoin',
+  GLD: 'gold', IAU: 'gold', SLV: 'silver', CPER: 'copper', USO: 'wti', BNO: 'brent', UNG: 'natgas', IBIT: 'bitcoin', BITO: 'bitcoin',
   ETHA: 'ethereum', ETHE: 'ethereum', SPY: 'sp500', QQQ: 'nasdaq100', SHY: 'ust2y', IEF: 'ust10y', TLT: 'ust30y', UUP: 'usd',
   ...Object.fromEntries(DOLLAR_PAIRS.map(([pair]) => [pair, 'usd'])),
 };
 // Price-ETF positions move opposite to the yield the market settles on; dollar-second pairs, opposite to the dollar.
 const INVERSE_PROXIES = new Set(['SHY', 'IEF', 'TLT', ...DOLLAR_PAIRS.filter(([, inverse]) => inverse).map(([pair]) => pair)]);
 // Named instruments that end the previous market's scope in a sentence.
-const OTHER_NAMES = ['KOSPI', 'Nikkei', 'VIX', 'VXN', 'MOVE', 'Russell', 'IWM', 'RUT', 'Natural Gas', 'NATGAS',
-  'UNG', 'Yen', 'Euro', 'Pound', 'Swiss', 'Semis', 'Semiconductors', 'Software', 'Shipping', 'Gold Miners', 'Silver Miners',
+const OTHER_NAMES = ['KOSPI', 'Nikkei', 'VIX', 'VXN', 'MOVE', 'Russell', 'IWM', 'RUT',
+  'Yen', 'Euro', 'Pound', 'Swiss', 'Semis', 'Semiconductors', 'Software', 'Shipping', 'Gold Miners', 'Silver Miners',
   'Copper Miners', 'Oil Services', 'Refiners', 'Treasury Yield', 'Treasury Yields', 'Bond Yields', 'Yield Curve', 'curve', 'HYG', 'LQD',
   'PFIX'];
 // Capitalised words that are vocabulary, not instruments.
@@ -481,7 +482,7 @@ function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
   const findings = [];
   if (product === 'early-look') {
     // "Our Levels": immediate-term Risk Ranges with the TREND in brackets.
-    const tickers = { UST10Y: 'ust10y', UST2Y: 'ust2y', UST30Y: 'ust30y', GOLD: 'gold', SILVER: 'silver', COPPER: 'copper', WTIC: 'wti', BRENT: 'brent',
+    const tickers = { UST10Y: 'ust10y', UST2Y: 'ust2y', UST30Y: 'ust30y', GOLD: 'gold', SILVER: 'silver', COPPER: 'copper', WTIC: 'wti', BRENT: 'brent', NATGAS: 'natgas',
       SPX: 'sp500', COMPQ: 'nasdaq100', NDX: 'nasdaq100', USD: 'usd', BTC: 'bitcoin', BITCOIN: 'bitcoin', ETH: 'ethereum' };
     for (const [name, row] of Object.entries(data)) {
       const ticker = (name.match(/\(([A-Z0-9/]+)\)\s*$/) || [])[1] || name.trim();

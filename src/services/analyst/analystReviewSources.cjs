@@ -2,7 +2,7 @@ const registry = require('../../../infra/lambdas/gmail_ingestor/research_product
 const { automatedSourceReadiness } = require('./analystSourceReadiness.cjs');
 const { pendingReviewSourceItems: pendingSources } = require('./analystReviewSourceCatalog.cjs');
 
-const REVIEW_KINDS = new Set(['portfolio-review', 'balance-review', 'prediction-markets-review']);
+const REVIEW_KINDS = new Set(['portfolio-review', 'balance-review', 'prediction-markets-review', 'daily-review']);
 const SOURCE_STATES = new Set(['ready', 'partial', 'missing', 'checking', 'unavailable', 'pending']);
 const CAPTURE_KINDS = new Set(['captured', 'review-captured']);
 // A check's own duration exists only after it settles; paused sources never ran.

@@ -1218,6 +1218,10 @@ class IbkrReader:
     async def open_orders(self) -> dict[str, Any]:
         return await self._request("/portfolio/open-orders")
 
+    async def executions(self) -> dict[str, Any]:
+        """Today's fills for every managed account, read fresh. Read-only."""
+        return await self._request("/portfolio/executions")
+
     async def session_closes(self, accounts: list[str]) -> list[Any]:
         """IBKR official daily closes per account, from the bridge's reference marks."""
         return await asyncio.gather(*(

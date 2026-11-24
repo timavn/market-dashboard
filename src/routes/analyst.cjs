@@ -794,6 +794,7 @@ function createAnalystRoutes({
         reviews: {
           portfolioReview: reviewReady('portfolio-review'),
           predictionMarketsReview: reviewReady('prediction-markets-review'),
+          dailyReview: reviewReady('daily-review'),
         },
       },
       readiness: {
@@ -814,6 +815,10 @@ function createAnalystRoutes({
         predictionMarketsReview: {
           ready: reviewReady('prediction-markets-review'),
           reason: reviewReason('prediction-markets-review', 'Predictive Markets Review unavailable'),
+        },
+        dailyReview: {
+          ready: reviewReady('daily-review'),
+          reason: reviewReason('daily-review', 'Daily Review unavailable'),
         },
       },
       failedDependencies: [...chatFailedDependencies, ...reviewFailedDependencies],

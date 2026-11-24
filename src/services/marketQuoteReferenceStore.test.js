@@ -56,6 +56,23 @@ describe('marketQuoteReferenceStore', () => {
     expect(fs.existsSync(first.filePath)).toBe(true);
   });
 
+  test('a stored quote priced off a wide, untraded book gives way to an older verified close', () => {
+    const now = () => Date.parse('2026-11-24T03:50:00.000Z');
+    const store = createMarketQuoteReferenceStore({ dataDir, now });
+    const book = verifiedRow({ symbol: 'UUP', source: 'ibkr', dataType: 'live', availability: 'current', secType: 'STK',
+      price: 32, mark: 32.005, mid: 32.005, bid: 29.6, ask: 34.41, last: null, changePercent: 7.47,
+      timestamp: '2026-11-24T03:46:58.175Z', quoteAsOf: '2026-11-24T03:46:58.175Z' });
+    expect(store.reconcileRows({ scope: 'currencies', incomingRows: [book], expectedSymbols: ['UUP'] })).toEqual([]);
+    const close = verifiedRow({ symbol: 'UUP', price: 29.94, changePercent: 0.54,
+      timestamp: '2026-11-23T21:00:00.000Z', quoteAsOf: '2026-11-23T21:00:00.000Z' });
+    expect(store.reconcileRows({ scope: 'currencies', incomingRows: [close], expectedSymbols: ['UUP'] })[0])
+      .toEqual(expect.objectContaining({ price: 29.94, changePercent: 0.54, availability: 'delayed' }));
+    // A tight book with no last trade is still a price.
+    const tight = { ...book, bid: 29.93, ask: 29.95, price: 29.94, mark: 29.94, mid: 29.94, changePercent: 0.54 };
+    expect(store.reconcileRows({ scope: 'currencies', incomingRows: [tight], expectedSymbols: ['UUP'] })[0])
+      .toEqual(expect.objectContaining({ source: 'ibkr', price: 29.94 }));
+  });
+
   test('keeps omitted assets through repeated partial responses and replaces them on recovery', () => {
     let time = Date.parse('2026-09-04T17:01:00.000Z');
     const store = createMarketQuoteReferenceStore({ dataDir, now: () => time });

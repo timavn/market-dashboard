@@ -1576,6 +1576,22 @@ app.get('/api/prediction-markets/paper-ledger', async (req, res) => {
   }
 });
 
+// Today's Kalshi fills and settlements for the Analyst's Daily Review. Read-only: two account reads, summed.
+const loadPredictionDayActivity = require('./src/services/predictionDayActivity.cjs').createDayActivityLoader({
+  loadFills: (floor) => require('./src/services/kalshiClient')
+    .paginateKalshi('/portfolio/fills', { min_ts: floor, limit: 200 }, 'fills'),
+  loadSettlements: (floor) => require('./src/services/kalshiClient')
+    .paginateKalshi('/portfolio/settlements', { min_ts: floor, limit: 200 }, 'settlements') });
+app.get('/api/prediction-markets/day-activity', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    res.json(await loadPredictionDayActivity({ since: String(req.query.since || '') }));
+  } catch (error) {
+    if (error.statusCode !== 400) console.error('[prediction-day-activity]', error.message);
+    res.status(error.statusCode || 503).json({ error: error.statusCode === 400 ? error.message : 'Kalshi activity unavailable' });
+  }
+});
+
 // ?date=YYYY-MM-DD reads an earlier market day's morning research for the report's date picker.
 const predictionResearchBoards = new Map();
 app.get('/api/prediction-markets/setup-board', async (req, res) => {

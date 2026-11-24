@@ -53,6 +53,9 @@ test('never credits another instrument’s code to a tracked market', () => {
   assert.deepEqual(codes('Brent, meanwhile, is still Bullish TRADE and TREND with an Alpha Code = 99/93 ($99 = TRADE, $93 = TREND)'),
     [{ market: 'brent', instrument: null, trade: 99, trend: 93 }]);
   assert.deepEqual(kinds('Brent Oil is still Bullish TRADE and TREND', 'signal').map(({ market }) => market), ['brent']);
+  // Natural Gas is its own market, never Oil's.
+  assert.deepEqual(kinds('Oil is Bearish TREND while Natural Gas is still Bullish TRADE and TREND', 'signal').map(({ market }) => market).sort(),
+    ['natgas', 'wti']);
   assert.deepEqual(codes('Dr. KOSPI failed its TRADE (Alpha Code for KOSPI = 68/71)'), []);
   assert.deepEqual(codes('NVDA lifted SPY’s +0.7% return, breaking out to Bullish TRADE and TREND with an Alpha Code = 217208'), []);
   assert.deepEqual(codes('Alpha Code for QQQ = 720705 (TRADE = 720, TREND = 705)', { ...references, QQQ: undefined }), []);

@@ -129,6 +129,21 @@ export const VOLATILITY_INDEX_DEFINITIONS = Object.freeze({
   }),
 });
 
+// What each series measures the volatility of, shown at the right of the Volatility table's series cell.
+export const VOLATILITY_INDEX_TRACKS = Object.freeze({
+  VIX: 'S&P 500',
+  VVIX: 'VIX',
+  RVX: 'Russell 2000',
+  VXN: 'Nasdaq-100',
+  VXEEM: 'Emerging Mkts',
+  GVZ: 'Gold',
+  OVX: 'Crude Oil',
+  BITVX: 'Bitcoin',
+  MOVE: 'Treasuries',
+  G5RV: 'G5 FX',
+  FXVL: 'G5 FX',
+});
+
 export const getVolatilityIndexDefinition = (indicatorKey) => (
   VOLATILITY_INDEX_DEFINITIONS[indicatorKey] || null
 );

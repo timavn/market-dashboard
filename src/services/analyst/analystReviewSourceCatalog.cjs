@@ -1,6 +1,14 @@
 const registry = require('../../../infra/lambdas/gmail_ingestor/research_products.json');
 
-const gatewayDependencies = new Set(['portfolio', 'portfolioOpenOrders', 'balance', 'portfolioBalance', 'portfolioFactors']);
+const gatewayDependencies = new Set(['portfolio', 'portfolioOpenOrders', 'balance', 'portfolioBalance', 'portfolioFactors',
+  'portfolioExecutions', 'portfolioSessionCloses']);
+// Daily Review inputs, in display order. The sidecar projection uses the same ids
+// (analyst_review_sources.DAILY_REVIEW_SOURCES after the broker reads).
+const dailyReviewSources = [['portfolio', 'IBKR holdings'], ['portfolioBalance', 'IBKR account exposure'],
+  ['portfolioExecutions', 'IBKR fills today'], ['portfolioSessionCloses', 'IBKR prior closes'],
+  ['portfolioOpenOrders', 'IBKR open orders'], ['portfolioSizing', 'Security betas'], ['marketPrices', 'Market prices'],
+  ['volatilityIndices', 'Volatility indices'], ['predictionBoard', 'Kalshi account'],
+  ['kalshiActivity', 'Kalshi fills and settlements']];
 // Predictive Markets Review setup board inputs, in display order. The sidecar
 // projection uses the same ids (analyst_review_sources.PREDICTION_BOARD_SOURCES).
 // Hedgeye inputs reuse their research product ids so pre-run readiness applies.
@@ -20,6 +28,7 @@ const source = (id, label, status) => ({ id, label, status, observedAt: null,
 // These rows reserve presentation space, without supplying source evidence.
 function pendingReviewSourceItems(kind, status = 'checking') {
   if (kind === 'prediction-markets-review') return predictionBoardSources.map(([id, label]) => source(id, label, status));
+  if (kind === 'daily-review') return dailyReviewSources.map(([id, label]) => source(id, label, status));
   if (!['portfolio-review', 'balance-review'].includes(kind)) return [];
   const items = [source('portfolio', 'IBKR holdings', status)];
   if (kind === 'portfolio-review') items.push(source('portfolioBalance', 'IBKR account exposure', status),

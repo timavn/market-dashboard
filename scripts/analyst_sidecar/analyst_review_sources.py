@@ -52,7 +52,12 @@ _COVERAGE_MISSING = {"late": "RESEARCH_PUBLICATION_LATE", "missing": "RESEARCH_P
                      "not due": "RESEARCH_NOT_DUE"}
 BAD_STATES = {"failed", "error", "offline", "disconnected", "unavailable", "stale", "cache-only", "cached", "mock", "seed", "seeded", "synthetic", "inferred", "fallback"}
 BAD_FLAGS = {"stale", "isStale", "cached", "cacheOnly", "cachedOnly", "fromCache", "from_cache", "mock", "isMock", "seed", "seeded", "synthetic", "inferred", "fallback", "refreshFailed", "disconnected"}
-GATEWAY_DEPENDENCIES = {"portfolio", "portfolioOpenOrders", "balance", "portfolioBalance", "portfolioFactors"}
+GATEWAY_DEPENDENCIES = {"portfolio", "portfolioOpenOrders", "balance", "portfolioBalance", "portfolioFactors",
+                        "portfolioExecutions", "portfolioSessionCloses"}
+# Daily Review inputs after the broker reads, in display order (mirrors analystReviewSourceCatalog.cjs).
+DAILY_REVIEW_SOURCES = (("portfolioSizing", "Security betas"), ("marketPrices", "Market prices"),
+                        ("volatilityIndices", "Volatility indices"), ("predictionBoard", "Kalshi account"),
+                        ("kalshiActivity", "Kalshi fills and settlements"))
 _LEGACY_PREDICTION_ASSETS = {
     "silver": "Silver", "gold": "Gold", "wti": "WTI", "brent": "Brent",
     "bitcoin": "Bitcoin", "sp500": "S&P 500", "nasdaq100": "Nasdaq 100", "cpi": "CPI",
@@ -588,6 +593,13 @@ def _review_sources(run, store, research_products, prediction_universe):
             if diagnostic:
                 item["diagnostic"] = diagnostic
             items.append(item)
+    elif kind == "daily-review":
+        items = connection_items + [
+            dependency("portfolio", "IBKR holdings", live=True), dependency("portfolioBalance", "IBKR account exposure", live=True),
+            dependency("portfolioExecutions", "IBKR fills today", live=True),
+            dependency("portfolioSessionCloses", "IBKR prior closes", live=True),
+            dependency("portfolioOpenOrders", "IBKR open orders", live=True),
+            *(dependency(name, label) for name, label in DAILY_REVIEW_SOURCES)]
     elif kind == "prediction-markets-review" and not _LEGACY_PREDICTION_DEPENDENCIES & set(dependencies):
         # Setup board review: one row per independently loaded input.
         board = read("predictionBoard")

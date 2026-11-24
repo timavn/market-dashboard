@@ -39,6 +39,7 @@ import SourceLibrary from './AnalystSourceLibrary';
 import AnalystSemanticText from './AnalystSemanticText';
 import { formatAnalystReportDate } from '../../utils/analystReportDates';
 import AnalystReportLink from './AnalystReportLink';
+import AnalystDailyReview, { parseDailyReview } from './AnalystDailyReview';
 
 const STREAM_COMMIT_INTERVAL_MS = 150;
 const REVIEW_POLL_INTERVAL_MS = 1_000;
@@ -47,6 +48,7 @@ const HISTORY_LOAD_ERROR = 'Conversation history is temporarily unavailable.';
 const REVIEW_ACTIONS = [
   { id: 'portfolio-review', label: 'Portfolio Review', message: 'Run Portfolio Review' },
   { id: 'prediction-markets-review', label: 'Predictive Markets Review', message: 'Run Predictive Markets Review' },
+  { id: 'daily-review', label: 'Daily Review', message: 'Run Daily Review' },
 ];
 const ACTIVE_STATES = new Set(['queued', 'running', 'starting']);
 
@@ -397,6 +399,12 @@ const Message = memo(function Message({ message, onCitation, inboxFindings, revi
     if (!terminalMarkdown.trim()) return null;
     return <AnalystPredictionReport messageId={message.id} markdown={terminalMarkdown} citations={message.citations} onCitation={onCitation} error={message.error} />;
   }
+  if (reviewKind === 'daily-review' && message.role === 'assistant' && !message.streaming) {
+    // The sheet arrives as one block in the saved report; a failed or interrupted run keeps its own words below.
+    const sheet = parseDailyReview(message.text);
+    if (sheet) return <AnalystDailyReview messageId={message.id} sheet={sheet} />;
+    if (!message.text?.trim()) return null;
+  }
   if (message.reviewBodyIncluded === false && !message.portfolioBrief) return <article data-message-id={message.id}
     className="analyst-captured-report-placeholder portfolio-brief-centered" aria-busy="true">
     <p>{formatAnalystReportDate(message.created_at)}</p>
@@ -723,6 +731,7 @@ export default function AnalystConversationPanel({ onClose }) {
   const reviewReady = useMemo(() => ({
     'portfolio-review': serviceStatus?.readiness?.portfolioReview?.ready !== false,
     'prediction-markets-review': serviceStatus?.readiness?.predictionMarketsReview?.ready !== false,
+    'daily-review': serviceStatus?.readiness?.dailyReview?.ready !== false,
   }), [serviceStatus]);
 
   const sortedEntities = useMemo(() => Object.values(state.entities)

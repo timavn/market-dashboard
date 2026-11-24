@@ -86,6 +86,7 @@ class FakeWebSocket {
 const REVIEW_ACTIONS = [
   ['portfolio-review', 'Portfolio Review', '11111111-1111-4111-8111-111111111111'],
   ['prediction-markets-review', 'Predictive Markets Review', '22222222-2222-4222-8222-222222222222'],
+  ['daily-review', 'Daily Review', '44444444-4444-4444-8444-444444444444'],
 ];
 // Balance Review is retired: saved Balance chats still list, but it cannot launch.
 const SAVED_REVIEWS = [...REVIEW_ACTIONS, ['balance-review', 'Balance Review', '33333333-3333-4333-8333-333333333333']];

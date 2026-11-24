@@ -88,6 +88,7 @@ const ANALYST_V2_REVIEW_SESSION_TITLES = new Set([
 const ANALYST_REVIEW_CONVERSATION_IDS = Object.freeze({
   'portfolio-review': 'review:portfolio-review',
   'prediction-markets-review': 'review:prediction-markets-review',
+  'daily-review': 'review:daily-review',
   'balance-review': 'review:balance-review',
 });
 const ANALYST_GM_REVIEW_ORDER = Object.freeze(['Portfolio Review', 'Options Review', 'Balance']);
@@ -95,6 +96,7 @@ const ANALYST_MANAGED_TITLE_LABELS = Object.freeze({
   misc: ANALYST_DEFAULT_SESSION_TITLE,
   'portfolio-review': 'Portfolio Review',
   'prediction-markets-review': 'Predictive Markets Review',
+  'daily-review': 'Daily Review',
   'balance-review': 'Balance Review',
   'options-review': 'Options Review',
   balance: 'Balance',
@@ -102,8 +104,8 @@ const ANALYST_MANAGED_TITLE_LABELS = Object.freeze({
 const ANALYST_MANAGED_TITLE_SLUGS = new Map(
   Object.entries(ANALYST_MANAGED_TITLE_LABELS).map(([slug, label]) => [label, slug]),
 );
-const ANALYST_MANAGED_TITLE_PATTERN = /^\[market-dashboard-analyst:(misc|portfolio-review|prediction-markets-review|balance-review|options-review|balance):([0-9a-f-]{36}|canonical)\]$/i;
-const ANALYST_REVIEW_FOLLOWUP_TITLE_PATTERN = /^\[market-dashboard-analyst-review:(portfolio-review|prediction-markets-review|balance-review):([0-9a-f-]{36})\]$/i;
+const ANALYST_MANAGED_TITLE_PATTERN = /^\[market-dashboard-analyst:(misc|portfolio-review|prediction-markets-review|daily-review|balance-review|options-review|balance):([0-9a-f-]{36}|canonical)\]$/i;
+const ANALYST_REVIEW_FOLLOWUP_TITLE_PATTERN = /^\[market-dashboard-analyst-review:(portfolio-review|prediction-markets-review|daily-review|balance-review):([0-9a-f-]{36})\]$/i;
 const ANALYST_GM_BATCH_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ANALYST_GM_COMPANION_REVIEW_KINDS = new Set(['options-review', 'balance']);
 

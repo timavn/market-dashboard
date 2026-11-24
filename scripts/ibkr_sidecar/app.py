@@ -88,6 +88,7 @@ SIDECAR_LOCK_PATH = Path(
 _sidecar_lock_handle = None
 _pnl_singleflight_lock = asyncio.Lock()
 _open_orders_snapshot_lock = asyncio.Lock()
+_executions_snapshot_lock = asyncio.Lock()
 _pnl_inflight: Dict[str, asyncio.Task] = {}
 LIVE_SESSION_VERIFY_TIMEOUT_SEC = float(os.environ.get("IBKR_LIVE_SESSION_VERIFY_TIMEOUT_SEC", "2.5"))
 FUNDING_ACCOUNT_UPDATE_TIMEOUT_SEC = float(
@@ -8147,6 +8148,42 @@ async def portfolio_open_orders(account: Optional[str] = Query(None)) -> JSONRes
         return JSONResponse({"ok": False, "status": "unavailable", "complete": False,
                              "liveVerified": False, "orders": [], "message": str(exc) or "Open orders unavailable"},
                             headers={"Cache-Control": "no-store"})
+
+
+@app.get("/portfolio/executions")
+async def portfolio_executions(account: Optional[str] = Query(None)) -> JSONResponse:
+    """Today's fills for the Analyst's Daily Review, read fresh from the broker. Read-only."""
+    headers = {"Cache-Control": "no-store"}
+    health = await ensure_connected()
+    if not health["ok"]:
+        return JSONResponse(
+            {"ok": False, "complete": False, "liveVerified": False, "status": health["status"],
+             "message": health.get("message"), "executions": []},
+            status_code=200, headers=headers,
+        )
+    try:
+        accounts = [str(value) for value in ib.managedAccounts() if value]
+        if not accounts or account and account not in accounts:
+            raise ValueError("Managed account could not be verified")
+        selected = [account] if account else accounts
+        async with _executions_snapshot_lock:
+            started_at = now_iso()
+            rows: List[Dict[str, Any]] = []
+            # One account-filtered request per account; a failed account fails the whole read,
+            # so a partial list is never presented as the day's trading.
+            for selected_account in selected:
+                evidence = await request_fresh_account_execution_evidence(ib, selected_account)
+                rows.extend(evidence["rows"])
+        observed_at = now_iso()
+        return JSONResponse({"ok": True, "status": "live", "liveVerified": True, "complete": True,
+                             "source": "ibkr_executions", "from_cache": False,
+                             "account": account, "accounts": selected, "executions": rows,
+                             "requestedAt": started_at, "asOf": observed_at, "fetched_at": observed_at},
+                            headers=headers)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "status": "unavailable", "complete": False, "liveVerified": False,
+                             "executions": [], "errorCode": getattr(exc, "code", None) or "EXECUTIONS_UNAVAILABLE",
+                             "message": str(exc) or "Executions unavailable"}, headers=headers)
 
 
 def _safe_pnl_float(value: Any) -> Optional[float]:

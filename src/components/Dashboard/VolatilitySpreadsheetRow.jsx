@@ -3,6 +3,7 @@ import DashboardResearchLabel from './DashboardResearchLabel';
 import { formatOverviewPrice } from '../../utils/formatOverviewPrice';
 import { delayedMarkerMarketContext } from '../../utils/delayedMarkerMarketContext';
 import DelayedDataMarker from './DelayedDataMarker';
+import { VOLATILITY_INDEX_TRACKS } from '../../constants/volatilityIndexDefinitions';
 import {
   isFiniteMetricNumber,
   VOLATILITY_METRIC_PERIODS,
@@ -43,6 +44,7 @@ const VolatilitySpreadsheetRow = ({
   onTickerClick = null,
   ariaLabel,
   research,
+  tracks = VOLATILITY_INDEX_TRACKS[symbol] || null,
 }) => {
   const level = available && isFiniteMetricNumber(row?.lastPx) ? Number(row.lastPx) : null;
   const quoteMode = String(row?.quoteMode || row?.dataType || '').toLowerCase();
@@ -67,6 +69,7 @@ const VolatilitySpreadsheetRow = ({
       data-status={displayedStatus}
     >
       <th scope="row">
+        <span className="efr-vol-spreadsheet__series">
         <DashboardResearchLabel label={symbol} reading={research}>
           {onTickerClick ? (
             <button
@@ -81,6 +84,8 @@ const VolatilitySpreadsheetRow = ({
             </button>
           ) : symbol}
         </DashboardResearchLabel>
+        {tracks && <span className="efr-vol-spreadsheet__tracks" title={`${symbol} tracks ${tracks}`}>{tracks}</span>}
+        </span>
       </th>
       <td
         title={level != null ? `Level ${level} · ${provenance}` : provenance}

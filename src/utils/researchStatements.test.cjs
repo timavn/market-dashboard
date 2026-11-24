@@ -162,3 +162,37 @@ test('Alpha Codes named after the phrase, after a dash, or in a roster are read,
     assert.deepEqual(flips(text), [], text);
   }
 });
+
+// Statements the reader skipped until 2026-11-23, each as stored; the board kept older Trade directions.
+test('reads a position aside, a lead-in, a while-clause, the curve named after the claim, and a level break', () => {
+  const cases = [
+    ['Brent Oil (we’re long BNO) continues to signal Bullish TRADE and TREND', ['BZ.trade=BULLISH', 'BZ.trend=BULLISH']],
+    ['Obviously, our UST 2yr Yield Signal was already Bullish TRADE - what changed yesterday was the Long End.', ['UST2Y.trade=BULLISH']],
+    ['UST 10yr Yield’s Fractal Dimension ( Risk Range™ Signal ) continues to signal lower-highs and Bearish TRADE', ['UST10Y.trade=BEARISH']],
+    ['Treasury yields remain bullish on both trade and trend signals across the 2-year, 10-year, and 30-year maturities.',
+      ['UST10Y.trade=BULLISH', 'UST10Y.trend=BULLISH', 'UST2Y.trade=BULLISH', 'UST2Y.trend=BULLISH', 'UST30Y.trade=BULLISH', 'UST30Y.trend=BULLISH']],
+    ['(8:30-9:22) • Hedgeye is also long Consumer Staples, Utilities and Health Care , giving it four long S&P sectors while the S&P itself is bearish trade and trend.',
+      ['SPX.trade=BEARISH', 'SPX.trend=BEARISH']],
+    ['He cited the 10-year Treasury yield breaking below Hedgeye’s 5.07% trade signal.', ['UST10Y.trade=BEARISH']],
+    ['QQQ remains bearish TRADE while bullish TREND', ['QQQ.trade=BEARISH', 'QQQ.trend=BULLISH']],
+  ];
+  for (const [text, expected] of cases) assert.deepEqual(read(text).filter((item) => !/alphaCode/.test(item)), expected, text);
+  assert.deepEqual(read('UST 10yr is back above TRADE Signal Level of 5.10%'), ['UST10Y.alphaCode=5.1//', 'UST10Y.trade=BULLISH']);
+  // The quoted source is the printed span, and it restates the claim on its own.
+  const [brent] = researchStatements('Brent Oil (we’re long BNO) continues to signal Bullish TRADE and TREND');
+  assert.equal(brent.sourceText, 'Brent Oil (we’re long BNO) continues to signal Bullish TRADE and TREND');
+  assert.deepEqual(claimedValues('the 10-year Treasury yield breaking below Hedgeye’s 5.07% trade signal', 'trade'), ['BEARISH']);
+});
+
+test('a level break without a side, a past or conditional break, and an untracked maturity state nothing', () => {
+  for (const text of [
+    'The 10-year yield fell 23 bps last week and broke its immediate-term trade level around 5.06% ; a move below roughly 4.94% would break trend.',
+    'If the 10-year subsequently breaks back below trade, Keith said he will become much more aggressive buying bonds.',
+    'The 10-year yield has not broken below its trade level',
+    'The S&P 500 broke below its trade level yesterday',
+    'Treasury yields remain bullish on both trade and trend signals across the 2-year, 20-year, and 30-year maturities.',
+    'The last inflation report on 9/11 brought the S&P and Nasdaq to Neutral trend.',
+    'The two-year yield signal returned to bullish trade and trend about two weeks ago, ahead of CPI.',
+  ]) assert.deepEqual(read(text), [], text);
+  assert.deepEqual(read('Gold is bearish trade, while the S&P would need to close above its trade level'), ['ref:GOLD.trade=BEARISH']);
+});

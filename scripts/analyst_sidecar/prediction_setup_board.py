@@ -342,6 +342,9 @@ def _range_cell(row: dict[str, Any]) -> str:
         return _number((row.get("price") or {}).get("value"), percent=row.get("group") == "rates")
     # A range is always drawn with its own instrument's price (e.g. Nasdaq Composite for COMPQ).
     price = (row.get("rangePrice") or row.get("price") or {}).get("value")
+    if (row.get("roll") or {}).get("mismatch"):
+        # The range is on another contract month than the one trading: its bar carries no price.
+        price = None
     decimals = 0 if max(abs(low), abs(high)) >= 1000 else 2
     value = f"{price:.{decimals}f}" if isinstance(price, (int, float)) else ""
     unit = "%" if row.get("group") == "rates" else ""
@@ -782,7 +785,9 @@ def render_setup_board(board: dict[str, Any]) -> str:
                           *([_structure_cell(row)] if sessions else []),
                           _as_of_cell(price.get("asOf"), [
                               (tick.get("date"), f"HedgAI {tick.get('ticker') or ''}".strip() if tick else None),
-                              (trade.get("date"), trade.get("source")),
+                              # A Trade stated on a stand-in (QQQ for the Nasdaq-100) names it, as the Tick does.
+                              (trade.get("date"), f"{trade.get('source') or ''} {trade.get('ticker') or ''}".strip()
+                               if trade.get("proxy") else trade.get("source")),
                               (_eastern_date(trend_break.get("since")), f"Alpha Code {_number(trend_break.get('level'))}") if trend_break
                               else (risk_range.get("date") if row.get("trend") else None, trend_product if row.get("trend") else None)],
                               market_date)])
@@ -795,6 +800,16 @@ def render_setup_board(board: dict[str, Any]) -> str:
             if rejected := row.get("priceRejected"):
                 notes.append(f"{row['label']} price withheld: {rejected.get('symbol')} returned "
                              f"{_number(rejected.get('value'))}, inconsistent with its Risk Range.")
+            roll = row.get("roll") or {}
+            if roll.get("mismatch"):
+                ranged, trading = roll.get("range") or {}, roll.get("trading") or {}
+                gap = roll.get("gapPct")
+                gap = f", {gap:+.1f}%" if isinstance(gap, (int, float)) and not isinstance(gap, bool) else ""
+                subject = "Kalshi's lines centre on" if roll.get("source") == "kalshi" else "the price is"
+                notes.append(f"**{row['label']} contract mismatch:** the Risk Range is on the {ranged.get('month')} contract "
+                             f"({_number(ranged.get('price'))}); {subject} the {trading.get('month')} contract "
+                             f"({_number(trading.get('price'))}{gap}). Price not placed in the range and no setup "
+                             f"until the range moves to {trading.get('month')}.")
         if notes:
             lines += [" ".join(notes), ""]
         # Boards captured with the line monitor fold each market's Kalshi lines under its section's table.

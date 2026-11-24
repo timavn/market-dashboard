@@ -43,7 +43,11 @@ from balance_brief import attach_balance_primary
 from portfolio_refresh import build_portfolio_refresh
 from portfolio_capture import PORTFOLIO_POSITION_COLUMNS, VALUED_PORTFOLIO_MARK_STATES, portfolio_mark_state, project_portfolio_context
 from inbox_holdings import current_holding_weights
-from position_session import PositionSessionReader
+from position_session import PositionSessionReader, _prior_closes as prior_session_closes
+from daily_review import (
+    BENCHMARK as DAILY_REVIEW_BENCHMARK, SECTOR_SYMBOLS as DAILY_REVIEW_SECTORS, build_daily_review, comparison_cutoff,
+    exit_closes as daily_review_exit_closes, normalize_executions, review_session,
+)
 from security_sectors import SecuritySectorReader
 from portfolio_sizing import PortfolioSizingReader
 from daily_research_reader import read_daily_research
@@ -128,6 +132,9 @@ BALANCE_REVIEW_RETRY_DELAY_SECONDS = 0.15
 BALANCE_REVIEW_CURRENT_TIMEOUT_SECONDS = 20
 PORTFOLIO_PCA_CONTEXT_TIMEOUT_SECONDS = 1
 PORTFOLIO_SIZING_TIMEOUT_SECONDS = 50
+# The Daily Review never waits long on a supporting read; a slow one leaves its own section empty.
+DAILY_REVIEW_BOARD_TIMEOUT_SECONDS = 50
+DAILY_REVIEW_SIZING_TIMEOUT_SECONDS = 30
 LOG_TIMESTAMP_PREFIX = "%(asctime)s.%(msecs)03dZ "
 LOG_TIMESTAMP_DATEFMT = "%Y-%m-%dT%H:%M:%S"
 
@@ -3220,6 +3227,213 @@ async def _prediction_review_v2_handler(
             "sections": [{"id": "setup-board", "title": "Setups", "status": status, "board": board}]}
 
 
+@dataclass
+class DailyReviewSources:
+    """Injectable acquisition boundary for the Daily Review, shared by production and tests."""
+
+    portfolio_context: Callable[[], Awaitable[Any]]
+    project_portfolio_context: Callable[[Any], Any]
+    session_closes: Callable[[list[str]], Awaitable[list[Any]]]
+    executions: Callable[[], Awaitable[Any]]
+    market_quotes: Callable[[], Awaitable[Any]]
+    daily_history: Callable[[str, str], Awaitable[Any]]
+    volatility: Callable[[], Awaitable[Any]]
+    broker_readiness: Optional[Callable[[], Awaitable[Any]]] = None
+    balance_context: Optional[Callable[[], Awaitable[Any]]] = None
+    open_orders: Optional[Callable[[], Awaitable[Any]]] = None
+    sizing_context: Optional[Callable[[list[str], str], Awaitable[Any]]] = None
+    prediction_board: Optional[Callable[[], Awaitable[Any]]] = None
+    kalshi_activity: Optional[Callable[[str], Awaitable[Any]]] = None
+    session: Callable[[str], dict[str, Any]] = review_session
+
+
+async def _read_api_json(path: str, params: Optional[dict[str, str]] = None, *, timeout: float = 20) -> Any:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(f"{API_BASE_URL}{path}", params=params)
+        response.raise_for_status()
+        return response.json()
+
+
+def _default_daily_review_sources() -> DailyReviewSources:
+    return DailyReviewSources(
+        broker_readiness=ibkr.readiness,
+        portfolio_context=ibkr.portfolio_context,
+        project_portfolio_context=project_portfolio_context,
+        balance_context=balance_context.context,
+        session_closes=ibkr.session_closes,
+        executions=ibkr.executions,
+        open_orders=ibkr.open_orders,
+        market_quotes=lambda: _read_api_json("/api/multi-region-quotes"),
+        daily_history=lambda symbol, start: openbb.market_history(symbol, start_date=start),
+        volatility=lambda: _read_api_json("/api/volatility-snapshot"),
+        sizing_context=portfolio_sizing_reader.read,
+        prediction_board=_read_prediction_setup_board,
+        kalshi_activity=lambda since: _read_api_json("/api/prediction-markets/day-activity", {"since": since}),
+    )
+
+
+async def _daily_review_v2_handler(
+    context: ReviewExecutionContext,
+    sources: Optional[DailyReviewSources] = None,
+) -> dict[str, Any]:
+    """Post-close wrap-up: P&L and its sources, today's trading, exposure, liquidity, the market and Kalshi."""
+    async with AcquisitionTasks() as tasks:
+        return await _capture_daily_review_v2(context, sources or _default_daily_review_sources(), tasks)
+
+
+async def _capture_daily_review_v2(context, sources, tasks) -> dict[str, Any]:
+    requested_at = utc_now_iso()
+    if sources.broker_readiness:
+        # The sheet is the account's day. Without the broker there is no sheet,
+        # so a failed connection ends the run before any other source is read.
+        started = time.monotonic()
+        readiness = await _capture_ib_gateway_readiness(context, sources.broker_readiness)
+        if not isinstance(readiness, dict) or readiness.get("liveVerified") is not True:
+            code = (readiness.get("errorCode") if isinstance(readiness, dict) else None) or "GATEWAY_UNAVAILABLE"
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            for name in ("portfolio", "portfolioBalance", "portfolioExecutions", "portfolioSessionCloses", "portfolioOpenOrders"):
+                await context.checkpoint(name, status="failed", error_code=_ib_gateway_dependent_code(code),
+                    detail={"liveVerified": False, "elapsedMs": elapsed_ms, "attemptCount": 1})
+            raise ReviewRunError(code, _ib_gateway_review_error(code, "Daily Review"), status_code=503, retryable=True)
+    try:
+        session = await asyncio.to_thread(sources.session, requested_at)
+        market_date, phase = session["marketDate"], session["phase"]
+        datetime.strptime(market_date, "%Y-%m-%d")
+    except Exception as exc:
+        await context.checkpoint("marketSession", status="failed", error_code="DAILY_REVIEW_SESSION_UNAVAILABLE",
+                                 detail={"liveVerified": False})
+        raise ReviewRunError("DAILY_REVIEW_SESSION_UNAVAILABLE",
+                             "The exchange session could not be verified. Refresh Daily Review to retry.",
+                             status_code=503, retryable=True) from exc
+
+    async def supporting(name, read, *, timeout, usable=lambda value: isinstance(value, dict),
+                         observed=lambda value: None, error_code, live=None):
+        """One independent read: checkpointed when it settles and never fatal to the sheet."""
+        started = time.monotonic()
+        try:
+            value = await asyncio.wait_for(read(), timeout)
+        except Exception as exc:
+            LOGGER.info("Daily Review source failed run=%s source=%s error=%s", context.run_id, name, type(exc).__name__)
+            value = None
+        ok = False
+        try:
+            ok = value is not None and bool(usable(value))
+        except Exception:
+            ok = False
+        detail = {"elapsedMs": round((time.monotonic() - started) * 1000)}
+        if live is not None:
+            detail["liveVerified"] = bool(ok and live)
+        await _active_daily_review_remaining(context)
+        await context.checkpoint(name, status="ready" if ok else "failed", evidence=value if ok else None,
+                                 as_of=((observed(value) if ok else None) or utc_now_iso()) if ok else None,
+                                 error_code=None if ok else error_code, detail=detail)
+        return value if ok else None
+
+    # Ten calendar days always span the session's bar and the one before it.
+    history_start = (datetime.strptime(market_date, "%Y-%m-%d") - timedelta(days=10)).date().isoformat()
+
+    async def read_histories(symbols):
+        results = await asyncio.gather(*(sources.daily_history(symbol, history_start) for symbol in symbols), return_exceptions=True)
+        return {symbol: result for symbol, result in zip(symbols, results) if isinstance(result, dict)}
+
+    async def read_market():
+        # SPY and the sector ETFs trade after hours, so their session move comes from dated daily bars.
+        quotes, histories = await asyncio.gather(
+            sources.market_quotes(), read_histories([DAILY_REVIEW_BENCHMARK, *DAILY_REVIEW_SECTORS]), return_exceptions=True)
+        if not isinstance(quotes, dict):
+            raise ValueError("Market quotes unavailable")
+        return {"quotes": quotes, "histories": histories if isinstance(histories, dict) else {}}
+
+    portfolio_task = tasks.start(_read_retrying_broker_review_source(
+        context, "portfolio", sources.portfolio_context, timeout_seconds=PORTFOLIO_BROKER_CAPTURE_TIMEOUT_SECONDS))
+    balance_task = tasks.start(_read_retrying_balance_review_source(context, sources.balance_context)) if sources.balance_context else None
+    executions_task = tasks.start(supporting(
+        "portfolioExecutions", sources.executions, timeout=15, live=True, error_code="EXECUTIONS_UNAVAILABLE",
+        usable=lambda value: normalize_executions(value, market_date) is not None, observed=lambda value: value.get("asOf")))
+    orders_task = tasks.start(_read_retrying_broker_review_source(
+        context, "portfolioOpenOrders", sources.open_orders, timeout_seconds=10)) if sources.open_orders else None
+    market_task = tasks.start(supporting(
+        "marketPrices", read_market, timeout=20, error_code="MARKET_PRICES_UNAVAILABLE",
+        observed=lambda value: (value["quotes"].get("meta") or {}).get("observedAt")))
+    volatility_task = tasks.start(supporting(
+        "volatilityIndices", sources.volatility, timeout=15, error_code="VOLATILITY_UNAVAILABLE",
+        observed=lambda value: value.get("generatedAt")))
+    board_task = tasks.start(supporting(
+        "predictionBoard", sources.prediction_board, timeout=DAILY_REVIEW_BOARD_TIMEOUT_SECONDS,
+        error_code="PREDICTION_BOARD_UNAVAILABLE", observed=lambda value: value.get("asOf"))) if sources.prediction_board else None
+    # Kalshi trades every day; its day starts at midnight Eastern on the session being wrapped up.
+    kalshi_since = datetime.strptime(market_date, "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York")).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    kalshi_task = tasks.start(supporting(
+        "kalshiActivity", lambda: sources.kalshi_activity(kalshi_since), timeout=25, error_code="KALSHI_ACTIVITY_UNAVAILABLE",
+        usable=lambda value: value.get("ok") is True, observed=lambda value: value.get("asOf"))) if sources.kalshi_activity else None
+
+    raw, _portfolio_error = _review_source_result(await portfolio_task)
+    balance, _balance_error = _review_source_result(await balance_task) if balance_task else (None, None)
+    if not raw or raw.get("liveVerified") is not True or str(raw.get("freshness") or "").lower() != "live":
+        raise ReviewRunError("LIVE_PORTFOLIO_UNAVAILABLE",
+                             "Verified IBKR holdings were unavailable. Refresh Daily Review to retry.",
+                             status_code=503, retryable=True)
+    metrics = portfolio_metrics(sources.project_portfolio_context(raw), balance)
+    if not metrics.get("available"):
+        raise ReviewRunError("LIVE_PORTFOLIO_UNAVAILABLE",
+                             "Verified IBKR holdings could not be read. Refresh Daily Review to retry.",
+                             status_code=503, retryable=True)
+    as_of = raw.get("asOf") or requested_at
+    accounts = [str(account) for account in metrics.get("accountIds") or [] if account]
+    stocks = sorted({str(row.get("symbol") or "").strip().upper() for row in metrics["positions"]
+                     if row.get("secType") == "STK" and re.fullmatch(r"[A-Z0-9.\-]{1,16}", str(row.get("symbol") or "").strip().upper())})
+
+    async def read_closes():
+        payloads = await sources.session_closes(accounts)
+        verified = [payload for payload in payloads if isinstance(payload, dict) and payload.get("ok") is True]
+        if not accounts or len(verified) != len(accounts):
+            raise ValueError("Official prior closes unavailable")
+        return {"asOf": utc_now_iso(), "payloads": verified}
+
+    closes_task = tasks.start(supporting("portfolioSessionCloses", read_closes, timeout=25, live=True,
+                                         error_code="SESSION_CLOSES_UNAVAILABLE", observed=lambda value: value.get("asOf")))
+    sizing_task = tasks.start(supporting(
+        "portfolioSizing", lambda: sources.sizing_context(stocks, as_of), timeout=DAILY_REVIEW_SIZING_TIMEOUT_SECONDS,
+        error_code="SIZING_UNAVAILABLE", usable=lambda value: isinstance(value.get("bySymbol"), dict),
+        observed=lambda value: value.get("asOf"))) if sources.sizing_context and stocks else None
+
+    executions_payload = await executions_task
+    # IBKR lists the current day's fills only; on a weekend or holiday they no longer describe the last session.
+    executions = normalize_executions(executions_payload, market_date) if executions_payload and phase != "closed" else None
+    held = {int(row["conId"]) for row in metrics["positions"] if row.get("conId") is not None}
+    exited = sorted({fill["symbol"] for fill in executions or []
+                     if fill["conId"] not in held and fill["secType"] == "STK" and fill["symbol"]})
+    exit_histories = None
+    if exited:
+        try:
+            exit_histories = await asyncio.wait_for(read_histories(exited[:60]), 20)
+        except Exception as exc:
+            LOGGER.info("Daily Review exit closes failed run=%s error=%s", context.run_id, type(exc).__name__)
+    cutoff = comparison_cutoff(as_of, market_date)
+    comparison = await asyncio.to_thread(context.store.portfolio_close_comparison, metrics, cutoff,
+                                         rebuild=(raw, balance) if cutoff == as_of and phase != "closed" else None)
+    closes_evidence = await closes_task
+    market = await market_task
+    sheet = build_daily_review(
+        as_of=as_of, market_date=market_date, phase=phase, metrics=metrics, portfolio=raw, balance=balance,
+        closes=prior_session_closes((closes_evidence or {}).get("payloads") or [], market_date),
+        executions=executions, exit_closes=daily_review_exit_closes(exit_histories, market_date),
+        comparison=comparison, factor_exposure=build_factor_exposure(metrics),
+        quotes=(market or {}).get("quotes"), histories=(market or {}).get("histories"),
+        volatility=await volatility_task, sizing=await sizing_task if sizing_task else None,
+        open_orders=_review_source_result(await orders_task)[0] if orders_task else None,
+        board=await board_task if board_task else None,
+        kalshi_activity=await kalshi_task if kalshi_task else None,
+    )
+    if closes_evidence is None:
+        sheet["notes"].insert(0, "IBKR's official prior closes were unavailable: P&L by position is not shown.")
+    if sheet["prediction"]["status"] != "ready":
+        sheet["notes"].append("The Kalshi account could not be read: the prediction-market section is not shown.")
+    outcome = "ready" if not sheet["notes"] else "partial"
+    return {"outcome": outcome, "citations": [],
+            "sections": [{"id": "daily-review", "title": "Daily Review", "status": outcome, "sheet": sheet}]}
+
+
 def _balance_dependency_exceptions(
     balance: Optional[dict[str, Any]], *, current_live: bool
 ) -> list[str]:
@@ -3518,6 +3732,7 @@ def _build_review_coordinator_v2() -> ReviewCoordinatorV2:
         {
             "portfolio-review": _portfolio_review_v2_handler,
             "prediction-markets-review": _prediction_review_v2_handler,
+            "daily-review": _daily_review_v2_handler,
             "balance-review": _balance_review_v2_handler,
         },
         # Narrative synthesis is optional.  Keep it disabled until a provider
@@ -3968,6 +4183,7 @@ async def healthz(_request: Request) -> JSONResponse:
             "ANALYST_PORTFOLIO_REVIEW_V2_ENABLED", "true"
         ).lower()
         == "true",
+        "daily-review": os.environ.get("ANALYST_DAILY_REVIEW_ENABLED", "true").lower() == "true",
     }
     return JSONResponse(
         {
@@ -4028,6 +4244,7 @@ def _review_v2_feature_enabled(review_kind: str) -> bool:
     variables = {
         "prediction-markets-review": "ANALYST_PREDICTION_MARKETS_REVIEW_ENABLED",
         "portfolio-review": "ANALYST_PORTFOLIO_REVIEW_V2_ENABLED",
+        "daily-review": "ANALYST_DAILY_REVIEW_ENABLED",
     }
     variable = variables.get(review_kind)
     return bool(variable and os.environ.get(variable, "true").lower() == "true")

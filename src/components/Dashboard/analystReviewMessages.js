@@ -1,4 +1,4 @@
-const REVIEW_KINDS = new Set(['portfolio-review', 'balance-review', 'prediction-markets-review']);
+const REVIEW_KINDS = new Set(['portfolio-review', 'balance-review', 'prediction-markets-review', 'daily-review']);
 const completed = message => ['complete', 'succeeded'].includes(message.reviewState || message.state);
 const failed = message => ['failed', 'interrupted', 'cancelled'].includes(message.reviewState || message.state);
 

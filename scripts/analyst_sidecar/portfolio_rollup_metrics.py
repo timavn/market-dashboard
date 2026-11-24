@@ -175,10 +175,10 @@ def comparison_observed_at(metrics: Any) -> str | None:
 def _previous_session_from_calendar(day: str) -> dict[str, Any] | None:
     script = (
         "const c=require('./src/utils/usEquityMarketCalendar.cjs');"
-        "const p=require('./src/services/analyst/analystPolicy.cjs');"
         "const day=c.previousTradingDateKey(process.argv[1]);"
-        "const w=p.portfolioCaptureWindow(new Date(day+'T12:00:00Z'));"
-        "process.stdout.write(JSON.stringify({sessionDate:day,closeMinute:w.captureMinute-30}));"
+        # The close itself, never the capture time less a delay: the delay moved from 30 to 5 minutes
+        # on 2026-11-18 and every baseline since then was rejected as an unknown close.
+        "process.stdout.write(JSON.stringify({sessionDate:day,closeMinute:c.usEquityCloseMinutes(day)}));"
     )
     result = subprocess.run(["node", "-e", script, day], cwd=ROOT, text=True,
                             capture_output=True, timeout=1, check=True)

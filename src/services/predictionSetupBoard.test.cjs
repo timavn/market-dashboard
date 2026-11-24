@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { alphaCodeBreaks, buildSetupBoard, createSetupBoardLoader, evaluateSetup, selectEvents } = require('./predictionSetupBoard.cjs');
+const { alphaCodeBreaks, buildSetupBoard, contractRoll, createSetupBoardLoader, evaluateSetup, priceSymbols, rollContracts, selectEvents } = require('./predictionSetupBoard.cjs');
 
 const rule = { bottomThird: 0.3333, topThird: 0.6667 };
 const tick = (direction) => ({ direction });
@@ -51,6 +51,10 @@ test('selects the 5pm crypto event and the 4pm index close event', () => {
     { event_ticker: 'KXBRENTD-26OCT2117' }, { event_ticker: 'KXBRENTD-26OCT2014' }, { event_ticker: 'KXBRENTD-26OCT2017' },
   ] });
   assert.equal(brent[0].eventTicker, 'KXBRENTD-26OCT2017');
+  const natgas = selectEvents({ id: 'natgas', kalshi: { series: 'KXNATGASD' } }, { KXNATGASD: [
+    { event_ticker: 'KXNATGASD-26NOV2417' }, { event_ticker: 'KXNATGASD-26NOV2317' },
+  ] });
+  assert.equal(natgas[0].eventTicker, 'KXNATGASD-26NOV2317');
 });
 
 test('Brent sits under Oil beside WTI with its own Risk Range, price, Tick proxy and USD correlation', () => {
@@ -60,11 +64,76 @@ test('Brent sits under Oil beside WTI with its own Risk Range, price, Tick proxy
     usdCorrelations: { calculationDate: '2026-10-19', correlations: { BRENT: { '15D': 0.146, '30D': 0.115, '60D': 0.489, '90D': 0.111 } } },
   });
   const oil = board.rows.filter((row) => row.group === 'oil');
-  assert.deepEqual(oil.map((row) => row.id), ['wti', 'brent']);
+  assert.deepEqual(oil.map((row) => row.id), ['wti', 'brent', 'natgas']);
   const brent = oil[1];
   assert.equal(brent.label, 'Brent');
   assert.deepEqual([brent.range.low, brent.range.high, brent.trend, brent.price.value], [104, 114, 'BULLISH', 106.27]);
   assert.equal(brent.usdCorrelation.key, 'BRENT');
+});
+
+test('Natural Gas sits under Energy with its own Risk Range, futures price, UNG Tick, weekly event and no volatility index', () => {
+  const board = buildSetupBoard({
+    riskRanges: { ranges: { NATGAS: { lrr: 3.02, hrr: 3.41, trend: 'BULLISH', date: '2026-11-23' } } },
+    quotes: { 'NG=F': { price: 3.1 } },
+    hedgai: { book: { rows: [{ ticker: 'UNG', position: 'Short' }] } },
+    usdCorrelations: { calculationDate: '2026-11-20', correlations: { NATGAS: { '15D': -0.2, '30D': -0.1, '60D': 0.1, '90D': 0.2 } } },
+    eventsBySeries: { KXNATGASD: [{ event_ticker: 'KXNATGASD-26NOV2317' }], KXNATGASW: [{ event_ticker: 'KXNATGASW-26NOV2717' }] },
+  });
+  const natgas = board.rows.find((row) => row.id === 'natgas');
+  assert.equal(natgas.label, 'Natural Gas');
+  assert.deepEqual([natgas.range.low, natgas.range.high, natgas.trend, natgas.price.value], [3.02, 3.41, 'BULLISH', 3.1]);
+  assert.deepEqual([natgas.tick.ticker, natgas.tick.direction], ['UNG', 'BEARISH']);
+  assert.equal(natgas.usdCorrelation.key, 'NATGAS');
+  assert.equal(natgas.events[0].eventTicker, 'KXNATGASD-26NOV2317');
+  assert.equal(natgas.weeklyEvent.eventTicker, 'KXNATGASW-26NOV2717');
+  assert.equal(natgas.volatility, null);
+});
+
+test('a Risk Range still on the expiring contract month is not compared with the month that is trading', () => {
+  const inputs = (price) => ({
+    asOf: '2026-11-23T20:00:00Z',
+    riskRanges: { ranges: { NATGAS: { lrr: 3.02, hrr: 3.41, trend: 'BULLISH', date: '2026-11-23' } } },
+    quotes: { 'NG=F': { price },
+      'NGZ26.NYM': { price: 3.19, previousClose: 3.41, timestamp: '2026-11-23T19:50:00Z' },
+      'NGF27.NYM': { price: 3.53, previousClose: 3.75, timestamp: '2026-11-23T19:50:00Z' } },
+  });
+  assert.deepEqual(rollContracts({ roll: { root: 'NG', suffix: '.NYM' } }, '2026-11-23T20:00:00Z'),
+    [{ symbol: 'NGZ26.NYM', month: 'December' }, { symbol: 'NGF27.NYM', month: 'January' }, { symbol: 'NGG27.NYM', month: 'February' }]);
+  assert.deepEqual(rollContracts({ roll: { root: 'NG', suffix: '.NYM' } }, '2026-12-05T20:00:00Z').map((item) => item.symbol),
+    ['NGF27.NYM', 'NGG27.NYM', 'NGH27.NYM']);
+  assert.ok(priceSymbols(new Date('2026-11-23T20:00:00Z')).includes('NGZ26.NYM'));
+  // The quote has rolled to January while the range is still December's: no position, no setup, and a named reason.
+  const rolled = buildSetupBoard(inputs(3.53)).rows.find((row) => row.id === 'natgas');
+  assert.equal(rolled.roll.mismatch, true);
+  assert.deepEqual([rolled.roll.range.month, rolled.roll.trading.month, rolled.roll.source], ['December', 'January', 'price']);
+  assert.equal(Math.round(rolled.roll.gapPct * 10) / 10, 10.7);
+  assert.equal(rolled.position, null);
+  assert.deepEqual(rolled.setup, { side: null, reason: 'Risk Range is on the December contract; January is trading' });
+  assert.equal(rolled.price.value, 3.53);
+  // Range and quote on the same month: the contracts are named and the row reads as usual.
+  const same = buildSetupBoard(inputs(3.19)).rows.find((row) => row.id === 'natgas');
+  assert.equal(same.roll.mismatch, false);
+  assert.equal(Math.round(same.position * 100), 44);
+  // Kalshi's own centre decides when its lines are read; an expired month's stale quote is never compared.
+  const market = { roll: { root: 'NG', suffix: '.NYM', minGapPct: 2 } };
+  const { quotes } = inputs(3.19);
+  assert.equal(contractRoll(market, { low: 3.02, high: 3.41 }, quotes, 3.52, { now: '2026-11-23T20:00:00Z', source: 'kalshi' }).mismatch, true);
+  // A range never leads the roll: January trading below its range is not read as a range on February.
+  const later = { 'NGF27.NYM': { price: 3.2, previousClose: 3.22, timestamp: '2026-12-05T19:50:00Z' },
+    'NGG27.NYM': { price: 3.36, previousClose: 3.38, timestamp: '2026-12-05T19:50:00Z' } };
+  const after = contractRoll(market, { low: 3.3, high: 3.7 }, later, 3.2, { now: '2026-12-05T20:00:00Z', source: 'kalshi' });
+  assert.equal(after.mismatch, false);
+  assert.equal(after.range.month, 'January');
+  // Brent on 2026-11-23: the range still on January, Kalshi and BZ=F on February.
+  const brent = contractRoll({ roll: { root: 'BZ', suffix: '.NYM', minGapPct: 2 } }, { low: 88, high: 96 },
+    { 'BZF27.NYM': { price: 89.63, previousClose: 89.37, timestamp: '2026-11-24T00:56:00Z' },
+      'BZG27.NYM': { price: 86.96, previousClose: 86.68, timestamp: '2026-11-24T00:56:00Z' } }, 86.95, { now: '2026-11-24T01:00:00Z', source: 'kalshi' });
+  assert.equal(brent.mismatch, true);
+  assert.deepEqual([brent.range.month, brent.trading.month], ['January', 'February']);
+  quotes['NGZ26.NYM'].timestamp = '2026-11-20T19:50:00Z';
+  assert.equal(contractRoll(market, { low: 3.02, high: 3.41 }, quotes, 3.52, { now: '2026-11-23T20:00:00Z' }), null);
+  // Other markets carry no roll check.
+  assert.equal(buildSetupBoard(inputs(3.53)).rows.find((row) => row.id === 'wti').roll, undefined);
 });
 
 test('builds rows from Hedgeye research, quotes and Kalshi events', () => {
@@ -123,7 +192,7 @@ test('attaches each market group volatility gauge with its Hedgeye range when pu
     monthChangePct: 25.24, availability: 'reference', freshness: 'refresh-delayed', asOf: '2026-10-16T20:17:30.000Z' } } });
   assert.deepEqual(delayed.rows.find((item) => item.id === 'ust10y').volatility, { symbol: 'MOVE', label: 'ICE BofA MOVE Index',
     value: 101.103, changePct: -1.35, d15: -3.32, m1: 25.24, asOf: '2026-10-16T20:17:30.000Z', regimeKey: 'MOVE' });
-  assert.deepEqual(board.sections.map((section) => section.label), ['Metals', 'Crypto', 'Oil', 'Indices', 'Rates', 'CPI', 'GDP']);
+  assert.deepEqual(board.sections.map((section) => section.label), ['Metals', 'Crypto', 'Energy', 'Indices', 'Rates', 'CPI', 'GDP']);
 });
 
 test('a price from a different instrument than its range is withheld, never positioned', () => {
@@ -466,7 +535,7 @@ test('the loader asks for each market ETF and the Dollar’s UUP volume; boards 
     marketDateFor: () => '2026-10-21',
   });
   const board = await load({ now: new Date('2026-10-21T20:00:00Z') });
-  assert.deepEqual(requested, ['GLD', 'SLV', 'CPER', 'USO', 'BNO', 'IBIT', 'ETHA', 'SPY', 'QQQ', 'SHY', 'IEF', 'TLT', 'UUP']);
+  assert.deepEqual(requested, ['GLD', 'SLV', 'CPER', 'USO', 'BNO', 'UNG', 'IBIT', 'ETHA', 'SPY', 'QQQ', 'SHY', 'IEF', 'TLT', 'UUP']);
   assert.equal(board.sourceStatus.volumeHistory, 'failed');
   assert.equal(board.rows.find((row) => row.id === 'gold').volume, null);
   assert.equal('volume' in buildSetupBoard({}).rows[0], false);
@@ -533,7 +602,7 @@ test('the loader asks for each market’s own price history and the CPI consensu
     marketDateFor: () => '2026-10-21',
   });
   const board = await load({ now: new Date('2026-10-21T20:00:00Z') });
-  assert.deepEqual(requested, ['GC=F', 'SI=F', 'HG=F', 'CL=F', 'BZ=F', 'BTC-USD', 'ETH-USD', '^GSPC', '^NDX', 'UST2Y', 'UST10Y', 'UST30Y', 'DX-Y.NYB']);
+  assert.deepEqual(requested, ['GC=F', 'SI=F', 'HG=F', 'CL=F', 'BZ=F', 'NG=F', 'BTC-USD', 'ETH-USD', '^GSPC', '^NDX', 'UST2Y', 'UST10Y', 'UST30Y', 'DX-Y.NYB']);
   assert.equal(board.sourceStatus.priceHistory, 'failed');
   assert.equal(board.sourceStatus.cpiConsensus, 'failed');
   assert.equal(board.rows.find((row) => row.id === 'gold').zScore, null);
@@ -550,11 +619,12 @@ test('Trade comes from what the morning products state: yields from the shared p
       'Gold remains Bearish TRADE and TREND, so we’ll see when we get The Signal to go bullish in #Quad4',
       'UST 2yr Yield down -11 basis points last week to Signal Bearish TRADE, but Bullish TREND',
       'UST 30yr Yield down -3 basis points last week and already signaling Bearish TRADE and TREND',
+      'QQQ remains Bearish TRADE and TREND',
     ].join('\n') },
   };
   const statements = extractPublishedStatements(earlyLook);
   const stamp = (reading) => ({ ...reading, sourceProduct: 'early-look', sourceLabel: 'Early Look', qualityStatus: 'validated' });
-  const securityIntelligence = buildSecurityIntelligenceV2({ symbols: ['UST2Y', 'UST30Y', 'GLD', 'GOLD'], marketDate: '2026-11-02', historyDays: 0,
+  const securityIntelligence = buildSecurityIntelligenceV2({ symbols: ['UST2Y', 'UST30Y', 'GLD', 'GOLD', 'NDX', 'QQQ'], marketDate: '2026-11-02', historyDays: 0,
     now: new Date('2026-11-02T16:00:00Z'), publishedTradeReadings: statements.trade.map(stamp) });
   const board = buildSetupBoard({ securityIntelligence, marketDate: '2026-11-02',
     publishedStatements: { references: statements.references.map(stamp), trends: [], alphaCodes: [] } });
@@ -570,6 +640,9 @@ test('Trade comes from what the morning products state: yields from the shared p
   assert.equal(securityIntelligence.bySymbol.GOLD?.lastVerifiedDecision?.trade?.value ?? null, null);
   assert.equal(securityIntelligence.bySymbol.GLD?.lastVerifiedDecision?.trade?.value ?? null, null);
   assert.equal(trade('silver'), null);
+  // Hedgeye states the Nasdaq's Trade on QQQ: it stands in for the index, named as QQQ.
+  assert.deepEqual([trade('nasdaq100').direction, trade('nasdaq100').ticker, trade('nasdaq100').proxy], ['BEARISH', 'QQQ', true]);
+  assert.equal(trade('ust2y').proxy, undefined);
 });
 
 test('a published Trade or Trend whose Alpha Code line the price crossed since reads Neutral, keeping the call it replaced', () => {

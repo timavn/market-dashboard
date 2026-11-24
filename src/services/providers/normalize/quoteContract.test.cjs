@@ -224,3 +224,13 @@ test('raw normalization cannot launder coercible price values into verified numb
     assert.match(raw.warning, /invalid_numeric_value/);
   }
 });
+
+test('a stock or ETF with no last trade is priced by its book only when the book is tight', () => {
+  const { ibkrObservationFailure } = require('./quoteObservation.cjs');
+  const base = { secType: 'STK', timestamp: new Date(observed).toISOString(), dataType: 'live', entitlementStatus: 'live' };
+  // UUP after the close on 2026-11-23: its midpoint read as a 7.47% gain on the day.
+  assert.equal(ibkrObservationFailure({ ...base, bid: 29.6, ask: 34.41, last: null }, { now: receipt }), 'wide_book');
+  assert.equal(ibkrObservationFailure({ ...base, bid: 29.93, ask: 29.95, last: null }, { now: receipt }), null);
+  assert.equal(ibkrObservationFailure({ ...base, bid: 29.6, ask: 34.41, last: 29.94 }, { now: receipt }), null);
+  assert.equal(ibkrObservationFailure({ ...base, secType: 'OPT', bid: 1.0, ask: 1.4, last: null }, { now: receipt }), null);
+});

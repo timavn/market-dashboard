@@ -388,6 +388,10 @@ table[aria-label="Correlation with the US Dollar"] .analyst-drivers__name-col { 
 .analyst-panel-v2 .analyst-prediction-report .analyst-research__facts > li { display: contents; }
 .analyst-research__fact-label,
 .analyst-research__fact-value { color: var(--analyst-ink, #172033); font-variant-numeric: tabular-nums; }
+/* What Market Structure's readings mean, in a few sentences under them. */
+.analyst-panel-v2 .analyst-prediction-report .analyst-research td.analyst-research__summary {
+  max-width: 84ch; color: var(--analyst-ink, #172033); white-space: normal;
+}
 .analyst-panel-v2 .analyst-prediction-report .analyst-research td.analyst-research__source { text-align: right; }
 .analyst-research__source button {
   padding: 0; border: 0; background: none; font: inherit; color: var(--dashboard-muted-text, #667085); cursor: pointer;

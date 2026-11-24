@@ -451,6 +451,7 @@ class StatedTradeGrammarTests(unittest.TestCase):
         self.assertEqual(stated_trade_values("US Dollar Index was up +0.1% on the week and remains Bullish on both our TRADE and TREND"), {"BULLISH"})
         self.assertEqual(stated_trade_values("Copper was described as bullish trend but bearish trade"), {"BEARISH"})
         self.assertEqual(stated_trade_values("NVDA Trade: BULLISH"), {"BULLISH"})
+        self.assertEqual(stated_trade_values("the 10-year Treasury yield breaking below Hedgeye’s 5.07% trade signal"), {"BEARISH"})
 
     def test_conditional_negated_and_trend_only_text_is_not_trade_evidence(self):
         from portfolio_review import stated_trade_values

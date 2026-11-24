@@ -421,7 +421,7 @@ class WorkspaceStore:
 
     def review_record(self, db, cid, turn, kind):
         """Read only the dispatch binding belonging to this exact review turn."""
-        if kind not in {'portfolio-review', 'balance-review', 'prediction-markets-review'} or not turn:
+        if kind not in {'portfolio-review', 'balance-review', 'prediction-markets-review', 'daily-review'} or not turn:
             return None
         row = db.execute('SELECT value FROM settings WHERE key=?', ('daily-run:' + cid,)).fetchone()
         try:
@@ -513,7 +513,7 @@ class WorkspaceStore:
                 captured_run = json.loads(binding['value']).get('runId') if binding else None
                 if captured_run == request_id.split(':', 1)[1]:
                     turn_runs[turn_id] = captured_run
-        review = result['kind'] in ('portfolio-review', 'balance-review', 'prediction-markets-review')
+        review = result['kind'] in ('portfolio-review', 'balance-review', 'prediction-markets-review', 'daily-review')
         for message in result['messages']:
             turn = turns.get(message.get('turn_id'), {})
             request_id = turn.get('request_id') or ''
@@ -638,7 +638,7 @@ class WorkspaceStore:
             return parsed if isinstance(parsed, dict) else {}
 
         run_id = setting('daily-run:' + cid).get('runId') or setting('portfolio-reference:' + cid).get('runId')
-        if not run_id and row['kind'] in {'portfolio-review', 'prediction-markets-review', 'balance-review'}:
+        if not run_id and row['kind'] in {'portfolio-review', 'prediction-markets-review', 'balance-review', 'daily-review'}:
             candidates = db.execute('''SELECT m.source_id,t.id AS turn_id,t.request_id,t.review_post_id,
                 EXISTS(SELECT 1 FROM messages u WHERE u.turn_id=t.id AND u.role='user' AND u.internal=1) AS internal_turn
                 FROM messages m LEFT JOIN turns t ON t.id=m.turn_id
@@ -688,7 +688,7 @@ class WorkspaceStore:
             )
 
         if (not isinstance(review_kind, str)
-                or review_kind not in {'portfolio-review', 'balance-review', 'prediction-markets-review'}
+                or review_kind not in {'portfolio-review', 'balance-review', 'prediction-markets-review', 'daily-review'}
                 or any(not isinstance(value, str) or not value or len(value) > 200
                        for value in (conversation_id, workspace_turn_id, run_id, request_id))):
             rejected()
@@ -838,7 +838,7 @@ class WorkspaceStore:
                 # review post. Keep every saved row, but count actual dialogue
                 # separately; older reviews all belong to their base post.
                 rows = db.execute('''SELECT c.*, (SELECT count(DISTINCT CASE
-                    WHEN c.kind IN ('portfolio-review','prediction-markets-review','balance-review')
+                    WHEN c.kind IN ('portfolio-review','prediction-markets-review','balance-review','daily-review')
                       AND m.role='assistant' AND (
                         t.review_post_id IS NOT NULL OR t.request_id LIKE 'daily-turn:%' OR t.request_id LIKE 'daily-narrative:%'
                         OR t.request_id LIKE 'narrative-retry:%' OR m.source_id LIKE 'daily-report:%'
@@ -872,7 +872,7 @@ class WorkspaceStore:
                     raise ValueError('The saved prompt is unavailable.')
                 report = next((m['text'] for m in reversed(conversation['messages']) if m['role'] == 'assistant' and m['turn_id'] != turn['id']), '')
                 review_post_id = turn['review_post_id']
-                if not review_post_id and prompt['internal'] and conversation['kind'] in ('portfolio-review', 'prediction-markets-review', 'balance-review'):
+                if not review_post_id and prompt['internal'] and conversation['kind'] in ('portfolio-review', 'prediction-markets-review', 'balance-review', 'daily-review'):
                     review_post_id = 'base'
                 return {'text': prompt['text'], 'internalPrompt': bool(prompt['internal']), 'report': report,
                         'reviewPostId': review_post_id}
@@ -921,7 +921,7 @@ class WorkspaceStore:
                     record = p['reviewRecord']
                     post_id = str(p.get('reviewPostId') or '').strip() or 'base'
                     if (not isinstance(record, dict) or record.get('kind') != conv['kind']
-                            or conv['kind'] not in {'portfolio-review', 'balance-review', 'prediction-markets-review'}
+                            or conv['kind'] not in {'portfolio-review', 'balance-review', 'prediction-markets-review', 'daily-review'}
                             or not isinstance(record.get('runId'), str) or not record['runId']
                             or request != 'daily-turn:' + record['runId']
                             or record.get('reviewPostId') != post_id):
@@ -1210,7 +1210,7 @@ class WorkspaceStore:
                     if s.get('hidden'):
                         continue
                     linked = db.execute('SELECT id,kind FROM conversations WHERE hermes_id=?', (s['id'],)).fetchone()
-                    linked_review = linked and linked['kind'] in {'portfolio-review', 'prediction-markets-review', 'balance-review'} and str(s.get('title') or '').startswith('[market-dashboard-analyst-review:')
+                    linked_review = linked and linked['kind'] in {'portfolio-review', 'prediction-markets-review', 'balance-review', 'daily-review'} and str(s.get('title') or '').startswith('[market-dashboard-analyst-review:')
                     if linked and linked[0] != stable('hermes:' + s['id']) and not linked_review:
                         continue
                     raw = [dict(r) for r in source.execute('SELECT * FROM messages WHERE session_id=? ORDER BY timestamp,id', (s['id'],))]

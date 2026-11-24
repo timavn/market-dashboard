@@ -5,6 +5,7 @@ import { previousTradingDateKey } from '../../utils/usEquityMarketCalendar.cjs';
 import { analystWorkspaceApi } from '../../services/analyst/analystClient';
 import AnalystSourceEmail from './AnalystSourceEmail';
 import AnalystSourcePanel from './AnalystSourcePanel';
+import { marketStructureSummary } from '../../utils/marketStructureSummary';
 
 // What this morning's Hedgeye products say about each market in a setup-board
 // section, emitted by the renderer as an ```analyst-research JSON block: one
@@ -65,7 +66,7 @@ export function parsePredictionResearch(raw) {
 // directions and signed moves green or red. Nothing here establishes a signal.
 const TICKERS = new Set([...portfolioReviewTickers(), 'SPX', 'NDX', 'COMPQ', 'VIX', 'VXN', 'MOVE', 'DXY', 'BTC', 'ETH']);
 const NAMES = ['U.S. Dollar Index', 'US Dollar Index', 'USD Index', 'U.S. Dollar', 'US Dollar', 'Bitcoin', '₿TC', 'Ethereum',
-  'Gold', 'Silver', 'Copper', 'Crude Oil', 'Oil', 'WTI', 'S&P 500', 'SP500', 'Nasdaq-100', 'Nasdaq Composite', 'Composite Index',
+  'Gold', 'Silver', 'Copper', 'Crude Oil', 'Oil', 'WTI', 'Natural Gas', 'S&P 500', 'SP500', 'Nasdaq-100', 'Nasdaq Composite', 'Composite Index',
   'NASDAQ', 'Nasdaq', 'Russell 2000', 'Russell', 'UST 2yr Yield', 'UST 10yr Yield', 'UST 30yr Yield', 'UST 2yr', 'UST 10yr',
   'UST 30yr', '10yr Yield', '2yr Yield', '30yr Yield', 'Treasury Bonds', 'CRB Index', '#NazVol', 'NazVol'];
 const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -132,11 +133,26 @@ function byProduct(entries) {
   return [...groups.values()].flat();
 }
 
+// Market Structure's readings end with a few plain sentences on what they mean, as a last line of its block.
+const STRUCTURE_PRODUCT = 'Market Structure';
+function withSummary(entries) {
+  const last = entries.findLastIndex(entry => entry.product === STRUCTURE_PRODUCT && entry.facts);
+  const summary = last < 0 ? null
+    : marketStructureSummary(entries.filter(entry => entry.product === STRUCTURE_PRODUCT).flatMap(entry => entry.facts || []));
+  return summary ? [...entries.slice(0, last + 1), { product: STRUCTURE_PRODUCT, summary }, ...entries.slice(last + 1)] : entries;
+}
+
 const Quote = ({ entry, market }) => <blockquote className="analyst-research__quote"><ResearchText value={entry.source} names={[market]} /></blockquote>;
 const entryTime = entry => (entry.time ? `${entry.date ? `${entry.date} ` : ''}${entry.time} PT` : null);
 
 function Entry({ entry, market, first, continued, span, open, onSource }) {
   const names = [market];
+  if (entry.summary) {
+    return <tr className="analyst-research__continued">
+      <td className="analyst-research__product" />
+      <td className="analyst-research__summary" colSpan={2}>{entry.summary}</td>
+    </tr>;
+  }
   return <tr className={first ? 'analyst-research__first' : continued ? 'analyst-research__continued' : undefined}>
     {first && <td className="analyst-research__market" rowSpan={span}>{market}</td>}
     <td className="analyst-research__product" title={entryTime(entry) || undefined}>{continued ? null : entry.product}</td>
@@ -230,7 +246,7 @@ export default function AnalystPredictionResearch({ research: saved }) {
           <td className="analyst-research__quiet" colSpan={4}>{reading.status === 'loading' ? `Reading ${dayLabel(shown)}…`
             : reading.status === 'empty' ? `No research read for ${dayLabel(shown)}.` : `Research for ${dayLabel(shown)} is unavailable.`}</td>
         </tr> : research.markets.map(row => (row.entries.length
-          ? byProduct(row.entries).map((entry, index, entries) => {
+          ? withSummary(byProduct(row.entries)).map((entry, index, entries) => {
             const key = `${shown}-${row.market}-${index}`;
             return <Entry key={key} entry={entry} market={row.market} first={index === 0}
               continued={index > 0 && entries[index - 1].product === entry.product} span={entries.length}

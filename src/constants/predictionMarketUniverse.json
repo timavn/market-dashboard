@@ -275,6 +275,12 @@
         "label": "Cboe Crude Oil Volatility",
         "regimeKey": "OVX"
       },
+      "roll": {
+        "root": "CL",
+        "suffix": ".NYM",
+        "minGapPct": 2,
+        "note": "Kalshi names its contract month in each rule and rolls two business days before the last trading day; the Risk Range can stay on the expiring month. The three nearest months are quoted and a range on a month that is not the one trading gives no setup."
+      },
       "usdCorrelationKey": "WTI"
     },
     {
@@ -341,7 +347,81 @@
         "label": "Cboe Crude Oil Volatility",
         "regimeKey": "OVX"
       },
+      "roll": {
+        "root": "BZ",
+        "suffix": ".NYM",
+        "minGapPct": 2,
+        "note": "Kalshi's index and BZ=F move to the next month about a week before the front month expires, while the Risk Range stays on it (January against February, 3% apart, on 2026-11-23). The three nearest months are quoted and a range on a month that is not the one trading gives no setup."
+      },
       "usdCorrelationKey": "BRENT"
+    },
+    {
+      "id": "natgas",
+      "label": "Natural Gas",
+      "group": "oil",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXNATGASD",
+        "title": "Natural Gas Daily",
+        "settlementSources": [
+          {
+            "name": "Pyth - NATGAS",
+            "url": "https://app.pyth.com/explore/Commodities.Index.NATGAS%2FUSD?returnUrl=%2Fexplore%3Fsearch%3Dgas%26state%3Dstable"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/COMMODITIES.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXNATGASD-26NOV2317",
+        "exampleRule": "If the close price of the 1-minute candlestick for natural gas on November 23, 2026 at 5:00 PM EST is above 3.400 USD/MMBtu, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "next 5:00 PM ET event",
+        "underlying": "Natural gas USD/MMBtu (Pyth Commodities.Index.NATGAS/USD 1-minute close at 5:00 PM ET)",
+        "comparator": ">",
+        "heldSeries": [
+          "KXNATGASW"
+        ],
+        "weekly": {
+          "series": "KXNATGASW"
+        }
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "risk-ranges",
+          "ticker": "NATGAS",
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "risk-ranges",
+          "ticker": "NATGAS",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "NATGAS"
+        },
+        "tick": {
+          "product": "hedgai-signals",
+          "ticker": "UNG",
+          "fit": "proxy",
+          "inverse": false
+        }
+      },
+      "notes": "Hedgeye's NATGAS Risk Range is the Natural Gas Continuous Contract; Kalshi settles on Pyth's natural gas index (since Aug 31, 2026 for the daily, Sep 4 for the weekly).",
+      "price": {
+        "symbol": "NG=F",
+        "fit": "proxy",
+        "label": "Natural gas futures (front month)"
+      },
+      "volume": {
+        "symbol": "UNG"
+      },
+      "roll": {
+        "root": "NG",
+        "suffix": ".NYM",
+        "minGapPct": 2,
+        "note": "The Risk Range stays on the expiring month until it expires; Kalshi's index and NG=F move to the next month days earlier, and winter months trade about 10% apart. The three nearest months are quoted and a range on a month that is not the one trading gives no setup."
+      },
+      "usdCorrelationKey": "NATGAS"
     },
     {
       "id": "bitcoin",
@@ -581,8 +661,7 @@
         },
         "trade": {
           "source": "published-trade",
-          "ticker": "NDX"
-        },
+          "ticker": "NDX", "proxy": "QQQ" },
         "tick": {
           "product": "hedgai-signals",
           "ticker": "QQQ",
@@ -994,6 +1073,7 @@
       "copper",
       "wti",
       "brent",
+      "natgas",
       "bitcoin",
       "ethereum",
       "sp500",
@@ -1021,7 +1101,7 @@
     },
     {
       "id": "oil",
-      "label": "Oil"
+      "label": "Energy"
     },
     {
       "id": "indices",
@@ -1040,8 +1120,8 @@
       "label": "GDP"
     }
   ],
-  "volatilityGaps": "No volatility index is available in the dashboard feeds for copper or Ethereum.",
-  "priceSymbolNote": "Use explicit provider symbols (GC=F, BTC-USD, …). Bare symbols such as SI, HG, CL, BTC and ETH resolve to unrelated US stocks/ETFs when IBKR is connected.",
+  "volatilityGaps": "No volatility index is available in the dashboard feeds for copper, natural gas or Ethereum.",
+  "priceSymbolNote": "Use explicit provider symbols (GC=F, NG=F, BTC-USD, …). Bare symbols such as SI, HG, CL, NG, BTC and ETH resolve to unrelated US stocks/ETFs when IBKR is connected.",
   "usd": {
     "symbol": "DX-Y.NYB",
     "label": "US Dollar Index",

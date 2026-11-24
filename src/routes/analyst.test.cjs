@@ -206,7 +206,7 @@ test('incremental research feed indexes source artifacts, not the massive derive
   assert.equal(decodeCursor(encodeCursor({ phase: 2, lastKey: null })).phase, 2);
 });
 
-test('reports the two live ReviewRunV2 kinds independently from Hermes session transport; Balance Review is retired', async (t) => {
+test('reports the three live ReviewRunV2 kinds independently from Hermes session transport; Balance Review is retired', async (t) => {
   const status = await readStatusWithHealth(t, {
     ok: true,
     status: 'ready',
@@ -214,6 +214,7 @@ test('reports the two live ReviewRunV2 kinds independently from Hermes session t
     reviews: {
       'portfolio-review': { ready: true, enabled: true },
       'prediction-markets-review': { ready: true, enabled: true },
+      'daily-review': { ready: true, enabled: true },
       'balance-review': { ready: false, enabled: false, reason: 'Review is disabled by its feature flag.' },
     },
   });
@@ -224,10 +225,12 @@ test('reports the two live ReviewRunV2 kinds independently from Hermes session t
   assert.deepEqual(status.readiness.reviewCoordinator, { ready: true, reason: null });
   assert.deepEqual(status.readiness.portfolioReview, { ready: true, reason: null });
   assert.deepEqual(status.readiness.predictionMarketsReview, { ready: true, reason: null });
+  assert.deepEqual(status.readiness.dailyReview, { ready: true, reason: null });
   assert.equal(status.readiness.balanceReview, undefined);
   assert.deepEqual(status.features.reviews, {
     portfolioReview: true,
     predictionMarketsReview: true,
+    dailyReview: true,
   });
 });
 

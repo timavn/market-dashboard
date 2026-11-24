@@ -39,16 +39,19 @@ SCHEMA_VERSION = 2
 REVIEW_KINDS = (
     "portfolio-review",
     "prediction-markets-review",
+    "daily-review",
     "balance-review",
 )
 REVIEW_TITLES = {
     "portfolio-review": "Portfolio Review",
     "prediction-markets-review": "Predictive Markets Review",
+    "daily-review": "Daily Review",
     "balance-review": "Balance Review",
 }
 REVIEW_VISIBLE_MESSAGES = {
     "portfolio-review": "Run Portfolio Review",
     "prediction-markets-review": "Run Predictive Markets Review",
+    "daily-review": "Run Daily Review",
     "balance-review": "Run Balance Review",
 }
 REVIEW_CONVERSATION_IDS = {
@@ -59,6 +62,7 @@ HEADLESS_CAPTURE_REQUEST_PREFIX = "portfolio-close:"
 DEADLINE_SECONDS = {
     "portfolio-review": 75,
     "prediction-markets-review": 90,
+    "daily-review": 90,
     "balance-review": 20,
 }
 ACTIVE_STATES = frozenset({"queued", "running"})
@@ -3178,6 +3182,10 @@ def render_review(
     outcome: str,
     _citations: list[dict[str, Any]],
 ) -> str:
+    if review_kind == "daily-review":
+        # The sheet is complete in code: one fenced block the Analyst window draws.
+        from daily_review import render_daily_review
+        return render_daily_review(sections, outcome)
     renderers = {
         "portfolio-review": render_portfolio_review,
         "prediction-markets-review": render_prediction_review,

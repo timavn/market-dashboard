@@ -145,7 +145,7 @@ const ALIAS_ANYWHERE = new Set(ENTRIES.filter((entry) => entry.caseSensitive).ma
 // ("S&P 500 futures", "Bitcoin dominance", "Euro area", "Gold Miners").
 const CONTINUES_NAME = /^(?:[\w&=]|-\w|\/\w|\s+\d|\s+&\s)/;
 const MODIFIER_AFTER = /^\s+(?:futures|transports|area|zone|dominance|related|linked|sensitive|services|vol|volatility|miners|stocks|equities|names|sectors?|producers|complex|etfs?|options|implied|positioning|sentiment|bulls|bears|reserves|demand|supply|inventor(?:y|ies))\b/i;
-const NEXT_WORD_ALLOWED = /^\s+(?:TRADE|TREND|Trade|Trend|Alpha|Signal|Index|Yield|Spot|Price|Bullish|Bearish|Neutral|BULLISH|BEARISH|NEUTRAL|Hedgeye|@Hedgeye)\b/;
+const NEXT_WORD_ALLOWED = /^\s+(?:TRADE|TREND|Trade|Trend|Alpha|Signal|Index|Yield|Spot|Price|Fractal|Risk\s+Range|Bullish|Bearish|Neutral|BULLISH|BEARISH|NEUTRAL|Hedgeye|@Hedgeye)\b/;
 const differentMarketAfter = (rest) => {
   if (CONTINUES_NAME.test(rest)) return true;
   // "Bitcoin’s dominance" is not Bitcoin.
@@ -244,10 +244,11 @@ const LEAD = new RegExp([
   String.raw`^\(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[–-]\s*\d{1,2}:\d{2}(?::\d{2})?)?\)\s*`,
   String.raw`^\d{1,2}\.?\)\s+|^\d{1,2}\.\s+|^[A-H]\)\s+`,
   String.raw`^(?:Real-Time\s+Alert|RTA|UPDATE|POSITION\s+CHANGE|POSITIONING\s+SHIFT|BOTTOM\s+LINE|NOTE)\s*:\s*`,
-  String.raw`^(?:And|But|So|Also|Meanwhile|Now|Again|Plus|Still|Then|Yet|Globally|Evidently|Separately|Elsewhere|Overall|Currently|Internationally|Notably|Later),?\s+`,
+  String.raw`^(?:And|But|So|Also|Meanwhile|Now|Again|Plus|Still|Then|Yet|Globally|Evidently|Separately|Elsewhere|Overall|Currently|Internationally|Notably|Later|Obviously),?\s+`,
   String.raw`^On\s+the\s+[\w-]+\s+side,?\s+`,
-  String.raw`^(?:He|She|Keith|McCullough|Hedgeye|The\s+desk|the\s+desk)\s+(?:(?:also|again|explicitly|further)\s+)?(?:said|noted|added|stressed|reiterated|highlighted|explained|pointed\s+out|confirmed|stated|identified|described)(?:\s+that)?\s+`,
+  String.raw`^(?:He|She|Keith|McCullough|Hedgeye|The\s+desk|the\s+desk)\s+(?:(?:also|again|explicitly|further)\s+)?(?:said|noted|added|stressed|reiterated|highlighted|explained|pointed\s+out|confirmed|stated|identified|described|cited)(?:\s+that)?\s+`,
   String.raw`^[Bb]oth\s+(?=[A-Z$(])`,
+  String.raw`^[Oo]ur\s+(?=[A-Z$(])`,
 ].join('|'));
 function stripLead(text) {
   let current = text;
@@ -288,12 +289,27 @@ function sentences(text) {
 }
 /** Clauses of a sentence: semicolons, spaced dashes, pipes, bullets and lettered items separate statements. */
 const CLAUSE_BREAK = /(\s*;\s*|\s+[–—|]\s+|\s+-{1,2}\s+|\s+[•▪]\s+|,?\s+(?:and\s+)?(?=[A-H]\)\s))/;
+// "…, while the S&P itself is bearish trade and trend": a while-clause that opens with a
+// market is that market's own statement. "Bearish TRADE while bullish TREND" stays whole.
+const WHILE = /,?\s+while\s+/g;
+function whileClauses(part) {
+  const result = [];
+  let start = 0;
+  for (const match of part.text.matchAll(WHILE)) {
+    const rest = part.text.slice(match.index + match[0].length);
+    if (!subjectsAt(rest)) continue;
+    result.push({ text: part.text.slice(start, match.index).trim(), after: result.length ? 'while' : part.after });
+    start = match.index + match[0].length;
+  }
+  result.push({ text: part.text.slice(start).trim(), after: result.length ? 'while' : part.after });
+  return result.filter((clause) => clause.text);
+}
 function clauses(sentence) {
   const parts = sentence.split(CLAUSE_BREAK);
   const result = [];
   for (let index = 0; index < parts.length; index += 2) {
     const text = parts[index].trim();
-    if (text) result.push({ text, after: (parts[index - 1] || '').trim() });
+    if (text) result.push(...whileClauses({ text, after: (parts[index - 1] || '').trim() }));
   }
   return result;
 }
@@ -310,8 +326,9 @@ function claimsIn(text) {
     let match;
     while ((match = claim.regex.exec(text))) {
       const fields = {};
-      if (claim.trade) fields.trade = DIRECTION[match[claim.trade].toLowerCase()];
-      if (claim.trend) fields.trend = DIRECTION[match[claim.trend].toLowerCase()];
+      const direction = (group) => { const word = match[group].toLowerCase(); return DIRECTION[claim.values?.[word] || word]; };
+      if (claim.trade) fields.trade = direction(claim.trade);
+      if (claim.trend) fields.trend = direction(claim.trend);
       found.push({ start: match.index, end: match.index + match[0].length, fields, order, form: claim.form, text: match[0] });
     }
   });
@@ -497,8 +514,9 @@ function closedAtExpansion(text) {
 function alphaLevels(clause, subjects, start) {
   const whole = clause.slice(start);
   const body = closedAtExpansion(whole);
-  // A label inside a direction claim is part of that claim.
-  const claims = claimsIn(body);
+  // A label inside a direction claim is part of that claim. A claim about a level ("back above
+  // TRADE Signal Level of 5.10%") still prints that level.
+  const claims = claimsIn(body).filter((claim) => !/-level$/.test(claim.form));
   const free = (match, offset = 0) => !claims.some((claim) => match.index + offset >= claim.start && match.index + offset < claim.end);
   const all = (regex) => [...body.matchAll(regex)].filter((match) => free(match));
   const matches = { codes: all(ALPHA_CODE), pair: all(PAIR_LABEL), onThe: all(ON_THE),
@@ -620,6 +638,27 @@ function unreadAlphaCodes(text) {
   return [...new Set(sentences(text))].filter((sentence) => CODE_MENTION.test(sentence) && !CODE_METHOD.test(sentence) && !read.has(sentence));
 }
 
+// "Brent Oil (we’re long BNO) continues to signal …": our own position, said in passing, is
+// not another market's signal.
+const POSITION_ASIDE = /\s*\((?:we|I)(?:['’](?:re|m)|\s+are|\s+am|\s+remain)\s+(?:still\s+)?(?:long|short)(?:\s+of)?\s+[^()]{1,40}\)/g;
+// "Treasury yields remain bullish on both trade and trend signals across the 2-year, 10-year,
+// and 30-year maturities": the claim is each named maturity's. Read with those yields first;
+// a maturity we do not track leaves the sentence unread.
+const MATURITY = String.raw`(?:\d{1,2}|two|five|ten|twenty|thirty)[-\s]?(?:year|yr)`;
+const ACROSS_MATURITIES = new RegExp(String.raw`^(?:U\.?S\.?\s+)?Treasury\s+yields\s+(.+?)\s+across\s+the\s+(${MATURITY}(?:(?:,\s*(?:and\s+)?|\s+and\s+)${MATURITY})*)(?:\s+(?:maturities|tenors|yields|points))?\.?$`, 'i');
+const MATURITY_YEARS = { two: 2, five: 5, ten: 10, twenty: 20, thirty: 30 };
+function maturitiesFirst(clause) {
+  const match = ACROSS_MATURITIES.exec(clause);
+  if (!match) return clause;
+  const names = match[2].match(new RegExp(MATURITY, 'gi')).map((name) => {
+    const years = /^[a-z\d]+/i.exec(name)[0].toLowerCase();
+    return `${MATURITY_YEARS[years] || years}-Year Yield`;
+  });
+  const listed = subjectsAt(names.join(', '));
+  if (!listed || listed.subjects.length !== names.length) return clause;
+  return `${names.join(', ')} ${match[1]}`;
+}
+
 /**
  * Every subject-bound statement in a text: { field: 'trade' | 'trend', value }
  * or { field: 'alphaCode', levels }, with the instrument identity, the exact
@@ -639,7 +678,14 @@ function researchStatements(text) {
       if (/\?/.test(raw) || (next && next.after !== ';' && CONDITIONAL_NEXT.test(next.text))
         || (previous && after !== ';' && CONDITIONAL_PREVIOUS.test(stripLead(previous.text)))) return;
       const printed = stripLead(raw);
-      const clause = subjectFirst(printed);
+      const clause = maturitiesFirst(subjectFirst(printed.replace(POSITION_ASIDE, '')));
+      // The span quoted as the source is always the printed words.
+      const printedSpan = (end) => {
+        if (clause === printed) return clause.slice(0, end).trim();
+        const closing = clause.slice(0, end).slice(-24);
+        const at = ACROSS_MATURITIES.test(printed) ? -1 : printed.lastIndexOf(closing);
+        return (at < 0 ? printed : printed.slice(0, at + closing.length)).trim();
+      };
       const subject = subjectsAt(clause);
       if (!subject) return;
       const claims = /\b(?:trade|trend)\b/i.test(clause) ? statementClaims(clause, subject.subjects, subject.length) : null;
@@ -649,7 +695,7 @@ function researchStatements(text) {
       for (const { unlessMentioned, ...identity } of subject.subjects) {
         if (unlessMentioned?.test(sentence)) continue;
         if (claims && (!claims.only || claims.only.has(identity.ticker))) {
-          const sourceText = clause.slice(0, claims.end).trim();
+          const sourceText = printedSpan(claims.end);
           for (const [field, value] of Object.entries(claims.values)) {
             result.push({ field, value, ...identity, sourceText, statement: sentence });
           }

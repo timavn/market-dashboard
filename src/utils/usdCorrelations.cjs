@@ -24,7 +24,7 @@ const REQUIRED_ROLLING_RETURNS = REQUIRED_ROLLING_OBSERVATIONS;
 const DEFAULT_MAX_STALE_DAYS = 5;
 
 const REQUIRED_SYMBOLS = ['DXY', 'SPX', 'NDX', 'WTI', 'BRENT', 'CRB', 'GOLD', 'BTC'];
-const OPTIONAL_SYMBOLS = ['SILVER', 'UST2Y', 'UST10Y', 'UST30Y', 'COPPER', 'ETH'];
+const OPTIONAL_SYMBOLS = ['SILVER', 'UST2Y', 'UST10Y', 'UST30Y', 'COPPER', 'NATGAS', 'ETH'];
 const METRIC_SYMBOLS = [...REQUIRED_SYMBOLS, ...OPTIONAL_SYMBOLS].filter((symbol) => symbol !== 'DXY');
 
 class UsdCorrelationDataError extends Error {

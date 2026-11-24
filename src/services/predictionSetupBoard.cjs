@@ -6,7 +6,7 @@ const { selectLatestPublishedTrade } = require('../utils/publishedResearchSignal
 const { PRODUCTS: MORNING_PRODUCTS, PROXY_TICKERS, buildMorningResearch } = require('./predictionMorningResearch.cjs');
 const { emailPublishedAt } = require('../utils/researchPublicationTime.cjs');
 const { brokenAlphaCodeLine } = require('./analyst/alphaCodeWatch.cjs');
-const { allocateLines, kalshiAccountValue, kalshiLine, scoreConviction, sizedMarket } = require('./predictionSizing.cjs');
+const { allocateLines, fitLadder, kalshiAccountValue, kalshiLine, scoreConviction, sizedMarket } = require('./predictionSizing.cjs');
 const { applyLineMonitor, bookCandidates, eventOf } = require('./predictionLineMonitor.cjs');
 
 // One row per tracked Kalshi market: Hedgeye Tick/Trade/Trend, the verified
@@ -75,13 +75,20 @@ function tradeReading(market, securityIntelligence, marketDate, publishedStateme
       source: reading.sourceLabel || reading.sourceProduct, sourceUrl: reading.sourceUrl,
       instrument: reading.sourceInstrument || null, reference: true };
   }
-  const ticker = spec?.ticker;
-  if (!ticker || !securityIntelligence) return null;
-  const trade = canonicalTradeResearch(securityIntelligence, ticker, { date: marketDate });
-  if (trade.status !== 'available') return null;
-  return { direction: trade.direction, ticker: trade.ticker, date: trade.sourceDate,
-    publishedAt: trade.sourcePublishedAt || null,
-    source: trade.sourceLabel || trade.source, sourceUrl: trade.sourceUrl };
+  if (!spec?.ticker || !securityIntelligence) return null;
+  const read = (ticker) => {
+    const trade = canonicalTradeResearch(securityIntelligence, ticker, { date: marketDate });
+    if (trade.status !== 'available') return null;
+    return { direction: trade.direction, ticker: trade.ticker, date: trade.sourceDate,
+      publishedAt: trade.sourcePublishedAt || null,
+      source: trade.sourceLabel || trade.source, sourceUrl: trade.sourceUrl };
+  };
+  const own = read(spec.ticker);
+  // Hedgeye states the Nasdaq's Trade on QQQ, not the index: the ETF's signal stands in,
+  // labelled as QQQ, unless the index has its own at least as recent (user-specified 2026-11-23).
+  const proxy = spec.proxy ? read(spec.proxy) : null;
+  if (proxy && (!own || String(proxy.date || '') > String(own.date || ''))) return { ...proxy, proxy: true };
+  return own;
 }
 
 function priceReading(symbol, label, fit, quotes) {
@@ -307,6 +314,66 @@ function rangePosition(price, range) {
  * A setup needs the published Trade and the Trend pointing the same way, and price in that side's third of the
  * Risk Range. Tick is not required: it only adjusts the size.
  */
+const CONTRACT_MONTH_CODES = 'FGHJKMNQUVXZ';
+const CONTRACT_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
+  'November', 'December'];
+const ROLL_QUOTE_MAX_LAG_MS = 24 * 60 * 60 * 1000;
+
+/** The three nearest delivery months of a market whose futures roll monthly (catalog `roll`), as provider symbols. */
+function rollContracts(market, now = new Date()) {
+  const spec = market.roll;
+  const date = new Date(now);
+  if (!spec || Number.isNaN(date.getTime())) return [];
+  return [1, 2, 3].map((ahead) => {
+    const month = date.getUTCMonth() + ahead;
+    const year = String(date.getUTCFullYear() + Math.floor(month / 12)).slice(2);
+    return { symbol: `${spec.root}${CONTRACT_MONTH_CODES[month % 12]}${year}${spec.suffix}`, month: CONTRACT_MONTHS[month % 12] };
+  });
+}
+
+/**
+ * Which contract month a published Risk Range sits on and which one is trading at `reference` (Kalshi's
+ * own centre, or without lines the quoted price). The trading contract is the month priced nearest the
+ * reference. The range was drawn on the prior close and lags the roll, so its contract is the trading month
+ * or an earlier one, whichever has the previous close nearest the range midpoint. A mismatch is two
+ * different months priced at least `minGapPct` apart.
+ */
+function contractRoll(market, range, quotes, reference, { now, source = 'price' } = {}) {
+  if (!market.roll || !range || !Number.isFinite(reference)) return null;
+  const listed = rollContracts(market, now).map((contract) => {
+    const quote = quotes?.[contract.symbol];
+    return { ...contract, price: finite(quote?.price), previousClose: finite(quote?.previousClose),
+      at: Date.parse(quote?.timestamp || quote?.asOf) };
+  }).filter((contract) => contract.price !== null && contract.previousClose !== null);
+  // An expired month keeps its last price for days; only months quoted together are compared.
+  const newest = Math.max(...listed.map((contract) => contract.at).filter(Number.isFinite));
+  const live = listed.filter((contract) => !Number.isFinite(newest) || !Number.isFinite(contract.at)
+    || newest - contract.at < ROLL_QUOTE_MAX_LAG_MS);
+  if (live.length < 2) return null;
+  const nearest = (value, key) => live.reduce((best, contract) =>
+    (Math.abs(contract[key] - value) < Math.abs(best[key] - value) ? contract : best));
+  const trading = nearest(reference, 'price');
+  // A range lags the roll and never leads it, so its month is the trading month or an earlier one.
+  const ranged = live.slice(0, live.indexOf(trading) + 1).reduce((best, contract) => {
+    const middle = (range.low + range.high) / 2;
+    return Math.abs(contract.previousClose - middle) < Math.abs(best.previousClose - middle) ? contract : best;
+  });
+  const gapPct = (trading.price / ranged.price - 1) * 100;
+  const pick = ({ symbol, month, price }) => ({ symbol, month, price });
+  return { range: pick(ranged), trading: pick(trading), gapPct, source,
+    mismatch: ranged.symbol !== trading.symbol && Math.abs(gapPct) >= (market.roll.minGapPct ?? 2) };
+}
+
+/** Record a row's contract months; a range on a month that is not the one trading gives no position and no setup. */
+function applyContractRoll(row, roll) {
+  if (!roll) return;
+  row.roll = roll;
+  if (!roll.mismatch) return;
+  row.position = null;
+  row.setup = { side: null, reason: `Risk Range is on the ${roll.range.month} contract; ${roll.trading.month} is trading` };
+  delete row.sizing;
+}
+
 function evaluateSetup({ trend, trade, position }, rule = UNIVERSE.setupRule) {
   if (position === null || position === undefined) return { side: null, reason: 'No comparable range position' };
   if (position < 0 || position > 1) return { side: null, reason: position < 0 ? 'Below range' : 'Above range' };
@@ -349,7 +416,7 @@ const EVENT_FILTERS = {
 };
 
 function eventFilter(market) {
-  if (['gold', 'silver', 'copper', 'brent', 'bitcoin', 'ethereum'].includes(market.id)) return EVENT_FILTERS['5pm'];
+  if (['gold', 'silver', 'copper', 'brent', 'natgas', 'bitcoin', 'ethereum'].includes(market.id)) return EVENT_FILTERS['5pm'];
   if (['sp500', 'nasdaq100'].includes(market.id)) return EVENT_FILTERS.close;
   if (market.id === 'wti') return EVENT_FILTERS.daily;
   return EVENT_FILTERS.any;
@@ -541,6 +608,11 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
         { low: usd.low, high: usd.high, date: usd.rangeDate || riskRanges?.manifest?.publicationDate || null })
       : null;
   }
+  // Futures that roll monthly: a range still on the expiring month is not compared with the month now trading.
+  for (const row of rows) {
+    const market = UNIVERSE.markets.find((item) => item.id === row.id);
+    if (market?.roll && !row.priceRejected) applyContractRoll(row, contractRoll(market, row.range, quotes, row.price?.value, { now: asOf }));
+  }
   // A setup's size in % of the Kalshi account, scored against the finished dollar reading.
   for (const row of rows) {
     if (!row.setup?.side || !sizedMarket(row.id)) continue;
@@ -582,15 +654,16 @@ function readGdpOutlook() {
 const seriesNames = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
   (Array.isArray(market.kalshi.series) ? market.kalshi.series : [market.kalshi.series]).concat(market.kalshi.weekly?.series || [])))];
 // ETF prices check levels the research prints for a market's proxy (QQQ, GLD, SPY …).
-const priceSymbols = () => [...new Set(UNIVERSE.markets.flatMap((market) =>
-  [market.price?.symbol, market.hedgeye.riskRange?.priceSymbol]).concat(UNIVERSE.usd.symbol, PROXY_TICKERS).filter(Boolean))];
+const priceSymbols = (now = new Date()) => [...new Set(UNIVERSE.markets.flatMap((market) =>
+  [market.price?.symbol, market.hedgeye.riskRange?.priceSymbol, ...rollContracts(market, now).map((contract) => contract.symbol)])
+  .concat(UNIVERSE.usd.symbol, PROXY_TICKERS).filter(Boolean))];
 const volumeSymbols = () => [...new Set(UNIVERSE.markets.map((market) => market.volume?.symbol)
   .concat(UNIVERSE.usd.volumeSymbol).filter(Boolean))];
 const zScoreSymbols = () => [...new Set(UNIVERSE.markets.map((market) => market.price?.symbol)
   .concat(UNIVERSE.usd.symbol).filter(Boolean))];
 const allTimeHighSymbols = () => [...new Set(UNIVERSE.markets.filter((market) => market.hedgeye.riskRange)
   .map(allTimeHighSymbol).concat(UNIVERSE.usd.symbol).filter(Boolean))];
-const tradeTickers = () => [...new Set(UNIVERSE.markets.map((market) => market.hedgeye.trade?.ticker)
+const tradeTickers = () => [...new Set(UNIVERSE.markets.flatMap((market) => [market.hedgeye.trade?.ticker, market.hedgeye.trade?.proxy])
   .concat(UNIVERSE.usd.tradeTicker).filter(Boolean))];
 
 /**
@@ -639,7 +712,7 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       settle(full(() => loadHedgai({ now }))),
       settle(full(() => loadSecurityIntelligence({ symbols: tradeTickers(), now }))),
       settle(full(() => loadNowcast())),
-      settle(loadQuotes(priceSymbols())),
+      settle(loadQuotes(priceSymbols(now))),
       settle(full(() => loadVolatility())),
       settle(full(() => loadUsdCorrelations())),
       settle(full(() => (loadPeriodReturns ? loadPeriodReturns(UNIVERSE.usd.symbol) : null))),
@@ -702,6 +775,15 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       const tickers = [...new Set([...boardEvents, ...heldEvents].filter(Boolean))];
       const read = await Promise.all(tickers.map((ticker) => settle(Promise.resolve().then(() => loadKalshiMarkets(ticker)))));
       const marketsByEvent = new Map(tickers.map((ticker, index) => [ticker, Array.isArray(read[index].value) ? read[index].value : null]));
+      // The contract Kalshi's own lines centre on decides the roll check, ahead of the quoted price.
+      for (const row of board.rows) {
+        const market = UNIVERSE.markets.find((item) => item.id === row.id);
+        const centre = market?.roll ? fitLadder((marketsByEvent.get(row.events?.[0]?.eventTicker) || []).map(kalshiLine))?.centre : null;
+        if (!Number.isFinite(centre) || row.priceRejected) continue;
+        const roll = contractRoll(market, row.range, quotes.value, centre, { now, source: 'kalshi' });
+        // A mismatch already found against the quoted price stands when Kalshi's lines agree with the range.
+        if (roll?.mismatch || !row.roll?.mismatch) applyContractRoll(row, roll);
+      }
       // Each sized setup gets a ticket for its daily event and, where one is listed, its weekly event.
       const ticketFor = (row, event) => {
         const markets = marketsByEvent.get(event);
@@ -736,5 +818,5 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
 const extraCboeSeries = () => UNIVERSE.markets.map((market) => market.volatility)
   .filter((spec) => spec?.cboeSymbol).map((spec) => ({ name: spec.key, symbol: spec.cboeSymbol }));
 
-module.exports = { gdpEventQuarter, gdpForecasts, readGdpOutlook, allTimeHighSymbols, alphaCodeBreaks, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents, selectWeeklyEvent,
+module.exports = { contractRoll, rollContracts, gdpEventQuarter, gdpForecasts, readGdpOutlook, allTimeHighSymbols, alphaCodeBreaks, volumeSymbols, zScoreSymbols, buildSetupBoard, extraCboeSeries, createSetupBoardLoader, emailPublishedAt, evaluateSetup, eventSortKey, selectEvents, selectWeeklyEvent,
   priceSymbols, seriesNames, tradeTickers };

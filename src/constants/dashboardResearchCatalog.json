@@ -1,5 +1,5 @@
 [
-  { "symbol": "SPX", "aliases": ["SPX", "^GSPC"], "names": ["S&P 500", "S&P 500 Index"], "proseNames": ["S&P500"] },
+  { "symbol": "SPX", "aliases": ["SPX", "^GSPC"], "names": ["S&P 500", "S&P 500 Index"], "proseNames": ["S&P500", "S&P"] },
   { "symbol": "RSP", "aliases": ["RSP"], "names": ["Invesco S&P 500 Equal Weight ETF"] },
   { "symbol": "MID", "aliases": ["MID", "^MID"], "names": ["S&P MidCap 400", "S&P MidCap 400 Index"] },
   { "symbol": "RUT", "aliases": ["RUT", "^RUT"], "names": ["Russell 2000", "Russell 2000 Index"], "proseNames": ["Russell"] },

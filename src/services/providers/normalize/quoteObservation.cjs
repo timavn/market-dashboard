@@ -1,3 +1,4 @@
+const { pricedOffWideBook } = require('../../../utils/marketQuoteReference.cjs');
 const configuredMaxAge = Number(process.env.IBKR_QUOTE_STALE_SEC || 60) * 1000;
 const MAX_AGE_MS = Number.isFinite(configuredMaxAge) && configuredMaxAge > 0 ? configuredMaxAge : 60000;
 const MAX_FUTURE_SKEW_MS = 5000;
@@ -30,6 +31,7 @@ function ibkrObservationFailure(quote, { now = Date.now(), maxAgeMs = MAX_AGE_MS
   const positive = (value) => strictQuoteNumber(value) !== null && strictQuoteNumber(value) > 0;
   const bid = positive(quote.bid), ask = positive(quote.ask);
   if (bid && ask && Number(quote.bid) > Number(quote.ask)) return 'crossed_book';
+  if (pricedOffWideBook({ ...quote, source: 'ibkr' })) return 'wide_book';
   if (!(positive(quote.last ?? quote.price) || (bid && ask))) return 'invalid_mark';
   return null;
 }

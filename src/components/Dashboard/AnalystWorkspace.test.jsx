@@ -777,7 +777,8 @@ test('new chat creates no row; search is server-side and review actions remain a
   expect(screen.getByRole('button', { name: 'Predictive Markets Review' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Balance Review' })).not.toBeInTheDocument();
   expect(within(screen.getByRole('group', { name: 'Start a review' })).getAllByRole('button').map(button => [button.getAttribute('aria-label'), button.textContent, button.getAttribute('aria-keyshortcuts')])).toEqual([
-    ['Portfolio Review', 'Portfolio reviewP', 'P'], ['Predictive Markets Review', 'Predictive marketsM', 'M']]);
+    ['Portfolio Review', 'Portfolio reviewP', 'P'], ['Predictive Markets Review', 'Predictive marketsM', 'M'],
+    ['Daily Review', 'Daily reviewD', 'D']]);
   fireEvent.keyDown(screen.getByRole('dialog', { name: 'The Analyst', exact: true }), { key: 'U' });
   expect(screen.getByRole('group', { name: 'Start a review' })).toBeVisible();
   expect(api.request.mock.calls.some(([path]) => path.startsWith('/daily/'))).toBe(false);

@@ -706,7 +706,8 @@ def _statement_grammar():
         try:
             grammar = json.loads((Path(__file__).resolve().parents[2] / "src/constants/researchStatementGrammar.json").read_text())
             _STATEMENT_GRAMMAR.append((re.compile(grammar["forbidden"], re.I),
-                                       [(re.compile(claim["pattern"], re.I), claim.get("trade")) for claim in grammar["claims"]]))
+                                       [(re.compile(claim["pattern"], re.I), claim.get("trade"), claim.get("values") or {})
+                                        for claim in grammar["claims"]]))
         except (OSError, ValueError, KeyError, TypeError, re.error):
             return None
     return _STATEMENT_GRAMMAR[0]
@@ -723,8 +724,10 @@ def stated_trade_values(statement: Any) -> set:
     forbidden, claims = grammar
     if forbidden.search(statement):
         return set()
-    found = [(match.start(), -(match.end() - match.start()), order, match.end(), _bias(match[group]) if group else None)
-             for order, (pattern, group) in enumerate(claims) for match in pattern.finditer(statement)]
+    # A claim about a level ("broke below its TRADE level") maps its own word to the direction.
+    found = [(match.start(), -(match.end() - match.start()), order, match.end(),
+              _bias(values.get(match[group].lower(), match[group])) if group else None)
+             for order, (pattern, group, values) in enumerate(claims) for match in pattern.finditer(statement)]
     taken = []
     for start, negative_length, order, end, value in sorted(found):
         if not any(start < other_end and other_start < end for other_start, other_end, _ in taken):

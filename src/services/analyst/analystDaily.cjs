@@ -9,7 +9,7 @@ const { createPortfolioCloseReview } = require('./analystPortfolioClose.cjs');
 const { logRunSettlement } = require('./analystRunTimeline.cjs');
 const materialEvidence = value => Array.isArray(value) ? value.map(materialEvidence) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !['asOf','observedAt','updatedAt','completedAt','startedAt','generatedAt','expiresAt','durationMs','runId','attempt'].includes(key)).map(([key, entry]) => [key, materialEvidence(entry)])) : value;
 // Balance Review is retired into Portfolio Review; its launches are rejected.
-const TITLES = { 'portfolio-review': 'Portfolio Review', 'prediction-markets-review': 'Predictive Markets Review' };
+const TITLES = { 'portfolio-review': 'Portfolio Review', 'prediction-markets-review': 'Predictive Markets Review', 'daily-review': 'Daily Review' };
 // Scalar stage timings for enough recent runs to compare a working session.
 const DIAGNOSTIC_RUNS = 50;
 const instant = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
@@ -112,7 +112,7 @@ function attachDailyWorkflow({ workspace, request, now = () => new Date(), canGe
   const deletePending = (id, record) => { if (pending.get(id) === record) pending.delete(id); };
   // Portfolio and Predictive acquisition share the local broker and research
   // stores with the attention scan while they are queued or acquiring.
-  const reviewAcquiring = () => [...pending.values()].some(record => ['portfolio-review', 'prediction-markets-review'].includes(record.kind)
+  const reviewAcquiring = () => [...pending.values()].some(record => ['portfolio-review', 'prediction-markets-review', 'daily-review'].includes(record.kind)
     && (record.startPending || ['queued', 'acquiring'].includes(record.reviewPhase)));
   // One timestamped line per settled run, from phase clocks kept on its record.
   // Keyed by run, so a record restored from inventory never logs twice.

@@ -5,6 +5,21 @@ const VERIFIED_AVAILABILITIES = new Set(['current', 'delayed', 'historical']);
 const SYNTHETIC_EVIDENCE = /mock|seed|synthetic|inferred|portfolio-derived|cost-basis/i;
 const FAILED_EVIDENCE = /stale|expired|offline|disconnected|cache|not[_ -]?entitled|unentitled/i;
 
+// The widest bid/ask, as a share of its midpoint, that still prices a stock or ETF with no last trade.
+const MAX_UNTRADED_SPREAD = 0.01;
+// With the market shut a stock or ETF often has no last trade and only a token book
+// (UUP 29.60 x 34.41 on 2026-11-23, shown as up 7.47% on the day): its midpoint is not a price.
+const pricedOffWideBook = (quote) => {
+  const positive = (value) => value != null && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0;
+  if (String(quote?.source || '').toLowerCase() !== 'ibkr' && quote?.source != null) return false;
+  if (!['STK', 'ETF'].includes(String(quote?.secType || '').toUpperCase())) return false;
+  // `price` on a served row is the mark; only a raw quote's `price` is a trade.
+  const traded = positive(quote.last) || (!('mark' in quote) && !('mid' in quote) && positive(quote.price));
+  if (traded || !positive(quote.bid) || !positive(quote.ask)) return false;
+  const bid = Number(quote.bid), ask = Number(quote.ask);
+  return (ask - bid) / ((ask + bid) / 2) > MAX_UNTRADED_SPREAD;
+};
+
 const rowTimestamp = (row) => (
   (row?.availability === 'reference' ? row.lastVerifiedAt : null)
     || row?.quoteAsOf || row?.timestamp || row?.asOf || null
@@ -23,6 +38,7 @@ const hasVerifiedOrigin = (row, now) => {
       && !['mock', 'isMock', 'seeded', 'synthetic', 'inferred', 'cacheOnly', 'fromCache']
         .some((key) => row[key] === true || row.meta?.[key] === true)
       && row._cache?.stale !== true && row._cache?.hit !== true
+      && !pricedOffWideBook(row)
   );
 };
 
@@ -71,4 +87,4 @@ const markRetainedReference = (row, reason, now = Date.now()) => {
   };
 };
 
-module.exports = { isVerifiedProviderRow, isRetainedQuoteReference, markRetainedReference, rowTimestamp };
+module.exports = { isVerifiedProviderRow, isRetainedQuoteReference, markRetainedReference, rowTimestamp, pricedOffWideBook };
