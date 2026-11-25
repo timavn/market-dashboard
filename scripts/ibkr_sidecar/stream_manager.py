@@ -894,7 +894,15 @@ class StreamManager:
             if self._ref_counts.get(cid, 0) > 0:
                 return await self._wait_for_persistent_quote(cid, contract, timeout_sec)
 
-            ticker = self.ib.reqMktData(contract, "", False, False)
+            # This stream belongs to this request alone. The contract handed in
+            # is the remembered one, shared by every quote for the symbol, and
+            # ib_insync tracks one request per contract object: a second
+            # request on it hides the first, which then streams at the Gateway
+            # until the session ends. A copy gives this request its own
+            # identity, so it is always cancelled here and cancelling it can
+            # never touch a subscription taken out while it waited.
+            stream_contract = Contract.create(**contract.dict())
+            ticker = self.ib.reqMktData(stream_contract, "", False, False)
             try:
                 deadline = asyncio.get_running_loop().time() + timeout_sec
                 last_raw = ticker_to_raw_quote(ticker, contract)
@@ -905,14 +913,11 @@ class StreamManager:
                     await asyncio.sleep(QUOTE_POLL_SEC)
                 return last_raw
             finally:
-                # Do not cancel a subscription that another request acquired
-                # while this endpoint-owned snapshot was waiting.
-                if self._ref_counts.get(cid, 0) <= 0:
-                    try:
-                        self.ib.cancelMktData(contract)
-                    except Exception as exc:
-                        self.last_error = f"quote_cancel: {exc}"
-                    self._forget_endpoint_ticker(contract)
+                try:
+                    self.ib.cancelMktData(stream_contract)
+                except Exception as exc:
+                    self.last_error = f"quote_cancel: {exc}"
+                self._forget_endpoint_ticker(stream_contract)
 
     def _forget_endpoint_ticker(self, contract: Contract) -> None:
         """Release ib_insync's Ticker for a finished one-off quote.

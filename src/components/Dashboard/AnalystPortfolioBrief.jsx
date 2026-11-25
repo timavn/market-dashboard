@@ -247,7 +247,7 @@ function PortfolioExposure({ metrics, comparison, asOf, loading, state }) {
     // Weights display as magnitudes, so Long and Short change by magnitude; Net keeps its sign.
     const change = metric.current === null || metric.previous === null ? null
       : !usePercentages || name === 'Net' ? metric.current - metric.previous : Math.abs(metric.current) - Math.abs(metric.previous);
-    return { name, className, metric, value: metrics[valueKey], valueColor: metrics[valueKey] === null || metrics[valueKey] === undefined ? undefined : color(metrics[valueKey]), current: format(metric.current), previous: format(metric.previous),
+    return { name, className, metric, current: format(metric.current), previous: format(metric.previous),
       change: exposureChange(change, usePercentages),
       currentColor: color(metric.current), previousColor: color(metric.previous) };
   });
@@ -260,15 +260,14 @@ function PortfolioExposure({ metrics, comparison, asOf, loading, state }) {
   return <section className="portfolio-review-section portfolio-review-exposure" aria-label="Exposure and risk" aria-busy={(state || previousUnavailable) && loading || undefined}><h2>Exposure &amp; risk</h2>
     <PortfolioReviewDateline text={`Positioning: ${portfolioDate(asOf)}`} previous={previousDate} />
     <div className="portfolio-review-section-body"><div className="portfolio-brief-table-scroll"><table className="portfolio-brief-table portfolio-brief-exposure" aria-label="Portfolio exposure">
-      <colgroup><col /><col /><col /><col /><col /></colgroup>
-      <thead><tr><th scope="col">Exposure</th><th scope="col">Value</th><th scope="col" className="portfolio-exposure-percent">Current</th>
-        <th scope="col" className="portfolio-exposure-change" title="Change since previous close; weights in basis points of NLV">Δ</th><th scope="col" className="portfolio-exposure-percent">Previous</th></tr></thead>
+      <colgroup><col /><col /><col /><col /></colgroup>
+      <thead><tr><th scope="col">Exposure</th><th scope="col" className="portfolio-exposure-percent">Previous</th>
+        <th scope="col" className="portfolio-exposure-change" title="Change since previous close; weights in basis points of NLV">Δ</th><th scope="col" className="portfolio-exposure-percent">Current</th></tr></thead>
       <tbody>{rows.map(row => <tr key={row.name} className={row.className}>
         <th scope="row"><AnalystSemanticText>{row.name}</AnalystSemanticText></th>
-        <td className={`portfolio-exposure-value ${row.valueColor || ''}`.trim()}><ExposureAmount value={row.value} /></td>
-        <td className={`portfolio-exposure-percent ${row.currentColor || ''}`.trim()}>{row.current}</td>
-        <td className={`portfolio-exposure-change ${row.change.color}`}>{row.change.text}</td>
         <td className={`portfolio-exposure-percent ${row.previousColor || ''}`.trim()}>{row.previous}</td>
+        <td className={`portfolio-exposure-change ${row.change.color}`}>{row.change.text}</td>
+        <td className={`portfolio-exposure-percent ${row.currentColor || ''}`.trim()}>{row.current}</td>
       </tr>)}</tbody>
     </table></div>
     {sectionState && <p className="portfolio-review-section-state">{sectionState}</p>}</div>

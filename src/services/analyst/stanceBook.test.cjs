@@ -47,14 +47,17 @@ test('the first verified read after Gateway connects raises every standing contr
   const findings = evaluateResearchAttention(verified(BOOK, book), NOW).findings.filter(item => item.severity === 'action-required');
   const stance = symbol => findings.find(item => item.symbol === symbol).presentation.stance;
   const call = (product, action, date, bias) => ({ product, action, date, bias });
-  assert.deepEqual(Object.fromEntries(findings.map(item => [item.symbol, item.action])), { EFX: 'exit', GIII: 'exit', BRBR: 'exit', LCID: 'trim', MPC: 'trim' });
+  assert.deepEqual(Object.fromEntries(findings.map(item => [item.symbol, item.action])), { EFX: 'exit', MPC: 'trim' });
   assert.deepEqual(stance('EFX').calls, [call('Signal Strength', 'LONG', '2026-10-26', 'BULLISH')]);
-  // A removal reads above the listing it ended, from the book's history.
-  assert.deepEqual(stance('GIII').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-23', 'NEUTRAL'), call('Signal Strength Shorts', 'SHORT', '2026-08-04', 'BEARISH')]);
-  assert.deepEqual(stance('BRBR').calls, [call('Signal Strength Shorts', 'REMOVE', '2026-10-22', 'NEUTRAL'), call('Signal Strength Shorts', 'SHORT', '2026-07-14', 'BEARISH')]);
-  // Booking SOME of a short keeps it short: both calls stay bearish, newest first.
-  assert.deepEqual(stance('LCID').calls, [call('Real-Time Alert', 'COVER SOME', '2026-10-26', 'BEARISH'), call('Signal Strength Shorts', 'SHORT', '2026-05-02', 'BEARISH')]);
-  assert.deepEqual(stance('LCID').order, { verb: 'BUY', quantity: null, note: 'some · stays short' });
+  // The retired Signal Strength Shorts list raises nothing: its removals are no alert and its listings no coverage.
+  const all = evaluateResearchAttention(verified(BOOK, book), NOW).findings;
+  assert.deepEqual(all.filter(item => ['GIII', 'BRBR'].includes(item.symbol)), []);
+  // A covered short still held is untracked, not an alert.
+  const lcid = all.find(item => item.symbol === 'LCID');
+  assert.deepEqual([lcid.action, lcid.severity, lcid.priority], ['untracked', undefined, 1]);
+  assert.deepEqual(lcid.presentation.untracked, { side: 'SHORT', closedBy: call('Real-Time Alert', 'COVER', '2026-10-26', 'NEUTRAL'), since: '2026-10-26', listed: [],
+    calls: [call('Real-Time Alert', 'COVER', '2026-10-26', 'NEUTRAL')] });
+  assert.equal(lcid.presentation.rows.find(row => row.label === 'Action').text, 'Real-Time Alert Cover Oct 26 → no product view; watch closer.');
   assert.deepEqual(stance('MPC').calls, [call('Real-Time Alert', 'SELL SOME', '2026-10-26', 'BULLISH')]);
   assert.deepEqual(stance('EFX').order, { verb: 'BUY', quantity: 13.75, note: 'to close short' });
   assert.deepEqual(stance('EFX').target, { side: null, quantity: 0, weightPct: 0 });
@@ -64,15 +67,15 @@ test('the first verified read after Gateway connects raises every standing contr
 
 test('a sizing review on the same holding never hides its contradiction', () => {
   const { book } = foldStanceEvents(undefined, OCTOBER, NOW);
-  const ctx = verified([{ symbol: 'BRBR', quantity: -350 }], book);
-  ctx.holdings.currentHoldings.push({ holding: 'BRBR', quantity: -350, currentHolding: { weightPct: 40, source: 'ibkr', basis: 'absolute_market_value_over_net_liquidation', asOf: ctx.holdings.asOf } });
-  ctx.holdings.ruleHoldings.push({ holding: 'BRBR', quantity: -350, heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: 40,
+  const ctx = verified([{ symbol: 'EFX', quantity: -350 }], book);
+  ctx.holdings.currentHoldings.push({ holding: 'EFX', quantity: -350, currentHolding: { weightPct: 40, source: 'ibkr', basis: 'absolute_market_value_over_net_liquidation', asOf: ctx.holdings.asOf } });
+  ctx.holdings.ruleHoldings.push({ holding: 'EFX', quantity: -350, heldSide: 'SHORT', trade: 'BEARISH', trend: 'BEARISH', weightPct: 40,
     signalContext: { trade: { status: 'published' }, trend: { status: 'published' } },
     // ATR 3.70 on 185 sets MAX 6.25%; a 40% weight is a sizing review.
     sizingInputs: { atr14: { value: 3.7, observations: 14, status: 'available', source: 'Yahoo Finance chart API', asOf: '2026-10-26' },
       referencePrice: { value: 185, observations: 1, status: 'available', source: 'Yahoo Finance chart API', asOf: '2026-10-26' } },
     sources: { trade: { publishedAt: '2026-10-27T12:00:00Z', citation: { id: 'cite_trade', sourceUri: feed('rr') } }, trend: { publishedAt: '2026-10-27T12:00:00Z', citation: { id: 'cite_trend', sourceUri: feed('rr') } } } });
-  const findings = evaluateResearchAttention(ctx, NOW).findings.filter(item => item.symbol === 'BRBR');
+  const findings = evaluateResearchAttention(ctx, NOW).findings.filter(item => item.symbol === 'EFX');
   assert.equal(findings.length, 2);
   assert.deepEqual(findings.map(item => [item.rule?.rule ?? 'stance', item.severity ?? null]).sort(), [['ABOVE_MAX', null], ['stance', 'action-required']]);
 });
@@ -101,8 +104,8 @@ test('an alert shows the last three calls on its security, newest first, as the 
   // The slot keeps only the latest alert; the alert card shows the three newest calls.
   assert.equal(book.tickers.DRAM['real-time-alert'].date, '2026-10-26');
   const findings = evaluateResearchAttention({ ...verified([{ symbol: 'DRAM', quantity: -40 }], book), marketDate: '2026-10-26' }, at).findings;
-  assert.deepEqual(findings.find(item => item.symbol === 'DRAM').presentation.stance.calls, [
-    { product: 'Real-Time Alert', action: 'COVER SOME', date: '2026-10-26', bias: 'BEARISH' },
+  assert.deepEqual(findings.find(item => item.symbol === 'DRAM').presentation.untracked.calls, [
+    { product: 'Real-Time Alert', action: 'COVER', date: '2026-10-26', bias: 'NEUTRAL' },
     { product: 'ETF Pro', action: 'SHORT', date: '2026-10-21', bias: 'BEARISH' },
     { product: 'Real-Time Alert', action: 'SHORT', date: '2026-10-02', bias: 'BEARISH' }]);
   assert.equal(foldStanceEvents(book, events, at).changed, false);
@@ -160,10 +163,10 @@ test('acting on a partial call clears it; a new call raises it again', () => {
   assert.equal(evaluateResearchAttention(again, next).findings[0].action, 'trim');
 });
 
-test('a partial call expires after a week, a full alert after a month and a removal after a quarter', () => {
+test('a partial call expires after a week, an alert after a month and a removal after a quarter', () => {
   const old = [alert('MPC', 'SELL', 'Real-Time Alert: Sell Signal (x): MPC -KM', '2026-09-20'),
     alert('VLO', 'SELL-SOME', 'Real-Time Alert: Sell-SOME Signal (x): VLO -KM', '2026-10-19'),
-    ledger('GIII', 'signal-strength', 'signal_strength_short_removed', 'data.shorts.removed[0]', 'GIII', '2026-07-20')];
+    ledger('GIII', 'signal-strength', 'signal_strength_removed', 'data.removed[0]', 'GIII', '2026-07-20')];
   assert.deepEqual(foldStanceEvents(undefined, old, NOW).book.tickers, {});
   const recent = [alert('MPC', 'SELL', 'Real-Time Alert: Sell Signal (x): MPC -KM', '2026-09-28'), alert('VLO', 'SELL-SOME', 'Real-Time Alert: Sell-SOME Signal (x): VLO -KM', '2026-10-21')];
   assert.deepEqual(Object.keys(foldStanceEvents(undefined, recent, NOW).book.tickers).sort(), ['MPC', 'VLO']);
@@ -183,7 +186,7 @@ test('the ledger history reads only the stance products, one projected query per
   const history = await loadStanceLedger(dynamodb, { days: 3, now: NOW });
   assert.deepEqual([history.from, history.through, history.events.length], ['2026-10-25', '2026-10-27', 3]);
   assert.deepEqual(calls.map(call => call.ExpressionAttributeValues[':date']).sort(), ['2026-10-25', '2026-10-26', '2026-10-27']);
-  assert.deepEqual(Object.entries(calls[0].ExpressionAttributeValues).filter(([key]) => key.startsWith(':p')).map(([, value]) => value), ['signal-strength', 'signal-strength-shorts', 'etf-pro', 'real-time-alert']);
+  assert.deepEqual(Object.entries(calls[0].ExpressionAttributeValues).filter(([key]) => key.startsWith(':p')).map(([, value]) => value), ['signal-strength', 'etf-pro', 'real-time-alert']);
   assert.match(calls[0].KeyConditionExpression, /^#f\d+ = :date$/);
   assert.equal(calls[0].ExpressionAttributeNames[calls[0].KeyConditionExpression.split(' ')[0]], 'marketDate');
 });
@@ -206,16 +209,19 @@ test('a trim targets the security’s own MIN and never crosses to the other sid
   assert.deepEqual(stance.order, { verb: 'SELL', quantity: 1.76, upTo: true, note: 'stays long' });
 });
 
-test('a full cover or sell leaves the product with no view; SOME anywhere in the alert keeps the side', () => {
+test('a full cover or sell leaves the product with no view; a Cover-SOME closes the short too, as on the RTA board', () => {
   const full = [ledger('XYZ', 'real-time-alert', 'position_change', 'data.alert.headline', 'BUY SIGNAL - COVERING SHORT XYZ', '2026-10-26')];
   const [row] = scanHoldings(foldStanceEvents(undefined, full, NOW).book, [{ symbol: 'XYZ', quantity: -10 }]);
   assert.deepEqual(row.opposing.map(item => [item.stance, item.action]), [['EXIT_SHORT', 'COVER']]);
   const ctx = verified([{ symbol: 'XYZ', quantity: -10 }], foldStanceEvents(undefined, full, NOW).book);
-  assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings[0].presentation.stance.calls, [{ product: 'Real-Time Alert', action: 'COVER', date: '2026-10-26', bias: 'NEUTRAL' }]);
-  // The body row arrives in a later fold and still makes the stored alert partial.
+  const [card] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual([card.action, card.priority, card.presentation.untracked.listed], ['untracked', 1, []]);
+  assert.deepEqual(Object.fromEntries(card.presentation.rows.slice(0, 4).map(item => [item.label, item.text])),
+    { 'Current position': 'Short', Action: 'Real-Time Alert Cover Oct 26 → no product view; watch closer.', Untracked: '1 day', 'Real-Time Alert': 'COVER Oct 26 · NEUTRAL' });
+  // The body row arrives in a later fold: the alert is recorded as Cover-SOME and still closes the short.
   const later = foldStanceEvents(foldStanceEvents(undefined, full, NOW).book,
     [ledger('SOME', 'real-time-alert', 'position_change', 'article.bodyText', 'COVERING SHORT XYZ — book-SOME here', '2026-10-26')], NOW).book;
-  assert.deepEqual([later.tickers.XYZ['real-time-alert'].action, later.tickers.XYZ['real-time-alert'].stance], ['COVER-SOME', 'REDUCE_SHORT']);
+  assert.deepEqual([later.tickers.XYZ['real-time-alert'].action, later.tickers.XYZ['real-time-alert'].stance], ['COVER-SOME', 'EXIT_SHORT']);
   // The email subject on the captured report says SOME too.
   const subject = { ...full[0], sourceReport: { sourceMessageId: full[0].sourceMessageId, title: 'Real-Time Alert: Cover-SOME (booking SOME = process): XYZ -KM', bodyText: '' } };
   assert.equal(foldStanceEvents(undefined, [subject], NOW).book.tickers.XYZ['real-time-alert'].action, 'COVER-SOME');
@@ -223,7 +229,7 @@ test('a full cover or sell leaves the product with no view; SOME anywhere in the
 
 test('a book from an older version is rebuilt rather than read', () => {
   const { book, changed } = foldStanceEvents({ version: 1, rosters: {}, tickers: { LCID: { 'real-time-alert': { stance: 'EXIT_SHORT' } } } }, [], NOW);
-  assert.deepEqual([book.version, book.backfill, book.tickers, changed], [2, null, {}, false]);
+  assert.deepEqual([book.version, book.backfill, book.tickers, changed], [5, null, {}, false]);
 });
 
 test('a SOME that names another ticker does not make this alert partial', () => {
@@ -236,14 +242,20 @@ test('a SOME that names another ticker does not make this alert partial', () => 
   }
 });
 
-test('a Signal Strength Shorts event folds the same under its own product and under the long product it was recorded in before', () => {
-  const legacy = ledger('SKHY', 'signal-strength', 'signal_strength_short_removed', 'data.shorts.removed[8]', 'SKHY', '2026-10-27');
-  const replayed = ledger('SKHY', 'signal-strength-shorts', 'signal_strength_short_removed', 'data.removed[8]', 'SKHY', '2026-10-27',
-    { sourceMessageId: legacy.sourceMessageId, sourceUrl: legacy.sourceUrl });
-  assert.deepEqual(stancesFromEvent(replayed, NOW).map(item => [item.slot, item.entry.stance]), [['signal-strength:short', 'EXIT_SHORT']]);
-  const { book } = foldStanceEvents(undefined, [legacy, replayed], NOW);
-  assert.equal(Object.keys(book.tickers.SKHY).length, 1);
-  assert.equal(book.tickers.SKHY['signal-strength:short'].stance, 'EXIT_SHORT');
-  // A long kind never reads from the Shorts product.
-  assert.deepEqual(stancesFromEvent(ledger('SKHY', 'signal-strength-shorts', 'signal_strength_added', 'data.added[0]', 'SKHY', '2026-10-27'), NOW), []);
+test('Signal Strength Shorts is retired: its rows are never a stance, under either product key', () => {
+  const rows = [ledger('SKHY', 'signal-strength', 'signal_strength_short_removed', 'data.shorts.removed[8]', 'SKHY', '2026-10-27'),
+    ledger('SKHY', 'signal-strength-shorts', 'signal_strength_short_removed', 'data.removed[8]', 'SKHY', '2026-10-27'),
+    ledger('SKHY', 'signal-strength-shorts', 'signal_strength_short_added', 'data.added[0]', 'SKHY', '2026-10-27'),
+    ledger('SKHY', 'signal-strength-shorts', 'signal_strength_added', 'data.added[0]', 'SKHY', '2026-10-27'), listed('SKHY', 'short', '2026-10-27', '2026-10-01')];
+  for (const row of rows) assert.deepEqual(stancesFromEvent(row, NOW), []);
+  assert.deepEqual(foldStanceEvents(undefined, rows, NOW).book.tickers, {});
+});
+
+test('an RTA "Sell Signal" whose own headline says SHORTING is a Short, whichever row is folded first', () => {
+  const rows = [ledger('ODFL', 'real-time-alert', 'position_change', 'data.alert.headline', 'Real-Time Alert: Van Sciver Sell Signal (when to sell?): Old Dominion Freight (ODFL) -KM', '2026-10-26'),
+    ledger('ODFL', 'real-time-alert', 'position_change', 'article.headline', 'SELL SIGNAL - SHORTING ODFL', '2026-10-26')];
+  for (const events of [rows, [...rows].reverse()]) {
+    const { book } = foldStanceEvents(undefined, events, NOW);
+    assert.deepEqual([book.tickers.ODFL['real-time-alert'].action, book.history.ODFL.map(call => call.stance)], ['SHORT', ['SHORT']]);
+  }
 });

@@ -78,8 +78,8 @@ export function evaluatePortfolioRule(holding, asOf) {
   }
   const { sizingBand, stop } = decision;
   const base = { ...holding, sizingBasis: 'ATR sizing',
-    atrPct: bandAvailable ? sizingBand.relativeAtr * 100 : null, atrFloorApplied: sizingBand.floorApplied, volatilityBlocked,
-    stopDistancePct: bandAvailable ? sizingBand.stopDistance * 100 : null, stopPrice: stop.price,
+    atrPct: bandAvailable && sizingBand.relativeAtr != null ? sizingBand.relativeAtr * 100 : null, atrFloorApplied: sizingBand.floorApplied, volatilityBlocked,
+    stopDistancePct: bandAvailable && sizingBand.stopDistance != null ? sizingBand.stopDistance * 100 : null, stopPrice: stop.price,
     stopLossPctNlv: bandAvailable ? stopLossPctNlv(weight, sizingBand.stopDistance) : null,
     weightPct: weight, trade, trend, minWeight: decision.minWeight, maxWeight, weightStatus, weightDeviation, targetWeight: null, reduction: null };
   if (!heldSignal) return { ...base, status: 'verification', reason: 'Position side unavailable' };

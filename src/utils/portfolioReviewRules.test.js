@@ -84,6 +84,13 @@ const sizedHolding = (extra = {}) => holding({
   trend: 'BULLISH', netLiquidation: 100000, lrr: 90, hrr: 110, ...extra,
 });
 
+test('a cash-like holding has no size limit', () => {
+  const result = evaluatePortfolioRule(sizedHolding({ holding: 'TBIL', weightPct: 60 }), asOf);
+  expect(result).toMatchObject({ minWeight: 0, maxWeight: 100, weightStatus: null });
+  expect(result.rule).not.toBe('ABOVE_MAX');
+  expect(evaluatePortfolioRule({ ...sizedHolding({ holding: 'TBIL', weightPct: 60 }), sizingInputs: {} }, asOf).rule).toBeUndefined();
+});
+
 test('verified ATR/range inputs enforce the ATR-derived MAX', () => {
   const result = evaluatePortfolioRule(sizedHolding({ weightPct: 8 }), asOf);
   expect(result).toMatchObject({ status: 'conflict', rule: 'ABOVE_MAX', targetWeight: 5, reduction: 3 });

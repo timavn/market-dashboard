@@ -334,7 +334,8 @@ def _range_cell(row: dict[str, Any]) -> str:
     """Token the report UI draws as a one-line price-in-range bar with this morning's Alpha Code under it.
 
     RR(low;high;price;decimals;unit;acTrade;acTrend;approx;dots;product) — dots is 1 when the Alpha Code
-    is on the range's own instrument, so its levels can be marked on the bar.
+    is on the range's own instrument, so its levels can be marked on the bar. A trailing ;@roll marks a price
+    on another contract month than the range: shown, but given no position.
     """
     risk_range = row.get("range") or {}
     low, high = risk_range.get("low"), risk_range.get("high")
@@ -342,21 +343,24 @@ def _range_cell(row: dict[str, Any]) -> str:
         return _number((row.get("price") or {}).get("value"), percent=row.get("group") == "rates")
     # A range is always drawn with its own instrument's price (e.g. Nasdaq Composite for COMPQ).
     price = (row.get("rangePrice") or row.get("price") or {}).get("value")
-    if (row.get("roll") or {}).get("mismatch"):
-        # The range is on another contract month than the one trading: its bar carries no price.
-        price = None
+    # The range is on another contract month than the one trading: the bar shows the price Kalshi settles on,
+    # flagged so it is not read as a position in the range.
+    rolled = bool((row.get("roll") or {}).get("mismatch"))
+    if rolled:
+        price = (row.get("price") or {}).get("value")
     decimals = 0 if max(abs(low), abs(high)) >= 1000 else 2
     value = f"{price:.{decimals}f}" if isinstance(price, (int, float)) else ""
     unit = "%" if row.get("group") == "rates" else ""
     token = f"RR({low:.{decimals}f};{high:.{decimals}f};{value};{decimals};{unit}"
+    flag = ";@roll" if rolled and isinstance(price, (int, float)) else ""
     code = _alpha_code(row)
     if not code:
-        return token + ")"
+        return token + flag + ")"
     level = lambda key: f"{code[key]:g}" if isinstance(code.get(key), (int, float)) and not isinstance(code.get(key), bool) else ""
     # The Alpha Code is printed for the market itself; a range drawn on another instrument (COMPQ) gets no dots.
     dots = 0 if row.get("rangePrice") else 1
     product = re.sub(r"[;()|]", " ", str(code.get("productLabel") or "")).strip()
-    return f"{token};{level('trade')};{level('trend')};{1 if code.get('approximate') else 0};{dots};{product})"
+    return f"{token};{level('trade')};{level('trend')};{1 if code.get('approximate') else 0};{dots};{product}{flag})"
 
 
 def _level(value: Any, unit: str | None) -> str:
@@ -808,7 +812,7 @@ def render_setup_board(board: dict[str, Any]) -> str:
                 subject = "Kalshi's lines centre on" if roll.get("source") == "kalshi" else "the price is"
                 notes.append(f"**{row['label']} contract mismatch:** the Risk Range is on the {ranged.get('month')} contract "
                              f"({_number(ranged.get('price'))}); {subject} the {trading.get('month')} contract "
-                             f"({_number(trading.get('price'))}{gap}). Price not placed in the range and no setup "
+                             f"({_number(trading.get('price'))}{gap}). The {trading.get('month')} price is shown without a range position; no setup "
                              f"until the range moves to {trading.get('month')}.")
         if notes:
             lines += [" ".join(notes), ""]

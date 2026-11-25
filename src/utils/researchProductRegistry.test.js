@@ -26,6 +26,12 @@ describe('researchProductRegistry', () => {
     expect(getResearchProduct('risk-ranges')).toBe(RESEARCH_PRODUCT_BY_ID['risk-ranges']);
   });
 
+  test('leaves out the retired Signal Strength Shorts product the deployed registry still names', () => {
+    expect(RESEARCH_PRODUCTS.map((product) => product.id)).not.toContain('signal-strength-shorts');
+    expect(getResearchProduct('signal-strength-shorts')).toBeNull();
+    expect(getResearchProduct('signal-strength').id).toBe('signal-strength');
+  });
+
   test('only marks scheduled products due after their New York deadline', () => {
     expect(isResearchProductDue('risk-ranges', {
       now: new Date('2026-07-23T11:59:00Z'),

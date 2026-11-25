@@ -8,7 +8,7 @@ const {
   parseArchiveDate,
 } = require('./morningTldrArchive.cjs');
 
-const productIds = ['top-3-things', 'risk-ranges', 'early-look', 'the-call', 'the-macro-show', 'signal-strength', 'signal-strength-shorts'];
+const productIds = ['top-3-things', 'risk-ranges', 'early-look', 'the-call', 'the-macro-show', 'signal-strength'];
 
 const makeClient = (items, { retry = false } = {}) => {
   let calls = 0;

@@ -989,7 +989,7 @@ describe('security intelligence projection', () => {
     });
   });
 
-  test('reads Signal Strength Shorts as its own decision, never as the long list', () => {
+  test('ignores stored Signal Strength Shorts events and manifests, under either product', () => {
     const response = buildSecurityIntelligence({
       symbols: ['SKHY'],
       marketDate: MARKET_DATE,
@@ -1024,11 +1024,9 @@ describe('security intelligence projection', () => {
     });
 
     expect(response.bySymbol.SKHY.decision.signalStrength).toMatchObject({ status: 'unavailable', value: null });
-    expect(response.bySymbol.SKHY.decision.signalStrengthShorts).toMatchObject({
-      status: 'available',
-      value: 'REMOVED',
-      sourceId: 'signal-strength-shorts',
-    });
+    expect(response.bySymbol.SKHY.decision).not.toHaveProperty('signalStrengthShorts');
+    expect(response.products.map((product) => product.id)).not.toContain('signal-strength-shorts');
+    expect(JSON.stringify(response)).not.toMatch(/signal[-_]strength[-_]short|Signal Strength Shorts/);
   });
 
   test('fails closed on conflicting Signal Strength events with the same publication time', () => {

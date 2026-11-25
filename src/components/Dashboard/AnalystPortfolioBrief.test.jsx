@@ -37,8 +37,7 @@ test('the centered review puts Gross first and Net last without redundant labels
   expect(report).not.toHaveTextContent('Exposure includes verified marks only; some position values are unavailable.');
   const exposure = screen.getByRole('region', { name: 'Exposure and risk' });
   expect(within(exposure).getAllByRole('rowheader').map(item => item.textContent)).toEqual(['Gross', 'Long', 'Short', 'Net']);
-  expect(exposure.querySelector('.is-long .portfolio-exposure-value')).toHaveTextContent('$159,845');
-  expect(exposure.querySelector('.is-short .portfolio-exposure-value')).toHaveTextContent('-$50,584');
+  expect(exposure.querySelector('.portfolio-exposure-value')).toBeNull();
   expect(exposure).toHaveTextContent('123%');
   expect(exposure).not.toHaveTextContent(/\.\d/);
   expect(exposure).not.toHaveTextContent('of NLV');
@@ -46,29 +45,26 @@ test('the centered review puts Gross first and Net last without redundant labels
   expect(screen.queryByText(/Legacy report:|VIEW LARGER IMAGE|cite_xyz/)).not.toBeInTheDocument();
 });
 
-test('exposure table separates whole-dollar values from Current, Δ and Previous weights side by side', () => {
+test('exposure table sets Current, Δ and Previous weights side by side, with no dollar Value column', () => {
   const data = message();
   data.portfolioBrief.metrics = { longMarketValue: 150000.4, shortMarketValue: -50000, grossExposure: 200000,
     netExposure: 100000, netLiquidation: 100000, grossLeverage: 2, netExposurePctOfNlv: 100 };
   render(<AnalystPortfolioBrief message={data} />);
   const table = screen.getByRole('table', { name: 'Portfolio exposure' });
-  expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Exposure', 'Value', 'Current', 'Δ', 'Previous']);
+  expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Exposure', 'Previous', 'Δ', 'Current']);
   const rows = within(table).getAllByRole('row').slice(1);
   expect(rows.map(position => within(position).getAllByRole('cell').map(cell => cell.textContent))).toEqual([
-    ['$200,000', '200%', '—', '—'], ['$150,000', '150%', '—', '—'], ['-$50,000', '50%', '—', '—'], ['$100,000', '100%', '—', '—'],
+    ['—', '—', '200%'], ['—', '—', '150%'], ['—', '—', '50%'], ['—', '—', '100%'],
   ]);
   for (const position of rows.slice(0, 4)) {
-    const [value, current, change, previous] = within(position).getAllByRole('cell');
-    expect(value).toHaveClass('portfolio-exposure-value');
-    expect(value.querySelector('.portfolio-exposure-amount')).toBeInTheDocument();
+    const [previous, change, current] = within(position).getAllByRole('cell');
     expect(current).toHaveClass('portfolio-exposure-percent');
     expect(change).toHaveClass('portfolio-exposure-change', 'signal-unavailable', { exact: true });
     expect(previous).toHaveClass('portfolio-exposure-percent');
   }
-  expect(rows[2].querySelector('.portfolio-exposure-sign')).toHaveTextContent('-');
 });
 
-test('every Current weight is an unsigned magnitude while captured Short and negative Net dollars keep their signs', () => {
+test('every Current weight is an unsigned magnitude', () => {
   const data = message();
   data.portfolioBrief.metrics = { longMarketValue: 50000, shortMarketValue: -150000, grossExposure: 200000,
     netExposure: -100000, netLiquidation: 100000, grossLeverage: 2, netExposurePctOfNlv: -100 };
@@ -76,20 +72,18 @@ test('every Current weight is an unsigned magnitude while captured Short and neg
   render(<AnalystPortfolioBrief message={data} />);
   const table = screen.getByRole('table', { name: 'Portfolio exposure' });
   const rows = within(table).getAllByRole('row').slice(1);
-  const weights = rows.slice(0, 4).map(position => within(position).getAllByRole('cell')[1]);
+  const weights = rows.slice(0, 4).map(position => within(position).getAllByRole('cell')[2]);
   expect(weights.map(cell => cell.textContent)).toEqual(['200%', '50%', '150%', '100%']);
   for (const cell of weights) expect(cell.children).toHaveLength(0);
   expect(rows[2]).toHaveClass('is-short');
-  expect(within(rows[2]).getAllByRole('cell')[0]).toHaveTextContent('-$150,000');
   expect(rows[3]).toHaveClass('is-net-negative');
-  expect(within(rows[3]).getAllByRole('cell')[0]).toHaveTextContent('-$100,000');
   expect(JSON.stringify(data)).toBe(original);
 });
 
 test('legacy exposure without captured NLV keeps dollar values and captured ratios without inventing Long or Short percentages', () => {
   render(<AnalystPortfolioBrief message={message()} />);
   const table = screen.getByRole('table', { name: 'Portfolio exposure' });
-  expect(within(table).getAllByRole('row').slice(1).map(position => within(position).getAllByRole('cell')[1].textContent))
+  expect(within(table).getAllByRole('row').slice(1).map(position => within(position).getAllByRole('cell')[2].textContent))
     .toEqual(['123%', '$159,845', '-$50,584', '64%']);
 });
 
@@ -613,10 +607,10 @@ test('Exposure & risk sets Current, Δ in basis points and Previous side by side
   const dateline = section.querySelector('.portfolio-review-dateline');
   expect(dateline).toHaveTextContent('Sep 4, 2026 13:05 PDT');
   expect(dateline).toHaveTextContent('Previous positioning: Sep 2, 2026 07:30 PDT');
-  expect(within(section).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Exposure', 'Value', 'Current', 'Δ', 'Previous']);
+  expect(within(section).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Exposure', 'Previous', 'Δ', 'Current']);
   expect(within(section).getAllByRole('rowheader').map(cell => cell.textContent)).toEqual(['Gross', 'Long', 'Short', 'Net']);
-  expect(within(section).getByRole('row', { name: 'Gross $210,429 123% -666 bp 130%' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Net $109,262 64% +404 bp 60%' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Gross 130% -666 bp 123%' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Net 60% +404 bp 64%' })).toBeInTheDocument();
   expect(section).not.toHaveTextContent(/AM|PM|211,000|\.\d+%/);
   expect(JSON.stringify(data)).toBe(original);
 });
@@ -626,17 +620,17 @@ test('comparison uses captured dollar pairs only when percentage pairs are unava
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const section = screen.getByRole('region', { name: 'Exposure and risk' });
   expect(within(section).getAllByRole('rowheader')).toHaveLength(4);
-  expect(within(section).getByRole('row', { name: 'Net — $5,000 — —' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Gross — $201,000 +$1,000 $200,000' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Long — — — —' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Net — — $5,000' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Gross $200,000 +$1,000 $201,000' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Long — — —' })).toBeInTheDocument();
 });
 
 test('an unavailable previous close preserves independently verified current exposures without inventing a change', () => {
   const data = brief(); data.comparison = { status: 'unavailable', baselineKind: 'previous-session-close', baselineSessionDate: '2026-09-03' };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const section = screen.getByRole('region', { name: 'Exposure and risk' });
-  expect(within(section).getByRole('row', { name: 'Gross $210,429 123% — —' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Net $109,262 64% — —' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Gross — — 123%' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Net — — 64%' })).toBeInTheDocument();
   expect(section).toHaveTextContent('Sep 3, 2026');
   expect(section).toHaveTextContent('Previous close unavailable');
 });
@@ -653,8 +647,8 @@ test('previous-close comparison renders original account observation times and b
   expect(section).toHaveTextContent('Previous: Oct 7, 2026 14:27 PDT');
   expect(section).not.toHaveTextContent('Current positioning:');
   // Both sides round to 170%; the Δ keeps the 97 bp move visible.
-  expect(within(section).getByRole('row', { name: 'Gross $210,429 170% +97 bp 170%' })).toBeInTheDocument();
-  expect(within(section).getByRole('row', { name: 'Net $109,262 29% -808 bp 37%' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Gross 170% +97 bp 170%' })).toBeInTheDocument();
+  expect(within(section).getByRole('row', { name: 'Net 37% -808 bp 29%' })).toBeInTheDocument();
   expect(JSON.stringify(data)).toBe(original);
 });
 
@@ -685,16 +679,16 @@ test('current and previous exposure use their own captured NLV and directional c
   const table = screen.getByRole('table', { name: 'Portfolio exposure' });
   const rows = within(table).getAllByRole('row').slice(1);
   // Short grows by magnitude; Net keeps its sign.
-  expect(rows.map(position => within(position).getAllByRole('cell').slice(1).map(cell => cell.textContent))).toEqual([
-    ['200%', '+10,000 bp', '100%'], ['50%', '-2,500 bp', '75%'], ['150%', '+12,500 bp', '25%'], ['100%', '-15,000 bp', '50%'],
+  expect(rows.map(position => within(position).getAllByRole('cell').map(cell => cell.textContent))).toEqual([
+    ['100%', '+10,000 bp', '200%'], ['75%', '-2,500 bp', '50%'], ['25%', '+12,500 bp', '150%'], ['50%', '-15,000 bp', '100%'],
   ]);
-  const weights = position => [1, 3].map(index => within(position).getAllByRole('cell')[index]);
+  const weights = position => [2, 0].map(index => within(position).getAllByRole('cell')[index]);
   weights(rows[1]).forEach(cell => expect(cell).toHaveClass('signal-bullish'));
   weights(rows[2]).forEach(cell => expect(cell).toHaveClass('signal-bearish'));
   expect(weights(rows[3])[0]).toHaveClass('signal-bearish');
   expect(weights(rows[3])[1]).toHaveClass('signal-bullish');
   // Δ colors follow the displayed sign: green up, red down.
-  expect(rows.map(position => within(position).getAllByRole('cell')[2].className)).toEqual([
+  expect(rows.map(position => within(position).getAllByRole('cell')[1].className)).toEqual([
     'portfolio-exposure-change signal-bullish', 'portfolio-exposure-change signal-bearish', 'portfolio-exposure-change signal-bullish',
     'portfolio-exposure-change signal-bearish',
   ]);
@@ -719,10 +713,10 @@ test('legacy missing prior side totals stay unavailable instead of borrowing the
   } };
   render(<AnalystPortfolioBrief message={{ portfolioBrief: data }} />);
   const table = screen.getByRole('table', { name: 'Portfolio exposure' });
-  expect(within(table).getByRole('row', { name: 'Long $159,845 $159,845 -$40,155 $200,000' })).toBeInTheDocument();
+  expect(within(table).getByRole('row', { name: 'Long $200,000 -$40,155 $159,845' })).toBeInTheDocument();
   const short = within(table).getAllByRole('row')[3];
-  expect(within(short).getAllByRole('cell').slice(1).map(cell => cell.textContent)).toEqual(['51%', '—', '—']);
-  expect(within(short).getAllByRole('cell')[3]).toHaveClass('signal-unavailable');
+  expect(within(short).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['—', '—', '51%']);
+  expect(within(short).getAllByRole('cell')[0]).toHaveClass('signal-unavailable');
 });
 
 test('unsupported comparisons and factor totals stay out of the report', () => {
@@ -864,7 +858,7 @@ test('loading, partial, ready and rejected captures keep account sections and co
   expect(screen.getByRole('region', { name: 'Action required' })).toBe(exceptions);
   expect(within(exposure).getAllByRole('row')).toEqual(exposureRows);
   expect(within(exposure).getAllByRole('columnheader')).toEqual(exposureColumns);
-  expect(screen.getByText('$210,429')).toBeVisible();
+  expect(within(screen.getByRole('table', { name: 'Portfolio exposure' })).getByText('123%')).toBeVisible();
   rerender(<AnalystPortfolioBrief message={{ ...base, state: 'failed', portfolioBrief: { ...ready, available: false } }} />);
   expect(screen.getByRole('region', { name: 'Exposure and risk' })).toBe(exposure);
   expect(screen.getByRole('region', { name: 'Action required' })).toBe(exceptions);
@@ -891,7 +885,7 @@ test('a failure after a published partial revision keeps that report in place, s
   expect(report).not.toHaveAttribute('aria-busy');
   expect(report).not.toHaveTextContent('Loading…');
   expect(screen.getByText('Captured partial research.')).toBeVisible();
-  expect(screen.getByText('$210,429')).toBeVisible();
+  expect(within(screen.getByRole('table', { name: 'Portfolio exposure' })).getByText('123%')).toBeVisible();
   expect(screen.getByRole('note')).toHaveTextContent(status);
   expect(report.lastElementChild).toBe(screen.getByRole('note'));
 });
@@ -901,7 +895,7 @@ test('the launch and deferred-history placeholder keeps the full report without 
   const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
   expect(report).toHaveClass('analyst-captured-report-placeholder', 'analyst-historical-report');
   expect(report).toHaveAttribute('data-message-id', 'deferred-post');
-  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(13);
+  expect(report.querySelectorAll('.portfolio-review-section')).toHaveLength(12);
   expect(report).not.toHaveTextContent('$');
   expect(screen.getByRole('table', { name: 'Portfolio exposure' })).toBeVisible();
   expect(screen.getByRole('table', { name: 'Action required' })).toHaveTextContent('Loading…');
@@ -922,7 +916,7 @@ test('Portfolio Review sections use content height and centered titles with date
       const report = screen.getByRole('article', { name: 'Portfolio Review summary' });
       const exposureTable = screen.getByRole('table', { name: 'Portfolio exposure' });
       expect(screen.queryByRole('table', { name: 'Exposure changes since previous close' })).not.toBeInTheDocument();
-      expect(exposureTable.querySelectorAll('col')).toHaveLength(5);
+      expect(exposureTable.querySelectorAll('col')).toHaveLength(4);
       expect(within(exposureTable).getAllByRole('rowheader').map(cell => cell.textContent)).toEqual(['Gross', 'Long', 'Short', 'Net']);
       report.querySelectorAll('.portfolio-review-section').forEach(section => {
         expect(window.getComputedStyle(section).minHeight).toBe('0');

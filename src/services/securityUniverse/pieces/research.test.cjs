@@ -11,7 +11,7 @@ const reference = (matchedText, lrr, hrr, extra = {}) => ({ productId: 'risk-ran
   matchType: 'direct_alias', matchedText, value: { lrr, hrr, trend: 'BULLISH' }, decisionEligible: true, ...extra });
 const entry = (riskRange, references, extra = {}) => ({ decision: {
   trade: missing('no-verified-published-trade-signal'), trend: descriptor('BULLISH'), riskRange,
-  signalStrength: missing('no-explicit-signal-strength-event'), signalStrengthShorts: missing('no-explicit-signal-strength-shorts-event'), ...extra,
+  signalStrength: missing('no-explicit-signal-strength-event'), ...extra,
 }, directReferences: references });
 const intelligence = bySymbol => async () => ({ schemaVersion: 2, marketDate: '2026-10-30', bySymbol });
 // Trade as a publication states it: explicit evidence, its feed item and its own instrument.

@@ -36,7 +36,7 @@ test('reads every product call from the scored book, standing first, one per pro
   ]);
   assert.equal(dram.value[1].sourceUri, 'gmail://message/etf', 'the standing entry wins over its history copy');
   assert.equal(dram.value[0].partial, true);
-  assert.deepEqual([stances.get('JPM').calls.value[0].product, stances.get('JPM').calls.value[0].sourceProduct], ['Signal Strength Shorts', 'signal-strength-shorts']);
+  assert.deepEqual(stances.get('JPM').calls.value, [], 'a stored Signal Strength Shorts entry is never a call');
   assert.deepEqual(stances.get('KO').calls.value, []);
   assert.deepEqual([stances.get('COST').status, stances.get('COST').calls.value], ['available', []]);
 });

@@ -288,6 +288,7 @@
 }
 .analyst-range-bar__dot.is-below { background: var(--dashboard-negative, #dc2626); }
 .analyst-range-bar__dot.is-above { background: var(--dashboard-positive, #059669); }
+/* A price on another contract month than the range: the same blue dot as every other row (2026-11-24), with no position. */
 
 /* Section drivers (AnalystPredictionDrivers): volatility and USD-correlation tables; saved reviews may carry the earlier cells. */
 .analyst-drivers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 4px 0 6px; align-items: start; }

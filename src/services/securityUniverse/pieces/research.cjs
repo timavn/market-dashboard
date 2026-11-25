@@ -15,7 +15,7 @@ const DAY_MS = 86_400_000;
 function emptyResearch(reason) {
   return withStatus({ trade: unavailable(reason, { source: SOURCE }), trend: unavailable(reason, { source: SOURCE }),
     tail: unavailable('no-published-tail-source'), riskRange: unavailable(reason, { source: SOURCE }),
-    signalStrength: unavailable(reason, { source: SOURCE }), signalStrengthShorts: unavailable(reason, { source: SOURCE }),
+    signalStrength: unavailable(reason, { source: SOURCE }),
     statedTrend: unavailable(reason, { source: SOURCE }), alphaCode: unavailable(reason, { source: SOURCE }),
     alphaCodeLines: unavailable(reason, { source: SOURCE }) });
 }
@@ -165,7 +165,6 @@ function createResearchPiece({ loadSecurityIntelligence, loadReferencePrices = a
           ? { ...riskRange, value: { lrr: decision.riskRange.lrr ?? riskRange.value?.lrr ?? null, hrr: decision.riskRange.hrr ?? riskRange.value?.hrr ?? null } }
           : riskRange),
         signalStrength: descriptorField(decision.signalStrength),
-        signalStrengthShorts: descriptorField(decision.signalStrengthShorts),
         // What the prose states, beside the Risk Range Trend that sizes positions.
         statedTrend: stated('trend', 'no-stated-trend'),
         alphaCode: stated('alphaCode', 'no-published-alpha-code'),

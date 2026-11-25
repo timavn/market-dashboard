@@ -6,6 +6,7 @@ import {
   calculateRangePosition,
   calculateRecordSignal,
   calculateSizingBand,
+  CASH_LIKE_SYMBOLS,
   calculateSizingDecision,
   calculateStopPrice,
   calculateTargetWeight,
@@ -151,6 +152,14 @@ describe('ATR sizing bands (weights are percentage points)', () => {
   test('blocks sizing only when MAX rounds below MIN at an extreme ATR', () => {
     expect(calculateSizingBand({ atr14: 50, spot: 100 })).toMatchObject({ minWeight: 0.25, maxWeight: 0.25, riskBlocked: false });
     expect(calculateSizingBand({ atr14: 60, spot: 100 })).toMatchObject({ minWeight: 0.25, maxWeight: 0, riskBlocked: true });
+  });
+
+  test('gives cash-like holdings a 0 to 100% band with or without an ATR', () => {
+    expect(calculateSizingBand({ atr14: 0.02, spot: 50, symbol: 'TBIL' })).toMatchObject({ available: true, cashLike: true, minWeight: 0, maxWeight: 100, riskBlocked: false, floorApplied: false });
+    expect(calculateSizingBand({ atr14: null, spot: null, symbol: 'sgov' })).toMatchObject({ available: true, minWeight: 0, maxWeight: 100, stopDistance: null });
+    expect(calculateSizingBand({ atr14: 0.02, spot: 50, symbol: 'TLT' }).maxWeight).toBe(10);
+    const cash = Object.entries(require('../constants/securityClassifications.json').securities).filter(([, labels]) => labels[1] === 'Cash').map(([symbol]) => symbol);
+    expect([...CASH_LIKE_SYMBOLS].sort()).toEqual(cash.sort());
   });
 
   test('requires a positive ATR and spot, and no beta', () => {

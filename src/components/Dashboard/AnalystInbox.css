@@ -86,10 +86,10 @@
 .analyst-inbox-heading:first-child { margin-top: 2px; }
 .analyst-inbox-heading--alert { color: #a61b1b; }
 .analyst-inbox-heading--signal { color: #8a6500; }
-.analyst-inbox-heading--action { color: var(--portfolio-review-blue, #2563eb); }
+.analyst-inbox-heading--action, .analyst-inbox-heading--untracked { color: var(--portfolio-review-blue, #2563eb); }
 .analyst-inbox-finding[data-category='alert'] { border-color: #d64545; }
 .analyst-inbox-finding[data-category='signal'] { border-color: #d9a400; }
-.analyst-inbox-finding[data-category='action'] { border-color: var(--portfolio-review-blue, #2563eb); }
+.analyst-inbox-finding:is([data-category='action'], [data-category='untracked']) { border-color: var(--portfolio-review-blue, #2563eb); }
 /* The card whose Source is open: its border takes the ticker's blue. */
 .analyst-inbox-finding[data-cited] { border-color: var(--portfolio-review-blue, #2563eb); }
 

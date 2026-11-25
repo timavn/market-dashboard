@@ -51,10 +51,11 @@ const isFactorTable = (section, block) => section.id === 'factor-exposure' && bl
 // restated dated publisher actions with no current call; saved captures keep
 // the facts, but Portfolio Review no longer shows them.
 // Signal Strength Shorts was a trial subscription that ended (user-specified 2026-11-18).
+// The Tick section (HedgAI Signals) was removed from the review (user-specified 2026-11-24); Tick stays on each position row.
 const retiredSectionIds = new Set(['refresh-realignment', 'refresh-watch-list', 'refresh-aligned', 'refresh-sequence',
-  'position-confirmations', 'position-contradictions', 'signal-strength-shorts']);
+  'position-confirmations', 'position-contradictions', 'signal-strength-shorts', 'hedgai-signals']);
 const retiredSectionTitles = new Set(['highest-priority realignment', 'watch list', 'what is already aligned', 'recommended sequence',
-  'position confirmations', 'position contradictions', 'signal strength shorts']);
+  'position confirmations', 'position contradictions', 'signal strength shorts', 'hedgai signals', 'tick']);
 const isRetiredSection = section => retiredSectionIds.has(section?.id)
   || retiredSectionTitles.has(text(section?.title).toLowerCase());
 const capturedSecurityName = value => /^(?:—|-|unavailable|unknown)$/i.test(text(value)) ? '' : text(value);
@@ -137,7 +138,6 @@ export const dailyRollupSections = rollup => rollup?.version === 1 && Array.isAr
 
 const dailySectionSlots = [
   { id: 'market-drivers', title: "Today's market drivers" },
-  { id: 'hedgai-signals', title: 'Tick' },
   { id: 'risk-ranges', title: 'Trend & range changes' },
   { id: 'macro-regime', title: 'Macro & regime' },
   { id: 'macro-show', title: 'Macro Show' },
@@ -165,13 +165,41 @@ const stableDailySections = rollup => {
   ];
 };
 
+// A range moving wholly one way with a Trend that agrees tints its row (user-specified 2026-11-24):
+// lower low, lower high and Bearish light red; higher low, higher high and Bullish light green.
+const rangeAlignment = row => {
+  const cells = new Set(array(row?.cells).map(cell => text(cell).toLowerCase()));
+  if (cells.has('lower low') && cells.has('lower high') && cells.has('bearish')) return 'analyst-range-row--down';
+  if (cells.has('higher low') && cells.has('higher high') && cells.has('bullish')) return 'analyst-range-row--up';
+  return undefined;
+};
+
+// The Call's Signal Divergence lines ("WMT - Monitor SHORT / Signal Strength LONG") read as the two views they compare
+// (user-specified 2026-11-24): Keith's Signal Strength list as Signal, over the sector analyst's position monitor as
+// Analyst; off either is Neutral. Each side takes its direction's color.
+const DIVERGENCE = /^(.*?)\s*[-–—]\s*(?:Off Monitor|Monitor (LONG|SHORT|NEUTRAL)) \/ (?:Off Signal Strength|Signal Strength (LONG|SHORT|NEUTRAL))$/i;
+const divergenceSide = side => side ? `${side[0].toUpperCase()}${side.slice(1).toLowerCase()}` : 'Neutral';
+const DIVERGENCE_TONE = { Long: 'signal-bullish', Short: 'signal-bearish', Neutral: 'signal-neutral' };
+
+function SignalDivergence({ match }) {
+  const sides = [['Signal', divergenceSide(match[3])], ['Analyst', divergenceSide(match[2])]];
+  return <p className="analyst-signal-divergence">
+    <span className="analyst-signal-divergence__ticker"><AnalystSemanticText context="Ticker">{match[1]}</AnalystSemanticText></span>
+    <span className="analyst-signal-divergence__sides">{sides.map(([label, side]) =>
+      <span key={label}>{label}: <span className={DIVERGENCE_TONE[side]}>{side}</span></span>)}</span>
+  </p>;
+}
+
 function ReportParagraph({ block }) {
   const title = portfolioTopicTitle(block.text, block.title) || text(block.title);
-  if (!title) return <p className="analyst-report-prose"><AnalystSemanticText>{block.text}</AnalystSemanticText></p>;
-  const body = block.text.startsWith(`${title} — `) ? block.text.slice(title.length + 3) : block.text;
+  const body = title && block.text.startsWith(`${title} — `) ? block.text.slice(title.length + 3) : block.text;
+  const divergence = text(body).match(DIVERGENCE);
+  const content = divergence ? <SignalDivergence match={divergence} /> : <p><AnalystSemanticText>{body}</AnalystSemanticText></p>;
+  if (!title) return divergence ? <div className="analyst-report-prose">{content}</div>
+    : <p className="analyst-report-prose"><AnalystSemanticText>{block.text}</AnalystSemanticText></p>;
   return <div className="analyst-portfolio-topic-block analyst-report-prose">
     <h3 className="analyst-portfolio-topic analyst-process--title"><AnalystSemanticText>{title}</AnalystSemanticText></h3>
-    <p><AnalystSemanticText>{body}</AnalystSemanticText></p>
+    {content}
   </div>;
 }
 
@@ -263,7 +291,7 @@ export default function AnalystDailyRollup({ rollup, citations = [], onCitation,
             <tbody>{block.rows.filter(row => Array.isArray(row?.cells) && row.cells.some(text)).map((row, rowIndex, rows) =>
               <React.Fragment key={rowIndex}>
               {block.groupRows && text(row.group) && row.group !== rows[rowIndex - 1]?.group && <tr className="analyst-research-group"><th scope="rowgroup" colSpan={block.columns.length}><AnalystSemanticText>{row.group}</AnalystSemanticText></th></tr>}
-              <tr>{block.columns.map((column, cellIndex) => <td key={cellIndex} title={presentAnalystReportDates(text(row.cellTitles?.[cellIndex])) || undefined}>
+              <tr className={rangeAlignment(row)}>{block.columns.map((column, cellIndex) => <td key={cellIndex} title={presentAnalystReportDates(text(row.cellTitles?.[cellIndex])) || undefined}>
                 {columnLabel(column) === 'Security'
                   ? <SecurityName row={row} cellIndex={cellIndex} currentIdentity={securityNames[text(row.cells[0])]} />
                   : isFactorTable(section, block) && cellIndex === 0

@@ -209,16 +209,16 @@ class SetupBoardRenderTests(unittest.TestCase):
                       "ASOF(N/A;Sep 28,HedgAI;,;Oct 9,Risk Ranges;100) |", report)
         self.assertIn("Gold price withheld: GC=F returned 41.5, inconsistent with its Risk Range.", report)
 
-    def test_contract_mismatch_leaves_the_price_off_the_range_and_warns(self):
+    def test_contract_mismatch_shows_the_price_without_a_range_position_and_warns(self):
         data = board()
         data["rows"][1].update(position=None, setup={"side": None, "reason": "Risk Range is on the December contract; January is trading"},
                                roll={"mismatch": True, "source": "kalshi", "gapPct": 10.66,
                                      "range": {"symbol": "NGZ26.NYM", "month": "December", "price": 3.19},
                                      "trading": {"symbol": "NGF27.NYM", "month": "January", "price": 3.53}})
         report = render_setup_board(data)
-        self.assertIn("RR(87.14;93.03;;2;)", report)
+        self.assertIn("RR(87.14;93.03;91.85;2;;@roll)", report)
         self.assertIn("**WTI contract mismatch:** the Risk Range is on the December contract (3.19); Kalshi's lines centre on "
-                      "the January contract (3.53, +10.7%). Price not placed in the range and no setup until the range moves to January.",
+                      "the January contract (3.53, +10.7%). The January price is shown without a range position; no setup until the range moves to January.",
                       report)
         data["rows"][1]["roll"]["mismatch"] = False
         self.assertNotIn("contract mismatch", render_setup_board(data))

@@ -99,6 +99,11 @@ export function calculateStopPrice({ basis, atr14, side } = {}) {
   return stop > 0 ? stop : null;
 }
 
+// Treasury-bill and floating-rate Treasury funds held as cash. Matches the
+// "Cash" group in constants/securityClassifications.json.
+export const CASH_LIKE_SYMBOLS = Object.freeze(['TBIL', 'BIL', 'SGOV', 'SHV', 'GBIL', 'CLIP', 'USFR', 'TFLO', 'XBIL']);
+export const isCashLikeSymbol = symbol => CASH_LIKE_SYMBOLS.includes(String(symbol || '').trim().toUpperCase());
+
 /**
  * Size each security from its own volatility, in percentage points of NLV.
  * The stop sits STOP_ATR_MULTIPLE ATRs away, so MIN and MAX are the weights
@@ -106,9 +111,31 @@ export function calculateStopPrice({ basis, atr14, side } = {}) {
  * floor sets the band, which caps MAX at MAX_POSITION_WEIGHT; the stop still
  * uses the measured ATR.
  */
-export function calculateSizingBand({ atr14, spot } = {}) {
+export function calculateSizingBand({ atr14, spot, symbol } = {}) {
   const atr = positive(metricValue(atr14));
   const price = positive(spot);
+  // Cash-like holdings carry no size limit (user-specified 2026-11-24): any
+  // weight from 0 to 100% is in band, with or without a measured ATR.
+  if (isCashLikeSymbol(symbol)) {
+    const relativeAtr = atr != null && price != null ? atr / price : null;
+    return {
+      available: true,
+      reason: null,
+      cashLike: true,
+      atr14: atr,
+      spot: price,
+      relativeAtr,
+      effectiveRelativeAtr: relativeAtr,
+      floorApplied: false,
+      stopDistance: relativeAtr == null ? null : SIZING_CONSTANTS.STOP_ATR_MULTIPLE * relativeAtr,
+      rawMinWeight: 0,
+      rawMaxWeight: 100,
+      minWeight: 0,
+      maxWeight: 100,
+      riskBlocked: false,
+      unit: 'percentage-points',
+    };
+  }
   if (atr == null || price == null) {
     return {
       available: false,
@@ -539,7 +566,7 @@ function unique(values) {
  * The function never transmits orders and never substitutes non-live quote data.
  */
 export function calculateSizingDecision(input = {}) {
-  const sizingBand = calculateSizingBand({ atr14: input.atr14, spot: input.spot });
+  const sizingBand = calculateSizingBand({ atr14: input.atr14, spot: input.spot, symbol: input.symbol });
   const recordsInput = input.records || {};
   const priorAth = input.priorAth ?? recordsInput.priorAllTimeHigh;
   const priorAtl = input.priorAtl ?? recordsInput.priorAllTimeLow;

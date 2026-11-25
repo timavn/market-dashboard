@@ -7,7 +7,7 @@ const { PRODUCTS: MORNING_PRODUCTS, PROXY_TICKERS, buildMorningResearch } = requ
 const { emailPublishedAt } = require('../utils/researchPublicationTime.cjs');
 const { brokenAlphaCodeLine } = require('./analyst/alphaCodeWatch.cjs');
 const { allocateLines, fitLadder, kalshiAccountValue, kalshiLine, scoreConviction, sizedMarket } = require('./predictionSizing.cjs');
-const { applyLineMonitor, bookCandidates, eventOf } = require('./predictionLineMonitor.cjs');
+const { applyLineMonitor, bookCandidates, eventOf, ladderLines, offPrice } = require('./predictionLineMonitor.cjs');
 
 // One row per tracked Kalshi market: Hedgeye Tick/Trade/Trend, the verified
 // underlying price, its Risk Range position, and the rule-based setup. A setup
@@ -775,6 +775,11 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       const tickers = [...new Set([...boardEvents, ...heldEvents].filter(Boolean))];
       const read = await Promise.all(tickers.map((ticker) => settle(Promise.resolve().then(() => loadKalshiMarkets(ticker)))));
       const marketsByEvent = new Map(tickers.map((ticker, index) => [ticker, Array.isArray(read[index].value) ? read[index].value : null]));
+      // A daily ladder with no line at even odds gives no curve: its weekly event is read to stand in for it.
+      const weeklyFor = board.rows.filter((row) => row.weeklyEvent?.eventTicker && !marketsByEvent.has(row.weeklyEvent.eventTicker)
+        && offPrice(ladderLines(marketsByEvent.get(row.events?.[0]?.eventTicker)))).map((row) => row.weeklyEvent.eventTicker);
+      const weeklyRead = await Promise.all(weeklyFor.map((ticker) => settle(Promise.resolve().then(() => loadKalshiMarkets(ticker)))));
+      weeklyFor.forEach((ticker, index) => marketsByEvent.set(ticker, Array.isArray(weeklyRead[index].value) ? weeklyRead[index].value : null));
       // The contract Kalshi's own lines centre on decides the roll check, ahead of the quoted price.
       for (const row of board.rows) {
         const market = UNIVERSE.markets.find((item) => item.id === row.id);
@@ -803,7 +808,8 @@ function createSetupBoardLoader({ loadRiskRanges, loadCryptoQuant, loadHedgai, l
       // Order books for each market's lines nearest even odds, so every line is priced at what its bet would fill at.
       let orderbooks = null;
       if (loadKalshiOrderbook && account > 0) {
-        const candidates = [...new Set(board.rows.flatMap((row) => bookCandidates(marketsByEvent.get(row.events?.[0]?.eventTicker))))];
+        const candidates = [...new Set(board.rows.flatMap((row) => [row.events?.[0]?.eventTicker, ...(weeklyFor.includes(row.weeklyEvent?.eventTicker) ? [row.weeklyEvent.eventTicker] : [])]
+          .flatMap((event) => bookCandidates(marketsByEvent.get(event)))))];
         const { books, failed } = await readBooks(candidates, now);
         orderbooks = books;
         if (candidates.length) board.sourceStatus.kalshiOrderbooks = failed === candidates.length ? 'failed' : 'ready';

@@ -25,15 +25,14 @@ PRODUCTS = {
     "top-3-things": "Top 3 Things", "risk-ranges": "Risk Ranges",
     "early-look": "Early Look", "the-call": "The Call",
     "the-macro-show": "Macro Show", "signal-strength": "Signal Strength",
-    "signal-strength-shorts": "Signal Strength Shorts", "market-structure": "Market Structure",
+    "market-structure": "Market Structure",
 }
 ALIASES = {"top3": "top-3-things", "riskranges": "risk-ranges", "earlylook": "early-look",
            "thecall": "the-call", "macroshow": "the-macro-show", "signalstrength": "signal-strength",
-           "signalstrengthshorts": "signal-strength-shorts", "marketstructure": "market-structure"}
+           "marketstructure": "market-structure"}
 # Event-driven Signal Strength keeps its latest eligible publication inside the
 # immutable capture. Other daily products retain their exact-edition policy.
-CAPTURE_SELECTION = {"signal-strength": "latest-captured-publication",
-                     "signal-strength-shorts": "latest-captured-publication"}
+CAPTURE_SELECTION = {"signal-strength": "latest-captured-publication"}
 HEADINGS = {
     "key takeaways", "the big picture", "macro grind", "quad path", "our levels",
     "top 5 most actionable", "macro commentary", "sector summary", "signal divergence",
@@ -322,6 +321,33 @@ def _instrument_label(row, symbol):
     return _text(row.get("originalName") or row.get("name")) or symbol
 
 
+NAME_OPENERS = {"with", "while", "for", "as", "but", "and", "the", "if", "when", "since", "after", "before",
+                "also", "both", "like", "versus", "long", "short", "of", "at", "by", "to", "from", "our"}
+COMPANY_SUFFIX = re.compile(r"(?:Inc|Corp|Ltd|LLC|Co|PLC|Incorporated|Corporation|Limited)\.?$", re.I)
+
+
+def _name_word(word):
+    return bool(word) and (word[0].isupper() or word[0].isdigit() or word == "&" or word[1:] != word[1:].lower())
+
+
+def _trailing_name(text):
+    """The security name a clause ends on: its last run of name words ("... tracker for Intuitive Surgical")."""
+    words, name = _text(text).split(), []
+    for word in reversed(words):
+        # "and" is left out: it joins two companies far more often than it sits inside one name.
+        joiner = word.lower() in {"of", "the", "de", "del", "la"} or (word == "in" and name[:1] == ["the"])
+        # A comma closes the name unless a company suffix follows it (Bath & Body Works, Inc.).
+        if word.endswith(",") and not (name and COMPANY_SUFFIX.match(name[0])):
+            break
+        if not (_name_word(word) or (joiner and name)) or len(name) == 8:
+            break
+        name.insert(0, word)
+    # A sentence's capitalized opening word is not part of the name (With Amazon, The ...).
+    while name and (name[0].lower() in NAME_OPENERS or name[0] == "&" or name[0] == name[0].lower() and not name[0][0].isdigit()):
+        name.pop(0)
+    return " ".join(name)
+
+
 def _published_security_identities(snapshot):
     """Read ticker/name pairs from this captured publication, not storage aliases."""
     identities = {}
@@ -362,20 +388,16 @@ def _published_security_identities(snapshot):
         name = _text(stock.get("originalName") or stock.get("name") or stock.get("securityName"))
         if ticker and name and ticker.upper() != name.upper():
             identities.setdefault(ticker.upper(), name)
-    # The Call commonly gives a bare ticker in its position list and the
-    # spelled-out company name at the start of that security's paragraph.
-    # Require the ticker to be established above so prose acronyms never
-    # become security identities.
-    for name, ticker in re.findall(
-        r"(?m)^\s*(?:[•*]\s*)?([^()\n]{1,120}?)\s*\(([A-Z][A-Z0-9./^-]*)\)(?=\s|[.,;:]|$)", body
-    ):
-        if ticker in known_tickers:
-            identities.setdefault(ticker, _text(name))
-    for name, ticker in re.findall(
-        r"\([A-Z][A-Z0-9./^-]*\)\s*,?\s+and\s+([^()\n;]{1,120}?)\s*\(([A-Z][A-Z0-9./^-]*)\)", body
-    ):
-        if ticker in known_tickers:
-            identities.setdefault(ticker, _text(name))
+    # The Call commonly gives a bare ticker in its position list and spells the company out in prose, mid-sentence
+    # as often as at the start of a paragraph ("... plan contractors such as UnitedHealth Group (UNH)"). The name is
+    # only the run of name words that ends at the ticker, never the sentence before it. Require the ticker to be
+    # established above so prose acronyms never become security identities.
+    for match in re.finditer(r"\(([A-Z][A-Z0-9./^-]*)\)", body):
+        if match.group(1) not in known_tickers:
+            continue
+        name = _trailing_name(re.split(r"[()\n;:]", body[max(0, match.start() - 160):match.start()])[-1])
+        if name:
+            identities.setdefault(match.group(1), name)
     return identities
 
 
@@ -403,6 +425,25 @@ def _level_identity(row, symbol):
     return re.sub(r"\W+", " ", name).casefold().strip()
 
 
+NAME_JOINERS = {"of", "and", "the", "de", "del", "la", "for", "in", "on"}
+
+
+def _named_security(value):
+    """A security name ending in its ticker ("Waste Management (WM)"), not a sentence that ends in one.
+
+    A following prose line that closes on a ticker ("the new utilization tracker for Intuitive Surgical (ISRG)")
+    used to be read as a listed position. A name is at most ten words, opens with a capital or digit, and its
+    other words are capitalized, joiners, or carry a capital inside (iShares).
+    """
+    match = re.fullmatch(r"([^:;\n]+?)\s*\([A-Z0-9][A-Z0-9./^-]*\)", value)
+    if not match:
+        return False
+    words = match.group(1).split()
+    if not words or len(words) > 10 or not (words[0][0].isupper() or words[0][0].isdigit() or words[0][1:] != words[0][1:].lower()):
+        return False
+    return all(not word[0].islower() or word.lower() in NAME_JOINERS or word[1:] != word[1:].lower() for word in words[1:])
+
+
 def _position_groups(snapshot):
     """Use bounded publisher labels, not imported arrays that cross label borders."""
     body = _text(_dict(snapshot.get("article")).get("bodyText"))
@@ -427,7 +468,7 @@ def _position_groups(snapshot):
             continue
         for value in values.split(","):
             value = _text(value).strip("• $")
-            if re.fullmatch(r"[A-Z][A-Z0-9./^-]{0,19}", value) or re.fullmatch(r"[^:;\n]+\([A-Z0-9][A-Z0-9./^-]*\)", value):
+            if re.fullmatch(r"[A-Z][A-Z0-9./^-]{0,19}", value) or _named_security(value):
                 if value not in groups[active]:
                     groups[active].append(value)
             elif value:
@@ -704,9 +745,8 @@ def _early_levels(report, section, snapshot, cid):
     report.table(section, ["Ticker", "Security", "Published range", "Trend"], rows)
 
 
-def _signal_strength(report, snapshot, cid, product="signal-strength"):
-    shorts = product == "signal-strength-shorts"
-    section = report.section(product, PRODUCTS[product])
+def _signal_strength(report, snapshot, cid):
+    section = report.section("signal-strength", "Signal Strength")
     data, meta = _dict(snapshot.get("data")), _dict(snapshot.get("meta"))
     identities = _published_security_identities(snapshot)
     changes = []
@@ -725,12 +765,10 @@ def _signal_strength(report, snapshot, cid, product="signal-strength"):
         for stock in stocks:
             stock = stock if isinstance(stock, dict) else {"ticker": stock}
             days = next((stock.get(key) for key in ("daysOn", "days_on", "days") if stock.get(key) is not None), None)
-            # A short's published Total Return is its gain, not the price change since the signal.
-            keys = ("totalReturn",) if shorts else ("percentChangeSinceSignal", "percent_change_since_signal", "percentSinceSignal", "signalReturn", "percentChange")
-            change = next((stock.get(key) for key in keys if stock.get(key) is not None), None)
+            change = next((stock.get(key) for key in ("percentChangeSinceSignal", "percent_change_since_signal", "percentSinceSignal", "signalReturn", "percentChange") if stock.get(key) is not None), None)
             rows.append(_row([*report.security(stock, _symbol(stock.get("ticker") or stock.get("symbol")), identities), _num(days),
                               f"{_num(change)}%" if _number(change) is not None else "—"], [cid]))
-        report.table(section, ["Ticker", "Security", "Days on", "Total return" if shorts else "Since signal"], rows)
+        report.table(section, ["Ticker", "Security", "Days on", "Since signal"], rows)
 
 
 def _market_structure(report, snapshot, cid):
@@ -850,9 +888,8 @@ def build_daily_research_rollup(evidence: dict[str, Any], *, as_of=None, holding
             cid = citations[product]
             _prose(report, section, snapshot, cid)
             _positions(report, section, snapshot, previous.get(product), cid, prior_citations.get(product))
-    for product in ("signal-strength", "signal-strength-shorts"):
-        if snapshot := snapshots.get(product):
-            _signal_strength(report, snapshot, citations[product], product)
+    if snapshot := snapshots.get("signal-strength"):
+        _signal_strength(report, snapshot, citations["signal-strength"])
     if snapshot := snapshots.get("market-structure"):
         _market_structure(report, snapshot, citations["market-structure"])
     sections = [section for section in report.sections if section["blocks"]]

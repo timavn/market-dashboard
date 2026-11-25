@@ -5,6 +5,7 @@ const {
   ENTITY_CATALOG,
   RESEARCH_PRODUCTS,
   RESEARCH_PRODUCT_BY_ID,
+  RETIRED_RESEARCH_PRODUCT_IDS,
   getControlledExposure,
   getResearchProduct,
   getSecurityExposureTags,
@@ -39,9 +40,6 @@ const STRUCTURED_TICKER_EVENT_KINDS = new Set([
   'signal_strength_removed',
   'signal_strength_listed',
   'signal_strength_membership',
-  'signal_strength_short_added',
-  'signal_strength_short_removed',
-  'signal_strength_short_membership',
   'portfolio_rank',
   'portfolio_solutions_rank',
   'portfolio_solutions_mover',
@@ -52,27 +50,20 @@ const STRUCTURED_TICKER_EVENT_KINDS = new Set([
   'etf_pro_change',
   'investing_idea_position',
 ]);
-// Each Signal Strength product's event kinds, and the value each kind reads as.
-// Before Shorts became its own product (2026-10-29) its events were recorded
-// under the long product, so a short kind is read from either product; the
-// kinds alone keep the two books apart.
-const SIGNAL_STRENGTH_SOURCE_PRODUCTS = Object.freeze({
-  'signal-strength': ['signal-strength'],
-  'signal-strength-shorts': ['signal-strength-shorts', 'signal-strength'],
-});
+// Signal Strength event kinds, and the value each kind reads as.
 const SIGNAL_STRENGTH_KINDS = Object.freeze({
-  'signal-strength': {
-    signal_strength_added: 'ADDED',
-    signal_strength_removed: 'REMOVED',
-    signal_strength_listed: null,
-    signal_strength_membership: null,
-  },
-  'signal-strength-shorts': {
-    signal_strength_short_added: 'ADDED',
-    signal_strength_short_removed: 'REMOVED',
-    signal_strength_short_membership: null,
-  },
+  signal_strength_added: 'ADDED',
+  signal_strength_removed: 'REMOVED',
+  signal_strength_listed: null,
+  signal_strength_membership: null,
 });
+// Signal Strength Shorts is retired. Its stored snapshots, manifests and events
+// are never read; its events were recorded under the long product before
+// 2026-10-29, so those are recognised by kind.
+const isRetiredProductId = (productId) => RETIRED_RESEARCH_PRODUCT_IDS.includes(productId);
+const isRetiredShortListEvent = (event) => (
+  String(event?.eventType || event?.kind || '').trim().toLowerCase().startsWith('signal_strength_short_')
+);
 const BOILERPLATE_PATTERN = /\b(click here|unsubscribe|manage (?:your )?preferences|view (?:this )?email in (?:your )?browser)\b/i;
 
 const ALIAS_TO_CANONICAL = (() => {
@@ -1124,12 +1115,10 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
     }));
   }
 
-  if (productId === 'signal-strength' || productId === 'signal-strength-shorts') {
-    const prefix = productId === 'signal-strength-shorts' ? 'signal_strength_short' : 'signal_strength';
-    const label = productId === 'signal-strength-shorts' ? 'Signal Strength Shorts' : 'Signal Strength';
+  if (productId === 'signal-strength') {
     [
-      ['added', `${prefix}_added`, 'ADDED'],
-      ['removed', `${prefix}_removed`, 'REMOVED'],
+      ['added', 'signal_strength_added', 'ADDED'],
+      ['removed', 'signal_strength_removed', 'REMOVED'],
     ].forEach(([field, kind, direction]) => {
       asArray(data[field]).forEach((entry) => {
         const ticker = extractTicker(entry);
@@ -1139,7 +1128,7 @@ function extractSnapshotReferences(snapshot, requestedSymbols, qualityStatus, {
           productId,
           kind,
           direction,
-          excerpt: `${ticker} ${direction.toLowerCase()} ${direction === 'ADDED' ? 'to' : 'from'} ${label}`,
+          excerpt: `${ticker} ${direction.toLowerCase()} ${direction === 'ADDED' ? 'to' : 'from'} Signal Strength`,
           ticker,
           requestedSymbols,
           qualityStatus,
@@ -1319,7 +1308,6 @@ function decisionInputs({
       decisionEligible: false,
     },
     signalStrength: unavailableDecision('no-explicit-signal-strength-event'),
-    signalStrengthShorts: unavailableDecision('no-explicit-signal-strength-shorts-event'),
   };
 
   const riskTrusted = (
@@ -1443,11 +1431,11 @@ function decisionInputs({
     decision.trade = { status: 'available', ...selected, reason: null };
   }
 
-  for (const [productId, field] of [['signal-strength', 'signalStrength'], ['signal-strength-shorts', 'signalStrengthShorts']]) {
-    const kinds = SIGNAL_STRENGTH_KINDS[productId];
+  for (const [productId, field] of [['signal-strength', 'signalStrength']]) {
+    const kinds = SIGNAL_STRENGTH_KINDS;
     const signalReferences = references.filter((reference) => (
       researchProjectionVerified &&
-      SIGNAL_STRENGTH_SOURCE_PRODUCTS[productId].includes(reference.productId) &&
+      reference.productId === productId &&
       reference.marketDate === marketDate &&
       productsById[reference.productId] === 'indexed' &&
       reference.qualityStatus === 'indexed' &&
@@ -1582,11 +1570,11 @@ function buildLastVerifiedDecision({
     }
   }
 
-  for (const [productId, field] of [['signal-strength', 'signalStrength'], ['signal-strength-shorts', 'signalStrengthShorts']]) {
-    const kinds = SIGNAL_STRENGTH_KINDS[productId];
+  for (const [productId, field] of [['signal-strength', 'signalStrength']]) {
+    const kinds = SIGNAL_STRENGTH_KINDS;
     const signalReferences = dates.flatMap(referencesForDate)
       .filter((reference) => (
-        SIGNAL_STRENGTH_SOURCE_PRODUCTS[productId].includes(reference.productId)
+        reference.productId === productId
         && verifiedQuality.has(reference.qualityStatus)
         && ['direct', 'direct_alias'].includes(reference.matchType)
         && Object.hasOwn(kinds, reference.kind)
@@ -1685,14 +1673,15 @@ function buildSecurityIntelligence({
   const normalizedHistoryDays = Math.max(0, Math.min(MAX_HISTORY_DAYS, Number(historyDays) || 0));
   const dates = marketDateSequence(marketDate, normalizedHistoryDays);
   const dateSet = new Set(dates);
-  const filteredManifests = asArray(productManifests).filter((item) => dateSet.has(item?.marketDate));
+  const filteredManifests = asArray(productManifests)
+    .filter((item) => dateSet.has(item?.marketDate) && !isRetiredProductId(manifestProductId(item)));
   const filteredSnapshots = filterSourceQualityRevisions(
-    asArray(snapshots).filter((item) => dateSet.has(item?.date)),
+    asArray(snapshots).filter((item) => dateSet.has(item?.date) && !isRetiredProductId(productIdForSnapshot(item))),
     filteredManifests,
     { snapshots: true },
   );
   const filteredEvents = filterSourceQualityRevisions(
-    asArray(entityEvents).filter((item) => dateSet.has(item?.marketDate)),
+    asArray(entityEvents).filter((item) => dateSet.has(item?.marketDate) && !isRetiredProductId(productIdForEvent(item))),
     filteredManifests,
   );
   const products = productCoverage({
@@ -1780,6 +1769,7 @@ function buildSecurityIntelligence({
   ]));
 
   filteredEvents.forEach((event) => {
+    if (isRetiredShortListEvent(event)) return;
     const entity = eventEntity(event);
     const productId = productIdForEvent(event);
     const qualityStatus = evidenceQualityStatus(event.marketDate, productId);

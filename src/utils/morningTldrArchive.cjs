@@ -8,7 +8,6 @@ const TLDR_ARCHIVE_PRODUCT_IDS = [
   'the-call',
   'the-macro-show',
   'signal-strength',
-  'signal-strength-shorts',
 ];
 
 const DEFAULT_VISIBLE_DAYS = 10;

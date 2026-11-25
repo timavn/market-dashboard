@@ -1,17 +1,18 @@
 import React from 'react';
 
-// RR(low;high;price;decimals;unit[;acTrade;acTrend;approx;dots;product]) — emitted by the setup board renderer
+// RR(low;high;price;decimals;unit[;acTrade;acTrend;approx;dots;product][;@roll]) — emitted by the setup board renderer
 // (scripts/analyst_sidecar/prediction_setup_board.py). Price may be empty when withheld; boards with the
-// morning's research add the Alpha Code, whose levels are marked on the bar when dots is 1.
+// morning's research add the Alpha Code, whose levels are marked on the bar when dots is 1. @roll: the price is the
+// contract month trading while the range is still on the expiring one, so it is shown but given no position.
 const NUMBER = '(-?\\d+(?:\\.\\d+)?)';
-const RANGE_TOKEN = new RegExp(`^RR\\(${NUMBER};${NUMBER};${NUMBER}?;(\\d);(%?)(?:;${NUMBER}?;${NUMBER}?;([01]);([01]);([^;()]*))?\\)$`);
+const RANGE_TOKEN = new RegExp(`^RR\\(${NUMBER};${NUMBER};${NUMBER}?;(\\d);(%?)(?:;${NUMBER}?;${NUMBER}?;([01]);([01]);([^;()]*))?(;@roll)?\\)$`);
 
 export function parsePredictionRange(value) {
   const match = String(value || '').trim().match(RANGE_TOKEN);
   if (!match) return null;
-  const [, low, high, price, decimals, unit, acTrade, acTrend, approximate, dots, product] = match;
+  const [, low, high, price, decimals, unit, acTrade, acTrend, approximate, dots, product, roll] = match;
   const range = { low: Number(low), high: Number(high), price: price === undefined ? null : Number(price),
-    decimals: Number(decimals), unit };
+    decimals: Number(decimals), unit, ...(roll ? { offContract: true } : {}) };
   if (approximate !== undefined) {
     range.alphaCode = { trade: acTrade === undefined ? null : Number(acTrade), trend: acTrend === undefined ? null : Number(acTrend),
       approximate: approximate === '1', dots: dots === '1', product: product.trim() };
@@ -25,13 +26,13 @@ const alphaLevel = (value, unit) => (unit === '%' ? value.toFixed(2)
 export const alphaCodeLevels = ({ trade, trend, approximate }, unit) => (trade === null && trend === null ? 'N/A' : [trade, trend]
   .map(value => (value === null ? '—' : `${approximate ? '~' : ''}${alphaLevel(value, unit)}`)).join('/'));
 
-export function predictionRangeLabel({ low, high, price, decimals, unit, alphaCode }) {
+export function predictionRangeLabel({ low, high, price, decimals, unit, alphaCode, offContract }) {
   const format = value => `${value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${unit}`;
   const exact = price === null ? null : ((price - low) / (high - low)) * 100;
-  const position = exact === null ? null : Math.round(exact);
+  const position = exact === null || offContract ? null : Math.round(exact);
   const alpha = alphaCode ? ` · Alpha Code ${alphaCodeLevels(alphaCode, unit)} (Trade/Trend)${alphaCode.product ? ` · ${alphaCode.product}` : ''}` : '';
   return { format, exact, position,
-    text: `${price === null ? 'Price withheld' : `Price ${format(price)}`} · Risk Range ${format(low)}–${format(high)}${position === null ? '' : ` · ${position}%`}${alpha}` };
+    text: `${price === null ? 'Price withheld' : `Price ${format(price)}${offContract ? ' (contract month trading; the range is on the expiring month)' : ''}`} · Risk Range ${format(low)}–${format(high)}${position === null ? '' : ` · ${position}%`}${alpha}` };
 }
 
 // Position reads green in the top third (66%+), red in the bottom third (33% and below), ink between.
@@ -39,7 +40,7 @@ const positionTone = position => position === null ? '' : position >= 66 ? ' is-
 
 /** One-line price-in-range bar with bottom/top third levels and the Alpha Code in its bottom-left corner. */
 export default function AnalystPredictionRangeBar({ range }) {
-  const { low, high, price, unit, alphaCode } = range;
+  const { low, high, price, unit, alphaCode, offContract } = range;
   const { format, exact, position, text } = predictionRangeLabel(range);
   // Every bar keeps its Alpha Code corner; a market with no published code reads AC N/A.
   const alphaLevels = alphaCode ? alphaCodeLevels(alphaCode, unit) : 'N/A';
@@ -64,7 +65,7 @@ export default function AnalystPredictionRangeBar({ range }) {
       <span className="analyst-range-bar__level analyst-range-bar__level--bottom">{format(low + third)}</span>
       <span className="analyst-range-bar__level analyst-range-bar__level--top">{format(low + 2 * third)}</span>
       {alphaMarks.map((left, index) => <span key={index} className="analyst-range-bar__alpha-dot" style={{ left: `${left}%` }} />)}
-      {x !== null && <span className={`analyst-range-bar__dot${below ? ' is-below' : above ? ' is-above' : ''}`} style={{ left: `${x}%` }} />}
+      {x !== null && <span className={`analyst-range-bar__dot${offContract ? ' is-off' : below ? ' is-below' : above ? ' is-above' : ''}`} style={{ left: `${x}%` }} />}
     </div>
     <span className="analyst-range-bar__end analyst-range-bar__end--high">{format(high)}</span>
     <span className={`analyst-range-bar__position${positionTone(position)}`}>{position === null ? '—' : `${position}%`}</span>

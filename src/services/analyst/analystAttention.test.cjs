@@ -157,7 +157,7 @@ test('an acquiring review defers at most two scan cycles before the scan runs', 
 });
 
 test('the stance book folds the journal, backfills its history once, and saves only on change', async () => {
-  const removal = { entityId: 'GIII', entityType: 'ticker', productKey: 'signal-strength', eventType: 'signal_strength_short_removed', fieldPath: 'data.shorts.removed[0]',
+  const removal = { entityId: 'GIII', entityType: 'ticker', productKey: 'signal-strength', eventType: 'signal_strength_removed', fieldPath: 'data.removed[0]',
     excerpt: 'GIII', marketDate: '2026-09-01', publishedAt: '2026-09-01T00:00:00+00:00', qualityStatus: 'validated', sourceUrl: 'https://app.hedgeye.com/feed_items/1' };
   let loads = 0;
   let seen;
@@ -169,7 +169,7 @@ test('the stance book folds the journal, backfills its history once, and saves o
   const call = f.settings.set.bind(f.settings);
   f.settings.set = (key, value) => { if (key === 'stance-book-v1') writes += 1; return call(key, value); };
   await f.subject.start();
-  assert.equal(seen.tickers.GIII['signal-strength:short'].stance, 'EXIT_SHORT');
+  assert.equal(seen.tickers.GIII['signal-strength:long'].stance, 'EXIT_LONG');
   assert.equal(seen.backfill.from, '2026-06-25');
   f.advance();
   await f.subject.start();

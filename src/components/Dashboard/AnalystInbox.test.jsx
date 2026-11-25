@@ -105,6 +105,22 @@ test('the Inbox groups cards as red Alerts, yellow Signals and blue Actions', ()
   expect(screen.queryByRole('heading', { name: 'IB Gateway' })).not.toBeInTheDocument();
 });
 
+test('a position held past the alert that closed its view sits in a blue Untracked section, uncovered names first', () => {
+  const at = new Date().toISOString();
+  const held = (id, subject, priority, text) => attention(id, { kind: 'portfolio', priority, action: 'untracked', holdingsVerified: true, holdingsVerifiedAt: at,
+    quantity: -10, currentHolding: currentHolding(at, 1.69), presentation: { subject, date: '2026-11-20', rows: [{ label: 'Current position', text: 'Short' },
+      { label: 'Position size', text: '1.69%' }, { label: 'Action', text }, { label: 'Untracked', text: '4 days' }] } });
+  const idea = attention('be', { kind: 'opportunity', priority: 1, presentation: { subject: 'BE', date: '2026-11-21', rows: [{ label: 'Action', text: 'New Short idea → review' }] } });
+  render(<AnalystInbox findings={[held('idx', 'IDX', 2, 'Real-Time Alert Cover Nov 16 → still Short on ETF Pro.'),
+    held('odfl', 'ODFL', 1, 'Real-Time Alert Cover Nov 20 → no product view; watch closer.'), idea]} />);
+  expect(screen.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Actions', 'BE', 'Untracked', 'ODFL', 'IDX']);
+  expect(screen.getByRole('heading', { name: 'Untracked' })).toHaveClass('analyst-inbox-heading--untracked');
+  const card = screen.getByRole('heading', { name: 'ODFL' }).closest('article');
+  expect(card.dataset.category).toBe('untracked');
+  expect(card).not.toHaveClass('is-action-required');
+  expect(card).toHaveTextContent('Action: Real-Time Alert Cover Nov 20 → no product view; watch closer.');
+  expect(card).toHaveTextContent('Untracked: 4 days');
+});
 test('orders urgent concerns before newer ideas and colors directional words and Quad labels', () => {
   const idea = attention('idea', { kind: 'opportunity', priority: 1, publicationTime: '2026-09-22T16:30:00Z',
     presentation: { subject: 'ABC', date: '2026-09-22', rows: [

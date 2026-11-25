@@ -111,7 +111,6 @@ const RESEARCH_FALLBACK_PRODUCTS = Object.freeze([
   ['portfolio-solutions', 'Portfolio Solutions', 'event_driven'],
   ['momo-tracker', 'MOMO Tracker', 'event_driven'],
   ['signal-strength', 'Signal Strength', 'event_driven'],
-  ['signal-strength-shorts', 'Signal Strength Shorts', 'event_driven'],
   ['real-time-alert', 'Real-Time Alerts', 'event_driven'],
   ['the-macro-show', 'Macro Show', 'event_driven'],
   ['the-call', 'The Call', 'event_driven'],
@@ -249,7 +248,7 @@ const metricToneForValue = (value) => {
   if (['ADDED', 'BULLISH', 'BUY', 'FULL', 'LONG', 'POSITIVE'].includes(normalized)) {
     return 'is-positive';
   }
-  if (['BEARISH', 'PARTIAL', 'REMOVED', 'SELL', 'SHORT', 'SHORTS ADDED', 'SHORTS LISTED', 'UNAVAILABLE'].includes(normalized)) {
+  if (['BEARISH', 'PARTIAL', 'REMOVED', 'SELL', 'SHORT', 'UNAVAILABLE'].includes(normalized)) {
     return 'is-negative';
   }
   if (['HISTORICAL', 'REFERENCE'].includes(normalized)) {
@@ -1681,7 +1680,6 @@ const PortfolioBreakdown = ({
     const trend = decision.trend || entry?.trend;
     const riskRange = decision.riskRange || entry?.riskRange;
     const signalStrength = decision.signalStrength || entry?.signalStrength;
-    const signalStrengthShorts = decision.signalStrengthShorts || entry?.signalStrengthShorts;
     const supplementalRange = entry?.supplementalRange || entry?.earlyLookRange;
     const currentReferences = getCurrentReferences(entry);
     const historicalReferences = getHistoricalReferences(entry);
@@ -1758,20 +1756,10 @@ const PortfolioBreakdown = ({
       && isVerifiedHistoricalDecisionDatum(lastVerifiedDecision.signalStrength, 'signalStrength')
       ? lastVerifiedDecision.signalStrength
       : null;
-    // Signal Strength Shorts is its own list; it fills the cell only when the long list has no reading.
-    const currentVerifiedSignalStrengthShorts = researchEnvelopeIsCurrent
-      && isVerifiedCurrentDecisionDatum(signalStrengthShorts, researchMarketDate, 'signalStrength') ? signalStrengthShorts : null;
-    const historicalVerifiedSignalStrengthShorts = !currentVerifiedSignalStrengthShorts
-      && isVerifiedHistoricalDecisionDatum(lastVerifiedDecision.signalStrengthShorts, 'signalStrength')
-      ? lastVerifiedDecision.signalStrengthShorts
-      : null;
     const verifiedTrade = currentVerifiedTrade || historicalVerifiedTrade;
     const verifiedTrend = currentVerifiedTrend || portfolioSolutionsDatum || historicalVerifiedTrend;
     const verifiedRiskRange = currentVerifiedRiskRange || historicalVerifiedRiskRange;
-    const verifiedLongSignalStrength = currentVerifiedSignalStrength || historicalVerifiedSignalStrength;
-    const verifiedSignalStrength = verifiedLongSignalStrength
-      || currentVerifiedSignalStrengthShorts
-      || historicalVerifiedSignalStrengthShorts;
+    const verifiedSignalStrength = currentVerifiedSignalStrength || historicalVerifiedSignalStrength;
     const tradeIsReference = Boolean(
       historicalVerifiedTrade
       || (currentVerifiedTrade && researchEnvelopeIsRetained),
@@ -1781,9 +1769,9 @@ const PortfolioBreakdown = ({
       || (!currentVerifiedTrend && portfolioSolutionsDatum)
       || (currentVerifiedTrend && researchEnvelopeIsRetained),
     );
-    const signalIsReference = verifiedLongSignalStrength
-      ? Boolean(historicalVerifiedSignalStrength || (currentVerifiedSignalStrength && researchEnvelopeIsRetained))
-      : Boolean(historicalVerifiedSignalStrengthShorts || (currentVerifiedSignalStrengthShorts && researchEnvelopeIsRetained));
+    const signalIsReference = Boolean(
+      historicalVerifiedSignalStrength || (currentVerifiedSignalStrength && researchEnvelopeIsRetained)
+    );
     const verifiedSupplementalRange = researchEnvelopeIsCurrent
       && supplementalRange
       && typeof supplementalRange === 'object'
@@ -1820,8 +1808,7 @@ const PortfolioBreakdown = ({
     const trendValue = normalizeResearchBias(
       researchValue(verifiedTrend, ['value', 'trend', 'signal']),
     );
-    const signalReading = researchValue(verifiedSignalStrength, ['value', 'action', 'change', 'state']);
-    const signalValue = signalReading && !verifiedLongSignalStrength ? `SHORTS ${signalReading}` : signalReading;
+    const signalValue = researchValue(verifiedSignalStrength, ['value', 'action', 'change', 'state']);
     const quadClassification = getSecurityQuadPlaybookRanking(holding);
     const quadRanking = quadClassification.ranking;
     const primaryRangeProduct = canonicalSecurity?.products?.['risk-ranges'];

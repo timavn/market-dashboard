@@ -361,3 +361,25 @@ test('with books, ladders and setup lines carry the bet and are priced on the fi
   assert.ok(fine.fillable > 0);
   for (const line of fine.lines.filter((item) => !item.illiquid)) assert.ok(Math.abs(line.ask - line.no.fill.avg) < 1e-12);
 });
+
+test('a daily ladder listed away from the price gives way to the weekly event\'s ladder', () => {
+  const daily = 'KXNATGASD-26NOV1317';
+  const weekly = 'KXNATGASW-26NOV1317B';
+  // Every daily line near-certain: none crosses even odds.
+  const off = ladder({ event: daily, centre: 40 }).map((market) => ({ ...market, yes_bid_dollars: '0.9700', yes_ask_dollars: '1.0000',
+    no_bid_dollars: '0.0000', no_ask_dollars: '0.0300' }));
+  const row = { id: 'natgas', label: 'Natural Gas', group: 'oil', events: [{ eventTicker: daily }], weeklyEvent: { eventTicker: weekly },
+    price: { value: 60 }, position: null, setup: { side: null, reason: 'Risk Range is on the December contract; January is trading' } };
+  const run = (marketsByEvent) => applyLineMonitor({ rows: [{ ...row }] }, { balance: null, positions: null, marketsByEvent, now: NOW }).rows[0].kalshiLines;
+  const swapped = run(new Map([[daily, off], [weekly, ladder({ event: weekly, centre: 60 })]]));
+  assert.deepEqual([swapped.event, swapped.weekly], [weekly, true]);
+  assert.ok(Math.abs(swapped.summary.centre - 60) < 0.01);
+  assert.equal(swapped.lines.lines.length, 9);
+  // No weekly ladder, or one just as far from the price: the daily stays.
+  for (const markets of [new Map([[daily, off]]), new Map([[daily, off], [weekly, off]])]) {
+    const kept = run(markets);
+    assert.deepEqual([kept.event, kept.weekly, kept.summary.centre], [daily, undefined, null]);
+  }
+  // A daily ladder that crosses even odds is never swapped.
+  assert.equal(run(new Map([[daily, ladder({ event: daily, centre: 60 })], [weekly, ladder({ event: weekly, centre: 61 })]])).event, daily);
+});

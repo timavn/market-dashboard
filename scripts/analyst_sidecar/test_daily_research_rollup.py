@@ -61,6 +61,12 @@ class DailyResearchRollupTests(unittest.TestCase):
         self.assertEqual(report["citations"][0]["publishedAt"], f"{PRIOR}T12:00:00+00:00")
         self.assertEqual(raw, original)
 
+    def test_a_captured_signal_strength_shorts_edition_is_never_read(self):
+        shorts = snapshot("signal-strength-shorts", data={"added": ["ZZZ"], "removed": ["YYY"]})
+        raw = evidence({"signal-strength-shorts": shorts, "signalstrengthshorts": shorts}, {"signal-strength-shorts": shorts})
+        self.assertEqual(accepted_snapshots(raw, as_of=CUTOFF), {})
+        self.assertEqual(build_daily_research_rollup(raw, as_of=CUTOFF)["sections"], [])
+
     def test_latest_signal_strength_respects_capture_cutoff_product_identity_and_current_precedence(self):
         prior = snapshot("signal-strength", day=PRIOR, data={"added": ["AAA"]})
         current = snapshot("signal-strength", data={"added": ["BBB"]})
@@ -376,6 +382,18 @@ VanEck Oil Services ETF (OIH) = Bearish (6/4/2026)
         self.assertTrue(all(row["citationIds"] for row in trend["rows"] + ranges["rows"]))
         self.assertNotIn("GLD", body(result))
         self.assertEqual(now, original)
+
+    def test_a_company_named_mid_sentence_is_only_its_name_not_the_sentence(self):
+        from daily_research_rollup import _published_security_identities
+        body = ("HEDGEYE POSITIONS\n\nLONGS: ISRG , UNH , ONON , BBWI\n\nHealth Care\n\n"
+                "Hospital Volumes are tracking robustly, with adjusted admissions for Tenet Healthcare (THC) , "
+                "and the new utilization tracker for Intuitive Surgical (ISRG) ; the broader view is negative.\n\n"
+                "Medicare Advantage Mandatory Models announced Friday require plan contractors such as "
+                "UnitedHealth Group (UNH) , and Oscar Health (OSCR) to comply.\n\n"
+                "The main upside risk is On Holding (ONON) expanding; Bath & Body Works, Inc. (BBWI) reports.")
+        names = _published_security_identities(snapshot("the-call", body=body))
+        self.assertEqual(names, {"ISRG": "Intuitive Surgical", "UNH": "UnitedHealth Group", "ONON": "On Holding",
+                                 "BBWI": "Bath & Body Works, Inc."})
 
     def test_all_security_tables_use_individual_ticker_and_name_rows(self):
         call = snapshot("the-call", body="HEDGEYE POSITIONS\n\nLONGS: Alpha Fund (AAA), Beta Fund (BBB)\n\nSHORTS: Gamma Fund (CCC)")

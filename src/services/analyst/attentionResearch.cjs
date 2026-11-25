@@ -1,7 +1,7 @@
 const { createHash } = require('node:crypto');
 const { evaluatePortfolioRule } = require('../../utils/portfolioReviewRules.js');
 const { sourceActionEvidence, describeAnalystFinding } = require('../../utils/analystFindingPresentation.cjs');
-const { STANCE_PRODUCTS, foldStanceEvents, scanHoldings, stanceCall } = require('./stanceBook.cjs');
+const { STANCE_PRODUCTS, retiredStanceEvent, foldStanceEvents, scanHoldings, stanceCall } = require('./stanceBook.cjs');
 const { MESSAGE_ID, TERM } = require('../../utils/sourceEmailClip.cjs');
 const { alphaCodeVerdict, brokenAlphaCodeLine } = require('./alphaCodeWatch.cjs');
 const { sessionsBetween } = require('./marketLevels.cjs');
@@ -447,9 +447,6 @@ const OPENS = { ADD: null, BUY: 'Long', 'BUY-SOME': 'Long', 'INITIATE-LONG': 'Lo
 // unlike a generic Sell headline they need no report prose to establish scope.
 function typedChange(event, evidence) {
   if (event.eventType === 'signal_strength_removed') return { action: 'REMOVE', side: 'Long' }; // The main list is bullish signals only.
-  // Signal Strength Shorts (since 2026-10-15) is its own bearish list.
-  if (event.eventType === 'signal_strength_short_added') return { action: 'OPEN', side: 'Short' };
-  if (event.eventType === 'signal_strength_short_removed') return { action: 'REMOVE', side: 'Short' };
   let source = {};
   try {
     const parsed = JSON.parse(event.excerpt);
@@ -506,7 +503,7 @@ function sourceActionFindings(context, now, verified, conflicts, sentenceMemo) {
   const latest = new Map();
   for (const event of context.events || []) {
     // Signal Strength, ETF Pro and Real-Time Alerts are standing stances in the stance book.
-    if (STANCE_PRODUCTS.has(event.productKey)) continue;
+    if (STANCE_PRODUCTS.has(event.productKey) || retiredStanceEvent(event)) continue;
     const instruction = sourceInstruction(event, now);
     // A generic alert headline cannot establish full versus partial action.
     // Require its exact report body/subject or an explicit partial typed action.
@@ -789,7 +786,7 @@ function accountFindings(context, now) {
   }
   return { findings: output, complete: fresh && account.historyVerified === true };
 }
-const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'signal-strength-shorts': 'Signal Strength Shorts', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
+const STANCE_PRODUCT_NAMES = { 'signal-strength': 'Signal Strength', 'etf-pro': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 const monthDay = date => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const amount = value => String(Math.round(value * 100) / 100);
 // Where the position is, where the calls take it, and the order between them.
@@ -808,6 +805,31 @@ function stanceOrder(context, symbol, state, side, partial, now) {
     order: { verb, quantity: Math.round((quantity - remaining) * 100) / 100, upTo: true, note: `stays ${side.toLowerCase()}` } };
 }
 const orderLine = ({ order }) => `${order.verb} ${order.quantity === null ? 'some' : `${amount(order.quantity)} ${order.quantity === 1 ? 'share' : 'shares'}`}`;
+// The three most recent product calls on a held security, either way: the standing ones and the book's
+// earlier calls, one row per product, action and day.
+const latestCalls = ({ opposing, supporting, history }) => [...new Map([...opposing, ...supporting, ...(history || [])].map(stanceCall)
+  .map(call => [[call.product, call.action, call.date].join('|'), call])).values()]
+  .sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product)).slice(0, 3);
+// A position held past the alert that closed Hedgeye's view of it. Another product still listing the held side
+// keeps it covered; with none it has no product view at all and leads the list.
+function untrackedFinding(context, now, scanned, state, sourceLinks) {
+  const { symbol, side, opposing, supporting } = scanned;
+  const exit = opposing[0];
+  const closed = stanceCall(exit);
+  const calls = latestCalls(scanned);
+  const held = side === 'LONG' ? 'Long' : 'Short';
+  const listed = [...new Set(supporting.map(item => stanceCall(item).product).filter(Boolean))];
+  const daysOut = Math.max(0, Math.round((Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`) - Date.parse(`${exit.date}T00:00:00Z`)) / 86400000));
+  const line = Object.values(context.riskRangeWatch?.lines || {}).find(item => item.symbol === symbol && item.price !== null);
+  const action = `Real-Time Alert ${titled(closed.action)} ${monthDay(exit.date)} → ${listed.length ? `still ${held} on ${listed.join(', ')}` : 'no product view; watch closer'}.`;
+  const rows = [...positionRows(state), row('Action', action),
+    row('Untracked', `${daysOut} ${daysOut === 1 ? 'day' : 'days'}`), ...calls.map(call => row(call.product, `${call.action} ${monthDay(call.date)} · ${call.bias}`)),
+    ...(line ? [riskRangeRow(context, line)] : []), ...durationRows(context, symbol, now)];
+  const result = finding({ key: [symbol, 'untracked', side], material: [side, exit.date, exit.stance, listed], symbol, kind: 'portfolio', priority: listed.length ? 2 : 1,
+    action: 'untracked', publishedAt: exit.at, rows, sourceLinks, state });
+  result.presentation.untracked = { side, closedBy: closed, since: exit.date, listed, calls };
+  return result;
+}
 // The whole verified book against every product's standing stance. Unlike a
 // source event, a stance holds until the product changes it, so the first
 // verified read after Gateway connects sees every contradiction at once.
@@ -821,6 +843,15 @@ function stanceFindings(context, now, verified) {
     const state = holdingState(context.holdings, symbol, true, now);
     if (!state.quantity) continue;
     const partial = opposing.every(item => item.partial);
+    const sourceLinks = opposing.map(item => ({ label: STANCE_PRODUCT_NAMES[item.product], citation: { id: `cite_${hash([item.sourceUri, item.slot, item.date, item.stance]).slice(0, 24)}`,
+      title: `${STANCE_PRODUCT_NAMES[item.product]}: ${symbol} ${item.label}`, product: item.product, publicationDate: item.date, sourceUri: item.sourceUri, excerpt: item.headline || `${symbol} ${item.label}`,
+      ...emailClip(item.sourceMessageId, symbol) } }));
+    // A full Real-Time Alert sell or cover is the end of Hedgeye's view, not an instruction against the position
+    // (user-specified 2026-11-24): a position still held past it joins the Untracked list in blue.
+    if (opposing.every(item => item.slot === 'real-time-alert' && item.stance.startsWith('EXIT_'))) {
+      output.push(untrackedFinding(context, now, scanned, state, sourceLinks));
+      continue;
+    }
     const key = [symbol, 'stance', scanned.side];
     // A Sell/Cover-SOME is acted on once the position shrinks from where it stood when first raised.
     const latest = opposing[0];
@@ -828,19 +859,12 @@ function stanceFindings(context, now, verified) {
       && !['resolved', 'superseded'].includes(item.state));
     const baseline = previous?.stanceBaseline?.date === latest.date ? previous.stanceBaseline : { date: latest.date, quantity: state.quantity };
     if (partial && Math.abs(state.quantity) < Math.abs(baseline.quantity)) continue;
-    // The three most recent product calls on this security, either way: the standing ones and the book's
-    // earlier calls, one row per product, action and day.
-    const calls = [...new Map([...opposing, ...supporting, ...(scanned.history || [])].map(stanceCall)
-      .map(call => [[call.product, call.action, call.date].join('|'), call])).values()]
-      .sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product)).slice(0, 3);
+    const calls = latestCalls(scanned);
     const plan = stanceOrder(context, symbol, state, scanned.side, partial, now);
     const rows = [...positionRows(state),
       ...calls.map(call => row(call.product, `${call.action} ${monthDay(call.date)} · ${call.bias}`)),
       { ...row('Order', orderLine(plan)), requiresFreshHoldings: true },
       ...durationRows(context, symbol, now)];
-    const sourceLinks = opposing.map(item => ({ label: STANCE_PRODUCT_NAMES[item.product], citation: { id: `cite_${hash([item.sourceUri, item.slot, item.date, item.stance]).slice(0, 24)}`,
-      title: `${STANCE_PRODUCT_NAMES[item.product]}: ${symbol} ${item.label}`, product: item.product, publicationDate: item.date, sourceUri: item.sourceUri, excerpt: item.headline || `${symbol} ${item.label}`,
-      ...emailClip(item.sourceMessageId, symbol) } }));
     const result = finding({ key, material: [scanned.side, opposing.map(item => [item.slot, item.stance, item.date])],
       symbol, kind: 'portfolio', priority: 0, severity: ACTION_REQUIRED, action: plan.verdict,
       publishedAt: opposing.map(item => item.at).sort().at(-1), rows, sourceLinks, state: { ...state, stanceBaseline: baseline } });
@@ -865,18 +889,19 @@ const lowerFirst = value => value[0].toLowerCase() + value.slice(1);
 const rangeSource = line => (line.cadence === 'weekly' ? `${line.source}; ${monthDay(line.asOf)}` : line.source || 'Risk Ranges');
 const rangeCitation = line => [{ label: rangeSource(line), citation: { id: `cite_${hash(['risk-range', line.symbol, line.low, line.high, line.asOf]).slice(0, 28)}`,
   title: `${line.source || 'Risk Ranges'}: ${line.symbol} Risk Range`, product: line.sourceId || 'risk-ranges', publicationDate: line.asOf, excerpt: `${line.symbol} ${rangeFigure(line.low)}–${rangeFigure(line.high)}`, ...emailClip(line.messageId, line.symbol) } }];
+// The row's text stays for the Analyst's context; the card draws the bar from `range`.
+function riskRangeRow(context, line) {
+  const printed = alphaLines(context.alphaCodeWatch, line.symbol);
+  const levelOf = duration => printed.find(item => item.duration === duration)?.level ?? null;
+  return { ...row('Risk Range', `${rangeFigure(line.low)}–${rangeFigure(line.high)} · ${rangeSource(line)}`),
+    range: { low: line.low, high: line.high, price: line.price, decimals: 2, unit: '',
+      ...(printed.length ? { alphaCode: { trade: levelOf('trade'), trend: levelOf('trend'), approximate: printed.some(item => item.approximate), dots: true, product: printed[0].productLabel || '' } } : {}) } };
+}
 function riskRangeFindings(context, now, verified) {
   const watch = context.riskRangeWatch;
   if (!verified || !watch) return [];
   const output = [];
-  // The row's text stays for the Analyst's context; the card draws the bar from `range`.
-  const rangeRow = line => {
-    const printed = alphaLines(context.alphaCodeWatch, line.symbol);
-    const levelOf = duration => printed.find(item => item.duration === duration)?.level ?? null;
-    return { ...row('Risk Range', `${rangeFigure(line.low)}–${rangeFigure(line.high)} · ${rangeSource(line)}`),
-      range: { low: line.low, high: line.high, price: line.price, decimals: 2, unit: '',
-        ...(printed.length ? { alphaCode: { trade: levelOf('trade'), trend: levelOf('trend'), approximate: printed.some(item => item.approximate), dots: true, product: printed[0].productLabel || '' } } : {}) } };
-  };
+  const rangeRow = line => riskRangeRow(context, line);
   // The security's own MIN / MAX, from the same sizing rule the Above MAX cards use.
   const sizeLimits = (symbol, state) => {
     const held = (context.holdings.ruleHoldings || []).find(candidate => symbolOf(candidate.holding) === symbol);

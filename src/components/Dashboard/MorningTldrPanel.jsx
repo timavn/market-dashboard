@@ -466,16 +466,15 @@ const splitEarlyLookLevels = (section, hasStructuredRows) => {
   };
 };
 
-// A short list's addition is bearish and its removal neutral, so its tones differ.
-const ChangeColumns = ({ added = [], removed = [], moved = [], addedTone = 'positive', removedTone = 'negative' }) => {
+const ChangeColumns = ({ added = [], removed = [], moved = [] }) => {
   const hasChanges = added.length || removed.length || moved.length;
   if (!hasChanges) return <p className="process-wiki__metadata">No explicit changes in the prior comparison.</p>;
   return (
     <dl className="tldr-wiki-change-list">
-      <dt className={`tldr-wiki-position-label tldr-wiki-position-label--${addedTone}`}>Added</dt>
-      <dd><PositionPills values={added.map((item) => item.value || item)} tone={addedTone} /></dd>
-      <dt className={`tldr-wiki-position-label tldr-wiki-position-label--${removedTone}`}>Removed</dt>
-      <dd><PositionPills values={removed.map((item) => item.value || item)} tone={removedTone} /></dd>
+      <dt className="tldr-wiki-position-label tldr-wiki-position-label--positive">Added</dt>
+      <dd><PositionPills values={added.map((item) => item.value || item)} tone="positive" /></dd>
+      <dt className="tldr-wiki-position-label tldr-wiki-position-label--negative">Removed</dt>
+      <dd><PositionPills values={removed.map((item) => item.value || item)} tone="negative" /></dd>
       {moved.length > 0 && (
         <>
           <dt>Side changes</dt>
@@ -502,24 +501,23 @@ const signalPercent = (value) => {
   return `${parsed > 0 ? '+' : ''}${parsed.toFixed(1)}%`;
 };
 
-// A short's published Total Return is its gain, not the price change since the signal.
-const SignalStrengthTable = ({ stocks = [], shorts = false }) => (
+const SignalStrengthTable = ({ stocks = [] }) => (
   <div className="tldr-wiki-table-scroll">
     <table
       className="wp-table tldr-wiki-table tldr-wiki-signal-table"
-      aria-label={shorts ? 'Signal Strength Shorts securities' : 'Signal Strength securities'}
-      data-testid={shorts ? 'signal-strength-shorts-table' : 'signal-strength-table'}
+      aria-label="Signal Strength securities"
+      data-testid="signal-strength-table"
     >
       <thead>
         <tr>
           <th scope="col">Days On</th>
           <th scope="col">Ticker</th>
-          <th scope="col">{shorts ? 'Total Return' : '% Change Since Signal'}</th>
+          <th scope="col">% Change Since Signal</th>
         </tr>
       </thead>
       <tbody>
         {stocks.map((stock) => {
-          const percent = shorts ? stock.totalReturn : stock.percentChangeSinceSignal;
+          const percent = stock.percentChangeSinceSignal;
           const tone = percent == null || percent === 0 ? 'neutral' : percent > 0 ? 'positive' : 'negative';
           return (
             <tr key={stock.ticker} data-key={stock.ticker} data-testid={`signal-strength-row-${stock.ticker}`}>
@@ -1007,9 +1005,9 @@ const PositionSection = ({
   );
 };
 
-const SignalStrengthSection = ({ snapshot, publicationState, isCurrentDate, shorts = false }) => {
+const SignalStrengthSection = ({ snapshot, publicationState, isCurrentDate }) => {
   const changes = getSignalChanges(snapshot);
-  const label = shorts ? 'Signal Strength Shorts' : 'Signal Strength';
+  const label = 'Signal Strength';
   return (
     <>
       {!snapshot && (
@@ -1023,13 +1021,9 @@ const SignalStrengthSection = ({ snapshot, publicationState, isCurrentDate, shor
       {snapshot && (
         <>
           {(changes.added.length > 0 || changes.removed.length > 0) && (
-            <ChangeColumns
-              added={changes.added}
-              removed={changes.removed}
-              {...(shorts ? { addedTone: 'negative', removedTone: 'neutral' } : {})}
-            />
+            <ChangeColumns added={changes.added} removed={changes.removed} />
           )}
-          {changes.membershipComplete && changes.stocks.length > 0 && <SignalStrengthTable stocks={changes.stocks} shorts={shorts} />}
+          {changes.membershipComplete && changes.stocks.length > 0 && <SignalStrengthTable stocks={changes.stocks} />}
         </>
       )}
     </>
@@ -1794,12 +1788,11 @@ const MorningTldrPanel = () => {
                           isCurrentDate={selectedIsToday}
                         />
                       )}
-                      {(definition.id === 'signal-strength' || definition.id === 'signal-strength-shorts') && (
+                      {definition.id === 'signal-strength' && (
                         <SignalStrengthSection
                           snapshot={snapshot}
                           publicationState={productPublicationState}
                           isCurrentDate={selectedIsToday}
-                          shorts={definition.id === 'signal-strength-shorts'}
                         />
                       )}
                       {definition.id === 'market-structure' && (

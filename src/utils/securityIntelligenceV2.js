@@ -5,7 +5,6 @@ const PRODUCT_PRIORITY = Object.freeze([
   'bitcoin-trend-tracker',
   'momo-tracker',
   'signal-strength',
-  'signal-strength-shorts',
   'investing-ideas',
   'portfolio-solutions',
 ]);
@@ -123,7 +122,6 @@ export const getCanonicalDirection = (security) => {
   return candidates[0] || null;
 };
 
-// Signal Strength (longs) by default; pass 'signal-strength-shorts' for the Shorts list.
 export const getCanonicalSignalStrength = (security, productId = 'signal-strength') => {
   const product = getCanonicalProduct(security, productId);
   if (canonicalProductState(product) !== 'available') {

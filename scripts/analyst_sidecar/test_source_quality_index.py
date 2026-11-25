@@ -61,6 +61,19 @@ class SourceQualityIndexTests(unittest.TestCase):
                         self.assertNotIn("sourceQuality", row)
                         self.assertEqual(row["excerpt"], row["citation"]["excerpt"])
 
+    def test_retired_signal_strength_shorts_documents_stay_out_of_every_listing(self):
+        shorts = NormalizedDocument.from_payload({
+            "documentId": "shorts", "product": "signal-strength-shorts", "publicationDate": "2026-09-22",
+            "sourceUri": "s3://research/signal-strength-shorts/list.html", "text": "Signal Strength Shorts ADDING: RUT"})
+        self.index.upsert_documents([self.document("kept", "RUT valid range."), shorts])
+        products = lambda rows: {row["citation"]["product"] for row in rows}
+        self.assertEqual(products(self.index.search("RUT", limit=20)), {"early-look"})
+        self.assertEqual(self.index.search("RUT", product="signal-strength-shorts"), [])
+        self.assertEqual(products(self.index.excerpts_for_publication_date("2026-09-22")), {"early-look"})
+        self.assertEqual(set(self.index.latest_by_product()), {"early-look"})
+        self.assertEqual({row["product"] for row in self.index.recent_documents_by_product()}, {"early-look"})
+        self.assertEqual([row["product"] for row in self.index.coverage_counts()["byProduct"]], ["early-look"])
+
     def test_successful_replay_without_issues_does_not_erase_source_defect(self):
         self.index.upsert_documents([self.document("annotated", "Original RUT range.", self.quality)])
         self.index.upsert_documents([self.document("replayed", "Original RUT range.", {"status": "clear", "issues": []})])

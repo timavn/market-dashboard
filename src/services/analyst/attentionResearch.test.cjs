@@ -93,14 +93,17 @@ test('source Sell while already Short is silent; Sell some preserves exact body 
   assert.deepEqual(findings[0].presentation.stance.calls, [{ product: 'Real-Time Alert', action: 'SELL SOME', date: '2026-09-22', bias: 'BULLISH' }]);
   assert.equal(findings[0].presentation.rows.some(row => /no remaining quantity/.test(row.text)), false);
 });
-test('a Real-Time Alert against a holding stands across dates until it is a month old', () => {
+test('a Real-Time Alert Sell-SOME on a holding is an alert; a full Sell is an Untracked card until it is a quarter old', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'CORN', quantity: 10 }];
   const event = sourceEvent('CORN'); event.marketDate = '2026-09-21'; event.publishedAt = '2026-09-21T12:00:00Z'; ctx.events = [event];
-  assert.equal(evaluateResearchAttention(ctx, NOW).findings[0].severity, 'action-required');
-  // A bare Sell without its report is still a published Sell against the Long.
+  // Its report says selling-SOME: a trim against the Long stays an alert.
+  assert.deepEqual([evaluateResearchAttention(ctx, NOW).findings[0].action, evaluateResearchAttention(ctx, NOW).findings[0].severity], ['trim', 'action-required']);
+  // A bare Sell without its report is a full Sell: it ends the view and the Long still held is untracked.
   ctx.events = [{ ...sourceEvent('CORN'), sourceReport: undefined }];
-  assert.equal(evaluateResearchAttention(ctx, NOW).findings[0].action, 'exit');
-  Object.assign(event, { marketDate: '2026-08-20', publishedAt: '2026-08-20T12:00:00Z' }); ctx.events = [event];
+  const [card] = evaluateResearchAttention(ctx, NOW).findings;
+  assert.deepEqual([card.action, card.severity, card.kind, card.priority], ['untracked', undefined, 'portfolio', 1]);
+  event.sourceReport = undefined;
+  Object.assign(event, { marketDate: '2026-06-20', publishedAt: '2026-06-20T12:00:00Z' }); ctx.events = [event];
   assert.equal(evaluateResearchAttention(ctx, NOW).findings.length, 0);
 });
 test('broad market commentary never becomes an Inbox finding', () => {
@@ -316,38 +319,37 @@ test('Signal Strength removals apply to held longs only', () => {
   ctx.events = [removal('NVDA'), removal('AMD')];
   assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings.map(item => item.symbol), ['NVDA']);
 });
-test('a Signal Strength Shorts addition opposes a held long; its removal exits a held short', () => {
+test('the retired Signal Strength Shorts list raises nothing against a holding', () => {
   const ctx = context(); ctx.holdings.positions = [{ symbol: 'JPM', quantity: 10 }, { symbol: 'SMCI', quantity: -5 }, { symbol: 'DECK', quantity: -5 }, { symbol: 'ZG', quantity: 5 }];
   const shorts = (symbol, eventType) => changeEvent(symbol, undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', eventType, excerpt: symbol });
   ctx.events = [shorts('JPM', 'signal_strength_short_added'), shorts('SMCI', 'signal_strength_short_added'),
     shorts('DECK', 'signal_strength_short_removed'), shorts('ZG', 'signal_strength_short_removed')];
   const findings = evaluateResearchAttention(ctx, NOW).findings;
-  assert.deepEqual(findings.map(item => [item.symbol, item.severity]).sort(), [['DECK', 'action-required'], ['JPM', 'action-required']]);
-  assert.deepEqual(findings.find(item => item.symbol === 'JPM').presentation.stance.calls, [{ product: 'Signal Strength Shorts', action: 'SHORT', date: '2026-09-22', bias: 'BEARISH' }]);
-  assert.deepEqual(findings.find(item => item.symbol === 'DECK').presentation.stance.calls, [{ product: 'Signal Strength Shorts', action: 'REMOVE', date: '2026-09-22', bias: 'NEUTRAL' }]);
+  assert.deepEqual(findings, []);
+  ctx.events = ctx.events.map(event => ({ ...event, productKey: 'signal-strength-shorts', productLabel: 'Signal Strength Shorts' }));
+  assert.deepEqual(evaluateResearchAttention(ctx, NOW).findings, []);
 });
 // The central security record (/api/security-universe identity) as the scan passes it in.
 const identityRecord = displayName => ({ identity: { status: 'available', displayName: { status: 'available', value: displayName, source: 'Yahoo Finance instrument metadata', asOf: '2026-09-22T12:00:00Z', reason: null } } });
-test('stance cards name every security from the security record, including ETF Pro, alert and removed tickers', () => {
+test('stance cards name every security from the security record, including ETF Pro and removed tickers', () => {
   const ctx = context();
-  ctx.holdings.positions = ['DRAM', 'LULU', 'COST', 'GS', 'ASTS'].map(symbol => ({ symbol, quantity: 10 }));
+  ctx.holdings.positions = ['DRAM', 'LULU', 'COST', 'GS'].map(symbol => ({ symbol, quantity: 10 }));
   const etf = { productKey: 'etf-pro', productLabel: 'ETF Pro' };
   ctx.events = [changeEvent('DRAM', 'REMOVE', 'LONG', etf),
     changeEvent('LULU', undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', eventType: 'signal_strength_removed', excerpt: 'LULU' }),
-    changeEvent('COST', 'ADD', 'SHORT', etf), changeEvent('GS', 'ADD', 'SHORT', etf),
-    changeEvent('ASTS', 'SELL', undefined, { productKey: 'real-time-alert', productLabel: 'Real-Time Alert' })];
+    changeEvent('COST', 'ADD', 'SHORT', etf), changeEvent('GS', 'ADD', 'SHORT', etf)];
   ctx.securities = { DRAM: identityRecord('Roundhill Memory ETF'), LULU: identityRecord('lululemon athletica inc.'),
-    COST: identityRecord('Costco Wholesale Corporation'), GS: identityRecord('The Goldman Sachs Group, Inc.'), ASTS: identityRecord('AST SpaceMobile, Inc.') };
+    COST: identityRecord('Costco Wholesale Corporation'), GS: identityRecord('The Goldman Sachs Group, Inc.') };
   const names = Object.fromEntries(evaluateResearchAttention(ctx, NOW).findings.filter(item => item.presentation.stance)
     .map(item => [item.symbol, item.presentation.stance.name]));
   assert.deepEqual(names, { DRAM: 'Roundhill Memory ETF', LULU: 'lululemon athletica inc.', COST: 'Costco Wholesale Corporation',
-    GS: 'The Goldman Sachs Group, Inc.', ASTS: 'AST SpaceMobile, Inc.' });
+    GS: 'The Goldman Sachs Group, Inc.' });
 });
 test('a roster name stands in only while the security record has no identity', () => {
   const ctx = context();
-  ctx.holdings.positions = [{ symbol: 'JPM', quantity: 10 }, { symbol: 'EFX', quantity: 10 }];
+  ctx.holdings.positions = [{ symbol: 'JPM', quantity: -10 }, { symbol: 'EFX', quantity: -10 }];
   const roster = symbol => changeEvent(symbol, undefined, undefined, { productKey: 'signal-strength', productLabel: 'Signal Strength', entityType: 'ticker',
-    eventType: 'signal_strength_short_membership', fieldPath: 'data.shorts.stocks[0]', excerpt: JSON.stringify({ ticker: symbol, side: 'short', name: `${symbol} roster name`, entryDate: '2026-09-22' }) });
+    eventType: 'signal_strength_membership', fieldPath: 'data.stocks[0]', excerpt: JSON.stringify({ ticker: symbol, side: 'long', name: `${symbol} roster name`, entryDate: '2026-09-22' }) });
   ctx.events = [roster('JPM'), roster('EFX')];
   ctx.securities = { JPM: identityRecord('JPMorgan Chase & Co.'), EFX: { identity: { status: 'unavailable', displayName: { status: 'unavailable', value: null, reason: 'identity-directory-unavailable' } } } };
   const names = Object.fromEntries(evaluateResearchAttention(ctx, NOW).findings.map(item => [item.symbol, item.presentation.stance?.name]));

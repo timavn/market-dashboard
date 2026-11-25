@@ -1,9 +1,8 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import AnalystDailyRollup from './AnalystDailyRollup';
 import usePortfolioSecurityNames from '../../hooks/usePortfolioSecurityNames';
-import hedgaiBaseline from '../../../data/research/hedgai/2026-09-28-baseline.json';
 
 const wholeText = expected => (_, element) => element.textContent === expected
   && !Array.from(element.children).some(child => child.textContent === expected);
@@ -34,7 +33,7 @@ test('research comparisons retain the latest publication at left and the full so
   expect(JSON.stringify(data)).toBe(captured);
 });
 
-test('statistics and model datelines keep their meanings without becoming publication periods', () => {
+test('model datelines keep their meaning without becoming publication periods, and the Tick section is not shown', () => {
   const positioning = 'Positioning: Sep 30, 2026 10:53 PDT';
   const tickDates = `${positioning} · Statistics: Sep 28, 2026`;
   const modelDates = `${positioning} · Statistics: Sep 25, 2026 · 252-session model · 72% of gross exposure modeled`;
@@ -49,7 +48,9 @@ test('statistics and model datelines keep their meanings without becoming public
   ] };
   const captured = JSON.stringify(data);
   render(<AnalystDailyRollup rollup={data} holdingsAsOf="2026-10-01T17:00:00Z" />);
-  for (const [title, expected] of [['Tick', tickDates], ['Factor exposure', modelDates]]) {
+  expect(screen.queryByRole('region', { name: 'Tick' })).toBeNull();
+  expect(screen.queryByText('Captured Tick research.')).toBeNull();
+  for (const [title, expected] of [['Factor exposure', modelDates]]) {
     const region = screen.getByRole('region', { name: title });
     const dateline = region.querySelector('.portfolio-review-dateline');
     expect(dateline).toHaveTextContent(expected.replace('Positioning: ', ''));
@@ -122,93 +123,6 @@ test('research security tables resolve missing descriptive names while captured 
   expect(JSON.stringify(data)).toBe(before);
 });
 
-test('combined HedgAI table keeps ten named readings visible, groups separate, and the complete dated book expandable', () => {
-  const visible = [
-    ['QQQ', 'Nasdaq-100', 'Short', '—', 'Short 48.0%', 'Short excluded'],
-    ['GLD', 'Gold', 'Wait', '—', 'Long 63.6%', 'Await Buy'],
-    ['XLE', 'Energy', 'Long', '—', 'Long 87.5%', 'Included'],
-    ['UJB', 'High-yield credit', 'Long', '—', 'Long 81.2%', 'Included'],
-    ['SLX', 'Steel', 'Short', '—', 'Short 66.7%', 'Included'],
-    ['SPY', 'S&P 500', 'Long', '—', 'Long 60.0%', 'Included'],
-    ['PALL', 'Palladium', 'Wait', 'Closed Long', 'Long 63.2%', 'Closed'],
-    ['XLY', 'Consumer discretionary', 'Long', '—', 'Long 68.0%', 'Included'],
-    ['IWM', 'Russell 2000', 'Long', '—', 'Long 60.0%', 'Included'],
-    ['SLV', 'Silver', 'Wait', '—', 'Long 64.7%', 'Await Buy'],
-  ];
-  const data = { version: 1, sections: [{ id: 'hedgai-signals', title: 'HedgAI Signals', blocks: [
-    { type: 'table', groupRows: true, columns: ['Ticker', 'Security', 'Now', 'Today', 'History', '60% filter'],
-      rows: visible.map((cells, index) => ({ cells, group: index < 5 ? 'Top AI Signals' : 'Need More Data AI Signals',
-        cellTitles: ['', cells[0] === 'UJB' ? 'High Yield Corp Bond $HYG · Source-listed ticker UJB' : cells[1], '',
-          cells[0] === 'PALL' ? 'Sep 28, 2026 08:43 ET · Closed Long: Palladium' : '',
-          cells[0] === 'GLD' ? 'Long 63.6% · 11 signals · W/L 1.28 · Sep 28, 2026' : '', ''] })) },
-    { type: 'table', groupRows: true, disclosure: 'Full HedgAI book · 47 securities',
-      columns: ['Ticker', 'Security', 'Position'], rows: hedgaiBaseline.rows.map(row => ({
-        group: row.group === 'top' ? 'Top AI Signals' : 'Need More Data AI Signals',
-        cells: [row.ticker, row.sourceLabel, row.position],
-      })) },
-  ] }] };
-  const saved = JSON.stringify(data);
-  render(<AnalystDailyRollup rollup={data} />);
-  const region = screen.getByRole('region', { name: 'Tick' });
-  const table = region.querySelector('.analyst-hedgai-summary');
-  expect(table).toHaveClass('analyst-hedgai-summary');
-  expect(within(table).getByRole('columnheader', { name: 'Tick' })).toBeVisible();
-  expect(table.querySelectorAll('tbody tr:not(.analyst-research-group)')).toHaveLength(10);
-  expect(table.querySelectorAll('th[scope="rowgroup"]')).toHaveLength(2);
-  for (const security of ['Nasdaq-100', 'Gold', 'Palladium', 'S&P 500', 'Consumer discretionary']) {
-    expect(within(table).getByText(security)).toBeVisible();
-  }
-  expect(within(table).getByText('High-yield credit').closest('.analyst-security-name')).toHaveAttribute('title', 'High Yield Corp Bond $HYG · Source-listed ticker UJB');
-  expect(within(table).getByText('Gold').closest('tr')).toHaveTextContent('Wait');
-  expect(within(table).getByText('Gold').closest('tr').querySelector('td[title*="11 signals"]')).toBeInTheDocument();
-  expect(within(table).getByText('Nasdaq-100').closest('tr')).toHaveTextContent('Short excluded');
-  within(within(table).getByText('Nasdaq-100').closest('tr')).getAllByText('Short').forEach(word => expect(word).toHaveClass('analyst-process--negative'));
-  expect(within(table).getByText('Palladium').closest('tr')).toHaveTextContent('WaitClosed Long');
-  within(table).getAllByText('Wait').forEach(word => expect(word).toHaveClass('analyst-process--muted'));
-  const disclosure = within(region).getByText(wholeText('Full Tick book · 47 securities')).closest('details');
-  expect(disclosure).not.toHaveAttribute('open');
-  expect(within(disclosure).queryByText('META')).not.toBeInTheDocument();
-  expect(disclosure.querySelector('table')).toBeNull();
-  fireEvent.click(disclosure.querySelector('summary'));
-  expect(disclosure).toHaveAttribute('open');
-  expect(within(disclosure).getByText('META')).toBeVisible();
-  expect(disclosure.querySelectorAll('tbody tr:not(.analyst-research-group)')).toHaveLength(47);
-  expect(JSON.stringify(data)).toBe(saved);
-});
-
-test('HedgAI keeps six active rows above a closed 47-security disclosure with both source groups and linked evidence', () => {
-  const citation = { id: 'hedgai-image', product: 'hedgai-signals', productLabel: 'HedgAI Signals',
-    title: 'Reviewed HedgAI publication', publicationDate: '2026-09-28', sourceUri: '/api/research/hedgai/source/hedgai-image' };
-  const activeTickers = new Set(['XLE', 'SLX', 'UJB', 'SPY', 'IWM', 'XLY']);
-  const rows = hedgaiBaseline.rows;
-  const data = { version: 1, citations: [citation], sections: [{ id: 'hedgai-signals', title: 'HedgAI Signals',
-    citationIds: [citation.id], blocks: [
-      { type: 'table', columns: ['Ticker', 'Security', 'HedgAI'], rows: rows.filter(row => activeTickers.has(row.ticker))
-        .map(row => ({ cells: [row.ticker, row.sourceLabel, 'Bullish'], citationIds: [citation.id] })) },
-      { type: 'paragraph', text: 'Shorts Closed: Platinum. Remaining Long META Up 13%.', citationIds: [citation.id] },
-      { type: 'table', disclosure: `Full HedgAI book · ${rows.length} securities`,
-        columns: ['Ticker', 'Security', 'Group', 'Position', 'Bull batting', 'Bear batting'], rows: rows.map(row => ({
-          cells: [row.ticker, row.sourceLabel, row.group === 'top' ? 'Top' : 'Need more data', row.position,
-            `${(row.metrics.buy.battingAverage * 100).toFixed(1)}%`, `${(row.metrics.short.battingAverage * 100).toFixed(1)}%`], citationIds: [citation.id],
-        })) },
-    ] }] };
-  const onCitation = jest.fn();
-  const original = JSON.stringify(data);
-  render(<AnalystDailyRollup rollup={data} onCitation={onCitation} />);
-  const region = screen.getByRole('region', { name: 'Tick' });
-  const disclosure = within(region).getByText(wholeText('Full Tick book · 47 securities')).closest('details');
-  expect(disclosure).not.toHaveAttribute('open');
-  expect(disclosure.querySelectorAll('tbody tr')).toHaveLength(0);
-  expect(region.querySelector('table tbody').querySelectorAll('tr')).toHaveLength(6);
-  within(region).getAllByText('Bullish').forEach(word => expect(word).toHaveClass('analyst-process--positive'));
-  expect(within(region).getByText('Long')).toHaveClass('analyst-process--positive');
-  fireEvent.click(disclosure.querySelector('summary'));
-  expect(disclosure.querySelectorAll('tbody tr')).toHaveLength(47);
-  expect(disclosure).toHaveTextContent('Top');
-  expect(disclosure).toHaveTextContent('Need more data');
-  expect(screen.queryByText(/^Sources:/)).not.toBeInTheDocument();
-  expect(JSON.stringify(data)).toBe(original);
-});
 const rollup = () => ({ version: 1, citations: [source], sections: [{
   id: 'macro', title: 'Macro outlook', citationIds: ['early'], blocks: [
     { type: 'paragraph', text: 'Quad 4 is a forecast scenario. Long position remains Bullish; short-term growth is Neutral.', citationIds: ['early'] },
@@ -653,9 +567,9 @@ test('empty and unsupported block types do not leave empty report headings', () 
 });
 
 test('Portfolio Review keeps each research section through absent, partial, ready and unavailable captures without reserved heights', () => {
-  const titles = ['PCA risk', 'Factor exposure', "Today's market drivers", 'Tick', 'Trend/Ranges/Coverage/Outbucket',
+  const titles = ['PCA risk', 'Factor exposure', "Today's market drivers", 'Trend/Ranges/Coverage/Outbucket',
     'Macro & regime', 'Macro Show', 'Company catalysts & sector research', 'Signal Strength', 'Market structure & flows'];
-  const ids = ['pca-risk', 'factor-exposure', 'market-drivers', 'hedgai-signals', 'risk-ranges',
+  const ids = ['pca-risk', 'factor-exposure', 'market-drivers', 'risk-ranges',
     'macro-regime', 'macro-show', 'company-catalysts', 'signal-strength', 'market-structure'];
   const { rerender } = render(<AnalystDailyRollup stableLayout loading />);
   const cards = screen.getAllByRole('region');
@@ -673,7 +587,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
     });
   };
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(10);
+  expect(screen.getAllByText('Loading…')).toHaveLength(9);
   cards.forEach(card => {
     expect(card).toHaveAttribute('aria-busy', 'true');
     expect(card.style.getPropertyValue('--portfolio-review-section-height')).toBe('');
@@ -686,7 +600,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
   const onCitation = jest.fn();
   rerender(<AnalystDailyRollup stableLayout loading rollup={partial} onCitation={onCitation} />);
   assertUnchangedLayout();
-  expect(screen.getAllByText('Loading…')).toHaveLength(9);
+  expect(screen.getAllByText('Loading…')).toHaveLength(8);
   const drivers = screen.getByRole('region', { name: "Today's market drivers" });
   expect(drivers).not.toHaveAttribute('aria-busy');
   expect(within(drivers.querySelector('.portfolio-review-section-body')).getByText('Captured market reading.')).toBeVisible();
@@ -707,7 +621,7 @@ test('Portfolio Review keeps each research section through absent, partial, read
   rerender(<AnalystDailyRollup stableLayout rollup={{ version: 1, sections: [] }} />);
   assertUnchangedLayout();
   // PCA risk and Factor exposure read Pending; the other eight read Unavailable.
-  expect(screen.getAllByText('Unavailable')).toHaveLength(8);
+  expect(screen.getAllByText('Unavailable')).toHaveLength(7);
   expect(screen.getAllByText('Pending')).toHaveLength(2);
   expect(screen.queryByText(/Captured reading|Captured market reading/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
@@ -756,71 +670,63 @@ test('a paused PCA section keeps its slot with a compact Pending state while oth
   expect(JSON.stringify(pending)).toBe(saved);
 });
 
-test('wide Portfolio Review research tables fit their report width with visible overflow and wrapped cells', () => {
+test('Factor readings stay on one compact line and hover evidence stays complete', () => {
   const style = document.createElement('style');
   style.textContent = require('fs').readFileSync(require('path').join(__dirname, 'AnalystDailyRollup.css'), 'utf8');
   document.head.append(style);
   try {
-    const data = { version: 1, sections: [{ id: 'hedgai-signals', title: 'Tick', blocks: [{
-      type: 'table', groupRows: true, disclosure: 'Full captured Tick book',
-      columns: ['Ticker', 'Security', 'Position'], rows: [{ cells: ['CAPTURED', 'Full captured security name', 'Last known Wait'], group: 'Captured group' }],
-    }] }] };
-    render(<AnalystDailyRollup stableLayout rollup={data} />);
-    fireEvent.click(screen.getByText('Full captured Tick book'));
-    const table = screen.getByRole('table', { name: 'Tick' });
-    expect(table).toHaveClass('analyst-hedgai-full-book');
-    expect(window.getComputedStyle(table.parentElement).overflow).toBe('visible');
-    expect(window.getComputedStyle(table).minWidth).toBe('0');
-    expect(window.getComputedStyle(table).width).toBe('100%');
-    expect(window.getComputedStyle(table).tableLayout).toBe('fixed');
-    expect(window.getComputedStyle(table.querySelector('tbody td')).whiteSpace).toBe('normal');
-    expect(screen.getByText('Full captured security name').closest('.analyst-security-name')).toHaveAttribute('title', 'Full captured security name');
-    const reading = table.querySelector('.analyst-tick-reading');
-    expect(reading).toHaveTextContent('Last known Wait');
-    expect(window.getComputedStyle(reading).whiteSpace).toBe('nowrap');
-    expect(reading).toHaveAttribute('title', 'Last known Wait');
-    expect(style.textContent).not.toMatch(/overscroll-behavior:\s*contain|scrollbar-gutter:/);
-  } finally { style.remove(); }
-});
-
-test('Factor and Tick readings stay on one compact line, security names wrap in full, and hover evidence stays complete', () => {
-  const style = document.createElement('style');
-  style.textContent = require('fs').readFileSync(require('path').join(__dirname, 'AnalystDailyRollup.css'), 'utf8');
-  document.head.append(style);
-  try {
-    const security = 'Nasdaq-100 · source-listed QQQ proxy';
     const factor = 'Developed markets equity with a very long captured factor name';
-    const detail = 'Last known Wait · Nasdaq-100 · source-listed QQQ · Sep 28, 2026';
     const data = { version: 1, sections: [
       { id: 'factor-exposure', title: 'Factor exposure', blocks: [{ type: 'table',
         columns: ['Factor', 'Gross (% NLV)', 'Net (% NLV)', 'Risk contribution'],
         rows: [{ cells: [factor, '20.0%', '+10.0%', '+12.0%'] }] }] },
-      { id: 'hedgai-signals', title: 'Tick', blocks: [{ type: 'table', groupRows: true,
-        columns: ['Ticker', 'Security', 'Tick', 'Today', 'History', '60% filter'],
-        rows: [{ cells: ['QQQ', security, 'Last known Wait', '—', 'Long 63.6%', 'Wait'],
-          cellTitles: ['', 'NASDAQ 100 · Source-listed ticker QQQ', detail, '', '', ''] }] }] },
     ] };
     const captured = JSON.stringify(data);
     render(<AnalystDailyRollup stableLayout rollup={data} />);
     const factorName = screen.getByText(factor).closest('.analyst-factor-name');
-    const securityName = screen.getByText(security).closest('.analyst-security-name');
-    const reading = document.querySelector('.analyst-tick-reading');
-    expect(window.getComputedStyle(securityName).whiteSpace).toBe('normal');
-    expect(window.getComputedStyle(securityName).textOverflow).not.toBe('ellipsis');
-    for (const identity of [factorName, reading]) {
+    for (const identity of [factorName]) {
       expect(window.getComputedStyle(identity).whiteSpace).toBe('nowrap');
       expect(window.getComputedStyle(identity).overflow).toBe('hidden');
       expect(window.getComputedStyle(identity).textOverflow).toBe('ellipsis');
       expect(identity.querySelector('br')).toBeNull();
     }
     expect(factorName).toHaveAttribute('title', factor);
-    expect(securityName).toHaveAttribute('title', 'NASDAQ 100 · Source-listed ticker QQQ');
-    expect(reading).toHaveTextContent('Last known Wait');
-    expect(reading).toHaveAttribute('title', detail);
-    expect(within(reading).getByText('Wait')).toHaveClass('analyst-process--muted');
-    const table = screen.getByRole('table', { name: 'Tick' });
-    expect(window.getComputedStyle(table.querySelector('col:nth-child(2)')).width).toBe('18%');
-    expect(window.getComputedStyle(table.querySelector('col:nth-child(3)')).width).toBe('18%');
     expect(JSON.stringify(data)).toBe(captured);
   } finally { style.remove(); }
+});
+
+test('a range moving wholly one way with an agreeing Trend tints its row; mixed or disagreeing rows stay plain', () => {
+  const columns = ['Ticker', 'Security', 'Prior range', 'Published range', 'Low boundary', 'High boundary', 'Trend'];
+  const data = { version: 1, sections: [{ id: 'risk-ranges', title: 'Risk Ranges', blocks: [{ type: 'table', columns, rows: [
+    { cells: ['COPPER', 'Copper Spot Price', '5.27–5.87', '5.17–5.81', 'Lower low', 'Lower high', 'Bearish'] },
+    { cells: ['USD', 'U.S. Dollar Index', '102.65–104.34', '102.9–104.56', 'Higher low', 'Higher high', 'Bullish'] },
+    { cells: ['NVDA', 'NVIDIA Corporation', '119–155', '121–173', 'Higher low', 'Higher high', 'Bearish'] },
+    { cells: ['NATGAS', 'Natural Gas', '3.02–3.41', '3.01–3.4', 'Lower low', 'Lower high', 'Bullish'] },
+    { cells: ['BRENT', 'Brent Crude Oil', '88–96', '87–96', 'Lower low', 'Unchanged', 'Bearish'] },
+  ] }] }] };
+  render(<AnalystDailyRollup rollup={data} />);
+  const row = ticker => screen.getByText(ticker).closest('tr');
+  expect(row('COPPER')).toHaveClass('analyst-range-row--down');
+  expect(row('USD')).toHaveClass('analyst-range-row--up');
+  for (const ticker of ['NVDA', 'NATGAS', 'BRENT']) expect(row(ticker).className).toBe('');
+});
+
+test('Signal Divergence lines stack Signal over Analyst in direction colors, with off either list shown as Neutral', () => {
+  const data = { version: 1, sections: [{ id: 'company-catalysts', title: 'Company catalysts', blocks: [
+    { type: 'paragraph', title: 'Signal Divergence', text: 'Signal Divergence — WMT - Monitor SHORT / Signal Strength LONG' },
+    { type: 'paragraph', text: 'JACK - Off Monitor / Signal Strength SHORT' },
+    { type: 'paragraph', text: 'RTO - Monitor LONG / Off Signal Strength' },
+  ] }] };
+  const captured = JSON.stringify(data);
+  render(<AnalystDailyRollup rollup={data} />);
+  const region = screen.getByRole('region', { name: 'Company catalysts' });
+  const lines = Array.from(region.querySelectorAll('.analyst-signal-divergence'));
+  expect(lines.map(line => line.querySelector('.analyst-signal-divergence__ticker').textContent)).toEqual(['WMT', 'JACK', 'RTO']);
+  expect(lines.map(line => Array.from(line.querySelector('.analyst-signal-divergence__sides').children, side => side.textContent)))
+    .toEqual([['Signal: Long', 'Analyst: Short'], ['Signal: Short', 'Analyst: Neutral'], ['Signal: Neutral', 'Analyst: Long']]);
+  expect(within(lines[0]).getByText('Long')).toHaveClass('signal-bullish');
+  expect(within(lines[0]).getByText('Short')).toHaveClass('signal-bearish');
+  expect(within(lines[1]).getByText('Neutral')).toHaveClass('signal-neutral');
+  expect(region).not.toHaveTextContent(/Monitor|Signal Strength/);
+  expect(JSON.stringify(data)).toBe(captured);
 });

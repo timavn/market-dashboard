@@ -10,6 +10,8 @@ export const SECURITY_RESEARCH_EXCLUDED_PRODUCTS = new Set([
   'cftc-positioning',
   'crypto-quant',
   'market-structure',
+  // Retired: the trial subscription ended, so its stored references are never shown.
+  'signal-strength-shorts',
   'volume',
 ]);
 // Security-specific trackers should render only when the publication has a
@@ -26,9 +28,6 @@ const RESEARCH_REFERENCE_KIND_PRIORITY = Object.freeze({
   signal_strength_removed: 125,
   signal_strength_listed: 125,
   signal_strength_membership: 125,
-  signal_strength_short_added: 125,
-  signal_strength_short_removed: 125,
-  signal_strength_short_membership: 125,
   etf_pro_change: 120,
   real_time_alert: 120,
   investing_idea_position: 125,
@@ -460,9 +459,6 @@ const buildStructuredResearchFacts = (productId, evidence, symbol) => {
     if (!normalizedSymbol) return facts;
     if (kind === 'signal_strength_added') add('signalStrength', `${normalizedSymbol} was added to Signal Strength`);
     else if (kind === 'signal_strength_removed') add('signalStrength', `${normalizedSymbol} was removed from Signal Strength`);
-    else if (kind === 'signal_strength_short_added') add('signalStrength', `${normalizedSymbol} was added to Signal Strength Shorts`);
-    else if (kind === 'signal_strength_short_removed') add('signalStrength', `${normalizedSymbol} was removed from Signal Strength Shorts`);
-    else if (kind === 'signal_strength_short_membership') add('signalStrength', `${normalizedSymbol} is on Signal Strength Shorts`);
     else {
       const direction = String(reference.direction || reference.value || '').trim().toUpperCase();
       if (direction) add('signalStrength', `${normalizedSymbol} Signal Strength status is ${direction}`);
@@ -607,7 +603,7 @@ const selectResearchProductDetails = (productId, references) => {
       ? item.kindPriority >= top.kindPriority - 15
       : item.score >= top.score - 32
   ));
-  const limit = ['portfolio-solutions', 'real-time-alert', 'etf-pro', 'signal-strength', 'signal-strength-shorts'].includes(productId)
+  const limit = ['portfolio-solutions', 'real-time-alert', 'etf-pro', 'signal-strength'].includes(productId)
     ? 4
     : 3;
   const selected = [];
@@ -690,6 +686,8 @@ export const buildResearchProductRows = ({
       !productId
       || productId === 'unknown'
       || SECURITY_RESEARCH_EXCLUDED_PRODUCTS.has(productId)
+      // Short-list events were recorded under the long product before 2026-10-29.
+      || String(reference?.kind || '').startsWith('signal_strength_short_')
       || !referenceDate
     ) return;
     const product = productsById.get(productId) || null;

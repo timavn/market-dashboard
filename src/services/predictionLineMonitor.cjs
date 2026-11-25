@@ -263,18 +263,21 @@ function ladderLines(markets, { config = MONITOR, sizingConfig = SIZING, books =
     fillable: lines.filter((line) => !line.illiquid && (!checkedOnly || line.checked)).length, centre: kalshiCentre(lines) };
 }
 
+/** A ladder with no line at even odds: every quoted line sits on one side of the price, or none is two-sided. */
+const offPrice = (ladder) => Boolean(ladder) && ladder.centre === null;
+
 /**
  * One market's block: its shading, the summary row (price against Kalshi's centre, fillable lines, close),
  * the setup's lines when shaded or the plain ladder otherwise, and the lines held in it.
  */
-function marketMonitor(row, { lines = null, ladder = null, held = [], quotedAt = null } = {}) {
+function marketMonitor(row, { lines = null, ladder = null, held = [], quotedAt = null, weeklyEvent = null } = {}) {
   const side = row.setup?.side || null;
   const top = worst(held);
   const group = UNIVERSE.markets.find((market) => market.id === row.id)?.group || null;
   // The market's own price, the one Kalshi settles on (Nasdaq-100, not the Composite its range is read against).
   const price = finite(row.price?.value);
   const shown = lines || ladder;
-  return { id: row.id, market: row.label, event: row.events?.[0]?.eventTicker || null,
+  return { id: row.id, market: row.label, event: weeklyEvent || row.events?.[0]?.eventTicker || null, ...(weeklyEvent ? { weekly: true } : {}),
     shade: side, ...(row.setup?.reason && !side ? { shadeReason: row.setup.reason } : {}),
     summary: { price, centre: ladder?.centre ?? null, position: finite(row.position), unit: ['rates', 'inflation', 'growth'].includes(group) ? '%' : null,
       fillable: ladder?.fillable ?? lines?.fillable ?? null,
@@ -410,16 +413,21 @@ function applyLineMonitor(board, { balance, positions, marketsByEvent, now = new
     const markets = event ? marketsByEvent.get(event) : null;
     // Each line is checked against the market's bet: what that many dollars buys through the order book.
     const bet = orderbooks?.size ? betDollars(row, account) : null;
-    const ladder = ladderLines(markets, { books: orderbooks, bet });
+    let ladder = ladderLines(markets, { books: orderbooks, bet });
     // A shaded row lists its lines for its side; any other row shows its ladder.
     const lines = shaded.setup?.side ? setupLines(shaded, markets, { held: own, books: orderbooks, bet }) : null;
+    // Kalshi can list a daily ladder away from the price (natural gas after a contract roll: every line near-certain),
+    // which has no even-odds line and no curve. The weekly event's ladder stands in, shown as the weekly.
+    const weekly = !lines && offPrice(ladder) ? ladderLines(marketsByEvent.get(row.weeklyEvent?.eventTicker), { books: orderbooks, bet }) : null;
+    const weeklyEvent = weekly && !offPrice(weekly) ? row.weeklyEvent.eventTicker : null;
+    if (weeklyEvent) ladder = weekly;
     if (!lines && !ladder && !own.length && !('setup' in row)) continue;
-    row.kalshiLines = marketMonitor(shaded, { lines, ladder, held: own, quotedAt: now.toISOString() });
+    row.kalshiLines = marketMonitor(shaded, { lines, ladder, held: own, quotedAt: now.toISOString(), weeklyEvent });
   }
   // Without a positions read the lines still show; the book needs the account's positions.
   if (positions) board.kalshiBook = kalshiBook({ balance, positions, held, now });
   return board;
 }
 
-module.exports = { applyLineMonitor, askLevels, betDollars, bookCandidates, bookFill, eventOf, setupLines, kalshiCentre, ladderLines, shadeOf, sideBook, heldDirection, heldPositions, heldState, kalshiBook,
+module.exports = { applyLineMonitor, offPrice, askLevels, betDollars, bookCandidates, bookFill, eventOf, setupLines, kalshiCentre, ladderLines, shadeOf, sideBook, heldDirection, heldPositions, heldState, kalshiBook,
   marketIdForTicker, marketMonitor, MONITOR };

@@ -195,15 +195,18 @@ test('preserves canonical non-available states without exposing populated fields
   });
 });
 
-test('states Signal Strength Shorts events as the short list, never the long list', () => {
+test('leaves out stored Signal Strength Shorts events, under either product', () => {
   const shortEvent = (kind, id) => reference({
     id, productId: 'signal-strength', productLabel: 'Signal Strength', kind,
     matchType: 'structured_membership', matchedText: 'JPM', value: null, direction: 'negative', excerpt: 'Signal Strength Shorts: 68 Stocks. ADDING: CG, JPM, SMCI',
   });
   const rows = buildResearchProductRows({
-    references: freeze([shortEvent('signal_strength_short_added', 'short-added')]),
+    references: freeze([shortEvent('signal_strength_short_added', 'short-added'),
+      { ...shortEvent('signal_strength_short_membership', 'short-listed'), productId: 'signal-strength-shorts', productLabel: 'Signal Strength Shorts' }]),
     productsById: new Map([['signal-strength', freeze(product({ id: 'signal-strength', label: 'Signal Strength' }))]]),
     symbol: 'JPM', marketDate: DATE, requireCurrentIndexed: true, includeEmptyProducts: true,
   });
-  expect(rows[0].factLines).toEqual(['JPM was added to Signal Strength Shorts.']);
+  expect(rows.map((row) => row.productId)).toEqual(['signal-strength']);
+  expect(rows[0].factLines).toEqual([]);
+  expect(JSON.stringify(rows)).not.toMatch(/Shorts/);
 });

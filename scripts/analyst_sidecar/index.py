@@ -26,6 +26,10 @@ MODEL_NAME = "BAAI/bge-small-en-v1.5"
 PARSER_VERSION = "analyst-normalizer-v1"
 MAX_EXCERPT_CHARS = 1_500
 DEFAULT_RESULT_LIMIT = 8
+# Signal Strength Shorts was a trial subscription that ended (last list 2026-10-30).
+# Its indexed documents stay stored; no search, listing or coverage row returns them.
+RETIRED_PRODUCTS = frozenset({"signal-strength-shorts"})
+_NOT_RETIRED = "NOT IN (" + ", ".join(f"'{product}'" for product in sorted(RETIRED_PRODUCTS)) + ")"
 MAX_RESULT_LIMIT = 20
 MAX_RESULT_TEXT_CHARS = 18_000
 PAGE_GRANT_TTL_MINUTES = 15
@@ -542,7 +546,7 @@ class ResearchIndex:
     def _filter_clause(
         *, product: Optional[str], symbol: Optional[str], start_date: Optional[str], end_date: Optional[str]
     ) -> tuple[str, list[Any]]:
-        clauses: list[str] = []
+        clauses: list[str] = [f"c.product {_NOT_RETIRED}"]
         params: list[Any] = []
         if product:
             clauses.append("c.product = ?")
@@ -556,7 +560,7 @@ class ResearchIndex:
         if end_date:
             clauses.append("c.publication_date <= ?")
             params.append(end_date)
-        return (" AND " + " AND ".join(clauses)) if clauses else "", params
+        return " AND " + " AND ".join(clauses), params
 
     def _annotate_source_quality(self, output: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Apply current exact-source validation without rewriting cited evidence.
@@ -755,13 +759,14 @@ class ResearchIndex:
     def latest_by_product(self) -> dict[str, dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT d.* FROM documents d
                 JOIN (
                     SELECT product, MAX(COALESCE(publication_date, '')) AS latest_date
                     FROM documents GROUP BY product
                 ) latest ON latest.product = d.product
                   AND COALESCE(d.publication_date, '') = latest.latest_date
+                WHERE d.product {_NOT_RETIRED}
                 ORDER BY d.product, d.indexed_at DESC
                 """
             ).fetchall()
@@ -775,7 +780,7 @@ class ResearchIndex:
         safe_dates = max(1, min(int(dates_per_product), 5))
         with self.connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 WITH ranked_dates AS (
                     SELECT product, publication_date,
                            DENSE_RANK() OVER (
@@ -790,7 +795,7 @@ class ResearchIndex:
                 JOIN ranked_dates r
                   ON r.product = d.product
                  AND COALESCE(r.publication_date, '') = COALESCE(d.publication_date, '')
-                WHERE r.date_rank <= ?
+                WHERE r.date_rank <= ? AND d.product {_NOT_RETIRED}
                 ORDER BY d.product, COALESCE(d.publication_date, '') DESC, d.indexed_at DESC
                 """,
                 (safe_dates,),
@@ -801,10 +806,10 @@ class ResearchIndex:
         """Scan every indexed chunk on one exact date in stable source order."""
         with self.connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT c.*, d.title, d.source_uri, d.content_hash, d.media_type
                 FROM chunks c JOIN documents d ON d.document_id = c.document_id
-                WHERE c.publication_date = ?
+                WHERE c.publication_date = ? AND c.product {_NOT_RETIRED}
                 ORDER BY c.product, c.document_id, c.ordinal
                 """,
                 (str(publication_date),),
@@ -980,7 +985,7 @@ class ResearchIndex:
             by_product = [
                 dict(item)
                 for item in connection.execute(
-                    "SELECT product, COUNT(*) AS documents, MAX(publication_date) AS latestDate FROM documents GROUP BY product"
+                    f"SELECT product, COUNT(*) AS documents, MAX(publication_date) AS latestDate FROM documents WHERE product {_NOT_RETIRED} GROUP BY product"
                 )
             ]
         return {"documents": row["documents"], "chunks": row["chunks"], "byProduct": by_product}

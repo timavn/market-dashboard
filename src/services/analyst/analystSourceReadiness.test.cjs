@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
 const registry = require('../../../infra/lambdas/gmail_ingestor/research_products.json');
+// The deployed registry still names the retired Signal Strength Shorts; readiness never lists it.
+const listed = registry.products.filter(row => row.id !== 'signal-strength-shorts');
 const { automatedSourceReadiness, sourceLibraryRows, FEED_MAX_AGE_MS } = require('./analystSourceReadiness.cjs');
 const { dailyReadiness } = require('./analystPolicy.cjs');
 const { attachDailyWorkflow } = require('./analystDaily.cjs');
@@ -24,7 +26,8 @@ const first = input => riskRow(automatedSourceReadiness(input, now));
 test('daily source roster requires dated provider and local index evidence and preserves actual source times', () => {
   const input = evidence();
   const result = automatedSourceReadiness(input, now);
-  assert.deepEqual(result.map(row => row.id), registry.products.map(row => row.id));
+  assert.deepEqual(result.map(row => row.id), listed.map(row => row.id));
+  assert.equal(result.some(row => row.id === 'signal-strength-shorts'), false);
   assert.deepEqual(riskRow(result), {
     id: 'risk-ranges', label: 'Risk Ranges', publicationDate: '2026-09-14', observedAt: providerTime,
     indexedAt: indexTime, updatedAt: indexTime, usableForDay: true, status: 'ready', reason: null,
@@ -121,7 +124,7 @@ test('a Crypto Quant email filed as its Bitcoin Tracker is ready under both ids 
   const library = dailyReadiness(input, now).automatedSources;
   assert.equal(library.some(item => item.id === 'crypto-quant'), false);
   assert.equal(library.find(item => item.id === 'bitcoin-trend-tracker').label, 'Crypto Quant · Bitcoin Tracker');
-  assert.equal(library.length, registry.products.length - 1);
+  assert.equal(library.length, listed.length - 1);
 });
 
 test('a product with nothing received today is not received, not a pipeline failure', () => {

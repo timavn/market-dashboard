@@ -175,14 +175,4 @@ describe('morning TL;DR helpers', () => {
       { ticker: 'C', daysOn: 0, percentChangeSinceSignal: -1.2 },
     ]);
   });
-
-  test('keeps a Signal Strength Shorts row\'s published Total Return, not a change since signal', () => {
-    const changes = getSignalChanges({
-      snapshotType: 'signal-strength-shorts',
-      stockCount: 1,
-      data: { added: [], removed: ['SKHY'], membershipComplete: true, stocks: [{ ticker: 'LVS', side: 'short', daysOn: 186, totalReturn: 29.26 }] },
-    });
-    expect(changes.removed).toEqual(['SKHY']);
-    expect(changes.stocks).toEqual([{ ticker: 'LVS', daysOn: 186, percentChangeSinceSignal: null, totalReturn: 29.26 }]);
-  });
 });

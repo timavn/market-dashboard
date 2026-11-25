@@ -146,21 +146,26 @@ function attentionContent(finding, now) {
 }
 
 const signed = (value, digits = 1) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value).toFixed(digits)}%`;
-// Three Inbox categories. Alerts (red): an instruction that contradicts a held
+// Four Inbox categories. Alerts (red): an instruction that contradicts a held
 // position. Actions (blue): the card tells you to do something. Signals (yellow):
-// a condition to know about, led by its Signal line. Service and evidence
-// problems are Systems issues and never reach the Inbox.
+// a condition to know about, led by its Signal line. Untracked (blue): positions
+// still held after the alert that closed Hedgeye's view of them. Service and
+// evidence problems are Systems issues and never reach the Inbox.
 const INBOX_CATEGORIES = [
   { key: 'alert', label: 'Alerts' },
   { key: 'signal', label: 'Signals' },
   { key: 'action', label: 'Actions' },
+  { key: 'untracked', label: 'Untracked' },
 ];
 function inboxCategory({ finding, content, modern }) {
   if (isActionRequired(finding)) return 'alert';
+  if ((finding.payload || finding).action === 'untracked') return 'untracked';
   if (!modern) return 'action';
   return content.rows.some(row => (row.lead && row.label === 'Action') || row.label === 'Order') ? 'action' : 'signal';
 }
 
+// These cards name the company under the Ticker.
+const NAMED_CATEGORIES = ['action', 'untracked'];
 const toneClass = tone => tone ? `analyst-inbox-signal--${tone}` : undefined;
 
 // Price windows are colored by their own sign, whichever side is held: down is
@@ -296,7 +301,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
   }, [loadHorizonStats, securities]);
   // Action cards name the company under the Ticker, from the central security record.
   const [companyNames, setCompanyNames] = useState({});
-  const actionTickers = [...new Set(alerts.filter(item => item.modern && inboxCategory(item) === 'action' && TICKER_KINDS.has((item.finding.payload || item.finding).kind))
+  const actionTickers = [...new Set(alerts.filter(item => item.modern && NAMED_CATEGORIES.includes(inboxCategory(item)) && TICKER_KINDS.has((item.finding.payload || item.finding).kind))
     .map(({ content }) => content.subject).filter(subject => typeof subject === 'string' && /^[A-Z0-9.^-]{1,12}$/.test(subject)))].sort().join(',');
   useEffect(() => {
     const missing = actionTickers ? actionTickers.split(',').filter(symbol => !(symbol in companyNames)) : [];
@@ -336,7 +341,7 @@ export default function AnalystInbox({ findings = [], error = '', onCitation, on
       const updateParts = content.updateParts || [{ text: content.headline, tone: content.tone }];
       const contextLines = [content.detail, ...(content.sourceContext || [])].filter(Boolean);
       const required = isActionRequired(finding);
-      const company = ticker && inboxCategory({ finding, content, modern }) === 'action' ? companyNames[ticker] || null : null;
+      const company = ticker && NAMED_CATEGORIES.includes(inboxCategory({ finding, content, modern })) ? companyNames[ticker] || null : null;
       const stance = modern && content.stance?.calls?.length ? content.stance : null;
       // Every linked publication opens from one Source popover beside the button.
       const durations = modern ? DURATIONS.map(label => content.rows.find(row => row.label === label)).filter(Boolean) : [];

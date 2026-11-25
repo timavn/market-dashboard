@@ -24,8 +24,12 @@ const STRUCTURED_ONLY_TICKERS = Object.freeze(
 );
 const STRUCTURED_ONLY_TICKER_SET = new Set(STRUCTURED_ONLY_TICKERS);
 
+// Signal Strength Shorts was a trial subscription that ended (last list 2026-10-30).
+// The deployed registry still names it; nothing local lists, loads or reads it.
+const RETIRED_RESEARCH_PRODUCT_IDS = Object.freeze(['signal-strength-shorts']);
+
 const RESEARCH_PRODUCTS = Object.freeze(
-  (registryDocument.products || []).map((product) => Object.freeze({
+  (registryDocument.products || []).filter((product) => !RETIRED_RESEARCH_PRODUCT_IDS.includes(product.id)).map((product) => Object.freeze({
     ...product,
     dashboardConsumer: Object.freeze({ ...(product.dashboardConsumer || registryDocument.defaultDashboardConsumer || {}) }),
     snapshotTypes: Object.freeze([
@@ -260,6 +264,7 @@ module.exports = {
   REQUIRED_STAGES,
   RESEARCH_PRODUCTS,
   RESEARCH_PRODUCT_BY_ID,
+  RETIRED_RESEARCH_PRODUCT_IDS,
   STRUCTURED_ONLY_TICKERS,
   getControlledExposure,
   getResearchProduct,

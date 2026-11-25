@@ -1,4 +1,5 @@
 const registry = require('../../../infra/lambdas/gmail_ingestor/research_products.json');
+const { RETIRED_RESEARCH_PRODUCT_IDS } = require('../../utils/researchProductRegistry.cjs');
 
 // Coverage is refreshed by the existing change feed every minute. A saved
 // coverage snapshot cannot establish that today's ingestion is still healthy.
@@ -36,7 +37,7 @@ function automatedSourceReadiness(evidence = {}, now = new Date()) {
   const feedReady = feedTime && now.getTime() - Date.parse(feedTime) <= FEED_MAX_AGE_MS
     && !invalidEvidence(evidence) && !evidence.feedError && !(evidence.errors || []).length;
 
-  return registry.products.map(product => {
+  return registry.products.filter(product => !RETIRED_RESEARCH_PRODUCT_IDS.includes(product.id)).map(product => {
     const sourceId = PUBLISHED_AS[product.id] || product.id;
     const row = products.find(item => (item.product || item.id) === sourceId);
     const publicationDate = text(row?.latestPublicationDate || row?.publicationDate)?.slice(0, 10) || null;

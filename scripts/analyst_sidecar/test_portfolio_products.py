@@ -45,6 +45,12 @@ class PortfolioProductsTests(unittest.TestCase):
         listed = self.project([membership("signal_strength_listed", "LISTED", productId="signal-strength")])
         self.assertEqual(listed[0]["reading"], "Listed")
 
+    def test_stored_signal_strength_shorts_events_are_never_readings(self):
+        refs = [membership(kind, "SHORT", productId=product, productLabel="Signal Strength Shorts")
+                for kind in ("signal_strength_short_added", "signal_strength_short_removed", "signal_strength_short_membership")
+                for product in ("signal-strength", "signal-strength-shorts")]
+        self.assertEqual(self.project(refs), [])
+
     def test_rejects_unsupported_mentions_future_unverified_and_inferred_membership(self):
         for patch in ({"qualityStatus": "failed"}, {"mock": True}, {"fixture": True}, {"isSeeded": True},
                       {"matchType": "inferred"}, {"sourceTicker": "BBB"}, {"sourceUrl": None, "sourceEventId": None},

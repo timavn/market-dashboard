@@ -78,7 +78,7 @@ export function settlementCurve(market) {
     const hi = ladder[index];
     return hi.strike === lo.strike ? hi.yes : lo.yes + (hi.yes - lo.yes) * ((x - lo.strike) / (hi.strike - lo.strike));
   };
-  return { id: market.id || market.market, market: market.market, event: market.event, closeTime: market.summary?.closeTime || null,
+  return { id: market.id || market.market, market: market.market, event: market.event, weekly: market.weekly === true, closeTime: market.summary?.closeTime || null,
     unit: market.summary?.unit || null, price: isNum(market.summary?.price) ? market.summary.price : null,
     levels: market.levels || {}, centre, sigma, strikes: lines.map(line => line.strike), above };
 }
@@ -458,7 +458,7 @@ export function AnalystPredictionCurve({ curve, width = 720 }) {
       </g>}
     </svg>
     <div className="analyst-curve__cells" style={{ gridTemplateColumns: `minmax(0, .8fr) repeat(${zones.length + 1}, minmax(0, 1fr))` }}>
-      <div className="analyst-curve__cell analyst-curve__name" title={[curve.event, closes && `closes ${closes}`].filter(Boolean).join(' · ') || undefined}>
+      <div className="analyst-curve__cell analyst-curve__name" title={[curve.weekly && 'Weekly event (the daily lists no line near the price)', curve.event, closes && `closes ${closes}`].filter(Boolean).join(' · ') || undefined}>
         <strong>{curve.market}</strong></div>
       {zones.map(zone => <div key={zone.label} className={`analyst-curve__cell is-${zone.tone}`}>
         <span className="analyst-curve__swatch" aria-hidden="true" /><strong>{zone.percent}%</strong><span>{zone.label}</span>

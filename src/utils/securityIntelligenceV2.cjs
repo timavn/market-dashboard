@@ -31,9 +31,6 @@ const STRUCTURED_KINDS = new Set([
   'signal_strength_removed',
   'signal_strength_listed',
   'signal_strength_membership',
-  'signal_strength_short_added',
-  'signal_strength_short_removed',
-  'signal_strength_short_membership',
   'portfolio_solutions_rank',
   'portfolio_solutions_mover',
   'position_mention',
@@ -41,10 +38,7 @@ const STRUCTURED_KINDS = new Set([
   'etf_pro_change',
   'investing_idea_position',
 ]);
-const SIGNAL_STRENGTH_ACTIONS = Object.freeze({
-  long: { signal_strength_added: 'ADDED', signal_strength_removed: 'REMOVED', signal_strength_membership: null },
-  short: { signal_strength_short_added: 'ADDED', signal_strength_short_removed: 'REMOVED', signal_strength_short_membership: null },
-});
+const SIGNAL_STRENGTH_ACTIONS = Object.freeze({ signal_strength_added: 'ADDED', signal_strength_removed: 'REMOVED', signal_strength_membership: null });
 const UNIVERSE_EVENT_KINDS = new Set([
   ...STRUCTURED_KINDS,
   // Python ingestion event names are retained in the immutable ledger and
@@ -486,9 +480,7 @@ function buildProductRecord({ product, productStatus, references, marketDate }) 
       excerpt: reference.excerpt || null,
       ...provenance(reference, productId, marketDate),
     });
-    // Each list reads only its own kinds, so a short kind recorded under the
-    // long product before Shorts became its own (2026-10-29) never sets it.
-    const signalAction = SIGNAL_STRENGTH_ACTIONS[productId === 'signal-strength-shorts' ? 'short' : 'long'][reference.kind];
+    const signalAction = SIGNAL_STRENGTH_ACTIONS[reference.kind];
     if (signalAction !== undefined) {
       record.fields.action = fieldValue(
         signalAction || reference.value || 'LISTED',

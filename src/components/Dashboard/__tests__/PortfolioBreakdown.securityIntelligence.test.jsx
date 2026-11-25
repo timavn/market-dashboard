@@ -426,7 +426,6 @@ const registeredResearchProducts = [
   ['bitcoin-trend-tracker', 'Bitcoin Tracker'],
   ['portfolio-solutions', 'Portfolio Solutions'],
   ['signal-strength', 'Signal Strength'],
-  ['signal-strength-shorts', 'Signal Strength Shorts'],
   ['real-time-alert', 'Real-Time Alerts'],
   ['the-macro-show', 'Macro Show'],
   ['the-call', 'The Call'],

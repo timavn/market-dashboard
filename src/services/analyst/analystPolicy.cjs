@@ -5,8 +5,7 @@ const { describeAnalystFinding, typedAnalystSignal: typedSignalEvent } = require
 const { automatedSourceReadiness, sourceLibraryRows } = require('./analystSourceReadiness.cjs');
 const REQUIRED_PRODUCTS = Object.freeze([
   ['risk-ranges', 'Risk Ranges'], ['early-look', 'Early Look'], ['bitcoin-trend-tracker', 'Bitcoin Tracker'],
-  ['momo-tracker', 'MOMO'], ['signal-strength', 'Signal Strength'], ['signal-strength-shorts', 'Signal Strength Shorts'],
-  ['portfolio-solutions', 'Portfolio Solutions'],
+  ['momo-tracker', 'MOMO'], ['signal-strength', 'Signal Strength'], ['portfolio-solutions', 'Portfolio Solutions'],
   ['etf-pro', 'ETF Pro'], ['top-3-things', 'Top 3 Things'], ['market-structure', 'Market Situation Report'],
 ]);
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');

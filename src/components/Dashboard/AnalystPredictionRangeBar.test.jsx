@@ -80,3 +80,13 @@ test('the Alpha Code reads AC Trade/Trend in the bottom-left corner, AC N/A with
     expect(draw(token).querySelector('.analyst-range-bar__alpha-code')).toHaveClass('is-na');
   }
 });
+
+test('a price on another contract month than the range keeps the blue dot, with no position', () => {
+  expect(parsePredictionRange('RR(3.01;3.40;3.65;2;;@roll)')).toEqual({ low: 3.01, high: 3.4, price: 3.65, decimals: 2, unit: '', offContract: true });
+  expect(parsePredictionRange('RR(87.00;96.00;87.97;2;;92;;0;1;Early Look;@roll)').alphaCode.product).toBe('Early Look');
+  const container = draw('RR(3.01;3.40;3.65;2;;@roll)');
+  expect(container.querySelector('.analyst-range-bar__price--above')).toHaveTextContent('3.65');
+  expect(container.querySelector('.analyst-range-bar__dot')).toHaveClass('is-off');
+  expect(container.querySelector('.analyst-range-bar__position')).toHaveTextContent('—');
+  expect(screen.getByRole('img').getAttribute('aria-label')).toMatch(/^Price 3\.65 \(contract month trading/);
+});

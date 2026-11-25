@@ -59,7 +59,7 @@ from portfolio_pca_review import read_portfolio_pca_review, build_portfolio_pca_
 from momo_roster_context import MomoRosterContextReader
 from daily_market_context import DailyMarketContextReader
 from contracts import Citation, envelope, validate_envelope, utc_now_iso
-from index import NormalizedDocument, ResearchIndex
+from index import NormalizedDocument, RETIRED_PRODUCTS, ResearchIndex
 from research_source_resolver import ResearchSourceResolver
 from market import (
     BalanceContextReader,
@@ -196,8 +196,10 @@ def research_product_definitions() -> list:
     The Inflation Nowcast publishes on no fixed schedule, so it stays
     event-driven: its latest publication date is shown, and it is late only
     when the feed reports a newer one this index has not captured.
+    A retired product stays in the registry for the ingestor and is left out here.
     """
-    return [product for product in REGISTRY.get("products", []) if isinstance(product, dict)]
+    return [product for product in REGISTRY.get("products", [])
+            if isinstance(product, dict) and product.get("id") not in RETIRED_PRODUCTS]
 
 
 SERVICE_TOKEN = os.environ.get("ANALYST_SERVICE_TOKEN", "")
@@ -1219,8 +1221,8 @@ def _coverage_result(
     ]
     expected_product_ids = {
         str(row.get("id"))
-        for row in REGISTRY.get("products", [])
-        if isinstance(row, dict) and row.get("id")
+        for row in research_product_definitions()
+        if row.get("id")
     }
     observed_product_ids = {row["product"] for row in products if row.get("product")}
     missing_product_ids = sorted(expected_product_ids - observed_product_ids)

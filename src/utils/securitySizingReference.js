@@ -43,13 +43,14 @@ export function securitySizingReference(payload, symbol, { now = Date.now() } = 
     && Date.parse(row.asOf) - Date.parse(value.asOf) <= (positive ? 0 : 7 * 86400000) ? value : null;
   const atr14 = metric(row.atr14, SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS, true);
   const referencePrice = metric(row.referencePrice, 1, true);
-  const band = calculateSizingBand({ atr14, spot: referencePrice?.value });
+  const band = calculateSizingBand({ atr14, spot: referencePrice?.value, symbol });
   return {
     available: band.available, minWeight: band.minWeight, maxWeight: band.maxWeight,
     atr14, referencePrice, relativeAtr: band.relativeAtr, floorApplied: band.floorApplied,
     stopDistance: band.stopDistance, asOf: row.asOf, source: SOURCE,
     historicalOnly: true, executable: false, riskBlocked: band.riskBlocked,
-    reason: !atr14 ? row.atr14?.observations >= SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS ? 'ATR source needs verification' : 'ATR needs 14 completed sessions'
+    ...(band.cashLike ? { cashLike: true } : {}),
+    reason: band.cashLike ? null : !atr14 ? row.atr14?.observations >= SIZING_CONSTANTS.MIN_ATR_OBSERVATIONS ? 'ATR source needs verification' : 'ATR needs 14 completed sessions'
       : !referencePrice ? 'Verified closing price needed' : null,
   };
 }

@@ -77,6 +77,7 @@ function SideCell({ book, take, bet }) {
 
 // Event, close and the bet each line is checked against, centred over the lines.
 const Label = ({ market, lines }) => <div className="analyst-lines__label">
+  {market.weekly && <span title="The daily event lists no line near the price, so the weekly event's lines are shown">Weekly</span>}
   <span>{market.event}</span>{lines.closeTime && <span>closes {pacific(lines.closeTime)}</span>}
   {isNum(lines.bet) && <span className="analyst-lines__bet">Bet {whole(lines.bet)}</span>}
 </div>;

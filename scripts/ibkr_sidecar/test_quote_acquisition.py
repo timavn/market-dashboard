@@ -633,6 +633,47 @@ class EndpointTickerReleaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(broker.wrapper.tickers, {})
         self.assertEqual(broker.wrapper.reqId2Ticker, {})
 
+    async def test_a_one_off_quote_is_cancelled_even_when_its_contract_is_subscribed_meanwhile(self):
+        # The dashboard subscribes an instrument while a one-off quote for it
+        # is still waiting. The one-off stream used to be left running at the
+        # Gateway, which went on sending its ticks for the whole session.
+        broker = RetainingBroker(ready_after=0.05)
+        cancelled = []
+        cancel = broker.cancelMktData
+        broker.cancelMktData = lambda contract: (cancelled.append(contract), cancel(contract))[1]
+        manager = make_manager(broker)
+
+        quote = asyncio.create_task(manager.get_quote_for_instrument(instrument("SPY", 601), timeout_sec=0.5))
+        await asyncio.sleep(0.02)
+        one_off = broker.market_data_contracts[0]
+        subscribed = make_contract(instrument("SPY", 601))
+        manager._contracts[601] = subscribed
+        manager._ref_counts[601] = 1
+        manager._tickers[601] = broker.reqMktData(subscribed)
+        self.assertIsNotNone((await quote)["quote"])
+
+        self.assertEqual([id(contract) for contract in cancelled], [id(one_off)])
+        self.assertIsNot(one_off, subscribed)
+        # Only the subscription is still known to the client and the Gateway.
+        self.assertEqual(list(broker.wrapper.tickers), [id(subscribed)])
+        self.assertEqual(len(broker.wrapper.reqId2Ticker), 1)
+        self.assertEqual(broker.active, 1)
+
+    async def test_two_one_off_quotes_for_a_remembered_symbol_never_share_a_request(self):
+        broker = RetainingBroker(ready_after=0.01)
+        broker.qualifyContractsAsync = SymbolBroker.qualifyContractsAsync.__get__(broker)
+        broker.unknown, broker.front_month = set(), "202612"
+        broker.CON_IDS = SymbolBroker.CON_IDS
+        manager = make_manager(broker)
+
+        for _ in range(2):
+            self.assertIsNotNone((await manager.get_quote_for_instrument(by_symbol("XLK"), timeout_sec=0.5))["quote"])
+
+        first, second = broker.market_data_contracts
+        self.assertIsNot(first, second)
+        self.assertEqual(broker.cancel_count, 2)
+        self.assertEqual(broker.wrapper.reqId2Ticker, {})
+
     async def test_a_contract_with_a_live_subscription_is_left_alone(self):
         broker = RetainingBroker()
         manager = make_manager(broker)

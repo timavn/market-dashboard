@@ -2,15 +2,21 @@
 // ledger. Every product reads the same models, so the whole live book is
 // compared against the latest dated stance of each list, not against the day
 // an update happened to be published.
-// Version 2 reads SOME from alert bodies; an older book is rebuilt from the ledger.
-const STANCE_BOOK_VERSION = 2;
-const STANCE_PRODUCTS = new Set(['signal-strength', 'signal-strength-shorts', 'etf-pro', 'real-time-alert']);
+// Version 2 reads SOME from alert bodies. Version 3 reads a Real-Time Alert Cover-SOME as closing the short, as the
+// RTA board does, and a "Sell Signal" that shorts as a Short. Version 5 drops the Signal Strength Shorts list. An older
+// book is rebuilt from the ledger.
+const STANCE_BOOK_VERSION = 5;
+const STANCE_PRODUCTS = new Set(['signal-strength', 'etf-pro', 'real-time-alert']);
+// Signal Strength Shorts was a trial that ended; its last list is from 2026-10-30. Its stored rows are never a
+// stance, an alert or coverage for a position (user-specified 2026-11-24).
+const RETIRED_STANCE_PRODUCTS = new Set(['signal-strength-shorts']);
+const retiredStanceEvent = event => RETIRED_STANCE_PRODUCTS.has(event?.productKey) || String(event?.eventType || '').startsWith('signal_strength_short_');
 const SLOT_LABELS = {
-  'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts',
+  'signal-strength:long': 'Signal Strength',
   'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro Shorts', 'real-time-alert': 'Real-Time Alert',
 };
 // A removal stays a standing instruction for a quarter; an alert is a Trade-duration
-// call; a Sell/Cover-SOME is a one-time trim, done or stale within a week.
+// call; a Sell-SOME is a one-time trim, done or stale within a week.
 const EXIT_RETENTION_DAYS = 90;
 const ALERT_RETENTION_DAYS = 30;
 const PARTIAL_RETENTION_DAYS = 7;
@@ -24,7 +30,9 @@ const EFFECTS = {
   EXIT_LONG: { opposes: 'LONG' }, EXIT_SHORT: { opposes: 'SHORT' },
   REDUCE_LONG: { opposes: 'LONG', partial: true }, REDUCE_SHORT: { opposes: 'SHORT', partial: true },
 };
-const ALERT_STANCES = { BUY: 'LONG', 'BUY-SOME': 'LONG', SHORT: 'SHORT', SELL: 'EXIT_LONG', 'SELL-SOME': 'REDUCE_LONG', COVER: 'EXIT_SHORT', 'COVER-SOME': 'REDUCE_SHORT' };
+// Cover-SOME closes the short (user-specified 2026-11-24): Hedgeye's own headline for it is "COVERING SHORT", the RTA
+// board drops the name, and the next call on it is a fresh short. Sell-SOME stays a trim, as on the board.
+const ALERT_STANCES = { BUY: 'LONG', 'BUY-SOME': 'LONG', SHORT: 'SHORT', SELL: 'EXIT_LONG', 'SELL-SOME': 'REDUCE_LONG', COVER: 'EXIT_SHORT', 'COVER-SOME': 'EXIT_SHORT' };
 const ALERT_LABELS = { BUY: 'Buy', 'BUY-SOME': 'Buy-SOME', SHORT: 'Short', SELL: 'Sell', 'SELL-SOME': 'Sell-SOME', COVER: 'Cover', 'COVER-SOME': 'Cover-SOME' };
 
 const TICKER = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -97,7 +105,7 @@ function typedSide(event, source) {
 // Each accepted event becomes one or more { symbol, slot, entry }. Anything
 // that does not name its own ticker with an explicit action is not a stance.
 function stancesFromEvent(event, now) {
-  if (!event || !STANCE_PRODUCTS.has(event.productKey) || untrusted(event)
+  if (!event || !STANCE_PRODUCTS.has(event.productKey) || retiredStanceEvent(event) || untrusted(event)
     || !['validated', 'indexed'].includes(event.qualityStatus)
     || !['security', 'ticker', 'equity', 'etf'].includes(String(event.entityType).toLowerCase())) return [];
   const symbol = symbolOf(event.entityId);
@@ -110,24 +118,18 @@ function stancesFromEvent(event, now) {
   const bare = text(event.excerpt).toUpperCase() === symbol || !event.fieldPath;
   const out = (slot, stance, label, extra = {}) => ({ symbol, slot, entry: { ...base, stance, label, ...extra } });
 
-  // Signal Strength Shorts is its own product; before 2026-10-29 its events were
-  // recorded under the long product. The event kind alone names the list.
-  if (event.productKey === 'signal-strength' || event.productKey === 'signal-strength-shorts') {
+  if (event.productKey === 'signal-strength') {
     const type = event.eventType;
-    if (event.productKey === 'signal-strength-shorts' && !String(type).startsWith('signal_strength_short_')) return [];
-    if (['signal_strength_membership', 'signal_strength_short_membership'].includes(type)) {
+    if (type === 'signal_strength_membership') {
       if (!source) return [];
-      const short = type === 'signal_strength_short_membership';
       const since = DATE.test(String(source.entryDate)) && source.entryDate <= date ? source.entryDate : date;
       const name = typeof source.name === 'string' && source.name.trim() ? { name: source.name.trim().slice(0, 80) } : {};
-      return [out(short ? 'signal-strength:short' : 'signal-strength:long', short ? 'SHORT' : 'LONG', 'Listed', { since, roster: true, ...name })];
+      return [out('signal-strength:long', 'LONG', 'Listed', { since, roster: true, ...name })];
     }
     if (!bare) return [];
     if (type === 'signal_strength_added') return [out('signal-strength:long', 'LONG', 'Added')];
     // The main list is bullish signals only; its removal exits a Long.
     if (type === 'signal_strength_removed') return [out('signal-strength:long', 'EXIT_LONG', 'Removed')];
-    if (type === 'signal_strength_short_added') return [out('signal-strength:short', 'SHORT', 'Added')];
-    if (type === 'signal_strength_short_removed') return [out('signal-strength:short', 'EXIT_SHORT', 'Removed')];
     return [];
   }
 
@@ -159,11 +161,15 @@ function stancesFromEvent(event, now) {
 // since a missed exit costs more than a removal reviewed and kept. One alert
 // restated at the same instant ("SELL SIGNAL MPC") keeps its explicit SOME.
 const RANK = { LONG: 0, SHORT: 0, REDUCE_LONG: 1, REDUCE_SHORT: 1, EXIT_LONG: 2, EXIT_SHORT: 2 };
+// One alert read two ways at the same instant: the explicit SOME wins, and "SELL SIGNAL - SHORTING X" (a Short)
+// wins over its subject's bare "Sell Signal", which alone would read as selling a long.
+const restated = (entry, kept) => (/SOME/.test(entry.action || '') !== /SOME/.test(kept.action || '') ? /SOME/.test(entry.action || '')
+  : entry.action === 'SHORT' && kept.action === 'SELL');
 function newer(slot, entry, current) {
   if (!current) return true;
   if (entry.date !== current.date) return entry.date > current.date;
   if (entry.at !== current.at) return entry.at > current.at;
-  if (slot === 'real-time-alert') return /SOME/.test(entry.action) && !/SOME/.test(current.action);
+  if (slot === 'real-time-alert') return restated(entry, current);
   return RANK[entry.stance] > RANK[current.stance];
 }
 function prune(book, today) {
@@ -187,8 +193,8 @@ const sameCall = (slot, entry) => call => call.slot === slot
   && (slot === 'real-time-alert' ? call.at === entry.at : call.stance === entry.stance && callDay(call) === callDay(entry));
 function replaces(entry, kept) {
   if (Boolean(kept.roster) !== Boolean(entry.roster)) return Boolean(kept.roster);
-  const some = /SOME/.test(entry.action || ''), keptSome = /SOME/.test(kept.action || '');
-  if (some !== keptSome) return some;
+  if (restated(entry, kept)) return true;
+  if (restated(kept, entry)) return false;
   return entry.at < kept.at || (entry.at === kept.at && (entry.sourceUri || '') < (kept.sourceUri || ''));
 }
 function record(book, symbol, slot, entry) {
@@ -320,7 +326,7 @@ async function loadStanceLedger(dynamodb, { days = EXIT_RETENTION_DAYS, now = ne
   return { from: dates.at(-1), through: dates[0], events };
 }
 
-const CALL_PRODUCTS = { 'signal-strength:long': 'Signal Strength', 'signal-strength:short': 'Signal Strength Shorts', 'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
+const CALL_PRODUCTS = { 'signal-strength:long': 'Signal Strength', 'etf-pro:long': 'ETF Pro', 'etf-pro:short': 'ETF Pro', 'real-time-alert': 'Real-Time Alert' };
 // Each product call as an Action and Bias reading. Bias is the side the product
 // still holds after its call: SOME keeps it; a full sell, cover or removal
 // leaves no view. Nothing here infers a Trade or Trend.
@@ -350,4 +356,4 @@ function securityCalls(book, symbol) {
   return [...calls.values()].sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product));
 }
 
-module.exports = { STANCE_BOOK_VERSION, STANCE_PRODUCTS, SLOT_LABELS, symbolOf, emptyStanceBook, stancesFromEvent, foldStanceEvents, scanHoldings, stanceCall, securityCalls, loadStanceLedger };
+module.exports = { STANCE_BOOK_VERSION, STANCE_PRODUCTS, retiredStanceEvent, SLOT_LABELS, symbolOf, emptyStanceBook, stancesFromEvent, foldStanceEvents, scanHoldings, stanceCall, securityCalls, loadStanceLedger };

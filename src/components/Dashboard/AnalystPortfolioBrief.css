@@ -25,7 +25,6 @@
 .portfolio-brief .portfolio-brief-exposure :is(th, td) { white-space: nowrap; }
 /* Exposure labels stay left; every value column is centered. */
 .portfolio-brief .portfolio-brief-exposure :is(td, thead th:not(:first-child)) { text-align: center; }
-.portfolio-brief .portfolio-brief-exposure .portfolio-exposure-value { padding-inline: 12px; }
 .portfolio-exposure-amount { position: relative; white-space: nowrap; }
 .portfolio-exposure-sign { position: absolute; inset-inline-end: 100%; }
 .portfolio-brief-takeaways { padding: 0; margin: 4px 0 0; list-style: none; }
