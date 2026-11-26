@@ -411,14 +411,18 @@ def _volume_cell(row: dict[str, Any]) -> str:
 
     VOL(d1;d15;d30;d90;date;symbol;side) — side is the day's move with (+) or against (-) the Trend, empty without one.
     Empty readings when the market's volume is unavailable, so the row keeps its shape.
+    Boards captured with price changes add ;p1;p15;p30;p90: the market's own price over the same windows, to one decimal.
     """
+    change = row.get("priceChange") or {}
+    move = lambda key: f"{round(change[key], 1) + 0:+.1f}" if isinstance(change.get(key), (int, float)) and not isinstance(change.get(key), bool) else ""
+    price = f";{move('d1')};{move('d15')};{move('d30')};{move('d90')}" if "priceChange" in row else ""
     volume = row.get("volume")
     if not isinstance(volume, dict):
-        return "VOL(;;;;;;)"
+        return f"VOL(;;;;;;{price})"
     pct = lambda key: f"{round(volume[key]):+d}" if isinstance(volume.get(key), (int, float)) else ""
     side = {"with": "+", "against": "-"}.get((volume.get("signal") or {}).get("side"), "")
     return (f"VOL({pct('d1')};{pct('d15')};{pct('d30')};{pct('d90')};{volume.get('date') or ''};"
-            f"{volume.get('symbol') or ''};{side})")
+            f"{volume.get('symbol') or ''};{side}{price})")
 
 
 TONE = {"Bullish": "positive", "Bearish": "negative", "Long": "positive", "Short": "negative",
@@ -543,7 +547,8 @@ def _dollar_row(usd: dict[str, Any] | None) -> dict[str, Any] | None:
             "range": {"low": usd.get("low"), "high": usd.get("high"), "date": usd.get("rangeDate")} if has_range else {},
             "tick": usd.get("tick"), "trade": usd.get("trade"), "trend": usd.get("trend"), "research": usd.get("research"),
             "structure": usd.get("structure"), **({"volume": usd.get("volume")} if "volume" in usd else {}),
-            **({"zScore": usd.get("zScore")} if "zScore" in usd else {})}
+            **({"zScore": usd.get("zScore")} if "zScore" in usd else {}),
+            **({"priceChange": usd.get("priceChange")} if "priceChange" in usd else {})}
 
 
 def _forecast_row(row: dict[str, Any]) -> bool:

@@ -289,6 +289,26 @@ function zScoreReading(price, history) {
 }
 
 /**
+ * The price against the last close before the quote's day (d1) and the last closes 15, 30 and 90 calendar days
+ * before that day: the same windows as volume, as percent changes.
+ */
+function priceChangeReading(price, history) {
+  if (!Number.isFinite(price?.value)) return null;
+  const day = etDay(price.asOf);
+  const closes = (history || [])
+    .filter((bar) => /^\d{4}-\d{2}-\d{2}$/.test(String(bar?.date || '')) && finite(bar.close) !== null && (!day || bar.date < day))
+    .sort((left, right) => left.date.localeCompare(right.date));
+  if (!closes.length) return null;
+  const versus = (bar) => (bar && bar.close > 0 ? ((price.value / bar.close) - 1) * 100 : null);
+  const windowed = Object.fromEntries(Object.entries(VOLUME_WINDOWS).map(([key, days]) => {
+    const start = new Date(`${day || closes.at(-1).date}T00:00:00Z`);
+    start.setUTCDate(start.getUTCDate() - days);
+    return [key, versus(closes.filter((bar) => bar.date <= start.toISOString().slice(0, 10)).at(-1))];
+  }));
+  return { d1: versus(closes.at(-1)), ...windowed, through: closes.at(-1).date };
+}
+
+/**
  * DV when the session's volume is below its 30-day (1-month) average, AV above it, read for the Trend's side.
  * A move against the Trend (a down day in a Bullish Trend, an up day in a Bearish one) on DV supports adding;
  * on AV it warns. A move with the Trend on AV confirms it; on DV it says nothing either way.
@@ -416,7 +436,7 @@ const EVENT_FILTERS = {
 };
 
 function eventFilter(market) {
-  if (['gold', 'silver', 'copper', 'brent', 'natgas', 'bitcoin', 'ethereum'].includes(market.id)) return EVENT_FILTERS['5pm'];
+  if (['gold', 'silver', 'copper', 'brent', 'natgas', 'bitcoin', 'ethereum', 'solana', 'xrp'].includes(market.id)) return EVENT_FILTERS['5pm'];
   if (['sp500', 'nasdaq100'].includes(market.id)) return EVENT_FILTERS.close;
   if (market.id === 'wti') return EVENT_FILTERS.daily;
   return EVENT_FILTERS.any;
@@ -592,7 +612,8 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
       ...(withStructure ? { structure: structureFor(market, range) } : {}),
       ...(volumeHistory ? { volume: volumeFor(market.volume, trend) } : {}),
       // Saved boards from before price history keep their original shape.
-      ...(priceHistory ? { zScore: zScoreReading(mismatch && rangePrice === price ? null : price, priceHistory[market.price.symbol]) } : {}),
+      ...(priceHistory ? { zScore: zScoreReading(mismatch && rangePrice === price ? null : price, priceHistory[market.price.symbol]),
+        priceChange: priceChangeReading(mismatch && rangePrice === price ? null : price, priceHistory[market.price.symbol]) } : {}),
     };
   });
   const usd = usdReading({ quotes, riskRanges, securityIntelligence, usdPeriods, hedgai, marketDate });
@@ -601,7 +622,10 @@ function buildSetupBoard({ riskRanges, cryptoQuant, hedgai, securityIntelligence
     Object.assign(usd, { trade: broken.trade, trend: broken.trend }, broken.alphaBreaks ? { alphaBreaks: broken.alphaBreaks } : {});
   }
   if (usd && volumeHistory) usd.volume = volumeFor({ symbol: UNIVERSE.usd.volumeSymbol }, usd.trend);
-  if (usd && priceHistory) usd.zScore = zScoreReading({ value: usd.value, asOf: usd.asOf }, priceHistory[UNIVERSE.usd.symbol]);
+  if (usd && priceHistory) {
+    usd.zScore = zScoreReading({ value: usd.value, asOf: usd.asOf }, priceHistory[UNIVERSE.usd.symbol]);
+    usd.priceChange = priceChangeReading({ value: usd.value, asOf: usd.asOf }, priceHistory[UNIVERSE.usd.symbol]);
+  }
   if (usd && withStructure) {
     usd.structure = usd.low !== null && usd.high !== null
       ? structureFor({ hedgeye: { riskRange: { product: 'risk-ranges', ticker: UNIVERSE.usd.riskRangeTicker } }, price: UNIVERSE.usd },

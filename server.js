@@ -1371,9 +1371,9 @@ const loadPredictionSetupBoard = createSetupBoardLoader({
   loadVolumeHistory: async (symbols) => Object.fromEntries((await Promise.all(symbols.map((symbol) => fetchYahooAdjustedHistory(symbol, {
     cacheScope: 'prediction-volume', period1: String(Math.floor(Date.now() / 1000) - 200 * 86400),
   }).then(({ bars }) => [symbol, bars], () => null)))).filter(Boolean)),
-  // Recent daily closes for each market's own price, for its Z-score. Treasury yields read FRED.
+  // Recent daily closes for each market's own price, for its Z-score and 1-, 15-, 30- and 90-day changes. Treasury yields read FRED.
   loadPriceHistory: async (symbols) => Object.fromEntries((await Promise.all(symbols.map((symbol) => (getTickerMapping(symbol).source === 'fred'
-    ? fetchFredHistoricalData(getTickerMapping(symbol).ticker, 3).then((rows) => (rows || []).map((row) => ({ date: row.date, close: row.value })))
+    ? fetchFredHistoricalData(getTickerMapping(symbol).ticker, 4).then((rows) => (rows || []).map((row) => ({ date: row.date, close: row.value })))
     : fetchYahooMaximumAdjustedHistory(predictionHistorySymbol(symbol)).then(({ bars }) => bars.map((bar) => ({ date: bar.date, close: bar.rawClose }))))
     .then((closes) => [symbol, closes], () => null)))).filter(Boolean)),
   loadCpiConsensus: async () => {

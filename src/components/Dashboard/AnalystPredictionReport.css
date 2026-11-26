@@ -235,7 +235,9 @@
 /* One window to a cell, centered under its column: the rule between windows stays, the first cell's left edge doesn't. */
 .analyst-panel-v2 .analyst-prediction-report .is-range-board td.analyst-prediction-volume-cell.is-window { text-align: center; }
 .analyst-prediction-volume__key { color: var(--dashboard-muted-text, #667085); }
-.analyst-prediction-volume__value { color: var(--analyst-ink, #172033); white-space: nowrap; }
+.analyst-prediction-volume__value, .analyst-prediction-volume__price { color: var(--analyst-ink, #172033); white-space: nowrap; }
+.analyst-prediction-volume__price.is-on { color: var(--dashboard-positive, #059669); }
+.analyst-prediction-volume__price.is-against { color: var(--dashboard-negative, #dc2626); }
 /* Good for the Trend's side reads green and bad red, as the Structure moves do. */
 .analyst-prediction-volume__window.is-on .analyst-prediction-volume__value { color: var(--dashboard-positive, #059669); }
 .analyst-prediction-volume__window.is-against .analyst-prediction-volume__value { color: var(--dashboard-negative, #dc2626); }

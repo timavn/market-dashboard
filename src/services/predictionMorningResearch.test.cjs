@@ -220,3 +220,18 @@ test('a long statement is shown in full and keeps the clauses between mentions',
   assert.equal(qqq.context.includes('…'), false);
   assert.equal(qqq.context.includes('we keep buying the dips in Healthcare'), true);
 });
+
+test('Crypto Quant ranges go to each coin’s own market, and “ripple” in prose is not XRP', () => {
+  const quant = structuredFindings({ data: { cryptos: {
+    BTC: { buyTrade: 56661, sellTrade: 64705, trend: 'BEARISH' }, SOL: { buyTrade: 64, sellTrade: 74, trend: 'BEARISH' },
+    XRP: { buyTrade: 0.85, sellTrade: 0.97, trend: 'BEARISH' }, AVAX: { buyTrade: 5.92, sellTrade: 7.21, trend: 'BEARISH' } } } }, 'crypto-quant');
+  assert.deepEqual(quant.map(({ market, low, high, trend }) => ({ market, low, high, trend })), [
+    { market: 'bitcoin', low: 56661, high: 64705, trend: 'Bearish' },
+    { market: 'solana', low: 64, high: 74, trend: 'Bearish' },
+    { market: 'xrp', low: 0.85, high: 0.97, trend: 'Bearish' },
+  ]);
+  const refs = { ...references, solana: 69, xrp: 0.94 };
+  const mentioned = (text) => [...new Set(extractFromText(text, { product: 'the-call', references: refs }).map((item) => item.market))];
+  assert.deepEqual(mentioned('Shorts in XRP and Solana (SOL) remain on.'), ['xrp', 'solana']);
+  assert.deepEqual(mentioned('The ripple effect of higher rates is still working through housing.'), []);
+});

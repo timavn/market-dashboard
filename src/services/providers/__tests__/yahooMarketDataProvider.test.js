@@ -112,6 +112,19 @@ describe('yahooMarketDataProvider explicit descriptors', () => {
     expect(legacy.observation).toMatchObject({ classification: 'delayed_reference', valid: true });
   });
 
+  it('keeps four decimals for a coin under $10 asked for by its explicit symbol, and two for the rest', async () => {
+    axios.get.mockResolvedValue(yahooResponse('XRP-USD', 0.9275));
+    const xrp = toLegacyQuote((await yahoo.getQuote({ symbol: 'XRP-USD', provider: 'yahoo', yahooSymbol: 'XRP-USD' })).canonical);
+    expect(xrp.price).toBe('0.9275');
+    expect(xrp.previousClose).toBe('0.9175');
+    expect(xrp.change).toBe('0.0100');
+
+    axios.get.mockResolvedValue(yahooResponse('SOL-USD', 69.7234));
+    expect(toLegacyQuote((await yahoo.getQuote({ symbol: 'SOL-USD', provider: 'yahoo', yahooSymbol: 'SOL-USD' })).canonical).price).toBe('69.72');
+    axios.get.mockResolvedValue(yahooResponse('F', 9.8765));
+    expect(toLegacyQuote((await yahoo.getQuote({ symbol: 'F', provider: 'yahoo', yahooSymbol: 'F' })).canonical).price).toBe('9.88');
+  });
+
   it.each(['DOGE', 'LINK'])('rejects a bare-symbol stock response for the %s crypto request', async (symbol) => {
     axios.get.mockResolvedValue(yahooResponse(symbol));
     const result = await yahoo.getQuote({

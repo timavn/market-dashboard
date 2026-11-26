@@ -24,7 +24,9 @@ const REQUIRED_ROLLING_RETURNS = REQUIRED_ROLLING_OBSERVATIONS;
 const DEFAULT_MAX_STALE_DAYS = 5;
 
 const REQUIRED_SYMBOLS = ['DXY', 'SPX', 'NDX', 'WTI', 'BRENT', 'CRB', 'GOLD', 'BTC'];
-const OPTIONAL_SYMBOLS = ['SILVER', 'UST2Y', 'UST10Y', 'UST30Y', 'COPPER', 'NATGAS', 'ETH'];
+const OPTIONAL_SYMBOLS = ['SILVER', 'UST2Y', 'UST10Y', 'UST30Y', 'COPPER', 'NATGAS', 'ETH', 'SOL', 'XRP'];
+// Coins trade around the clock, so their daily candle closes at 00:00 UTC.
+const UTC_CLOSE_SYMBOLS = new Set(['ETH', 'SOL', 'XRP']);
 const METRIC_SYMBOLS = [...REQUIRED_SYMBOLS, ...OPTIONAL_SYMBOLS].filter((symbol) => symbol !== 'DXY');
 
 class UsdCorrelationDataError extends Error {
@@ -157,11 +159,11 @@ function buildUsdCorrelationSnapshot(histories, options = {}) {
     }
   }
   for (const symbol of OPTIONAL_SYMBOLS) {
-    // ETH daily candles close at 00:00 UTC, later than the DXY cutoff on
+    // ETH, SOL and XRP daily candles close at 00:00 UTC, later than the DXY cutoff on
     // U.S. afternoons. Do not turn its still-open candle into a daily return.
     const priorUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
       .toISOString().slice(0, 10);
-    const completedCutoff = symbol === 'ETH' && priorUtcDay < cutoffDate ? priorUtcDay : cutoffDate;
+    const completedCutoff = UTC_CLOSE_SYMBOLS.has(symbol) && priorUtcDay < cutoffDate ? priorUtcDay : cutoffDate;
     const history = normalizeHistory(histories?.[symbol], completedCutoff);
     if (history.length >= 2) normalized[symbol] = history;
   }

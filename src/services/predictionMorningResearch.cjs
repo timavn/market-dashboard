@@ -35,6 +35,9 @@ const MARKETS = {
   natgas: { names: ['Natural Gas', 'Nat Gas', 'NatGas', 'NATGAS'], instrument: 'natgas' },
   bitcoin: { names: ['Bitcoin', 'BTC', '₿TC', 'BTC-USD', 'BTCUSD'], instrument: 'bitcoin' },
   ethereum: { names: ['Ethereum', 'Ether', 'ETH', 'ETH-USD', 'ETHUSD'], instrument: 'ethereum' },
+  solana: { names: ['Solana', 'SOL', 'SOL-USD', 'SOLUSD'], instrument: 'solana' },
+  // "Ripple" is left out: it is also an ordinary word (ripple effect).
+  xrp: { names: ['XRP', 'XRP-USD', 'XRPUSD'], instrument: 'xrp' },
   sp500: { names: ['SPX', 'S&P 500', 'S&P500', 'SP500', 'S&P'], instrument: 'sp500' },
   nasdaq100: { names: ['NDX', 'Nasdaq-100', 'Nasdaq 100', 'NASDAQ-100'], instrument: 'nasdaq100' },
   ust2y: { names: ['UST 2yr', 'UST 2-year', 'UST2Y', '2yr', '2-year', 'two-year', '2-Year Treasury'], instrument: 'ust2y', yield: true },
@@ -56,7 +59,7 @@ const DOLLAR_PAIRS = ['JPY', 'YEN', 'CAD', 'CHF', 'CNY', 'CNH', 'MXN'].flatMap((
 // with the ticker and never compared with the market's own price.
 const PROXIES = {
   GLD: 'gold', IAU: 'gold', SLV: 'silver', CPER: 'copper', USO: 'wti', BNO: 'brent', UNG: 'natgas', IBIT: 'bitcoin', BITO: 'bitcoin',
-  ETHA: 'ethereum', ETHE: 'ethereum', SPY: 'sp500', QQQ: 'nasdaq100', SHY: 'ust2y', IEF: 'ust10y', TLT: 'ust30y', UUP: 'usd',
+  ETHA: 'ethereum', ETHE: 'ethereum', BSOL: 'solana', XRPC: 'xrp', SPY: 'sp500', QQQ: 'nasdaq100', SHY: 'ust2y', IEF: 'ust10y', TLT: 'ust30y', UUP: 'usd',
   ...Object.fromEntries(DOLLAR_PAIRS.map(([pair]) => [pair, 'usd'])),
 };
 // Price-ETF positions move opposite to the yield the market settles on; dollar-second pairs, opposite to the dollar.
@@ -483,7 +486,7 @@ function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
   if (product === 'early-look') {
     // "Our Levels": immediate-term Risk Ranges with the TREND in brackets.
     const tickers = { UST10Y: 'ust10y', UST2Y: 'ust2y', UST30Y: 'ust30y', GOLD: 'gold', SILVER: 'silver', COPPER: 'copper', WTIC: 'wti', BRENT: 'brent', NATGAS: 'natgas',
-      SPX: 'sp500', COMPQ: 'nasdaq100', NDX: 'nasdaq100', USD: 'usd', BTC: 'bitcoin', BITCOIN: 'bitcoin', ETH: 'ethereum' };
+      SPX: 'sp500', COMPQ: 'nasdaq100', NDX: 'nasdaq100', USD: 'usd', BTC: 'bitcoin', BITCOIN: 'bitcoin', ETH: 'ethereum', SOL: 'solana', XRP: 'xrp' };
     for (const [name, row] of Object.entries(data)) {
       const ticker = (name.match(/\(([A-Z0-9/]+)\)\s*$/) || [])[1] || name.trim();
       const market = tickers[ticker];
@@ -498,7 +501,7 @@ function structuredFindings(snapshot, product, { riskRangeTickers = {} } = {}) {
     }
   }
   if (product === 'crypto-quant') {
-    for (const [ticker, market] of [['BTC', 'bitcoin'], ['ETH', 'ethereum']]) {
+    for (const [ticker, market] of [['BTC', 'bitcoin'], ['ETH', 'ethereum'], ['SOL', 'solana'], ['XRP', 'xrp']]) {
       const row = data.cryptos?.[ticker];
       const low = Number(row?.buyTrade);
       const high = Number(row?.sellTrade);

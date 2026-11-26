@@ -12,8 +12,11 @@ function toLegacyQuote(canonical) {
   const close = canonical.close;
   const change = close != null && mark != null ? mark - close : null;
   const changePercent = close > 0 && change != null ? (change / close) * 100 : null;
+  // A coin asked for by its explicit symbol (XRP-USD) carries no secType; under $10 a cent is a
+  // large share of its price, so it keeps four places.
+  const cheapCoin = /-USD$/.test(String(canonical.providerSymbol || canonical.symbol || '')) && mark != null && Math.abs(mark) < 10;
   const priceText = (value) => value == null ? null
-    : canonical.secType === 'CRYPTO' ? String(value) : value.toFixed(2);
+    : canonical.secType === 'CRYPTO' ? String(value) : value.toFixed(cheapCoin ? 4 : 2);
 
   return {
     symbol: canonical.symbol,

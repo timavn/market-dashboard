@@ -38,21 +38,27 @@ const STRUCTURE_TOKEN = /^STRUCT\(([-+=]*);([-+]?\d+);([-+=]*);([-+]?\d+);([^;()
 // VOL(d1;d15;d30;d90;date;symbol[;side]): the latest session's ETF volume against the prior session and its 15-, 30- and
 // 90-calendar-day averages, in signed whole percents. Drawn under Tick, Trade and Trend, or one window to a cell
 // under Z, Tick, Trade and Trend when the board has a Z column. Side is the day's move with (+) or against (-) the Trend.
-const VOLUME_TOKEN = /^VOL\(([-+]?\d*);([-+]?\d*);([-+]?\d*);([-+]?\d*);([^;()]*);([^;()]*)(?:;([-+]?))?\)$/;
+// Later boards add ;p1;p15;p30;p90, the market's own price change over the same windows, drawn as a row above the volume.
+const VOLUME_TOKEN = /^VOL\(([-+]?\d*);([-+]?\d*);([-+]?\d*);([-+]?\d*);([^;()]*);([^;()]*)(?:;([-+]?)(?:;([-+]?[\d.]*);([-+]?[\d.]*);([-+]?[\d.]*);([-+]?[\d.]*))?)?\)$/;
 const VOLUME_WINDOWS = ['1D', '15D', '30D', '90D'];
 // A signed number reads by its own sign everywhere on the site: up green, down red, zero plain.
 const windowTone = value => (value > 0 ? ' is-on' : value < 0 ? ' is-against' : '');
 const VOLUME_SIDE = { '-': ' · Day against the Trend', '+': ' · Day with the Trend' };
 function VolumeCell({ match, split, ...span }) {
-  const [, d1, d15, d30, d90, date, symbol, side] = match;
+  const [, d1, d15, d30, d90, date, symbol, side, ...prices] = match;
   const values = [d1, d15, d30, d90];
-  const label = values.every(value => value === '') ? 'Volume unavailable'
+  const priced = prices[0] !== undefined;
+  const signed = (value, digits) => (value === null ? 'N/A' : `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value).toFixed(digits)}%`);
+  const volumeLabel = values.every(value => value === '') ? 'Volume unavailable'
     : `${symbol} volume${date ? ` on ${date}` : ''} vs the prior session and its 15-, 30- and 90-day averages${VOLUME_SIDE[side] || ''}`;
+  const label = priced ? `Top: price change vs the prior close and the closes 15, 30 and 90 days back · Bottom: ${volumeLabel}` : volumeLabel;
   const windows = VOLUME_WINDOWS.map((key, index) => {
     const value = values[index] === '' ? null : Number(values[index]);
     const tone = value === null ? '' : windowTone(value);
+    const price = !priced || prices[index] === '' ? null : Number(prices[index]);
     return <span key={key} className={`analyst-prediction-volume__window${tone}`}>
       <span className="analyst-prediction-volume__key">{key}</span>
+      {priced && <span className={`analyst-prediction-volume__price${price === null ? '' : windowTone(price)}`}>{signed(price, 1)}</span>}
       <span className="analyst-prediction-volume__value">{value === null ? 'N/A' : `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value)}%`}</span>
     </span>;
   });

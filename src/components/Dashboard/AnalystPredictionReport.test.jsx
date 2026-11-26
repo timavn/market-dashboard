@@ -578,6 +578,17 @@ test.each([
   expect(container.querySelector('td').title).toContain(sentence);
 });
 
+test('a board with price changes draws a price row above the volume in each window', () => {
+  ReactMarkdown.renderSpy.mockClear();
+  render(<AnalystPredictionReport markdown="## Metals" />);
+  const { td: Cell } = ReactMarkdown.renderSpy.mock.calls[0][0].components;
+  const { container } = render(<table><tbody><tr><Cell node={{ children: [{ type: 'text', value: 'VOL(-12;+8;-30;0;2026-10-27;GLD;;+0.3;-2.1;;+11.0)' }] }} /></tr></tbody></table>);
+  const windows = [...container.querySelectorAll('.analyst-prediction-volume__window')].map(window => [...window.children].map(line => line.textContent));
+  expect(windows).toEqual([['1D', '+0.3%', '−12%'], ['15D', '−2.1%', '+8%'], ['30D', 'N/A', '−30%'], ['90D', '+11.0%', '0%']]);
+  expect([...container.querySelectorAll('.analyst-prediction-volume__price')].map(price => price.className.replace('analyst-prediction-volume__price', '').trim()))
+    .toEqual(['is-on', 'is-against', '', 'is-on']);
+});
+
 test('a research Source opens the product\'s own email at the quoted line, and the line alone without one', async () => {
   ReactMarkdown.renderSpy.mockClear();
   analystWorkspaceApi.request.mockReset();

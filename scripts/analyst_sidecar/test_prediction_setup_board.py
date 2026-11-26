@@ -351,6 +351,9 @@ class SetupBoardRenderTests(unittest.TestCase):
         # A market whose volume could not be read keeps an empty token, so its row still splits.
         self.assertIn("| BIAS(Bullish;;) | VOL(;;;;;;) | RR(", report)
         self.assertNotIn("Volume", render_setup_board(board()))
+        # Boards with price changes add the market's own price over the same windows; a missing window stays empty.
+        gold["priceChange"] = {"d1": 0.34, "d15": -2.06, "d30": None, "d90": 11.0, "through": "2026-10-08"}
+        self.assertIn("VOL(+14;-5;-15;-21;2026-10-09;GLD;-;+0.3;-2.1;;+11.0) | RR(", render_setup_board(data))
 
     def test_cpi_lists_every_nowcast_month_with_its_kalshi_event_or_na(self):
         report = render_setup_board({"rows": [{"id": "cpi", "label": "CPI YoY", "group": "inflation",

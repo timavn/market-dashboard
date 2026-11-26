@@ -11,6 +11,11 @@
       "series": "KX5YRDIRHM / KX5YRDIRLM",
       "label": "5Y Treasury yield",
       "reason": "No Hedgeye Risk Range, Trend, or Tick covers the 5Y yield."
+    },
+    {
+      "series": "KXAVAXD",
+      "label": "Avalanche",
+      "reason": "Crypto Quant publishes an AVAX range, but Kalshi listed no open Avalanche above/below event on 2026-11-25."
     }
   ],
   "markets": [
@@ -560,6 +565,128 @@
       "usdCorrelationKey": "ETH"
     },
     {
+      "id": "solana",
+      "label": "Solana",
+      "group": "crypto",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXSOLD",
+        "title": "SOL Directional",
+        "settlementSources": [
+          {
+            "name": "CF Benchmarks",
+            "url": "https://www.cfbenchmarks.com/"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/CRYPTO.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXSOLD-26NOV2517",
+        "exampleRule": "If the simple average of the sixty seconds of CF Benchmarks' SOLUSD_RTI before 5 PM EST is above $49.9999 at 5 PM EST on Nov 25, 2026, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "today's 5 PM ET event",
+        "underlying": "CF Benchmarks SOLUSD_RTI, 60-second average before 5 PM ET",
+        "comparator": ">",
+        "weekly": {
+          "series": "KXSOLD",
+          "friday": true
+        }
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "crypto-quant",
+          "ticker": "SOL",
+          "fields": [
+            "buyTrade",
+            "sellTrade"
+          ],
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "crypto-quant",
+          "ticker": "SOL",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "SOL"
+        },
+        "tick": null
+      },
+      "gaps": [
+        "No HedgAI Tick for SOL; never borrow the Bitcoin (IBIT) reading."
+      ],
+      "price": {
+        "symbol": "SOL-USD",
+        "fit": "close",
+        "label": "SOL-USD"
+      },
+      "volume": {
+        "symbol": "BSOL"
+      },
+      "usdCorrelationKey": "SOL"
+    },
+    {
+      "id": "xrp",
+      "label": "XRP",
+      "group": "crypto",
+      "cadence": "daily",
+      "kalshi": {
+        "series": "KXXRPD",
+        "title": "XRP Price above/below",
+        "settlementSources": [
+          {
+            "name": "CF Benchmarks",
+            "url": "https://www.cfbenchmarks.com/data/indices/XRPUSD_RTI"
+          }
+        ],
+        "contractTermsUrl": "https://assets.kalshi.com/contract_terms/CRYPTO.pdf",
+        "feeType": "quadratic",
+        "exampleEvent": "KXXRPD-26NOV2517",
+        "exampleRule": "If the simple average of the sixty seconds of CF Benchmarks' Ripple-Dollar Real Time Index (XRPUSD_RTI) before 5 PM EST is above 0.7999 at 5 PM EST on Nov 25, 2026, then the market resolves to Yes.",
+        "strikeType": "greater",
+        "eventSelection": "today's 5 PM ET event",
+        "underlying": "CF Benchmarks XRPUSD_RTI, 60-second average before 5 PM ET",
+        "comparator": ">",
+        "weekly": {
+          "series": "KXXRPD",
+          "friday": true
+        }
+      },
+      "hedgeye": {
+        "riskRange": {
+          "product": "crypto-quant",
+          "ticker": "XRP",
+          "fields": [
+            "buyTrade",
+            "sellTrade"
+          ],
+          "fit": "exact"
+        },
+        "trend": {
+          "product": "crypto-quant",
+          "ticker": "XRP",
+          "fit": "exact"
+        },
+        "trade": {
+          "source": "published-trade",
+          "ticker": "XRP"
+        },
+        "tick": null
+      },
+      "gaps": [
+        "No HedgAI Tick for XRP; never borrow the Bitcoin (IBIT) reading."
+      ],
+      "price": {
+        "symbol": "XRP-USD",
+        "fit": "close",
+        "label": "XRP-USD"
+      },
+      "volume": {
+        "symbol": "XRPC"
+      },
+      "usdCorrelationKey": "XRP"
+    },
+    {
       "id": "sp500",
       "label": "S&P 500",
       "group": "indices",
@@ -1076,6 +1203,8 @@
       "natgas",
       "bitcoin",
       "ethereum",
+      "solana",
+      "xrp",
       "sp500",
       "nasdaq100"
     ],
@@ -1120,7 +1249,7 @@
       "label": "GDP"
     }
   ],
-  "volatilityGaps": "No volatility index is available in the dashboard feeds for copper, natural gas or Ethereum.",
+  "volatilityGaps": "No volatility index is available in the dashboard feeds for copper, natural gas, Ethereum, Solana or XRP.",
   "priceSymbolNote": "Use explicit provider symbols (GC=F, NG=F, BTC-USD, …). Bare symbols such as SI, HG, CL, NG, BTC and ETH resolve to unrelated US stocks/ETFs when IBKR is connected.",
   "usd": {
     "symbol": "DX-Y.NYB",

@@ -25,7 +25,7 @@ describe('USD correlation provider service', () => {
     const [first, second] = await Promise.all([service.getSnapshot(), service.getSnapshot()]);
     const third = await service.getSnapshot();
 
-    expect(fetchHistory).toHaveBeenCalledTimes(15);
+    expect(fetchHistory).toHaveBeenCalledTimes(17);
     expect(second).toBe(first);
     expect(third).toBe(first);
     expect(first.sourceStatus).toBe('current');

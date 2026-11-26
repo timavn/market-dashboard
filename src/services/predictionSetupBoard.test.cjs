@@ -506,6 +506,23 @@ test('volume compares the latest completed session with the prior one and its 15
   assert.equal(board.rows.find((row) => row.id === 'sp500').volume, null);
 });
 
+test('price change reads the price against the prior close and the closes 15, 30 and 90 calendar days back', () => {
+  // Closes 100, 101, … on the 92 weekdays through Oct 21; the quote is the next day at 220.
+  const closes = sessions('2026-10-21', Array(92).fill(1)).map((bar) => ({ date: bar.date, close: bar.rawClose }));
+  const at = (date) => closes.filter((bar) => bar.date <= date).at(-1).close;
+  const board = buildSetupBoard({ priceHistory: { 'BTC-USD': closes },
+    quotes: { 'BTC-USD': { price: 220, asOf: '2026-10-22T15:00:00Z' } } });
+  const row = board.rows.find((item) => item.id === 'bitcoin');
+  assert.equal(board.rows.find((item) => item.id === 'gold').priceChange, null);
+  assert.equal('priceChange' in buildSetupBoard({}).rows[0], false);
+  const pct = (close) => ((220 / close) - 1) * 100;
+  assert.equal(row.priceChange.through, '2026-10-21');
+  assert.equal(row.priceChange.d1, pct(at('2026-10-21')));
+  assert.equal(row.priceChange.d15, pct(at('2026-10-07')));
+  assert.equal(row.priceChange.d30, pct(at('2026-09-22')));
+  assert.equal(row.priceChange.d90, pct(at('2026-07-24')));
+});
+
 test('against the Trend, decelerating volume supports adding and accelerating volume warns; with it, accelerating confirms', () => {
   const down = (volumes) => sessions('2026-10-21', volumes).map((bar, index, all) => ({ ...bar, rawClose: 200 - index - (index === all.length - 1 ? 5 : 0) }));
   const board = buildSetupBoard({
@@ -535,7 +552,7 @@ test('the loader asks for each market ETF and the Dollar’s UUP volume; boards 
     marketDateFor: () => '2026-10-21',
   });
   const board = await load({ now: new Date('2026-10-21T20:00:00Z') });
-  assert.deepEqual(requested, ['GLD', 'SLV', 'CPER', 'USO', 'BNO', 'UNG', 'IBIT', 'ETHA', 'SPY', 'QQQ', 'SHY', 'IEF', 'TLT', 'UUP']);
+  assert.deepEqual(requested, ['GLD', 'SLV', 'CPER', 'USO', 'BNO', 'UNG', 'IBIT', 'ETHA', 'BSOL', 'XRPC', 'SPY', 'QQQ', 'SHY', 'IEF', 'TLT', 'UUP']);
   assert.equal(board.sourceStatus.volumeHistory, 'failed');
   assert.equal(board.rows.find((row) => row.id === 'gold').volume, null);
   assert.equal('volume' in buildSetupBoard({}).rows[0], false);
@@ -602,7 +619,7 @@ test('the loader asks for each market’s own price history and the CPI consensu
     marketDateFor: () => '2026-10-21',
   });
   const board = await load({ now: new Date('2026-10-21T20:00:00Z') });
-  assert.deepEqual(requested, ['GC=F', 'SI=F', 'HG=F', 'CL=F', 'BZ=F', 'NG=F', 'BTC-USD', 'ETH-USD', '^GSPC', '^NDX', 'UST2Y', 'UST10Y', 'UST30Y', 'DX-Y.NYB']);
+  assert.deepEqual(requested, ['GC=F', 'SI=F', 'HG=F', 'CL=F', 'BZ=F', 'NG=F', 'BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', '^GSPC', '^NDX', 'UST2Y', 'UST10Y', 'UST30Y', 'DX-Y.NYB']);
   assert.equal(board.sourceStatus.priceHistory, 'failed');
   assert.equal(board.sourceStatus.cpiConsensus, 'failed');
   assert.equal(board.rows.find((row) => row.id === 'gold').zScore, null);
@@ -858,4 +875,33 @@ test('GDP lists each quarter Kalshi has an event for with the published figure a
   const bare = buildSetupBoard({ asOf: '2026-11-20T18:00:00.000Z' });
   assert.deepEqual(bare.rows.find((row) => row.id === 'gdp').forecasts, []);
   assert.equal('gdpOutlook' in bare.sources, false);
+});
+
+test('Solana and XRP read their own Crypto Quant ranges and Kalshi 5 PM events, never another coin\'s', () => {
+  const board = buildSetupBoard({
+    cryptoQuant: { date: '2026-11-25', data: { cryptos: {
+      ETH: { buyTrade: 1552, sellTrade: 1804, trend: 'BEARISH' },
+      SOL: { buyTrade: 64, sellTrade: 74, trend: 'BEARISH' },
+      XRP: { buyTrade: 0.85, sellTrade: 0.97, trend: 'BEARISH' },
+    } } },
+    quotes: { 'SOL-USD': { price: 69 }, 'XRP-USD': { price: 0.94 } },
+    eventsBySeries: {
+      // The 2 PM hourly event is listed first and skipped; Friday's 5 PM event is the weekly.
+      KXSOLD: [{ event_ticker: 'KXSOLD-26NOV2514' }, { event_ticker: 'KXSOLD-26NOV2517' }, { event_ticker: 'KXSOLD-26NOV2717' }],
+      KXXRPD: [{ event_ticker: 'KXXRPD-26NOV2517' }],
+    },
+    marketDate: '2026-11-25',
+  });
+  const row = (id) => board.rows.find((item) => item.id === id);
+  assert.deepEqual(board.rows.filter((item) => item.group === 'crypto').map((item) => item.id), ['bitcoin', 'ethereum', 'solana', 'xrp']);
+  assert.deepEqual({ ...row('solana').range }, { low: 64, high: 74, trend: 'BEARISH', ticker: 'SOL', product: 'crypto-quant', date: '2026-11-25', fit: 'exact' });
+  assert.equal(row('solana').position, 0.5);
+  assert.equal(row('solana').events[0].eventTicker, 'KXSOLD-26NOV2517');
+  assert.equal(row('solana').tick, null);
+  assert.equal(row('xrp').range.low, 0.85);
+  assert.equal(row('xrp').range.high, 0.97);
+  assert.equal(row('xrp').price.symbol, 'XRP-USD');
+  assert.equal(row('xrp').events[0].eventTicker, 'KXXRPD-26NOV2517');
+  // No published Trade: no setup, whatever the Trend.
+  assert.equal(row('solana').setup.side, null);
 });
