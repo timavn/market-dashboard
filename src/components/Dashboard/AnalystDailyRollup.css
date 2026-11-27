@@ -65,7 +65,3 @@
 /* Ranges: a range moving wholly one way with an agreeing Trend tints the whole row. */
 .portfolio-brief .portfolio-brief-table tbody tr.analyst-range-row--down > td { background: #fef2f2; }
 .portfolio-brief .portfolio-brief-table tbody tr.analyst-range-row--up > td { background: #ecfdf5; }
-/* Signal Divergence: the ticker, then Signal stacked over Analyst, each side in its direction's color. */
-.portfolio-brief .analyst-signal-divergence { display: flex; align-items: baseline; gap: 10px; }
-.portfolio-brief .analyst-signal-divergence__ticker { min-width: 44px; }
-.portfolio-brief .analyst-signal-divergence__sides { display: grid; }

@@ -711,22 +711,17 @@ test('a range moving wholly one way with an agreeing Trend tints its row; mixed 
   for (const ticker of ['NVDA', 'NATGAS', 'BRENT']) expect(row(ticker).className).toBe('');
 });
 
-test('Signal Divergence lines stack Signal over Analyst in direction colors, with off either list shown as Neutral', () => {
+test('Signal Divergence lines stored in earlier reviews are not shown', () => {
   const data = { version: 1, sections: [{ id: 'company-catalysts', title: 'Company catalysts', blocks: [
     { type: 'paragraph', title: 'Signal Divergence', text: 'Signal Divergence — WMT - Monitor SHORT / Signal Strength LONG' },
     { type: 'paragraph', text: 'JACK - Off Monitor / Signal Strength SHORT' },
     { type: 'paragraph', text: 'RTO - Monitor LONG / Off Signal Strength' },
+    { type: 'paragraph', text: 'AAA: Sell some into strength; this is not an exit.' },
   ] }] };
   const captured = JSON.stringify(data);
   render(<AnalystDailyRollup rollup={data} />);
   const region = screen.getByRole('region', { name: 'Company catalysts' });
-  const lines = Array.from(region.querySelectorAll('.analyst-signal-divergence'));
-  expect(lines.map(line => line.querySelector('.analyst-signal-divergence__ticker').textContent)).toEqual(['WMT', 'JACK', 'RTO']);
-  expect(lines.map(line => Array.from(line.querySelector('.analyst-signal-divergence__sides').children, side => side.textContent)))
-    .toEqual([['Signal: Long', 'Analyst: Short'], ['Signal: Short', 'Analyst: Neutral'], ['Signal: Neutral', 'Analyst: Long']]);
-  expect(within(lines[0]).getByText('Long')).toHaveClass('signal-bullish');
-  expect(within(lines[0]).getByText('Short')).toHaveClass('signal-bearish');
-  expect(within(lines[1]).getByText('Neutral')).toHaveClass('signal-neutral');
-  expect(region).not.toHaveTextContent(/Monitor|Signal Strength/);
+  expect(region).not.toHaveTextContent(/Signal Divergence|Monitor|Signal Strength|WMT|JACK|RTO/);
+  expect(region).toHaveTextContent('Sell some into strength');
   expect(JSON.stringify(data)).toBe(captured);
 });

@@ -570,6 +570,9 @@ def _prose(report, section, snapshot, cid, skip=()):
         normalized = title.lower()
         if normalized in {*POSITION_HEADINGS, *skip}:
             continue
+        # The Call's Signal Divergence list is left out of the review (user-specified 2026-11-26).
+        if normalized == "signal divergence":
+            continue
         paragraphs = _paragraphs(body)
         # Source levels have their own de-duplicated table, not another long
         # prose list copied out of the email.

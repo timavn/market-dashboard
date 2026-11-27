@@ -174,32 +174,18 @@ const rangeAlignment = row => {
   return undefined;
 };
 
-// The Call's Signal Divergence lines ("WMT - Monitor SHORT / Signal Strength LONG") read as the two views they compare
-// (user-specified 2026-11-24): Keith's Signal Strength list as Signal, over the sector analyst's position monitor as
-// Analyst; off either is Neutral. Each side takes its direction's color.
+// The Call's Signal Divergence lines ("WMT - Monitor SHORT / Signal Strength LONG") are left out of the review
+// (user-specified 2026-11-26). New reviews no longer carry them; this hides the ones stored in earlier reviews.
 const DIVERGENCE = /^(.*?)\s*[-–—]\s*(?:Off Monitor|Monitor (LONG|SHORT|NEUTRAL)) \/ (?:Off Signal Strength|Signal Strength (LONG|SHORT|NEUTRAL))$/i;
-const divergenceSide = side => side ? `${side[0].toUpperCase()}${side.slice(1).toLowerCase()}` : 'Neutral';
-const DIVERGENCE_TONE = { Long: 'signal-bullish', Short: 'signal-bearish', Neutral: 'signal-neutral' };
-
-function SignalDivergence({ match }) {
-  const sides = [['Signal', divergenceSide(match[3])], ['Analyst', divergenceSide(match[2])]];
-  return <p className="analyst-signal-divergence">
-    <span className="analyst-signal-divergence__ticker"><AnalystSemanticText context="Ticker">{match[1]}</AnalystSemanticText></span>
-    <span className="analyst-signal-divergence__sides">{sides.map(([label, side]) =>
-      <span key={label}>{label}: <span className={DIVERGENCE_TONE[side]}>{side}</span></span>)}</span>
-  </p>;
-}
 
 function ReportParagraph({ block }) {
   const title = portfolioTopicTitle(block.text, block.title) || text(block.title);
   const body = title && block.text.startsWith(`${title} — `) ? block.text.slice(title.length + 3) : block.text;
-  const divergence = text(body).match(DIVERGENCE);
-  const content = divergence ? <SignalDivergence match={divergence} /> : <p><AnalystSemanticText>{body}</AnalystSemanticText></p>;
-  if (!title) return divergence ? <div className="analyst-report-prose">{content}</div>
-    : <p className="analyst-report-prose"><AnalystSemanticText>{block.text}</AnalystSemanticText></p>;
+  if (DIVERGENCE.test(text(body))) return null;
+  if (!title) return <p className="analyst-report-prose"><AnalystSemanticText>{block.text}</AnalystSemanticText></p>;
   return <div className="analyst-portfolio-topic-block analyst-report-prose">
     <h3 className="analyst-portfolio-topic analyst-process--title"><AnalystSemanticText>{title}</AnalystSemanticText></h3>
-    {content}
+    <p><AnalystSemanticText>{body}</AnalystSemanticText></p>
   </div>;
 }
 

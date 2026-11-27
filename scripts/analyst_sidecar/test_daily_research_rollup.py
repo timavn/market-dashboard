@@ -182,7 +182,8 @@ AAA: Sell some into strength; this is not an exit.
         neutral = [row["cells"] for table in tables(result) for row in table["rows"] if row["cells"][-1] == "Neutral"]
         self.assertEqual(neutral, [["AI.PA", "—", "Neutral"], ["CCC", "—", "Neutral"]])
         self.assertIn("Sell some into strength; this is not an exit.", body(result))
-        self.assertIn("AAA - Monitor LONG / Off Signal Strength", body(result))
+        self.assertNotIn("Signal Divergence", body(result))
+        self.assertNotIn("Off Signal Strength", body(result))
 
     def test_unsafe_arrays_without_explicit_source_labels_are_omitted(self):
         source = snapshot("the-call", body="Top 5 Most Actionable\n\nAAA: Remains on the watch list.", data={"longs": ["AAA", "BEARISH: BBB"], "shorts": ["BBB"]})
